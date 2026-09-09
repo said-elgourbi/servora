@@ -1,0 +1,47 @@
+# Servora foundation local development stack.
+#
+# The API + PostgreSQL are the long-lived system of record (BR-001).
+# This compose file provides the two foundational services; Android and
+# Angular development happen on the host against these services.
+#
+# Configuration comes from `.env` at the repository root (see .env.example).
+name: servora
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-servora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-servora}
+      POSTGRES_DB: ${POSTGRES_DB:-servora}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-servora} -d ${POSTGRES_DB:-servora}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  api:
+    build:
+      context: ./api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-servora}:${POSTGRES_PASSWORD:-servora}@postgres:5432/${POSTGRES_DB:-servora}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:

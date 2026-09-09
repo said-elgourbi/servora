@@ -1,0 +1,30 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Node.js / API
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Logs
+*.log
+
+# Android / Gradle
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/captures/
+android/**/build/
+*.apk
+*.aab
+*.keystore
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
