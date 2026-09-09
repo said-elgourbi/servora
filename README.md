@@ -78,3 +78,12 @@ make android-build       # Android debug APK (requires Android SDK)
 - When a non-default `DATABASE_URL`/`POSTGRES_PORT` is required on a machine where the
   default ports are taken, set them in the local `.env` — never commit machine-specific
   values (`.env` is git-ignored).
+
+## Repository & versioning
+
+- Canonical repository: `https://github.com/said-elgourbi/servora.git` (remote `origin`).
+- `main` — stable, release-ready; releases are tagged from `main` (`v0.1.0`, …).
+- `develop` — primary integration and development branch (default working branch).
+- Foundation status: see `docs/tracker/002-repository-foundation.md`.
+- Full ruleset: `docs/versioning.md` — read it before branching or committing.
+
