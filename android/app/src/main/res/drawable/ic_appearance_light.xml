@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sun glyph for the light option of the sign-in appearance controls.
+
+  Geometry matches the icon set the design uses (`Figma/src/screens/Login.tsx`, lucide `Sun`):
+  a 4-unit circle with eight 2-unit rays, stroked rather than filled. The control that draws it
+  supplies the colour, so the stroke colour here is only a placeholder.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M12,8a4,4 0 1,0 0,8a4,4 0 1,0 0,-8"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.75" />
+    <path
+        android:pathData="M12,2L12,4M12,20L12,22M2,12L4,12M20,12L22,12M4.93,4.93L6.34,6.34M17.66,17.66L19.07,19.07M6.34,17.66L4.93,19.07M19.07,4.93L17.66,6.34"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="1.75" />
+</vector>

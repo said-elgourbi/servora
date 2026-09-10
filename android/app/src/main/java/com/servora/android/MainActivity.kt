@@ -1,0 +1,85 @@
+package com.servora.android
+
+import android.os.Bundle
+import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import com.servora.android.data.preferences.AppLanguage
+import com.servora.android.data.preferences.AppTheme
+import com.servora.android.data.preferences.AppearancePreferences
+import com.servora.android.ui.appearance.AppAppearance
+import com.servora.android.ui.appearance.LocalAppAppearance
+import com.servora.android.ui.auth.AuthFlowScreen
+import com.servora.android.ui.passwordreset.PasswordResetViewModel
+import com.servora.android.ui.signin.SignInViewModel
+import com.servora.android.ui.sms.SmsSignInViewModel
+import com.servora.android.ui.theme.ServoraTheme
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+
+/**
+ * Single activity hosting the Compose UI.
+ *
+ * It is an [AppCompatActivity] because the app-wide appearance the sign-in controls change — the
+ * application locale and the light/dark night mode — is applied by `AppCompatDelegate`
+ * (`docs/decisions/007-android-appearance-controls.md`).
+ */
+@AndroidEntryPoint
+class MainActivity : AppCompatActivity() {
+
+    @Inject
+    lateinit var appearancePreferences: AppearancePreferences
+
+    // One ViewModel per authentication destination, created by Hilt. They are created lazily on
+    // first use, so the flow only builds the state it is actually showing.
+    private val signInViewModel: SignInViewModel by viewModels()
+    private val passwordResetViewModel: PasswordResetViewModel by viewModels()
+    private val smsSignInViewModel: SmsSignInViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            ServoraTheme {
+                CompositionLocalProvider(LocalAppAppearance provides appAppearance()) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background,
+                    ) {
+                        AuthFlowScreen(
+                            signInViewModel = signInViewModel,
+                            passwordResetViewModel = passwordResetViewModel,
+                            smsSignInViewModel = smsSignInViewModel,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads the appearance the app is applying from the platform state — which already carries
+     * the stored choices — and reports changes back to the code that stores them.
+     *
+     * Deriving rather than duplicating means the controls stay correct when the change comes from
+     * outside the app, such as the system per-app language settings.
+     */
+    @Composable
+    private fun appAppearance(): AppAppearance {
+        val locales = LocalConfiguration.current.locales
+        val languageTag = if (locales.isEmpty) null else locales[0].language
+        return AppAppearance(
+            language = AppLanguage.fromLanguageTag(languageTag),
+            theme = if (isSystemInDarkTheme()) AppTheme.DARK else AppTheme.LIGHT,
+            onLanguageChange = appearancePreferences::storeLanguage,
+            onThemeChange = appearancePreferences::storeTheme,
+        )
+    }
+}

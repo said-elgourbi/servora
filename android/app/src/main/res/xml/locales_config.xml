@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The languages the Android app ships: `values/` (English) and `values-fr/` (French) per
+  `BR-028`.
+
+  Android 13+ reads this list for the system per-app language settings page, and it is what
+  tells the platform which languages the app declares. Switching inside the app works on every
+  supported API level through `AppCompatDelegate.setApplicationLocales`
+  (`docs/decisions/007-android-appearance-controls.md`).
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="fr" />
+</locale-config>

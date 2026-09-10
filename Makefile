@@ -35,7 +35,7 @@ ps: ## Show foundation service status
 
 # ----------------------------------------------------------------- database
 
-.PHONY: db-shell migrate migration
+.PHONY: db-shell migrate migration seed
 db-shell: ## Open a psql shell against the local development PostgreSQL
 	$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-servora} -d $${POSTGRES_DB:-servora}
 
@@ -45,6 +45,9 @@ migrate: api-build ## Apply pending database migrations using the API tooling on
 NAME ?= migration
 migration: api-build ## Generate a new migration, e.g. `make migration NAME=add_technician_profile`
 	cd $(API_DIR) && npm run db:generate -- --name $(NAME)
+
+seed: api-build ## Seed the local development database with the two foundation QA accounts
+	cd $(API_DIR) && npm run db:seed
 
 # ---------------------------------------------------------------------- API
 

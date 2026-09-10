@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Only the window look before Compose draws. The parent is an AppCompat theme because the
+      activity is an `AppCompatActivity`, and it is what applies the app-wide light/dark night
+      mode and the application locale behind the sign-in appearance controls
+      (`docs/decisions/007-android-appearance-controls.md`). Colours, shapes and typography come
+      from `ui/theme/Theme.kt`; `values-night/themes.xml` supplies the dark window background.
+    -->
+    <style name="Theme.Servora" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>

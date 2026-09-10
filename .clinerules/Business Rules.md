@@ -535,27 +535,209 @@ None.
 
 ---
 
-## BR-019 — SMS/OTP authentication
+## BR-019 — Phone/SMS authentication
 
 **Description:**
-Users may authenticate using SMS and a one-time password.
+Users may authenticate using their phone number and an SMS one-time password (OTP).
+
+Phone authentication is an authentication method, not merely phone verification. It exists for
+users who already have a Servora account; it never creates one.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+Supported authentication methods are exactly:
+
+* email address/username + password (`BR-018`)
+* phone number + SMS OTP (`BR-019`)
+
+Google and Microsoft authentication are not supported.
+
+* A verified phone number may authenticate an existing Servora user.
+* Phone authentication must not create a new account. Registration is a separate future flow.
+* Phone numbers are stored in canonical **E.164** format. Canadian `+1` numbers are supported,
+  and the representation must support international E.164 numbers rather than assuming a
+  single country.
+* Server-side normalisation and validation of the submitted number are authoritative; a client
+  never decides whether a number is acceptable.
+* An OTP consists of **6 numeric digits** generated from a cryptographically secure source.
+* An OTP expires **10 minutes** after it is issued.
+* At most **5 failed verification attempts** are accepted for one OTP.
+* Successful verification immediately invalidates the OTP.
+* Requesting a new OTP invalidates the previously issued OTP.
+* A new OTP may be requested no sooner than **60 seconds** after the previous request
+  (server-enforced resend cooldown). A client may display a countdown, but the server decides.
+* OTP values are never logged, never returned through the API, and never stored in plaintext.
+  Only a secure one-way representation of the OTP is persisted (`BR-046`).
+* After a successful verification the client receives the **same** Servora authenticated
+  session and token pair as `BR-018`, and authorization continues to use the existing
+  Servora user/role/permission model. Phone authentication does not introduce a separate
+  session or authorization architecture.
+* Successful phone authentication also follows `BR-018`'s eligibility rule: only an `ACTIVE`
+  account authenticates.
+
+**Exceptions:**
+* A phone number that is absent from Servora, that belongs to a non-`ACTIVE` account, or that
+  is ambiguous (associated with more than one account) cannot authenticate; the attempt is
+  reported exactly like the generic non-disclosing response required by `BR-044`.
+* Rate limits and the resend cooldown are configuration, so a deployment may tighten them
+  without a product change. The approved initial values are recorded in
+  `docs/decisions/006-authentication-flows-and-sms-provider.md`.
+
+**Notes:**
+How a phone number is first associated with a user, changed, released, or verified outside the
+sign-in flow is not defined by this rule and remains **OPEN QUESTION** (see `BR-039`).
+
+SMS delivery is provider-specific and is isolated behind an application-level port
+(`SmsProvider`). The initial production provider is Sinch; the domain and application layers
+do not depend on provider-specific classes, terminology or response structures.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-043 — Password reset
+
+**Description:**
+A user who cannot sign in may regain access to their own account by proving control of the
+password-reset delivery channel configured for that account.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+* Password reset applies to an **existing** account only. It never creates an account and never
+  changes which value is the authentication identity.
+* The authentication identity is the existing one used by `BR-018`. The reset is delivered to the
+  email address configured on that account. Identity and delivery channel are separate concepts,
+  and no new identity field is introduced to support the flow.
+* The response is externally generic whether or not the submitted identity belongs to an account
+  (`BR-044`). The API must not report that an account does not exist.
+* The reset credential is:
+  * cryptographically random,
+  * single-use,
+  * time-limited (**30 minutes**),
+  * persisted only as a one-way digest (`BR-046`),
+  * invalidated after a successful reset,
+  * invalidated after expiry,
+  * protected against brute-force guessing by a maximum of **5 failed verification attempts**.
+* Requesting a new reset credential for the same account invalidates the outstanding one.
+* A successful reset:
+  * hashes the new password with the existing password hashing mechanism and the existing
+    password policy — no new password policy is introduced by this rule,
+  * invalidates the reset credential that was used and any other outstanding credential for the
+    same account,
+  * records the password change through the existing audit/event architecture (`BR-033`),
+  * never stores or logs the plaintext password,
+  * does **not** by itself sign the user in: the user returns to normal authentication.
+* Reset requests and reset-credential verification are rate limited (`BR-045`).
+
+**Exceptions:**
+None.
+
+**Notes:**
+* Whether an existing authentication session is revoked when a password is reset is **OPEN
+  QUESTION**. No behaviour is implemented for it until product ownership decides.
+* The delivery transport and provider for the reset message is a separate, still-open
+  infrastructure decision; it is isolated behind an application-level port
+  (`PasswordResetNotifier`) and recorded in `docs/decisions/006-authentication-flows-and-sms-provider.md`.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-044 — Authentication must not disclose account existence or state
+
+**Description:**
+An unauthenticated caller must not be able to learn from Servora whether an email address,
+username or phone number belongs to an account, nor what state that account is in.
 
 **Applies to:**
 Android, Angular, API
 
 **Expected behavior:**
 
-* SMS/OTP authentication is supported.
-* OTP validation is performed by the backend/authentication service.
-* Clients do not determine whether an OTP is valid.
-* Successful authentication establishes the same user identity and authorization context as other supported authentication methods.
+* Responses for an unknown identity and for a known identity are externally equivalent: the same
+  message, the same stable error code, the same HTTP status, the same response structure, and no
+  avoidable difference in response time or work performed.
+* When an identity is unknown, the externally identical response is returned **without** producing
+  the effect — for example, no SMS or email message is sent.
+* This applies to every authentication entry point: password sign-in (`BR-018`), phone/SMS
+  authentication (`BR-019`) and password reset (`BR-043`).
+* Rate limiting applies to unknown identities as well, so a throttling response cannot be used to
+  distinguish identities (`BR-045`).
+* A client may present a friendly generic message, but it must not present different copy for
+  "account not found" and "credential rejected".
 
 **Exceptions:**
-Detailed OTP expiration, retry, rate-limit, recovery, and phone-number lifecycle rules remain open.
+None.
 
 **Status:**
-**CONFIRMED** — authentication method
-**OPEN QUESTION** — detailed OTP business rules
+**CONFIRMED**
+
+---
+
+## BR-045 — Authentication attempts are rate limited
+
+**Description:**
+Authentication entry points accept a bounded number of attempts in a rolling window.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+* Limits are enforced by the backend and are configuration, so a deployment may tighten them
+  without a product change.
+* Approved initial limits:
+  * password-reset request: **3 per identity / 15 minutes** and **10 per identity / 24 hours**
+  * SMS OTP request: **3 per phone number / 15 minutes** and **10 per phone number / 24 hours**
+  * SMS OTP resend cooldown: **60 seconds** between requests for the same phone number
+* Limits apply whether or not the identity belongs to an account (`BR-044`).
+* Rejecting for a limit must not perform the underlying operation.
+* A client may display a countdown or disabled state, but the server remains authoritative.
+
+**Exceptions:**
+None.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-046 — One-time authentication codes are stored as one-way digests
+
+**Description:**
+Servora never retains, transmits or emits a one-time authentication code in a form that can be
+re-used.
+
+**Applies to:**
+API, Database
+
+**Expected behavior:**
+
+* Applies to SMS OTPs (`BR-019`) and password-reset credentials (`BR-043`).
+* A code is never persisted in plaintext and is never returned in an API response.
+* A code is never written to logs, traces or error output.
+* Only a keyed one-way digest of the code is persisted, and comparison is performed in constant
+  time.
+* A code is single-use: a successfully verified code, a superseded code and an expired code can
+  never be verified again.
+
+**Exceptions:**
+None.
+
+**Notes:**
+The digest construction is an architectural decision, recorded in
+`docs/decisions/006-authentication-flows-and-sms-provider.md` (D1).
+
+**Status:**
+**CONFIRMED**
 
 ---
 

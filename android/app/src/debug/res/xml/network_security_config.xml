@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only override: cleartext is permitted so the app can talk to a local API
+  (emulator host `10.0.2.2`, a LAN address, or `localhost`). Debug builds are never
+  shipped, and the release configuration in `src/main/res/xml/` stays HTTPS-only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

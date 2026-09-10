@@ -11,8 +11,16 @@ Servora is a monorepo built feature by feature as controlled vertical slices.
 Initial supported languages are **English** and **French**. Development rules live in
 `Project.md`, `dev.md`, `qa.md` and the application rules in the project ruleset.
 
-> This repository currently contains the **API foundation milestone only**.
-> See `docs/tracker/001-foundation.md` for status.
+> The repository currently contains the API foundation and the **foundation domain model**
+> (organizations, users, profiles, memberships, customers and their contacts/addresses).
+> See `docs/tracker/001-foundation.md`, `docs/tracker/002-repository-foundation.md`,
+> `docs/tracker/003-foundation-domain-model.md` and
+> `docs/tracker/004-authentication-domain-model.md` for status.
+> Android app appearance controls (app language, light/dark) are covered by
+> `docs/tracker/005-android-appearance-controls.md`.
+>
+> Authentication persistence (sessions, refresh tokens, password reset tokens) is modelled in
+> `docs/domain/authentication-domain-model.md`.
 
 ## Layout
 
@@ -22,6 +30,7 @@ android/    Android client (scaffold — not yet implemented)
 docs/
   decisions/   Architecture decision records
   tracker/     Feature milestone tracker
+  domain/      Domain model documentation
 docker-compose.yml   Foundation local stack (PostgreSQL + API)
 Makefile             Local development orchestration
 ```
@@ -79,11 +88,24 @@ make android-build       # Android debug APK (requires Android SDK)
   default ports are taken, set them in the local `.env` — never commit machine-specific
   values (`.env` is git-ignored).
 
+- Authentication token lifetimes are configurable per environment: `ACCESS_TOKEN_LIFETIME`
+  (default `15m`), `SESSION_LIFETIME` (default `30d`) and `PASSWORD_RESET_TOKEN_LIFETIME`
+  (default `30m`). Durations accept `500ms`, `15m`, `2h`, `30d`; the API refuses to start on
+  an unusable value. See `docs/domain/authentication-domain-model.md` §7.
+
+
 ## Repository & versioning
 
 - Canonical repository: `https://github.com/said-elgourbi/servora.git` (remote `origin`).
 - `main` — stable, release-ready; releases are tagged from `main` (`v0.1.0`, …).
 - `develop` — primary integration and development branch (default working branch).
-- Foundation status: see `docs/tracker/002-repository-foundation.md`.
+- Foundation status: `docs/tracker/001-foundation.md`,
+  `docs/tracker/002-repository-foundation.md`, `docs/tracker/003-foundation-domain-model.md`,
+  `docs/tracker/004-authentication-domain-model.md`.
+- Domain model: `docs/domain/foundation-domain-model.md`.
+- Authentication domain model: `docs/domain/authentication-domain-model.md`
+  (decision: `docs/decisions/004-authentication-domain-model.md`).
+- Android appearance controls: `docs/tracker/005-android-appearance-controls.md`
+  (decision: `docs/decisions/007-android-appearance-controls.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.
 
