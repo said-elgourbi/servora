@@ -9,9 +9,19 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { parseRefreshRequest, parseSignInRequest } from './auth-request.dto.js';
+import {
+  parsePasswordResetCompleteRequest,
+  parsePasswordResetRequest,
+  parsePasswordResetVerifyRequest,
+  parseRefreshRequest,
+  parseSignInRequest,
+  parseSmsOtpRequest,
+  parseSmsOtpVerifyRequest,
+} from './auth-request.dto.js';
 import { AuthService, type SignInResponse } from './auth.service.js';
 import { AuthApiError } from './auth-error.js';
+import { PasswordResetService } from './password-reset.service.js';
+import { SmsOtpService } from './sms-otp.service.js';
 import {
   AuthGuard,
   type AuthenticatedRequest,
@@ -34,7 +44,11 @@ import { readClientContext } from './client-context.js';
  */
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly passwordReset: PasswordResetService,
+    private readonly smsOtp: SmsOtpService,
+  ) {}
 
   @Post('sign-in')
   @HttpCode(HttpStatus.OK)
@@ -67,6 +81,70 @@ export class AuthController {
     @Req() request: AuthenticatedRequest,
   ): Promise<AuthSessionDto[]> {
     return this.auth.listSessions(requireAuth(request).userId);
+  }
+
+  // ------------------------------------------------------ password reset
+
+  /**
+   * Starts a password reset (`BR-043`).
+   *
+   * `202` with an empty body is the response whether or not the address exists, so the status
+   * carries no information about the account (`BR-044`).
+   */
+  @Post('password-reset/request')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async requestPasswordReset(@Body() body: unknown): Promise<void> {
+    await this.passwordReset.request(parsePasswordResetRequest(body));
+  }
+
+  /**
+   * Checks a reset credential without consuming it (`BR-043`).
+   *
+   * `204` on success; every failure is the single `401 RESET_CODE_INVALID`. No body is
+   * returned, so a client cannot learn more than "this code may be used".
+   */
+  @Post('password-reset/verify')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async verifyPasswordReset(@Body() body: unknown): Promise<void> {
+    await this.passwordReset.verify(parsePasswordResetVerifyRequest(body));
+  }
+
+  /**
+   * Redeems a reset credential and sets the new password (`BR-043`).
+   *
+   * `204`, and deliberately not a session: a reset returns the user to normal authentication.
+   */
+  @Post('password-reset/complete')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async completePasswordReset(@Body() body: unknown): Promise<void> {
+    await this.passwordReset.complete(parsePasswordResetCompleteRequest(body));
+  }
+
+  // ------------------------------------------------------- phone/SMS
+
+  /** Issues an SMS one-time password (`BR-019`), answering `202` in every case. */
+  @Post('sms/request')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async requestSmsOtp(@Body() body: unknown): Promise<void> {
+    await this.smsOtp.request(parseSmsOtpRequest(body));
+  }
+
+  /**
+   * Verifies an SMS one-time password and authenticates the caller (`BR-019`).
+   *
+   * Returns the same body as `POST /auth/sign-in`: a phone verification is a sign-in, not a
+   * second kind of session.
+   */
+  @Post('sms/verify')
+  @HttpCode(HttpStatus.OK)
+  smsSignIn(
+    @Body() body: unknown,
+    @Req() request: Request,
+  ): Promise<SignInResponse> {
+    return this.smsOtp.verify(
+      parseSmsOtpVerifyRequest(body),
+      readClientContext(request),
+    );
   }
 }
 

@@ -1,8 +1,10 @@
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import {
+  authRateLimitEvents,
   authRefreshTokens,
   authSessions,
   passwordResetTokens,
+  phoneOtpChallenges,
 } from '../database/schema.js';
 
 // Domain types for the authentication slice. See
@@ -20,6 +22,23 @@ export type NewAuthRefreshToken = InferInsertModel<typeof authRefreshTokens>;
 
 export type PasswordResetToken = InferSelectModel<typeof passwordResetTokens>;
 export type NewPasswordResetToken = InferInsertModel<typeof passwordResetTokens>;
+
+export type PhoneOtpChallenge = InferSelectModel<typeof phoneOtpChallenges>;
+export type NewPhoneOtpChallenge = InferInsertModel<typeof phoneOtpChallenges>;
+
+export type AuthRateLimitEvent = InferSelectModel<typeof authRateLimitEvents>;
+export type NewAuthRateLimitEvent = InferInsertModel<typeof authRateLimitEvents>;
+
+/**
+ * Stable, machine-readable rate-limit scopes (`BR-045`). One scope per authentication entry
+ * point that may be attempted repeatedly, so the same subject hash in two scopes counts
+ * independently. Stored in `auth_rate_limit_events.scope` and enforced by a CHECK constraint.
+ */
+export const AUTH_RATE_LIMIT_SCOPES = [
+  'PASSWORD_RESET_REQUEST',
+  'SMS_OTP_REQUEST',
+] as const;
+export type AuthRateLimitScope = (typeof AUTH_RATE_LIMIT_SCOPES)[number];
 
 /**
  * Stable, machine-readable client platform codes stored in

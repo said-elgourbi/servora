@@ -13,7 +13,10 @@ import { AUTH_CONFIG } from './auth-config.provider.js';
 import type { AuthConfig } from './auth-config.js';
 import { toAuthSessionDto, type AuthSessionDto } from './auth.dto.js';
 import { AuthApiError } from './auth-error.js';
-import type { SignInRequestDto } from './auth-request.dto.js';
+import type {
+  AuthDeviceContext,
+  SignInRequestDto,
+} from './auth-request.dto.js';
 import {
   generateOpaqueToken,
   hashOpaqueToken,
@@ -93,6 +96,22 @@ export class AuthService {
       throw AuthApiError.invalidCredentials();
     }
 
+    return this.openSession(user.id, input.device, context, now);
+  }
+
+  /**
+   * Opens one session for a device and issues its first token pair.
+   *
+   * Shared by every authentication method (`BR-019`): a phone verification produces exactly
+   * the same session and tokens as a password sign-in, so there is one authenticated state in
+   * the system and one place where a session is created.
+   */
+  async openSession(
+    userId: string,
+    device: AuthDeviceContext,
+    context: ClientContext,
+    now: Date = new Date(),
+  ): Promise<SignInResponse> {
     const sessionExpiresAt = new Date(
       now.getTime() + this.config.sessionLifetimeMs,
     );
@@ -102,11 +121,11 @@ export class AuthService {
       const [created] = await tx
         .insert(authSessions)
         .values({
-          userId: user.id,
-          platform: input.device.platform,
-          deviceId: input.device.deviceId,
-          deviceName: input.device.deviceName,
-          appVersion: input.device.appVersion,
+          userId,
+          platform: device.platform,
+          deviceId: device.deviceId,
+          deviceName: device.deviceName,
+          appVersion: device.appVersion,
           ipAddress: context.ipAddress,
           userAgent: context.userAgent,
           expiresAt: sessionExpiresAt,
@@ -124,7 +143,7 @@ export class AuthService {
       return created;
     });
 
-    return this.issueTokens(session.id, user.id, refreshToken, now);
+    return this.issueTokens(session.id, userId, refreshToken, now);
   }
   /**
    * Rotates a refresh token (`ADR-004` D4): the presented token is revoked and

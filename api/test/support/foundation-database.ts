@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { inArray } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -70,6 +70,17 @@ export async function createFoundationTestDatabase(): Promise<FoundationTestData
 
 export function uniqueEmail(prefix = 'test'): string {
   return `${prefix}-${randomUUID()}@servora.test`;
+}
+
+/**
+ * A unique E.164 number with a North American shape.
+ *
+ * Uniqueness matters beyond row hygiene: authentication attempts are rate limited per phone
+ * number (`BR-045`), so a number reused between runs would carry a ledger from the previous
+ * run and start already throttled.
+ */
+export function uniquePhone(): string {
+  return `+1416${randomInt(100_000_000, 999_999_999)}`;
 }
 
 export async function createTestOrganization(

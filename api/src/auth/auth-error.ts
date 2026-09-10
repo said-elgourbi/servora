@@ -12,6 +12,16 @@ export const AUTH_ERROR_CODES = {
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   REFRESH_TOKEN_INVALID: 'REFRESH_TOKEN_INVALID',
   UNAUTHENTICATED: 'UNAUTHENTICATED',
+  /**
+   * A password-reset credential was wrong, expired, superseded, consumed or no longer
+   * eligible. One code for all of those, so the response cannot be used to learn whether
+   * an account exists (`BR-044`).
+   */
+  RESET_CODE_INVALID: 'RESET_CODE_INVALID',
+  /** The same, for an SMS one-time password (`BR-019`, `BR-044`). */
+  OTP_CODE_INVALID: 'OTP_CODE_INVALID',
+  /** An authentication attempt exceeded a configured limit (`BR-045`). */
+  TOO_MANY_REQUESTS: 'TOO_MANY_REQUESTS',
 } as const;
 
 export type AuthErrorCode =
@@ -77,6 +87,39 @@ export class AuthApiError extends HttpException {
       HttpStatus.UNAUTHORIZED,
       AUTH_ERROR_CODES.UNAUTHENTICATED,
       'Authentication is required.',
+    );
+  }
+
+  /**
+   * Wrong, expired, superseded, consumed or ineligible reset credential.
+   *
+   * Deliberately one factory and one message: distinguishing those cases would let an
+   * unauthenticated caller discover whether an account exists, or how far a guessed code
+   * got (`BR-044`).
+   */
+  static resetCodeInvalid(): AuthApiError {
+    return new AuthApiError(
+      HttpStatus.UNAUTHORIZED,
+      AUTH_ERROR_CODES.RESET_CODE_INVALID,
+      'The reset code is invalid or has expired. Request a new code.',
+    );
+  }
+
+  /** Wrong, expired, superseded, consumed or ineligible one-time password (`BR-019`). */
+  static otpCodeInvalid(): AuthApiError {
+    return new AuthApiError(
+      HttpStatus.UNAUTHORIZED,
+      AUTH_ERROR_CODES.OTP_CODE_INVALID,
+      'The verification code is invalid or has expired. Request a new code.',
+    );
+  }
+
+  /** A configured attempt limit was exceeded (`BR-045`). */
+  static tooManyRequests(): AuthApiError {
+    return new AuthApiError(
+      HttpStatus.TOO_MANY_REQUESTS,
+      AUTH_ERROR_CODES.TOO_MANY_REQUESTS,
+      'Too many attempts. Wait before trying again.',
     );
   }
 }

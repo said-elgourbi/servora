@@ -45,3 +45,17 @@ export interface SmsProvider {
 
 /** Injection token for the bound `SmsProvider`. */
 export const SMS_PROVIDER = Symbol('SMS_PROVIDER');
+
+/**
+ * Raised when a provider rejected, refused or could not accept a message.
+ *
+ * It carries no provider-specific detail on purpose: everything above the port reacts to the
+ * failure the same way, and a provider's error body may echo the message it was given — which
+ * for an OTP is the code itself (`BR-046`).
+ */
+export class SmsDeliveryError extends Error {
+  constructor() {
+    super('The SMS provider did not accept the message.');
+    this.name = 'SmsDeliveryError';
+  }
+}

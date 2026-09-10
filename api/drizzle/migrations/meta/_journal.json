@@ -15,6 +15,13 @@
       "when": 1789045314501,
       "tag": "0001_secret_master_chief",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789062121980,
+      "tag": "0002_auth_flows",
+      "breakpoints": true
     }
   ]
 }

@@ -22,7 +22,8 @@
     "test:cov": "vitest run --coverage",
     "test:e2e": "node --env-file-if-exists=../.env ./node_modules/vitest/vitest.mjs run --config ./vitest.config.e2e.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node --env-file-if-exists=../.env dist/database/run-migrations.js"
+    "db:migrate": "node --env-file-if-exists=../.env dist/database/run-migrations.js",
+    "db:seed": "node --env-file-if-exists=../.env dist/database/run-development-seed.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

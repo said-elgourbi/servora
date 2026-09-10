@@ -23,6 +23,7 @@ import {
   date,
   index,
   inet,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -269,6 +270,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   memberships: many(organizationMembers),
   sessions: many(authSessions),
   passwordResetTokens: many(passwordResetTokens),
+  phoneOtpChallenges: many(phoneOtpChallenges),
 }));
 
 export const userProfilesRelations = relations(userProfiles, ({ one }) => ({
@@ -427,11 +429,75 @@ export const passwordResetTokens = pgTable(
     updatedAt: updatedAt(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     usedAt: timestamp('used_at', { withTimezone: true }),
+    // Failed verification attempts against this credential. `BR-043` caps them at five,
+    // so the count has to outlive the request that made it.
+    attempts: integer('attempts').notNull().default(0),
   },
   (table) => [
     unique('password_reset_tokens_token_hash_unique').on(table.tokenHash),
+    check('password_reset_tokens_attempts_check', sql`${table.attempts} >= 0`),
     index('password_reset_tokens_user_id_idx').on(table.userId),
     index('password_reset_tokens_expires_at_idx').on(table.expiresAt),
+    // Supports "does this account still have a usable reset credential?" without
+    // putting a non-immutable expression in the predicate (`ADR-004` D8).
+    index('password_reset_tokens_outstanding_idx')
+      .on(table.userId)
+      .where(sql`${table.usedAt} is null`),
+  ],
+);
+
+// ------------------------------------------------------ phone_otp_challenges
+
+// One SMS one-time-password challenge (`BR-019`). A row is created per request and the
+// next request supersedes it, so an invalidated challenge is provably unusable instead of
+// being overwritten. Only the keyed digest of the code is stored (`BR-046`).
+export const phoneOtpChallenges = pgTable(
+  'phone_otp_challenges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: varchar('code_hash', { length: 255 }).notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  },
+  (table) => [
+    check('phone_otp_challenges_attempts_check', sql`${table.attempts} >= 0`),
+    index('phone_otp_challenges_user_id_idx').on(table.userId),
+    index('phone_otp_challenges_expires_at_idx').on(table.expiresAt),
+    index('phone_otp_challenges_outstanding_idx')
+      .on(table.userId)
+      .where(sql`${table.consumedAt} is null`),
+  ],
+);
+
+// ---------------------------------------------------- auth_rate_limit_events
+
+// Rolling-window ledger for authentication attempts (`BR-045`), shared by every
+// authentication entry point. The subject is stored as a keyed digest, so the table can
+// count attempts per email address or phone number without retaining either of them.
+export const authRateLimitEvents = pgTable(
+  'auth_rate_limit_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scope: varchar('scope', { length: 50 }).notNull(),
+    subjectHash: varchar('subject_hash', { length: 64 }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'auth_rate_limit_events_scope_check',
+      sql`${table.scope} in ('PASSWORD_RESET_REQUEST', 'SMS_OTP_REQUEST')`,
+    ),
+    index('auth_rate_limit_events_lookup_idx').on(
+      table.scope,
+      table.subjectHash,
+      table.createdAt,
+    ),
   ],
 );
 
@@ -464,4 +530,14 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
     references: [users.id],
   }),
 }));
+
+export const phoneOtpChallengesRelations = relations(
+  phoneOtpChallenges,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [phoneOtpChallenges.userId],
+      references: [users.id],
+    }),
+  }),
+);
 
