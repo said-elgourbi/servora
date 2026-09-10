@@ -11,6 +11,19 @@ const ARGON2ID_OPTIONS: HashOptions = {
   parallelism: 1,
 };
 
+/**
+ * A real Argon2id hash of a value no caller can supply, verified against when
+ * there is no stored hash to compare with - an unknown email address, for
+ * example.
+ *
+ * Verification against it always fails, but it costs exactly one Argon2id
+ * verification with the parameters above, so response timing cannot reveal
+ * whether an email address is registered. It protects no account and contains no
+ * plaintext, so it is not a secret.
+ */
+export const DUMMY_PASSWORD_HASH =
+  '$argon2id$v=19$m=19456,p=1,t=2$1YglPGarckWWPrHiiue1/Q$CSXrLOc+53M/Y3vis6zWXsDgh2MbN6XrCuSsWbFJfcg';
+
 /** Hashes a plaintext password with Argon2id. The plaintext is not retained. */
 export async function hashPassword(plainPassword: string): Promise<string> {
   const password = requirePassword(plainPassword);
@@ -33,4 +46,3 @@ export async function verifyPassword(
     return false;
   }
 }
-
