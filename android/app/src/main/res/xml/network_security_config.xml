@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release configuration: HTTPS only (`Project.md` §16, `dev.md` §11).
+  The debug build overrides this with `app/src/debug/res/xml/network_security_config.xml`
+  so a developer can point at a local API.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

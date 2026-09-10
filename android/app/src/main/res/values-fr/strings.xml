@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      French sign-in strings (`Project.md` §10, `BR-028`).
+
+      `app_name` is intentionally absent: the brand is not translated, and the default
+      file marks it `translatable="false"`.
+    -->
+
+    <string name="sign_in_brand_subtitle">Gestion des interventions</string>
+    <string name="sign_in_email_label">Courriel</string>
+    <string name="sign_in_email_placeholder">vous@entreprise.com</string>
+    <string name="sign_in_password_label">Mot de passe</string>
+    <string name="sign_in_password_placeholder">••••••••</string>
+    <string name="sign_in_show_password">Afficher le mot de passe</string>
+    <string name="sign_in_hide_password">Masquer le mot de passe</string>
+    <string name="sign_in_action">Se connecter</string>
+    <string name="sign_in_action_pending">Connexion…</string>
+    <string name="sign_in_succeeded">Connexion réussie.</string>
+    <string name="sign_in_copyright">© 2026 Servora</string>
+
+    <string name="sign_in_error_email_required">Saisissez votre courriel.</string>
+    <string name="sign_in_error_password_required">Saisissez votre mot de passe.</string>
+    <string name="sign_in_error_invalid_credentials">Courriel ou mot de passe incorrect.</string>
+    <string name="sign_in_error_network_title">Connexion impossible</string>
+    <string name="sign_in_error_network_message">Vérifiez votre réseau et réessayez.</string>
+    <string name="sign_in_error_server_title">Échec de la connexion</string>
+    <string name="sign_in_error_server_message">Veuillez réessayer.</string>
+    <!-- The backend rejected the submitted payload (`VALIDATION_FAILED`). -->
+    <string name="sign_in_error_validation">Vérifiez l\'adresse courriel et le mot de passe saisis.</string>
+
+    <!-- Les deux autres modes de connexion définis par la maquette approuvée. -->
+    <string name="sign_in_forgot_password">Mot de passe oublié ?</string>
+    <string name="sign_in_sms_action">Se connecter par SMS</string>
+
+    <!-- Commandes d'apparence de la barre supérieure de connexion (`BR-028`). -->
+    <string name="appearance_theme_light">Thème clair</string>
+    <string name="appearance_theme_dark">Thème sombre</string>
+
+    <!--
+      Échecs d'authentification partagés : un code, un message, sur chaque écran (`BR-041`).
+      Aucun message ne distingue « compte inexistant » de « code ou mot de passe erroné » (`BR-044`).
+    -->
+    <string name="auth_error_invalid_credentials">Courriel ou mot de passe incorrect.</string>
+    <string name="auth_error_reset_code_invalid">Ce code de réinitialisation n\'est pas valide. Demandez-en un nouveau.</string>
+    <string name="auth_error_otp_code_invalid">Ce code de vérification n\'est pas valide. Demandez-en un nouveau.</string>
+    <string name="auth_error_validation">Vérifiez les renseignements saisis.</string>
+    <string name="auth_error_too_many_requests">Trop de tentatives. Patientez un instant et réessayez.</string>
+    <string name="auth_error_network">Vérifiez votre réseau et réessayez.</string>
+    <string name="auth_error_server">Veuillez réessayer.</string>
+
+    <!-- Mot de passe oublié (`BR-043`). -->
+    <string name="password_reset_title">Réinitialiser votre mot de passe</string>
+    <string name="password_reset_subtitle_identity">Saisissez votre courriel et nous vous enverrons un code de réinitialisation.</string>
+    <string name="password_reset_subtitle_code">Si un compte existe pour ce courriel, un code de réinitialisation y a été envoyé.</string>
+    <string name="password_reset_subtitle_new_password">Choisissez un nouveau mot de passe pour votre compte.</string>
+    <string name="password_reset_done_message">Votre mot de passe a été mis à jour. Connectez-vous avec votre nouveau mot de passe.</string>
+    <string name="password_reset_code_label">Code de réinitialisation</string>
+    <string name="password_reset_code_placeholder">123456</string>
+    <string name="password_reset_new_password_label">Nouveau mot de passe</string>
+    <string name="password_reset_action_send">Envoyer le code</string>
+    <string name="password_reset_action_sending">Envoi…</string>
+    <string name="password_reset_action_verify">Vérifier le code</string>
+    <string name="password_reset_action_verifying">Vérification…</string>
+    <string name="password_reset_action_save">Enregistrer le mot de passe</string>
+    <string name="password_reset_action_saving">Enregistrement…</string>
+    <string name="password_reset_back">Retour</string>
+    <string name="password_reset_back_to_sign_in">Retour à la connexion</string>
+    <string name="password_reset_error_email_required">Saisissez votre courriel.</string>
+    <string name="password_reset_error_code_required">Saisissez le code à 6 chiffres.</string>
+    <string name="password_reset_error_password_required">Saisissez un nouveau mot de passe.</string>
+
+    <!-- Connexion par téléphone ou SMS (`BR-019`). -->
+    <string name="sms_sign_in_title">Se connecter par SMS</string>
+    <string name="sms_sign_in_subtitle_phone">Saisissez votre numéro de téléphone au format international, par exemple +15145550100.</string>
+    <string name="sms_sign_in_subtitle_code">Si ce numéro est associé à un compte, un code de vérification y a été envoyé.</string>
+    <string name="sms_sign_in_phone_label">Numéro de téléphone</string>
+    <string name="sms_sign_in_phone_placeholder">+15145550100</string>
+    <string name="sms_sign_in_code_label">Code de vérification</string>
+    <string name="sms_sign_in_code_placeholder">123456</string>
+    <string name="sms_sign_in_action_request_code">Envoyer le code</string>
+    <string name="sms_sign_in_action_requesting">Envoi…</string>
+    <string name="sms_sign_in_action_verify">Vérifier et se connecter</string>
+    <string name="sms_sign_in_action_verifying">Vérification…</string>
+    <string name="sms_sign_in_action_resend">Renvoyer le code</string>
+    <string name="sms_sign_in_back">Retour</string>
+    <string name="sms_sign_in_signed_in">Connexion réussie.</string>
+    <string name="sms_sign_in_error_phone_required">Saisissez votre numéro de téléphone.</string>
+    <string name="sms_sign_in_error_code_required">Saisissez le code à 6 chiffres.</string>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Window and launcher colours only — the Material 3 palette is defined in Kotlin
+      (`ui/theme/Color.kt`) from `docs/design/android-design-system.md`, because a
+      Compose UI reads its colours from `MaterialTheme`, not from resources.
+    -->
+
+    <!-- Brand steel blue; the launcher mask supplies the icon shape. -->
+    <color name="ic_launcher_background">#2B5EA7</color>
+
+    <!-- App canvas (`background` token): cool near-white in light mode. -->
+    <color name="window_background">#F1F3F8</color>
+</resources>

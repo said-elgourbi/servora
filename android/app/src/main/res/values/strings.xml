@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      English sign-in strings.
+
+      Every user-facing string lives here and in `values-fr/strings.xml`; the screen
+      itself formats nothing (`Project.md` §10, `dev.md` §9). The API returns
+      presentation text of its own, but clients branch on stable error codes and show
+      their own localized copy (`docs/api/authentication.md` §2, C1).
+    -->
+
+    <string name="app_name" translatable="false">Servora</string>
+
+    <string name="sign_in_brand_subtitle">Field Service Management</string>
+    <string name="sign_in_email_label">Email</string>
+    <string name="sign_in_email_placeholder">you@company.com</string>
+    <string name="sign_in_password_label">Password</string>
+    <string name="sign_in_password_placeholder">••••••••</string>
+    <string name="sign_in_show_password">Show password</string>
+    <string name="sign_in_hide_password">Hide password</string>
+    <string name="sign_in_action">Sign In</string>
+    <string name="sign_in_action_pending">Signing in…</string>
+    <string name="sign_in_succeeded">Signed in.</string>
+    <string name="sign_in_copyright">© 2026 Servora</string>
+
+    <string name="sign_in_error_email_required">Enter your email.</string>
+    <string name="sign_in_error_password_required">Enter your password.</string>
+    <string name="sign_in_error_invalid_credentials">Incorrect email or password.</string>
+    <string name="sign_in_error_network_title">Unable to connect</string>
+    <string name="sign_in_error_network_message">Check your network and try again.</string>
+    <string name="sign_in_error_server_title">Unable to sign in</string>
+    <string name="sign_in_error_server_message">Please try again.</string>
+    <!-- The backend rejected the submitted payload (`VALIDATION_FAILED`). -->
+    <string name="sign_in_error_validation">Check the email address and password you entered.</string>
+
+    <!-- The two additional sign-in destinations the approved design defines. -->
+    <string name="sign_in_forgot_password">Forgot your password?</string>
+    <string name="sign_in_sms_action">Sign in with SMS</string>
+
+    <!--
+      Appearance controls in the sign-in top bar (`BR-028`): the app language and the light/dark
+      theme. The two-letter codes are shown exactly as designed, so they are never translated;
+      the full names are the labels a screen reader announces for them.
+    -->
+    <string name="appearance_language_english_code" translatable="false">EN</string>
+    <string name="appearance_language_french_code" translatable="false">FR</string>
+    <string name="appearance_language_english_name" translatable="false">English</string>
+    <string name="appearance_language_french_name" translatable="false">Français</string>
+    <string name="appearance_theme_light">Light theme</string>
+    <string name="appearance_theme_dark">Dark theme</string>
+
+    <!--
+      Shared authentication failures. One code, one message, on every screen (`BR-041`), and no
+      message distinguishes "no such account" from "wrong credential" or "wrong code" (`BR-044`).
+    -->
+    <string name="auth_error_invalid_credentials">Incorrect email or password.</string>
+    <string name="auth_error_reset_code_invalid">That reset code is not valid. Request a new one.</string>
+    <string name="auth_error_otp_code_invalid">That verification code is not valid. Request a new one.</string>
+    <string name="auth_error_validation">Check the details you entered.</string>
+    <string name="auth_error_too_many_requests">Too many attempts. Wait a moment and try again.</string>
+    <string name="auth_error_network">Check your network and try again.</string>
+    <string name="auth_error_server">Please try again.</string>
+
+    <!-- Forgotten password (`BR-043`). -->
+    <string name="password_reset_title">Reset your password</string>
+    <string name="password_reset_subtitle_identity">Enter your email and we will send you a reset code.</string>
+    <string name="password_reset_subtitle_code">If an account exists for that email, a reset code has been sent to it.</string>
+    <string name="password_reset_subtitle_new_password">Choose a new password for your account.</string>
+    <string name="password_reset_done_message">Your password was updated. Sign in with your new password.</string>
+    <string name="password_reset_code_label">Reset code</string>
+    <string name="password_reset_code_placeholder">123456</string>
+    <string name="password_reset_new_password_label">New password</string>
+    <string name="password_reset_action_send">Send reset code</string>
+    <string name="password_reset_action_sending">Sending…</string>
+    <string name="password_reset_action_verify">Verify code</string>
+    <string name="password_reset_action_verifying">Verifying…</string>
+    <string name="password_reset_action_save">Save new password</string>
+    <string name="password_reset_action_saving">Saving…</string>
+    <string name="password_reset_back">Back</string>
+    <string name="password_reset_back_to_sign_in">Back to sign in</string>
+    <string name="password_reset_error_email_required">Enter your email.</string>
+    <string name="password_reset_error_code_required">Enter the 6-digit code.</string>
+    <string name="password_reset_error_password_required">Enter a new password.</string>
+
+    <!-- Phone/SMS sign-in (`BR-019`). -->
+    <string name="sms_sign_in_title">Sign in with SMS</string>
+    <string name="sms_sign_in_subtitle_phone">Enter your phone number in international format, for example +15145550100.</string>
+    <string name="sms_sign_in_subtitle_code">If that number belongs to an account, a verification code has been sent to it.</string>
+    <string name="sms_sign_in_phone_label">Phone number</string>
+    <string name="sms_sign_in_phone_placeholder">+15145550100</string>
+    <string name="sms_sign_in_code_label">Verification code</string>
+    <string name="sms_sign_in_code_placeholder">123456</string>
+    <string name="sms_sign_in_action_request_code">Send code</string>
+    <string name="sms_sign_in_action_requesting">Sending…</string>
+    <string name="sms_sign_in_action_verify">Verify and sign in</string>
+    <string name="sms_sign_in_action_verifying">Verifying…</string>
+    <string name="sms_sign_in_action_resend">Resend code</string>
+    <string name="sms_sign_in_back">Back</string>
+    <string name="sms_sign_in_signed_in">Signed in.</string>
+    <string name="sms_sign_in_error_phone_required">Enter your phone number.</string>
+    <string name="sms_sign_in_error_code_required">Enter the 6-digit code.</string>
+</resources>
