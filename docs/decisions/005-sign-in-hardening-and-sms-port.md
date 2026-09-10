@@ -91,6 +91,12 @@ nothing, including the recipient and the body, because a body may contain a one-
 It exists so the port is resolvable and testable before provider selection; it is not a
 production delivery path, and a real provider must be bound before any OTP flow ships.
 
+> **Resolved later (2026-09-10):** the OTP flow rules D6 records as undecided, and the provider
+> selection D7 defers, were decided by product ownership and are implemented in `ADR-006`
+> (`BR-019`). D5's port design is unchanged and is what `ADR-006` D4 binds to Sinch; the no-op
+> implementation remains the default binding. Nothing above is rewritten: this note records the
+> supersession in place.
+
 ## Consequences
 
 - An inactive or suspended account can no longer authenticate, and cannot be distinguished

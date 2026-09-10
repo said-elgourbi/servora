@@ -246,3 +246,28 @@ cd api && npm run test:e2e
 | Retention/pruning of expired sessions, refresh tokens and reset tokens | `BR-027`, `BR-033` |
 | Whether revocation events must be independently audited | `BR-033` |
 | Whether additional platforms (`platform` codes beyond `ANDROID`/`WEB`) are needed | `BR-010`, `BR-016` |
+
+> The `BR-019` and `BR-029` rows above were resolved on 2026-09-10 — OTP expiry, attempts and rate
+> limits, phone/SMS authentication, and reset throttling and the reset delivery channel — and are
+> implemented as described below and in `ADR-006` / `ADR-008`. Still open from those rows: the
+> phone-number lifecycle (`BR-019` Notes) and notification behavior (`BR-029`).
+
+## Password reset and phone/SMS (added 2026-09-10)
+
+The rules for the two additional authentication flows are canonical in `BR-019` (phone/SMS) and
+`BR-043`–`BR-046` (password reset, non-disclosure, rate limiting, code storage); the architectural
+decisions are in `docs/decisions/006-authentication-flows-and-sms-provider.md`, and the wire
+contract is in `docs/api/authentication.md` §3.6–§3.11. Three model changes implement them:
+
+| Change | Purpose |
+| --- | --- |
+| `password_reset_tokens.attempts` (+ `>= 0` check, outstanding-row index) | Counts failed verifications so the five-attempt limit (`BR-043`) survives the request that observed them |
+| `phone_otp_challenges` (new) | One row per SMS OTP request; a new request or a successful verification sets `consumed_at`, so a superseded or used code is provably unusable (`BR-019`) |
+| `auth_rate_limit_events` (new) | The rolling-window ledger behind `BR-045`, shared by both flows. The subject is stored as an HMAC, so the table counts attempts without retaining an email address or a phone number |
+
+The reset delivery transport that `ADR-006` D3 left open is decided (`ADR-008`): the message leaves
+through the provider-neutral `EMAIL_PROVIDER` port, and the production binding sends it through
+Resend. No model change was needed — how a message travels is not a domain concept.
+
+`users.phone` is unchanged: phone authentication resolves eligibility at request time and fails
+closed when the number matches no account or more than one (`ADR-006` D5).
