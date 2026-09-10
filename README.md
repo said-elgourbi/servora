@@ -16,6 +16,8 @@ Initial supported languages are **English** and **French**. Development rules li
 > See `docs/tracker/001-foundation.md`, `docs/tracker/002-repository-foundation.md`,
 > `docs/tracker/003-foundation-domain-model.md` and
 > `docs/tracker/004-authentication-domain-model.md` for status.
+> Android app appearance controls (app language, light/dark) are covered by
+> `docs/tracker/005-android-appearance-controls.md`.
 >
 > Authentication persistence (sessions, refresh tokens, password reset tokens) is modelled in
 > `docs/domain/authentication-domain-model.md`.
@@ -103,5 +105,7 @@ make android-build       # Android debug APK (requires Android SDK)
 - Domain model: `docs/domain/foundation-domain-model.md`.
 - Authentication domain model: `docs/domain/authentication-domain-model.md`
   (decision: `docs/decisions/004-authentication-domain-model.md`).
+- Android appearance controls: `docs/tracker/005-android-appearance-controls.md`
+  (decision: `docs/decisions/007-android-appearance-controls.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.
 

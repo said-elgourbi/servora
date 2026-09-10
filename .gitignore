@@ -9,6 +9,9 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# Design reference (Figma Make export) — not part of the repository source
+Figma/
+
 # Logs
 *.log
 
@@ -28,3 +31,6 @@ android/**/build/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local development notifications written by the API (one-time codes).
+var/

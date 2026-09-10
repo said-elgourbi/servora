@@ -33,10 +33,28 @@ services:
     build:
       context: ./api
     environment:
+      # Hard-coded rather than configurable: the guarded development affordances
+      # (`PASSWORD_RESET_DELIVERY=file`, `SMS_PROVIDER=file`) are refused in production, so a
+      # local developer runs the API on the host to use them (`ADR-006` D3, D4).
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgres://${POSTGRES_USER:-servora}:${POSTGRES_PASSWORD:-servora}@postgres:5432/${POSTGRES_DB:-servora}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # No default: a hard-coded secret would be a committed credential (dev.md §5).
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required — set it in the repository-root .env (see .env.example)}
+      # Authentication-flow configuration (BR-019, BR-043, BR-045; ADR-006). Every value has an
+      # approved default, so a local stack only overrides what it wants to change.
+      SMS_PROVIDER: ${SMS_PROVIDER:-noop}
+      SINCH_SERVICE_PLAN_ID: ${SINCH_SERVICE_PLAN_ID:-}
+      SINCH_API_TOKEN: ${SINCH_API_TOKEN:-}
+      SINCH_FROM: ${SINCH_FROM:-}
+      PASSWORD_RESET_DELIVERY: ${PASSWORD_RESET_DELIVERY:-noop}
+      PASSWORD_RESET_DELIVERY_DIRECTORY: ${PASSWORD_RESET_DELIVERY_DIRECTORY:-var/dev-notifications}
+      # Transactional email delivery (BR-043, ADR-008). The no-op default keeps the stack bootable;
+      # a deployment selects resend together with the credentials.
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-noop}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
