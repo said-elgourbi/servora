@@ -10,11 +10,11 @@ References: `dev.md` §5 (configuration and secrets), `dev.md` §6 (database), `
 
 ## 1. Prerequisites
 
-| Tool | Why |
-| --- | --- |
-| Docker Engine with the Compose plugin | Runs PostgreSQL and the API (`make up`) |
-| Node.js ≥ 24 + npm | Host tooling: migrations, seed, API tests (`api/package.json` `engines`) |
-| JDK + Android SDK | Only for Android builds (`make android-build`) |
+| Tool                                  | Why                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| Docker Engine with the Compose plugin | Runs PostgreSQL and the API (`make up`)                                  |
+| Node.js ≥ 24 + npm                    | Host tooling: migrations, seed, API tests (`api/package.json` `engines`) |
+| JDK + Android SDK                     | Only for Android builds (`make android-build`)                           |
 
 ## 2. Foundation (database + API)
 
@@ -41,21 +41,23 @@ Notes:
 
 The foundation database starts empty and the API has no user-creation endpoint yet, so a
 fresh environment cannot sign in. `make seed` creates the smallest dataset that can:
-two active accounts, one per foundation role (`BR-003`), inside one organization.
+two active accounts, one per default foundation role (`BR-003`), inside one organization.
 
 ```bash
 make seed
 ```
 
-| What | Value |
-| --- | --- |
-| Organization | `Servora Development` (`SEED_ORGANIZATION_NAME`) |
-| Manager account | `manager@servora.test` (`SEED_MANAGER_EMAIL`) — role `MANAGER` |
-| Technician account | `technician@servora.test` (`SEED_TECHNICIAN_EMAIL`) — role `TECHNICIAN` |
-| Password | `SEED_MANAGER_PASSWORD` / `SEED_TECHNICIAN_PASSWORD`, or generated and printed once |
+| What               | Value                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| Organization       | `Servora Development` (`SEED_ORGANIZATION_NAME`)                                    |
+| Manager account    | `manager@servora.test` (`SEED_MANAGER_EMAIL`) — default Manager role                |
+| Technician account | `technician@servora.test` (`SEED_TECHNICIAN_EMAIL`) — default Technician role       |
+| Password           | `SEED_MANAGER_PASSWORD` / `SEED_TECHNICIAN_PASSWORD`, or generated and printed once |
 
 Written per account: the `users` row (address, Argon2id hash, `ACTIVE`), the `user_profiles`
-row (`Dev Manager` / `Dev Technician`), and the `organization_members` row (role code, `ACTIVE`).
+row (`Dev Manager` / `Dev Technician`), and the `organization_members` row (`role_id`,
+`ACTIVE`). The seed also upserts the default permission catalogue, default organization roles and
+role-permission assignments.
 
 Credential policy:
 
@@ -88,9 +90,8 @@ Implementation: `api/src/database/development-seed.ts` resolves the dataset from
 environment (pure, unit-tested in `development-seed.spec.ts`) and
 `api/src/database/run-development-seed.ts` performs the writes (`npm run db:seed`).
 
-Customers, jobs, assignments and evidence are intentionally **not** seeded: their domain rules
-are still `OPEN QUESTION` (`BR-021`–`BR-027`), so inventing rows for them would create
-behaviour the product has not decided.
+Customers, jobs, assignments and evidence are intentionally **not** seeded: those rows are not
+needed for authentication smoke testing.
 
 ## 4. Android against a local API (physical device or emulator)
 
@@ -141,31 +142,31 @@ Notes:
 
 ## 5. Command reference
 
-| Command | Purpose |
-| --- | --- |
-| `make up` / `make down` / `make down-v` | Start / stop / stop + delete the database volume |
-| `make logs` / `make ps` | Follow logs / show service status |
-| `make migrate` | Apply migrations (host tooling) |
-| `make migration NAME=<name>` | Generate a migration from the Drizzle schema |
-| `make seed` | Seed the development dataset (§3) |
-| `make db-shell` | `psql` against the local database |
-| `make api-build` / `api-start` / `api-start-dev` | Build / run the API on the host |
-| `make api-test` / `api-test-e2e` | API unit tests / API e2e tests (needs `make up`) |
-| `make api-lint` / `api-format` | Lint / format the API sources |
-| `make android-build` / `android-test` / `android-lint` | Assemble debug APK / JVM tests / lint |
-| `make test` / `lint` / `build` | Aliases for the API targets |
+| Command                                                | Purpose                                          |
+| ------------------------------------------------------ | ------------------------------------------------ |
+| `make up` / `make down` / `make down-v`                | Start / stop / stop + delete the database volume |
+| `make logs` / `make ps`                                | Follow logs / show service status                |
+| `make migrate`                                         | Apply migrations (host tooling)                  |
+| `make migration NAME=<name>`                           | Generate a migration from the Drizzle schema     |
+| `make seed`                                            | Seed the development dataset (§3)                |
+| `make db-shell`                                        | `psql` against the local database                |
+| `make api-build` / `api-start` / `api-start-dev`       | Build / run the API on the host                  |
+| `make api-test` / `api-test-e2e`                       | API unit tests / API e2e tests (needs `make up`) |
+| `make api-lint` / `api-format`                         | Lint / format the API sources                    |
+| `make android-build` / `android-test` / `android-lint` | Assemble debug APK / JVM tests / lint            |
+| `make test` / `lint` / `build`                         | Aliases for the API targets                      |
 
 ## 6. Transactional email (`ADR-008`)
 
 Password-reset messages are delivered through the `EMAIL_PROVIDER` port. Every value has an
 approved default, so a local stack and the test suite need no configuration at all.
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `PASSWORD_RESET_DELIVERY` | `noop` | Which port delivers a reset: `noop`, `file` (development sink, refused in production) or `email` |
-| `EMAIL_PROVIDER` | `noop` | Which service sends email: `noop` or `resend` |
-| `RESEND_API_KEY` | — | Required when `EMAIL_PROVIDER=resend`; the API refuses to start without it |
-| `EMAIL_FROM` | — | Required when `EMAIL_PROVIDER=resend`; an address on a domain verified in Resend |
+| Variable                  | Default | Meaning                                                                                          |
+| ------------------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `PASSWORD_RESET_DELIVERY` | `noop`  | Which port delivers a reset: `noop`, `file` (development sink, refused in production) or `email` |
+| `EMAIL_PROVIDER`          | `noop`  | Which service sends email: `noop` or `resend`                                                    |
+| `RESEND_API_KEY`          | —       | Required when `EMAIL_PROVIDER=resend`; the API refuses to start without it                       |
+| `EMAIL_FROM`              | —       | Required when `EMAIL_PROVIDER=resend`; an address on a domain verified in Resend                 |
 
 ```bash
 # Deliver reset codes by email in a local run. Never commit these values (dev.md §5).
@@ -188,12 +189,11 @@ A provider rejection never changes the API response: the reset request answers `
 
 ## 7. Troubleshooting
 
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| Every `/auth/*` route returns `404` | The API container is running an image built before the route existed | `make up` (rebuilds; the compose image is not rebuilt by a plain restart) |
-| Compose exits immediately or the API container restarts repeatedly | `JWT_SECRET` missing, or shorter than 32 characters | Set a valid `JWT_SECRET` in `.env` |
-| Sign-in shows a generic network/server error instead of "incorrect credentials" | The device cannot reach the base URL | Check `adb reverse --list`, confirm `servora.api.baseUrl=http://127.0.0.1:3000/` (trailing slash), then rebuild |
-| A base-URL change has no effect | `API_BASE_URL` is compiled into the APK | `./gradlew installDebug` again |
-| `make seed` reports an invalid `SEED_*_PASSWORD` | Password shorter than the 8-character domain minimum | Use a longer value, or leave the variable empty to generate one |
-| `make seed` / `make migrate` cannot reach PostgreSQL | `DATABASE_URL` does not match the published `POSTGRES_PORT` | Keep both values in sync in `.env` |
-
+| Symptom                                                                         | Cause                                                                | Fix                                                                                                             |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Every `/auth/*` route returns `404`                                             | The API container is running an image built before the route existed | `make up` (rebuilds; the compose image is not rebuilt by a plain restart)                                       |
+| Compose exits immediately or the API container restarts repeatedly              | `JWT_SECRET` missing, or shorter than 32 characters                  | Set a valid `JWT_SECRET` in `.env`                                                                              |
+| Sign-in shows a generic network/server error instead of "incorrect credentials" | The device cannot reach the base URL                                 | Check `adb reverse --list`, confirm `servora.api.baseUrl=http://127.0.0.1:3000/` (trailing slash), then rebuild |
+| A base-URL change has no effect                                                 | `API_BASE_URL` is compiled into the APK                              | `./gradlew installDebug` again                                                                                  |
+| `make seed` reports an invalid `SEED_*_PASSWORD`                                | Password shorter than the 8-character domain minimum                 | Use a longer value, or leave the variable empty to generate one                                                 |
+| `make seed` / `make migrate` cannot reach PostgreSQL                            | `DATABASE_URL` does not match the published `POSTGRES_PORT`          | Keep both values in sync in `.env`                                                                              |

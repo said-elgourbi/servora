@@ -14,6 +14,18 @@ export type CustomerType = (typeof CUSTOMER_TYPES)[number];
 export const CUSTOMER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type CustomerStatus = (typeof CUSTOMER_STATUSES)[number];
 
+export const CUSTOMER_PREFERRED_CONTACT_METHODS = [
+  'EMAIL',
+  'PHONE',
+  'SMS',
+  'NONE',
+] as const;
+export type CustomerPreferredContactMethod =
+  (typeof CUSTOMER_PREFERRED_CONTACT_METHODS)[number];
+
+export const CUSTOMER_LANGUAGES = ['en-CA', 'fr-CA'] as const;
+export type CustomerLanguage = (typeof CUSTOMER_LANGUAGES)[number];
+
 export const CUSTOMER_ADDRESS_TYPES = ['SERVICE', 'BILLING', 'OTHER'] as const;
 export type CustomerAddressType = (typeof CUSTOMER_ADDRESS_TYPES)[number];
 

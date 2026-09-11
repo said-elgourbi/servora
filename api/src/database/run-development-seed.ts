@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { loadConfig } from '../config/configuration.js';
@@ -9,8 +9,11 @@ import {
   type SeedAccount,
 } from './development-seed.js';
 import {
+  organizationRoles,
   organizationMembers,
   organizations,
+  permissions,
+  rolePermissions,
   userProfiles,
   users,
 } from './schema.js';
@@ -19,6 +22,153 @@ import {
 // (`make seed`). Development tooling only: it never runs inside the API process
 // and refuses to run when NODE_ENV=production.
 type SeedDatabase = PostgresJsDatabase<Record<string, never>>;
+
+const PERMISSION_TEMPLATES = [
+  {
+    code: 'CUSTOMER_CREATE',
+    nameEn: 'Create customers',
+    nameFr: 'Creer des clients',
+    descriptionEn: 'Create customer records.',
+    descriptionFr: 'Creer des dossiers client.',
+  },
+  {
+    code: 'CUSTOMER_VIEW',
+    nameEn: 'View customers',
+    nameFr: 'Voir les clients',
+    descriptionEn: 'View customer records.',
+    descriptionFr: 'Voir les dossiers client.',
+  },
+  {
+    code: 'CUSTOMER_UPDATE',
+    nameEn: 'Update customers',
+    nameFr: 'Modifier les clients',
+    descriptionEn: 'Update customer records.',
+    descriptionFr: 'Modifier les dossiers client.',
+  },
+  {
+    code: 'CUSTOMER_DELETE',
+    nameEn: 'Delete customers',
+    nameFr: 'Supprimer des clients',
+    descriptionEn: 'Soft-delete customer records.',
+    descriptionFr: 'Supprimer logiquement des dossiers client.',
+  },
+  {
+    code: 'CUSTOMER_VIEW_DELETED',
+    nameEn: 'View deleted customers',
+    nameFr: 'Voir les clients supprimes',
+    descriptionEn: 'Include soft-deleted customers in filtered views.',
+    descriptionFr: 'Inclure les clients supprimes dans les vues filtrees.',
+  },
+  {
+    code: 'TECHNICIAN_CREATE',
+    nameEn: 'Create technicians',
+    nameFr: 'Creer des techniciens',
+    descriptionEn: 'Create technician users and memberships.',
+    descriptionFr: 'Creer des utilisateurs et adhesions technicien.',
+  },
+  {
+    code: 'TECHNICIAN_VIEW',
+    nameEn: 'View technicians',
+    nameFr: 'Voir les techniciens',
+    descriptionEn: 'View technician records.',
+    descriptionFr: 'Voir les dossiers technicien.',
+  },
+  {
+    code: 'TECHNICIAN_UPDATE',
+    nameEn: 'Update technicians',
+    nameFr: 'Modifier les techniciens',
+    descriptionEn: 'Update technician records.',
+    descriptionFr: 'Modifier les dossiers technicien.',
+  },
+  {
+    code: 'TECHNICIAN_DELETE',
+    nameEn: 'Delete technicians',
+    nameFr: 'Supprimer des techniciens',
+    descriptionEn:
+      'Delete or deactivate technician access according to domain rules.',
+    descriptionFr:
+      'Supprimer ou desactiver l acces technicien selon les regles du domaine.',
+  },
+  {
+    code: 'JOB_CREATE',
+    nameEn: 'Create jobs',
+    nameFr: 'Creer des travaux',
+    descriptionEn: 'Create job records.',
+    descriptionFr: 'Creer des dossiers de travail.',
+  },
+  {
+    code: 'JOB_VIEW',
+    nameEn: 'View jobs',
+    nameFr: 'Voir les travaux',
+    descriptionEn: 'View job records.',
+    descriptionFr: 'Voir les dossiers de travail.',
+  },
+  {
+    code: 'JOB_UPDATE',
+    nameEn: 'Update jobs',
+    nameFr: 'Modifier les travaux',
+    descriptionEn: 'Update job records.',
+    descriptionFr: 'Modifier les dossiers de travail.',
+  },
+  {
+    code: 'JOB_DELETE',
+    nameEn: 'Delete jobs',
+    nameFr: 'Supprimer des travaux',
+    descriptionEn: 'Delete jobs according to domain rules.',
+    descriptionFr: 'Supprimer des travaux selon les regles du domaine.',
+  },
+  {
+    code: 'VISIT_VIEW_ASSIGNED',
+    nameEn: 'View assigned visits',
+    nameFr: 'Voir les visites assignees',
+    descriptionEn: 'View visits assigned to the technician.',
+    descriptionFr: 'Voir les visites assignees au technicien.',
+  },
+  {
+    code: 'VISIT_UPDATE_ASSIGNED_STATUS',
+    nameEn: 'Update assigned visit status',
+    nameFr: 'Modifier le statut des visites assignees',
+    descriptionEn: 'Advance the field status of assigned visits.',
+    descriptionFr: 'Faire avancer le statut terrain des visites assignees.',
+  },
+  {
+    code: 'VISIT_ADD_NOTE',
+    nameEn: 'Add visit notes',
+    nameFr: 'Ajouter des notes de visite',
+    descriptionEn: 'Add notes to assigned visits.',
+    descriptionFr: 'Ajouter des notes aux visites assignees.',
+  },
+  {
+    code: 'VISIT_RECORD_OUTCOME',
+    nameEn: 'Record visit outcomes',
+    nameFr: 'Enregistrer les resultats de visite',
+    descriptionEn: 'Record the outcome of assigned visits.',
+    descriptionFr: 'Enregistrer le resultat des visites assignees.',
+  },
+] as const;
+
+const ROLE_TEMPLATES = {
+  MANAGER: {
+    nameEn: 'Manager',
+    nameFr: 'Gestionnaire',
+    descriptionEn: 'Default management role with core CRUD permissions.',
+    descriptionFr:
+      'Role de gestion par defaut avec les permissions CRUD principales.',
+    permissionCodes: PERMISSION_TEMPLATES.map((permission) => permission.code),
+  },
+  TECHNICIAN: {
+    nameEn: 'Technician',
+    nameFr: 'Technicien',
+    descriptionEn: 'Default field role for assigned visit work.',
+    descriptionFr: 'Role terrain par defaut pour les visites assignees.',
+    permissionCodes: [
+      'VISIT_VIEW_ASSIGNED',
+      'VISIT_UPDATE_ASSIGNED_STATUS',
+      'VISIT_ADD_NOTE',
+      'VISIT_RECORD_OUTCOME',
+    ],
+  },
+} as const;
 
 async function main(): Promise<void> {
   const { databaseUrl, nodeEnv } = loadConfig();
@@ -37,14 +187,112 @@ async function main(): Promise<void> {
     const db = drizzle(client);
 
     const organizationId = await ensureOrganization(db, seed.organizationName);
+    const permissionIds = await ensurePermissions(db);
+    const roleIds = await ensureDefaultRoles(db, organizationId, permissionIds);
     for (const account of seed.accounts) {
-      await upsertAccount(db, organizationId, account);
+      await upsertAccount(db, organizationId, roleIds[account.role], account);
     }
 
     report(seed);
   } finally {
     await client.end();
   }
+}
+
+async function ensurePermissions(
+  db: SeedDatabase,
+): Promise<Record<string, string>> {
+  const ids: Record<string, string> = {};
+  for (const template of PERMISSION_TEMPLATES) {
+    const [permission] = await db
+      .insert(permissions)
+      .values(template)
+      .onConflictDoUpdate({
+        target: permissions.code,
+        set: {
+          nameEn: template.nameEn,
+          nameFr: template.nameFr,
+          descriptionEn: template.descriptionEn,
+          descriptionFr: template.descriptionFr,
+        },
+      })
+      .returning({ id: permissions.id, code: permissions.code });
+    if (!permission) {
+      throw new Error(`Failed to seed permission "${template.code}".`);
+    }
+    ids[permission.code] = permission.id;
+  }
+  return ids;
+}
+
+async function ensureDefaultRoles(
+  db: SeedDatabase,
+  organizationId: string,
+  permissionIds: Record<string, string>,
+): Promise<Record<keyof typeof ROLE_TEMPLATES, string>> {
+  const roleIds = {} as Record<keyof typeof ROLE_TEMPLATES, string>;
+
+  for (const systemCode of Object.keys(ROLE_TEMPLATES) as Array<
+    keyof typeof ROLE_TEMPLATES
+  >) {
+    const template = ROLE_TEMPLATES[systemCode];
+    const [existingRole] = await db
+      .select({ id: organizationRoles.id })
+      .from(organizationRoles)
+      .where(
+        and(
+          eq(organizationRoles.organizationId, organizationId),
+          eq(organizationRoles.systemCode, systemCode),
+        ),
+      )
+      .limit(1);
+
+    const role =
+      existingRole ??
+      (
+        await db
+          .insert(organizationRoles)
+          .values({
+            organizationId,
+            systemCode,
+            nameEn: template.nameEn,
+            nameFr: template.nameFr,
+            descriptionEn: template.descriptionEn,
+            descriptionFr: template.descriptionFr,
+            status: 'ACTIVE',
+          })
+          .returning({ id: organizationRoles.id })
+      )[0];
+    if (existingRole) {
+      await db
+        .update(organizationRoles)
+        .set({
+          nameEn: template.nameEn,
+          nameFr: template.nameFr,
+          descriptionEn: template.descriptionEn,
+          descriptionFr: template.descriptionFr,
+          status: 'ACTIVE',
+        })
+        .where(eq(organizationRoles.id, existingRole.id));
+    }
+    if (!role) {
+      throw new Error(`Failed to seed the ${systemCode} role.`);
+    }
+    roleIds[systemCode] = role.id;
+
+    for (const permissionCode of template.permissionCodes) {
+      const permissionId = permissionIds[permissionCode];
+      if (permissionId === undefined) {
+        throw new Error(`Missing seeded permission "${permissionCode}".`);
+      }
+      await db
+        .insert(rolePermissions)
+        .values({ organizationId, roleId: role.id, permissionId })
+        .onConflictDoNothing();
+    }
+  }
+
+  return roleIds;
 }
 
 /** Creates the organization on first use; re-running the seed never duplicates it. */
@@ -81,6 +329,7 @@ async function ensureOrganization(
 async function upsertAccount(
   db: SeedDatabase,
   organizationId: string,
+  roleId: string,
   account: SeedAccount,
 ): Promise<void> {
   const passwordHash = await hashPassword(account.password);
@@ -120,12 +369,12 @@ async function upsertAccount(
     .values({
       organizationId,
       userId: user.id,
-      role: account.role,
+      roleId,
       status: 'ACTIVE',
     })
     .onConflictDoUpdate({
       target: [organizationMembers.organizationId, organizationMembers.userId],
-      set: { role: account.role, status: 'ACTIVE' },
+      set: { roleId, status: 'ACTIVE' },
     });
 }
 

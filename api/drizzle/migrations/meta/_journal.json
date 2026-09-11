@@ -22,6 +22,20 @@
       "when": 1789062121980,
       "tag": "0002_auth_flows",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789132537346,
+      "tag": "0003_purple_black_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789135507264,
+      "tag": "0004_woozy_spitfire",
+      "breakpoints": true
     }
   ]
 }

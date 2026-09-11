@@ -1,8 +1,6 @@
 import { requireEnum, requireText } from '../validation/domain-validation.js';
 import {
-  MEMBER_ROLES,
   MEMBER_STATUSES,
-  type MemberRole,
   type MemberStatus,
   type OrganizationMember,
 } from './organization-member.types.js';
@@ -11,7 +9,7 @@ export interface OrganizationMemberDto {
   id: string;
   organizationId: string;
   userId: string;
-  role: MemberRole;
+  roleId: string;
   status: MemberStatus;
   joinedAt: string;
   createdAt: string;
@@ -20,7 +18,7 @@ export interface OrganizationMemberDto {
 
 export interface AddOrganizationMemberDto {
   userId: string;
-  role: MemberRole;
+  roleId: string;
   status?: MemberStatus;
 }
 
@@ -31,7 +29,7 @@ export function toOrganizationMemberDto(
     id: member.id,
     organizationId: member.organizationId,
     userId: member.userId,
-    role: member.role as MemberRole,
+    roleId: member.roleId,
     status: member.status as MemberStatus,
     joinedAt: member.joinedAt.toISOString(),
     createdAt: member.createdAt.toISOString(),
@@ -46,7 +44,7 @@ export function parseAddOrganizationMemberDto(
   const source = (input ?? {}) as Record<string, unknown>;
   return {
     userId: requireText(source.userId, 'userId', 36),
-    role: requireEnum(source.role, MEMBER_ROLES, 'role'),
+    roleId: requireText(source.roleId, 'roleId', 36),
     status:
       source.status === undefined
         ? undefined

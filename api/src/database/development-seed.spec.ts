@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MEMBER_ROLES } from '../members/organization-member.types.js';
+import { SYSTEM_ROLE_CODES } from '../members/organization-member.types.js';
 import {
   DEFAULT_SEED_MANAGER_EMAIL,
   DEFAULT_SEED_ORGANIZATION_NAME,
@@ -8,7 +8,7 @@ import {
 } from './development-seed.js';
 
 describe('resolveDevelopmentSeed', () => {
-  it('seeds one account per foundation role', () => {
+  it('seeds one account per default system role template', () => {
     const seed = resolveDevelopmentSeed({});
 
     expect(seed.accounts.map((account) => account.role)).toEqual([
@@ -16,7 +16,9 @@ describe('resolveDevelopmentSeed', () => {
       'TECHNICIAN',
     ]);
     expect(
-      seed.accounts.every((account) => MEMBER_ROLES.includes(account.role)),
+      seed.accounts.every((account) =>
+        SYSTEM_ROLE_CODES.includes(account.role),
+      ),
     ).toBe(true);
   });
 

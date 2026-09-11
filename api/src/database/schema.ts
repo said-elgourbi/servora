@@ -24,10 +24,12 @@ import {
   index,
   inet,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -57,9 +59,82 @@ export const organizations = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
-    check('organizations_status_check', sql`${table.status} in ('ACTIVE', 'INACTIVE')`),
+    check(
+      'organizations_status_check',
+      sql`${table.status} in ('ACTIVE', 'INACTIVE')`,
+    ),
     index('organizations_status_idx').on(table.status),
     index('organizations_email_idx').on(table.email),
+  ],
+);
+
+// -------------------------------------------------------------- permissions
+
+export const permissions = pgTable(
+  'permissions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    code: varchar('code', { length: 100 }).notNull(),
+    nameEn: varchar('name_en', { length: 150 }).notNull(),
+    nameFr: varchar('name_fr', { length: 150 }).notNull(),
+    descriptionEn: text('description_en').notNull(),
+    descriptionFr: text('description_fr').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    unique('permissions_code_unique').on(table.code),
+    check('permissions_code_not_blank_check', sql`btrim(${table.code}) <> ''`),
+    check(
+      'permissions_name_en_not_blank_check',
+      sql`btrim(${table.nameEn}) <> ''`,
+    ),
+    check(
+      'permissions_name_fr_not_blank_check',
+      sql`btrim(${table.nameFr}) <> ''`,
+    ),
+  ],
+);
+
+// --------------------------------------------------------- organization_roles
+
+export const organizationRoles = pgTable(
+  'organization_roles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    systemCode: varchar('system_code', { length: 20 }),
+    nameEn: varchar('name_en', { length: 150 }).notNull(),
+    nameFr: varchar('name_fr', { length: 150 }).notNull(),
+    descriptionEn: text('description_en').notNull(),
+    descriptionFr: text('description_fr').notNull(),
+    status: varchar('status', { length: 20 }).notNull().default('ACTIVE'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      'organization_roles_system_code_check',
+      sql`${table.systemCode} is null or ${table.systemCode} in ('MANAGER', 'TECHNICIAN')`,
+    ),
+    check(
+      'organization_roles_status_check',
+      sql`${table.status} in ('ACTIVE', 'INACTIVE')`,
+    ),
+    check(
+      'organization_roles_name_en_not_blank_check',
+      sql`btrim(${table.nameEn}) <> ''`,
+    ),
+    check(
+      'organization_roles_name_fr_not_blank_check',
+      sql`btrim(${table.nameFr}) <> ''`,
+    ),
+    uniqueIndex('organization_roles_system_code_unique')
+      .on(table.organizationId, table.systemCode)
+      .where(sql`${table.systemCode} is not null`),
+    index('organization_roles_organization_id_idx').on(table.organizationId),
   ],
 );
 
@@ -98,11 +173,12 @@ export const userProfiles = pgTable('user_profiles', {
   phone: varchar('phone', { length: 50 }),
   avatarUrl: varchar('avatar_url', { length: 500 }),
   locale: varchar('locale', { length: 10 }).notNull().default('en-CA'),
-  timezone: varchar('timezone', { length: 100 }).notNull().default('America/Toronto'),
+  timezone: varchar('timezone', { length: 100 })
+    .notNull()
+    .default('America/Toronto'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
-
 
 // ------------------------------------------------------ organization_members
 
@@ -116,9 +192,13 @@ export const organizationMembers = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    role: varchar('role', { length: 20 }).notNull(),
+    roleId: uuid('role_id')
+      .notNull()
+      .references(() => organizationRoles.id),
     status: varchar('status', { length: 20 }).notNull().default('ACTIVE'),
-    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    joinedAt: timestamp('joined_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -128,16 +208,77 @@ export const organizationMembers = pgTable(
       table.userId,
     ),
     check(
-      'organization_members_role_check',
-      sql`${table.role} in ('MANAGER', 'TECHNICIAN')`,
-    ),
-    check(
       'organization_members_status_check',
       sql`${table.status} in ('ACTIVE', 'INACTIVE')`,
     ),
     index('organization_members_organization_id_idx').on(table.organizationId),
     index('organization_members_user_id_idx').on(table.userId),
-    index('organization_members_role_idx').on(table.role),
+    index('organization_members_role_id_idx').on(table.roleId),
+  ],
+);
+
+// --------------------------------------------------------- role_permissions
+
+export const rolePermissions = pgTable(
+  'role_permissions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    roleId: uuid('role_id')
+      .notNull()
+      .references(() => organizationRoles.id, { onDelete: 'cascade' }),
+    permissionId: uuid('permission_id')
+      .notNull()
+      .references(() => permissions.id, { onDelete: 'cascade' }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique('role_permissions_role_permission_unique').on(
+      table.roleId,
+      table.permissionId,
+    ),
+    index('role_permissions_organization_role_idx').on(
+      table.organizationId,
+      table.roleId,
+    ),
+    index('role_permissions_permission_id_idx').on(table.permissionId),
+  ],
+);
+
+// --------------------------------------------- organization_member_permissions
+
+export const organizationMemberPermissions = pgTable(
+  'organization_member_permissions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => organizationMembers.id, { onDelete: 'cascade' }),
+    permissionId: uuid('permission_id')
+      .notNull()
+      .references(() => permissions.id, { onDelete: 'cascade' }),
+    grantedByMembershipId: uuid('granted_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique('organization_member_permissions_member_permission_unique').on(
+      table.memberId,
+      table.permissionId,
+    ),
+    index('organization_member_permissions_organization_member_idx').on(
+      table.organizationId,
+      table.memberId,
+    ),
+    index('organization_member_permissions_permission_id_idx').on(
+      table.permissionId,
+    ),
   ],
 );
 
@@ -157,21 +298,64 @@ export const customers = pgTable(
     billingEmail: varchar('billing_email', { length: 320 }),
     billingPhone: varchar('billing_phone', { length: 50 }),
     notes: text('notes'),
+    preferredContactMethod: varchar('preferred_contact_method', { length: 20 })
+      .notNull()
+      .default('NONE'),
+    language: varchar('language', { length: 10 }).notNull().default('en-CA'),
     status: varchar('status', { length: 20 }).notNull().default('ACTIVE'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedByMembershipId: uuid('deleted_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    deleteReason: text('delete_reason'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
-    check('customers_type_check', sql`${table.type} in ('INDIVIDUAL', 'COMPANY')`),
-    check('customers_status_check', sql`${table.status} in ('ACTIVE', 'INACTIVE')`),
+    check(
+      'customers_type_check',
+      sql`${table.type} in ('INDIVIDUAL', 'COMPANY')`,
+    ),
+    check(
+      'customers_status_check',
+      sql`${table.status} in ('ACTIVE', 'INACTIVE')`,
+    ),
+    check(
+      'customers_preferred_contact_method_check',
+      sql`${table.preferredContactMethod} in ('EMAIL', 'PHONE', 'SMS', 'NONE')`,
+    ),
+    check(
+      'customers_language_check',
+      sql`${table.language} in ('en-CA', 'fr-CA')`,
+    ),
+    check(
+      'customers_deleted_actor_check',
+      sql`(${table.deletedAt} is null) = (${table.deletedByMembershipId} is null)`,
+    ),
     index('customers_organization_id_idx').on(table.organizationId),
-    index('customers_organization_type_idx').on(table.organizationId, table.type),
-    index('customers_organization_status_idx').on(table.organizationId, table.status),
+    index('customers_organization_not_deleted_idx')
+      .on(table.organizationId)
+      .where(sql`${table.deletedAt} is null`),
+    index('customers_organization_deleted_idx').on(
+      table.organizationId,
+      table.deletedAt,
+    ),
+    index('customers_organization_type_idx').on(
+      table.organizationId,
+      table.type,
+    ),
+    index('customers_organization_status_idx').on(
+      table.organizationId,
+      table.status,
+    ),
     index('customers_organization_display_name_idx').on(
       table.organizationId,
       table.displayName,
     ),
-    index('customers_organization_email_idx').on(table.organizationId, table.email),
+    index('customers_organization_email_idx').on(
+      table.organizationId,
+      table.email,
+    ),
   ],
 );
 
@@ -196,7 +380,6 @@ export const customerCompanies = pgTable('customer_companies', {
   businessName: varchar('business_name', { length: 255 }),
   taxNumber: varchar('tax_number', { length: 100 }),
 });
-
 
 // ------------------------------------------------------- customer_contacts
 
@@ -249,11 +432,784 @@ export const customerAddresses = pgTable(
       'customer_addresses_type_check',
       sql`${table.type} in ('SERVICE', 'BILLING', 'OTHER')`,
     ),
+    uniqueIndex('customer_addresses_default_service_unique')
+      .on(table.customerId)
+      .where(sql`${table.type} = 'SERVICE' and ${table.isDefault} = true`),
+    uniqueIndex('customer_addresses_default_billing_unique')
+      .on(table.customerId)
+      .where(sql`${table.type} = 'BILLING' and ${table.isDefault} = true`),
     index('customer_addresses_customer_id_idx').on(table.customerId),
     index('customer_addresses_type_idx').on(table.type),
   ],
 );
 
+// --------------------------------------------------------------- properties
+
+export const properties = pgTable(
+  'properties',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 255 }),
+    addressLine1: varchar('address_line1', { length: 255 }).notNull(),
+    addressLine2: varchar('address_line2', { length: 255 }),
+    city: varchar('city', { length: 100 }).notNull(),
+    province: varchar('province', { length: 100 }).notNull(),
+    postalCode: varchar('postal_code', { length: 20 }).notNull(),
+    country: varchar('country', { length: 100 }).notNull().default('Canada'),
+    notes: text('notes'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index('properties_organization_id_idx').on(table.organizationId),
+    index('properties_organization_postal_code_idx').on(
+      table.organizationId,
+      table.postalCode,
+    ),
+  ],
+);
+
+// -------------------------------------------- property_customer_relationships
+
+export const propertyCustomerRelationships = pgTable(
+  'property_customer_relationships',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    propertyId: uuid('property_id')
+      .notNull()
+      .references(() => properties.id),
+    customerId: uuid('customer_id')
+      .notNull()
+      .references(() => customers.id),
+    startedAt: timestamp('started_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'property_customer_relationships_time_check',
+      sql`${table.endedAt} is null or ${table.endedAt} >= ${table.startedAt}`,
+    ),
+    uniqueIndex('property_customer_relationships_active_property_unique')
+      .on(table.organizationId, table.propertyId)
+      .where(sql`${table.endedAt} is null`),
+    index('property_customer_relationships_organization_customer_idx').on(
+      table.organizationId,
+      table.customerId,
+    ),
+  ],
+);
+
+// --------------------------------------------------------------------- jobs
+
+export const jobs = pgTable(
+  'jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobNumber: integer('job_number').notNull(),
+    customerId: uuid('customer_id')
+      .notNull()
+      .references(() => customers.id),
+    propertyId: uuid('property_id').references(() => properties.id),
+    propertyAddressSnapshot: jsonb('property_address_snapshot'),
+    title: varchar('title', { length: 255 }).notNull(),
+    description: text('description'),
+    typeCode: varchar('type_code', { length: 50 }),
+    status: varchar('status', { length: 20 }).notNull().default('NEW'),
+    ownerMembershipId: uuid('owner_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    finalOutcomeCode: varchar('final_outcome_code', { length: 30 }),
+    version: integer('version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    unique('jobs_organization_job_number_unique').on(
+      table.organizationId,
+      table.jobNumber,
+    ),
+    check('jobs_job_number_check', sql`${table.jobNumber} > 0`),
+    check('jobs_title_not_blank_check', sql`btrim(${table.title}) <> ''`),
+    check(
+      'jobs_status_check',
+      sql`${table.status} in ('NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED')`,
+    ),
+    check(
+      'jobs_property_snapshot_check',
+      sql`(${table.propertyId} is null) = (${table.propertyAddressSnapshot} is null)`,
+    ),
+    check('jobs_version_check', sql`${table.version} > 0`),
+    index('jobs_organization_status_idx').on(
+      table.organizationId,
+      table.status,
+    ),
+    index('jobs_organization_customer_idx').on(
+      table.organizationId,
+      table.customerId,
+    ),
+    index('jobs_organization_property_idx').on(
+      table.organizationId,
+      table.propertyId,
+    ),
+    index('jobs_organization_owner_membership_idx').on(
+      table.organizationId,
+      table.ownerMembershipId,
+    ),
+  ],
+);
+
+// ----------------------------------------------- organization job numbering
+
+export const organizationJobNumberCounters = pgTable(
+  'organization_job_number_counters',
+  {
+    organizationId: uuid('organization_id')
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    lastJobNumber: integer('last_job_number').notNull().default(0),
+    updatedAt: updatedAt(),
+  },
+);
+
+// ----------------------------------------------------------- job histories
+
+export const jobCustomerHistory = pgTable(
+  'job_customer_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    previousCustomerId: uuid('previous_customer_id').references(
+      () => customers.id,
+    ),
+    newCustomerId: uuid('new_customer_id')
+      .notNull()
+      .references(() => customers.id),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('job_customer_history_organization_job_recorded_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.recordedAt,
+    ),
+    uniqueIndex('job_customer_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+export const jobStatusHistory = pgTable(
+  'job_status_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    fromStatus: varchar('from_status', { length: 20 }),
+    toStatus: varchar('to_status', { length: 20 }).notNull(),
+    reasonCode: varchar('reason_code', { length: 30 }),
+    note: text('note'),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'job_status_history_from_status_check',
+      sql`${table.fromStatus} is null or ${table.fromStatus} in ('NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED')`,
+    ),
+    check(
+      'job_status_history_to_status_check',
+      sql`${table.toStatus} in ('NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED')`,
+    ),
+    check(
+      'job_status_history_status_changed_check',
+      sql`${table.fromStatus} is distinct from ${table.toStatus}`,
+    ),
+    index('job_status_history_organization_job_recorded_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.recordedAt,
+    ),
+    uniqueIndex('job_status_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+export const jobPropertyHistory = pgTable(
+  'job_property_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    previousPropertyId: uuid('previous_property_id').references(
+      () => properties.id,
+    ),
+    previousAddressSnapshot: jsonb('previous_address_snapshot'),
+    newPropertyId: uuid('new_property_id')
+      .notNull()
+      .references(() => properties.id),
+    newAddressSnapshot: jsonb('new_address_snapshot').notNull(),
+    note: text('note'),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'job_property_history_previous_snapshot_check',
+      sql`(${table.previousPropertyId} is null) = (${table.previousAddressSnapshot} is null)`,
+    ),
+    index('job_property_history_organization_job_recorded_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.recordedAt,
+    ),
+    uniqueIndex('job_property_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+// ------------------------------------------------------------------- visits
+
+export const visits = pgTable(
+  'visits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    propertyId: uuid('property_id').references(() => properties.id),
+    locationAddressSnapshot: jsonb('location_address_snapshot'),
+    status: varchar('status', { length: 20 }).notNull().default('DRAFT'),
+    scheduledStart: timestamp('scheduled_start', { withTimezone: true }),
+    scheduledEnd: timestamp('scheduled_end', { withTimezone: true }),
+    arrivalWindowStart: timestamp('arrival_window_start', {
+      withTimezone: true,
+    }),
+    arrivalWindowEnd: timestamp('arrival_window_end', { withTimezone: true }),
+    outcomeCode: varchar('outcome_code', { length: 30 }),
+    outcomeSummary: text('outcome_summary'),
+    outcomeRecordedAt: timestamp('outcome_recorded_at', { withTimezone: true }),
+    outcomeRecordedByMembershipId: uuid(
+      'outcome_recorded_by_membership_id',
+    ).references(() => organizationMembers.id),
+    version: integer('version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      'visits_status_check',
+      sql`${table.status} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED', 'NO_SHOW')`,
+    ),
+    check(
+      'visits_schedule_pair_check',
+      sql`(${table.scheduledStart} is null) = (${table.scheduledEnd} is null)`,
+    ),
+    check(
+      'visits_schedule_order_check',
+      sql`${table.scheduledEnd} is null or ${table.scheduledEnd} > ${table.scheduledStart}`,
+    ),
+    check(
+      'visits_arrival_window_pair_check',
+      sql`(${table.arrivalWindowStart} is null) = (${table.arrivalWindowEnd} is null)`,
+    ),
+    check(
+      'visits_arrival_window_order_check',
+      sql`${table.arrivalWindowEnd} is null or ${table.arrivalWindowEnd} > ${table.arrivalWindowStart}`,
+    ),
+    check(
+      'visits_location_snapshot_check',
+      sql`(${table.propertyId} is null) = (${table.locationAddressSnapshot} is null)`,
+    ),
+    check(
+      'visits_scheduled_requirements_check',
+      sql`${table.status} <> 'SCHEDULED' or (${table.propertyId} is not null and ${table.scheduledStart} is not null and ${table.scheduledEnd} is not null)`,
+    ),
+    check(
+      'visits_outcome_code_check',
+      sql`${table.outcomeCode} is null or ${table.outcomeCode} in ('RESOLVED', 'NEEDS_PARTS', 'NEEDS_FOLLOWUP', 'NEEDS_QUOTE_APPROVAL', 'UNABLE_TO_COMPLETE')`,
+    ),
+    check(
+      'visits_outcome_recorded_pair_check',
+      sql`(${table.outcomeCode} is null) = (${table.outcomeRecordedAt} is null)`,
+    ),
+    check(
+      'visits_outcome_actor_pair_check',
+      sql`(${table.outcomeRecordedAt} is null) = (${table.outcomeRecordedByMembershipId} is null)`,
+    ),
+    check(
+      'visits_completed_outcome_check',
+      sql`${table.status} <> 'COMPLETED' or (${table.outcomeCode} is not null and ${table.outcomeSummary} is not null)`,
+    ),
+    check('visits_version_check', sql`${table.version} > 0`),
+    index('visits_organization_job_idx').on(table.organizationId, table.jobId),
+    index('visits_organization_status_idx').on(
+      table.organizationId,
+      table.status,
+    ),
+    index('visits_organization_scheduled_start_idx').on(
+      table.organizationId,
+      table.scheduledStart,
+    ),
+  ],
+);
+
+// ------------------------------------------------------------ visit history
+
+export const visitScheduleHistory = pgTable(
+  'visit_schedule_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id')
+      .notNull()
+      .references(() => visits.id, { onDelete: 'cascade' }),
+    previousScheduledStart: timestamp('previous_scheduled_start', {
+      withTimezone: true,
+    }),
+    previousScheduledEnd: timestamp('previous_scheduled_end', {
+      withTimezone: true,
+    }),
+    newScheduledStart: timestamp('new_scheduled_start', {
+      withTimezone: true,
+    }).notNull(),
+    newScheduledEnd: timestamp('new_scheduled_end', {
+      withTimezone: true,
+    }).notNull(),
+    previousArrivalWindowStart: timestamp('previous_arrival_window_start', {
+      withTimezone: true,
+    }),
+    previousArrivalWindowEnd: timestamp('previous_arrival_window_end', {
+      withTimezone: true,
+    }),
+    newArrivalWindowStart: timestamp('new_arrival_window_start', {
+      withTimezone: true,
+    }),
+    newArrivalWindowEnd: timestamp('new_arrival_window_end', {
+      withTimezone: true,
+    }),
+    reason: text('reason'),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    confirmedConflicts: jsonb('confirmed_conflicts'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('visit_schedule_history_organization_visit_recorded_idx').on(
+      table.organizationId,
+      table.visitId,
+      table.recordedAt,
+    ),
+    uniqueIndex('visit_schedule_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+export const visitStatusHistory = pgTable(
+  'visit_status_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id')
+      .notNull()
+      .references(() => visits.id, { onDelete: 'cascade' }),
+    fromStatus: varchar('from_status', { length: 20 }),
+    toStatus: varchar('to_status', { length: 20 }).notNull(),
+    isCorrection: boolean('is_correction').notNull().default(false),
+    reasonCode: varchar('reason_code', { length: 30 }),
+    note: text('note'),
+    cancellationSource: varchar('cancellation_source', { length: 20 }),
+    jobStatusHistoryId: uuid('job_status_history_id').references(
+      () => jobStatusHistory.id,
+    ),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    confirmedConflicts: jsonb('confirmed_conflicts'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'visit_status_history_from_status_check',
+      sql`${table.fromStatus} is null or ${table.fromStatus} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED', 'NO_SHOW')`,
+    ),
+    check(
+      'visit_status_history_to_status_check',
+      sql`${table.toStatus} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED', 'NO_SHOW')`,
+    ),
+    check(
+      'visit_status_history_status_changed_check',
+      sql`${table.fromStatus} is distinct from ${table.toStatus}`,
+    ),
+    check(
+      'visit_status_history_correction_check',
+      sql`not ${table.isCorrection} or (${table.fromStatus} = 'EN_ROUTE' and ${table.toStatus} = 'SCHEDULED')`,
+    ),
+    check(
+      'visit_status_history_canceled_source_check',
+      sql`(${table.toStatus} <> 'CANCELED' or ${table.cancellationSource} is not null) and (${table.toStatus} = 'CANCELED' or ${table.cancellationSource} is null)`,
+    ),
+    check(
+      'visit_status_history_cancellation_source_check',
+      sql`${table.cancellationSource} is null or ${table.cancellationSource} in ('MANUAL', 'JOB_CANCELLATION')`,
+    ),
+    check(
+      'visit_status_history_job_cancellation_check',
+      sql`${table.cancellationSource} is distinct from 'JOB_CANCELLATION' or ${table.jobStatusHistoryId} is not null`,
+    ),
+    check(
+      'visit_status_history_reason_scope_check',
+      sql`${table.reasonCode} is null or (${table.toStatus} = 'CANCELED' and ${table.cancellationSource} = 'MANUAL')`,
+    ),
+    check(
+      'visit_status_history_reason_code_check',
+      sql`${table.reasonCode} is null or ${table.reasonCode} in ('CUSTOMER_RESCHEDULED', 'CUSTOMER_CANCELED', 'WEATHER', 'TECH_UNAVAILABLE', 'DUPLICATE', 'OTHER')`,
+    ),
+    index('visit_status_history_organization_visit_recorded_idx').on(
+      table.organizationId,
+      table.visitId,
+      table.recordedAt,
+    ),
+    uniqueIndex('visit_status_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+export const visitLocationHistory = pgTable(
+  'visit_location_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id')
+      .notNull()
+      .references(() => visits.id, { onDelete: 'cascade' }),
+    previousPropertyId: uuid('previous_property_id').references(
+      () => properties.id,
+    ),
+    previousAddressSnapshot: jsonb('previous_address_snapshot'),
+    newPropertyId: uuid('new_property_id')
+      .notNull()
+      .references(() => properties.id),
+    newAddressSnapshot: jsonb('new_address_snapshot').notNull(),
+    jobPropertyHistoryId: uuid('job_property_history_id').references(
+      () => jobPropertyHistory.id,
+    ),
+    note: text('note'),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'visit_location_history_previous_snapshot_check',
+      sql`(${table.previousPropertyId} is null) = (${table.previousAddressSnapshot} is null)`,
+    ),
+    check(
+      'visit_location_history_property_changed_check',
+      sql`${table.previousPropertyId} is distinct from ${table.newPropertyId}`,
+    ),
+    index('visit_location_history_organization_visit_recorded_idx').on(
+      table.organizationId,
+      table.visitId,
+      table.recordedAt,
+    ),
+    uniqueIndex('visit_location_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+export const visitLocationReviewFlags = pgTable(
+  'visit_location_review_flags',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id')
+      .notNull()
+      .references(() => visits.id, { onDelete: 'cascade' }),
+    jobPropertyHistoryId: uuid('job_property_history_id')
+      .notNull()
+      .references(() => jobPropertyHistory.id),
+    raisedAt: timestamp('raised_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedByMembershipId: uuid('resolved_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    resolutionNote: text('resolution_note'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('visit_location_review_flags_open_visit_unique')
+      .on(table.organizationId, table.visitId)
+      .where(sql`${table.resolvedAt} is null`),
+  ],
+);
+
+// ------------------------------------------------------- visit_technicians
+
+export const visitTechnicians = pgTable(
+  'visit_technicians',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id')
+      .notNull()
+      .references(() => visits.id, { onDelete: 'cascade' }),
+    technicianMembershipId: uuid('technician_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    roleCode: varchar('role_code', { length: 20 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    unique('visit_technicians_assignment_unique').on(
+      table.organizationId,
+      table.visitId,
+      table.technicianMembershipId,
+    ),
+    check(
+      'visit_technicians_role_code_check',
+      sql`${table.roleCode} in ('LEAD', 'TECHNICIAN')`,
+    ),
+    uniqueIndex('visit_technicians_lead_unique')
+      .on(table.visitId)
+      .where(sql`${table.roleCode} = 'LEAD'`),
+    index('visit_technicians_organization_technician_idx').on(
+      table.organizationId,
+      table.technicianMembershipId,
+    ),
+  ],
+);
+
+export const visitTechnicianHistory = pgTable(
+  'visit_technician_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id')
+      .notNull()
+      .references(() => visits.id, { onDelete: 'cascade' }),
+    technicianMembershipId: uuid('technician_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    event: varchar('event', { length: 20 }).notNull(),
+    roleCode: varchar('role_code', { length: 20 }),
+    previousRoleCode: varchar('previous_role_code', { length: 20 }),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'visit_technician_history_event_check',
+      sql`${table.event} in ('ASSIGNED', 'REMOVED', 'ROLE_CHANGED')`,
+    ),
+    check(
+      'visit_technician_history_assigned_check',
+      sql`${table.event} <> 'ASSIGNED' or (${table.roleCode} is not null and ${table.previousRoleCode} is null)`,
+    ),
+    check(
+      'visit_technician_history_removed_check',
+      sql`${table.event} <> 'REMOVED' or (${table.roleCode} is null and ${table.previousRoleCode} is not null)`,
+    ),
+    check(
+      'visit_technician_history_role_changed_check',
+      sql`${table.event} <> 'ROLE_CHANGED' or (${table.roleCode} is not null and ${table.previousRoleCode} is not null and ${table.roleCode} <> ${table.previousRoleCode})`,
+    ),
+    check(
+      'visit_technician_history_role_code_check',
+      sql`${table.roleCode} is null or ${table.roleCode} in ('LEAD', 'TECHNICIAN')`,
+    ),
+    check(
+      'visit_technician_history_previous_role_code_check',
+      sql`${table.previousRoleCode} is null or ${table.previousRoleCode} in ('LEAD', 'TECHNICIAN')`,
+    ),
+    index('visit_technician_history_organization_visit_recorded_idx').on(
+      table.organizationId,
+      table.visitId,
+      table.recordedAt,
+    ),
+    uniqueIndex('visit_technician_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+export const visitOutcomeHistory = pgTable(
+  'visit_outcome_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id')
+      .notNull()
+      .references(() => visits.id, { onDelete: 'cascade' }),
+    outcomeCode: varchar('outcome_code', { length: 30 }).notNull(),
+    outcomeSummary: text('outcome_summary').notNull(),
+    previousOutcomeCode: varchar('previous_outcome_code', { length: 30 }),
+    previousOutcomeSummary: text('previous_outcome_summary'),
+    reason: text('reason'),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'visit_outcome_history_outcome_code_check',
+      sql`${table.outcomeCode} in ('RESOLVED', 'NEEDS_PARTS', 'NEEDS_FOLLOWUP', 'NEEDS_QUOTE_APPROVAL', 'UNABLE_TO_COMPLETE')`,
+    ),
+    check(
+      'visit_outcome_history_previous_outcome_code_check',
+      sql`${table.previousOutcomeCode} is null or ${table.previousOutcomeCode} in ('RESOLVED', 'NEEDS_PARTS', 'NEEDS_FOLLOWUP', 'NEEDS_QUOTE_APPROVAL', 'UNABLE_TO_COMPLETE')`,
+    ),
+    check(
+      'visit_outcome_history_previous_pair_check',
+      sql`(${table.previousOutcomeCode} is null) = (${table.previousOutcomeSummary} is null)`,
+    ),
+    index('visit_outcome_history_organization_visit_recorded_idx').on(
+      table.organizationId,
+      table.visitId,
+      table.recordedAt,
+    ),
+    uniqueIndex('visit_outcome_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+export const visitNotes = pgTable(
+  'visit_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id')
+      .notNull()
+      .references(() => visits.id, { onDelete: 'cascade' }),
+    authorMembershipId: uuid('author_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    body: text('body').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('visit_notes_organization_visit_recorded_idx').on(
+      table.organizationId,
+      table.visitId,
+      table.recordedAt,
+    ),
+    uniqueIndex('visit_notes_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
 
 // ------------------------------------------------------------- relations
 
@@ -321,26 +1277,35 @@ export const customerIndividualsRelations = relations(
   }),
 );
 
-export const customerCompaniesRelations = relations(customerCompanies, ({ one }) => ({
-  customer: one(customers, {
-    fields: [customerCompanies.customerId],
-    references: [customers.id],
+export const customerCompaniesRelations = relations(
+  customerCompanies,
+  ({ one }) => ({
+    customer: one(customers, {
+      fields: [customerCompanies.customerId],
+      references: [customers.id],
+    }),
   }),
-}));
+);
 
-export const customerContactsRelations = relations(customerContacts, ({ one }) => ({
-  customer: one(customers, {
-    fields: [customerContacts.customerId],
-    references: [customers.id],
+export const customerContactsRelations = relations(
+  customerContacts,
+  ({ one }) => ({
+    customer: one(customers, {
+      fields: [customerContacts.customerId],
+      references: [customers.id],
+    }),
   }),
-}));
+);
 
-export const customerAddressesRelations = relations(customerAddresses, ({ one }) => ({
-  customer: one(customers, {
-    fields: [customerAddresses.customerId],
-    references: [customers.id],
+export const customerAddressesRelations = relations(
+  customerAddresses,
+  ({ one }) => ({
+    customer: one(customers, {
+      fields: [customerAddresses.customerId],
+      references: [customers.id],
+    }),
   }),
-}));
+);
 
 // ------------------------------------------------------------ auth_sessions
 
@@ -362,12 +1327,17 @@ export const authSessions = pgTable(
     userAgent: varchar('user_agent', { length: 500 }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
-    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
   },
   (table) => [
-    check('auth_sessions_platform_check', sql`${table.platform} in ('ANDROID', 'WEB')`),
+    check(
+      'auth_sessions_platform_check',
+      sql`${table.platform} in ('ANDROID', 'WEB')`,
+    ),
     index('auth_sessions_user_id_idx').on(table.userId),
     index('auth_sessions_device_id_idx').on(table.deviceId),
     index('auth_sessions_expires_at_idx').on(table.expiresAt),
@@ -409,7 +1379,9 @@ export const authRefreshTokens = pgTable(
     unique('auth_refresh_tokens_token_hash_unique').on(table.tokenHash),
     index('auth_refresh_tokens_session_id_idx').on(table.sessionId),
     index('auth_refresh_tokens_expires_at_idx').on(table.expiresAt),
-    index('auth_refresh_tokens_replaced_by_token_id_idx').on(table.replacedByTokenId),
+    index('auth_refresh_tokens_replaced_by_token_id_idx').on(
+      table.replacedByTokenId,
+    ),
   ],
 );
 
@@ -503,33 +1475,42 @@ export const authRateLimitEvents = pgTable(
 
 // ----------------------------------------------------------- auth relations
 
-export const authSessionsRelations = relations(authSessions, ({ one, many }) => ({
-  user: one(users, {
-    fields: [authSessions.userId],
-    references: [users.id],
+export const authSessionsRelations = relations(
+  authSessions,
+  ({ one, many }) => ({
+    user: one(users, {
+      fields: [authSessions.userId],
+      references: [users.id],
+    }),
+    refreshTokens: many(authRefreshTokens),
   }),
-  refreshTokens: many(authRefreshTokens),
-}));
+);
 
-export const authRefreshTokensRelations = relations(authRefreshTokens, ({ one }) => ({
-  session: one(authSessions, {
-    fields: [authRefreshTokens.sessionId],
-    references: [authSessions.id],
+export const authRefreshTokensRelations = relations(
+  authRefreshTokens,
+  ({ one }) => ({
+    session: one(authSessions, {
+      fields: [authRefreshTokens.sessionId],
+      references: [authSessions.id],
+    }),
+    // The rotation successor, so a reused token can be traced back to its chain.
+    replacedByToken: one(authRefreshTokens, {
+      fields: [authRefreshTokens.replacedByTokenId],
+      references: [authRefreshTokens.id],
+      relationName: 'auth_refresh_tokens_replacement',
+    }),
   }),
-  // The rotation successor, so a reused token can be traced back to its chain.
-  replacedByToken: one(authRefreshTokens, {
-    fields: [authRefreshTokens.replacedByTokenId],
-    references: [authRefreshTokens.id],
-    relationName: 'auth_refresh_tokens_replacement',
-  }),
-}));
+);
 
-export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
-  user: one(users, {
-    fields: [passwordResetTokens.userId],
-    references: [users.id],
+export const passwordResetTokensRelations = relations(
+  passwordResetTokens,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [passwordResetTokens.userId],
+      references: [users.id],
+    }),
   }),
-}));
+);
 
 export const phoneOtpChallengesRelations = relations(
   phoneOtpChallenges,
@@ -540,4 +1521,3 @@ export const phoneOtpChallengesRelations = relations(
     }),
   }),
 );
-

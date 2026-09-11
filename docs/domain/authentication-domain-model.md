@@ -7,9 +7,10 @@ It extends `docs/domain/foundation-domain-model.md` (organizations, users, profi
 memberships/roles, customers): authentication answers *"who is this user and on which
 device are they signed in"*, while the foundation doc answers *"what may they see"*.
 
-Scope of this document: the three authentication tables, their stable codes, token
+Scope of this document: the authentication persistence tables, their stable codes, token
 storage rules, lifetimes and lifecycle. The authentication **endpoints** (sign-in,
-refresh, sign-out, password reset, OTP) are a separate slice — see §11.
+refresh, sign-out, password reset, OTP) are documented separately in
+`docs/api/authentication.md`.
 
 ## 1. Sessions are user-scoped, not organization-scoped
 
@@ -81,8 +82,9 @@ plus the history of rotated tokens.
 
 Reset tokens are **single-use**: redeeming one sets `used_at`, so a second presentation of
 the same token is rejected by comparing `used_at` rather than by deleting the row.
-Several unused tokens may exist for one user at a time (a user may request a reset twice,
-or from two devices), so there is no uniqueness on `user_id` — only on `token_hash`.
+Requesting a new reset credential invalidates any outstanding credential for the same account
+(`BR-043`). Historical used, expired or superseded rows may remain for traceability, but at most
+one reset credential is usable for an account at a time.
 
 Because reset tokens are per-user and independent of sessions, they are not revoked when a
 session ends. They disappear with the user (`ON DELETE CASCADE`).
@@ -226,9 +228,6 @@ cd api && npm run test:e2e
 
 **Out of scope (this slice is persistence + domain only):**
 
-- **No authentication endpoints exist yet.** Nothing is routed under `/auth`; sign-in,
-  refresh, sign-out, session listing and password reset are the next slice. No request
-  shape was invented for them (`BR-042`).
 - **Access token wire format is undecided here.** The schema constrains only stored
   secrets; `IssuedAuthTokens` describes the pair a future endpoint returns.
 - **Android ships models only** — no Gradle project exists yet (`ADR-002`), so the Kotlin
@@ -241,16 +240,15 @@ cd api && npm run test:e2e
 
 | Question | Rule |
 | --- | --- |
-| OTP expiry, retry, rate limiting, recovery, phone-number lifecycle | `BR-019` |
-| Password reset request throttling/lockout and delivery channel | `BR-019`, `BR-029` |
+| Phone-number lifecycle outside sign-in | `BR-019` |
+| Whether existing sessions are revoked when a password is reset | `BR-043` |
 | Retention/pruning of expired sessions, refresh tokens and reset tokens | `BR-027`, `BR-033` |
 | Whether revocation events must be independently audited | `BR-033` |
 | Whether additional platforms (`platform` codes beyond `ANDROID`/`WEB`) are needed | `BR-010`, `BR-016` |
 
-> The `BR-019` and `BR-029` rows above were resolved on 2026-09-10 — OTP expiry, attempts and rate
-> limits, phone/SMS authentication, and reset throttling and the reset delivery channel — and are
-> implemented as described below and in `ADR-006` / `ADR-008`. Still open from those rows: the
-> phone-number lifecycle (`BR-019` Notes) and notification behavior (`BR-029`).
+> OTP expiry, OTP attempts, OTP resend cooldown, authentication rate limits, password-reset expiry,
+> password-reset attempt limits and reset delivery have been decided by `BR-019` and `BR-043`–`BR-046`.
+> They are not open questions.
 
 ## Password reset and phone/SMS (added 2026-09-10)
 

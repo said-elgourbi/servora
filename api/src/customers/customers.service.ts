@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, getTableColumns } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, sql } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
   customerAddresses,
@@ -114,26 +114,38 @@ export class CustomersService {
   async findCustomerInOrganization(
     scope: OrganizationScope,
     customerId: string,
+    options: { includeDeleted?: boolean } = {},
   ): Promise<Customer | null> {
+    const predicates = [
+      eq(customers.organizationId, scope.organizationId),
+      eq(customers.id, customerId),
+    ];
+    if (options.includeDeleted !== true) {
+      predicates.push(sql`${customers.deletedAt} is null`);
+    }
+
     const [row] = await this.db
       .select()
       .from(customers)
-      .where(
-        and(
-          eq(customers.organizationId, scope.organizationId),
-          eq(customers.id, customerId),
-        ),
-      )
+      .where(and(...predicates))
       .limit(1);
     return row ?? null;
   }
 
   /** Lists the customers owned by the caller's organization. */
-  async listCustomersInOrganization(scope: OrganizationScope): Promise<Customer[]> {
+  async listCustomersInOrganization(
+    scope: OrganizationScope,
+    options: { includeDeleted?: boolean } = {},
+  ): Promise<Customer[]> {
+    const predicates = [eq(customers.organizationId, scope.organizationId)];
+    if (options.includeDeleted !== true) {
+      predicates.push(sql`${customers.deletedAt} is null`);
+    }
+
     return this.db
       .select()
       .from(customers)
-      .where(eq(customers.organizationId, scope.organizationId))
+      .where(and(...predicates))
       .orderBy(desc(customers.createdAt));
   }
 
@@ -253,7 +265,8 @@ export class CustomersService {
       billingEmail: input.billingEmail ?? null,
       billingPhone: input.billingPhone ?? null,
       notes: input.notes ?? null,
+      preferredContactMethod: input.preferredContactMethod ?? 'NONE',
+      language: input.language ?? 'en-CA',
     };
   }
 }
-

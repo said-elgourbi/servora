@@ -1,0 +1,1422 @@
+# Servora — Job & Visit Domain Model
+
+> Authoritative description of the Servora **Job & Visit domain**: Properties, Customer ↔
+> Property relationships, Jobs, Visits, scheduling, assignment, field execution, history and the
+> offline/concurrency behaviour those aggregates require.
+>
+> **This document is documentation only.** It changes no application code, no database schema and
+> no migration. It defines the domain and the proposed PostgreSQL shape so the Job & Visit
+> implementation slice can be reviewed and approved _before_ anything is built
+> (`Project.md` §8, `dev.md` §2).
+>
+> - Business rules: `Business Rules.md` — principally BR-047 – BR-080 (and BR-001, BR-007,
+>   BR-013 – BR-015, BR-022, BR-028, BR-031, BR-033, BR-041, BR-042).
+> - Foundation domain: `docs/domain/foundation-domain-model.md` (organizations, users, members,
+>   customers, contacts, addresses).
+> - Conventions: `Project.md`, `dev.md`, `qa.md`.
+
+## 1. Four concepts, four identities
+
+`BR-047` separates four things that must never be merged into one entity:
+
+| Concept      | Meaning                                          | Identity                                     |
+| ------------ | ------------------------------------------------ | -------------------------------------------- |
+| **Customer** | The person or company receiving service          | `customers.id` (foundation model)            |
+| **Property** | The physical location where service is performed | `properties.id`                              |
+| **Job**      | The overall work request / work order            | `jobs.id` + organization-scoped `job_number` |
+| **Visit**    | One field attempt to perform work for a Job      | `visits.id`                                  |
+
+Consequences that follow directly from `BR-047`, `BR-048`, `BR-051`, `BR-059` and `BR-071`:
+
+- A Job is not a Visit and a Visit is not a Job. One Job may have zero, one or many Visits over
+  time.
+- A Visit represents one field attempt, never a permanent representation of the Job. Additional
+  field attempts are **additional Visits on the same Job**, never a new Job.
+- A Job may be created with no Property and no Visit.
+- A Visit is never created merely because a Job exists.
+- Job status and Visit status are **two separate state machines** (`BR-058`, `BR-074`) that must
+  not be merged (`BR-059`).
+- The domain must not depend on any presentation concern — tabs, screens or navigation (`BR-047`).
+
+### 1.1 Relationship overview (proposed)
+
+```text
+organizations
+    │ 1
+    ├──────────── * properties ──* property_customer_relationships ──* customers
+    │                   │ 1                                            │ 1
+    │                   └──────────── 0..1  jobs.property_id           │
+    │                                        │ 1                       │
+    │ 1                                      │                         │
+    └────────────────────────────────────────* jobs ───────────────────┘
+                                             │ 1
+                                             *
+                                          visits
+                                             │
+        ┌────────────────┬───────────────────┼────────────────┬─────────────────┐
+        │                │                   │                │                 │
+  visit_status    visit_schedule   visit_technician    visit_outcome      visit_notes
+   _history         _history          _history           _history
+
+jobs
+    │
+    ├── job_status_history        (§7.1)
+    ├── job_property_history      (§7.2)  ← referenced by visit_location_review_flags
+    ├── job_customer_history      (§5.2)
+    └── visits                    (§9.2)
+            ├── visit_status_history          (§9.5)
+            ├── visit_schedule_history        (§9.4)
+            ├── visit_technicians             (§10.2, current assignment)
+            ├── visit_technician_history      (§10.3)
+            ├── visit_outcome_history         (§11.2)
+            ├── visit_notes                   (§12)
+            ├── visit_location_history        (§9.6)
+            └── visit_location_review_flags   (§6.3)
+```
+
+Every history table is **append-only** and hangs off the aggregate it describes. The section that
+introduces each table describes its own history table.
+
+## 2. Ownership, identity and numbering
+
+### 2.1 Tenant model
+
+- The **organization** is the tenant and the owner of all Job & Visit data (`BR-001`).
+- Every new table in this domain carries `organization_id uuid NOT NULL` with
+  `REFERENCES organizations(id) ON DELETE CASCADE`, matching the foundation model.
+- Organization-owned rows are addressed by the composite key `(organization_id, id)`. Fetching an
+  aggregate by `id` alone is forbidden (`api/src/tenancy/tenant-scope.ts`).
+- A row outside the caller's organization is reported as **not found**, never as **forbidden**, so
+  the API never reveals the existence of another tenant's data.
+- This matches the foundation model exactly: tenant scoping is enforced in the data-access layer
+  and verified by integration tests. This slice follows that pattern and introduces no new
+  tenancy architecture (`dev.md` §1, `Project.md` §12).
+
+### 2.2 Identifiers
+
+- Every primary key is a `uuid` defaulting to `gen_random_uuid()`, as in the foundation model.
+- `jobs.id`, `visits.id` and `properties.id` are immutable technical identifiers (`BR-052`).
+- `jobs.job_number` is a **separate, human-readable, organization-scoped sequential integer**. It
+  is never the primary key and never a cross-system key (`BR-052`, §13).
+- Foreign keys are `uuid`. Clients never use human-facing business values (a Job number, a status
+  code) as an identifier.
+
+### 2.3 Timestamps
+
+- `created_at` / `updated_at` follow the foundation convention:
+  `timestamp with time zone NOT NULL DEFAULT now()`, with `updated_at` refreshed through Drizzle
+  `$onUpdate` so no client or API-host clock is trusted.
+- Business-event timestamps are stored separately and explicitly (§14).
+- Times are stored as time-zone-aware instants. Localized display is a presentation concern.
+  Time-zone _business_ behaviour (for example the organization's scheduling time zone) is not
+  defined by the business rules and remains an open question (§21, `BR-026`).
+
+### 2.4 Deletion and history
+
+- History tables in this domain are **append-only** and are never rewritten or deleted
+  (`BR-057`, `BR-067`).
+- Physical deletion of a Job is an **OPEN QUESTION** (`BR-021`): `BR-008` grants Managers a delete
+  capability, but the relationship between deleting a Job and preserving business history is not
+  defined. No deletion behaviour is modelled here (§16).
+- Deletion behaviour is therefore stated deliberately per reference rather than inherited blindly
+  from the ORM default. Aggregate-internal references cascade; references to _other_ aggregates
+  (Customer, Property, member) do not, because a cascade would destroy Job/Visit history that
+  `BR-057` and `BR-067` require to be preserved. The full matrix is in §6.4.
+
+## 3. Properties
+
+### 3.1 Proposed table — `properties`
+
+A Property is the physical location where service is performed, owned by the organization
+(`BR-049`).
+
+| Column                      | Type           | Null? | Notes                                        |
+| --------------------------- | -------------- | ----- | -------------------------------------------- |
+| `id`                        | `uuid`         | no    | PK, `gen_random_uuid()`                      |
+| `organization_id`           | `uuid`         | no    | FK → `organizations.id`, `ON DELETE CASCADE` |
+| `name`                      | `varchar(255)` | yes   | Optional Property name (`BR-049`)            |
+| `address_line1`             | `varchar(255)` | no    | Structured address (§3.2)                    |
+| `address_line2`             | `varchar(255)` | yes   |                                              |
+| `city`                      | `varchar(100)` | no    |                                              |
+| `province`                  | `varchar(100)` | no    |                                              |
+| `postal_code`               | `varchar(20)`  | no    |                                              |
+| `country`                   | `varchar(100)` | no    | `NOT NULL DEFAULT 'Canada'`                  |
+| `notes`                     | `text`         | yes   | Optional Property notes (`BR-049`)           |
+| `created_at` / `updated_at` | `timestamptz`  | no    | Foundation convention                        |
+
+Constraints and indexes:
+
+- No `status` column and no lifecycle columns. `BR-049` defines a Property as a name, a structured
+  address and optional notes. No Property lifecycle is defined by the business rules, so none is
+  invented (`BR-042`).
+- No uniqueness constraint on the address. The business rules do not forbid two Properties sharing
+  an address, and Property de-duplication is a data-quality concern rather than a modelled rule.
+- Indexes: `(organization_id)`, `(organization_id, postal_code)` — the organization-scoped address
+  lookup a management UI needs.
+
+### 3.2 Address shape
+
+The structured address is deliberately the **same shape as `customer_addresses`**
+(`address_line1`, `address_line2`, `city`, `province`, `postal_code`, `country`). Do **not**
+introduce alternative names such as `address_line_1`, `line1`, `province_state`, `state` or `zip`.
+`BR-049` requires a structured address rather than a single free-text field, and reusing the
+foundation shape keeps one vocabulary for one concept (`BR-041`).
+
+- `address_line1`, `city`, `province`, `postal_code` and `country` are required, matching
+  `customer_addresses`.
+- A Property is an **independently identified entity**. It does not share a primary key with any
+  `customer_addresses` row, and a customer address change never rewrites a Property (`BR-057`).
+- Editing a Property's own address is allowed, because Jobs and Visits keep immutable address
+  snapshots (§6.3, §9.3). Whether the Property's own address history must additionally be retained
+  is not defined by the business rules and is recorded as an open question (§21, `BR-057`).
+
+## 4. Property ↔ Customer relationship
+
+`BR-049` and `BR-050` make the Customer ↔ Property link a first-class, historical relationship
+rather than a column: a Property belongs to the organization, and it may be associated with
+different Customers over its lifetime — **one active Customer at a time**.
+
+### 4.1 Proposed table — `property_customer_relationships` (append-only)
+
+| Column                | Type          | Null? | Notes                                                    |
+| --------------------- | ------------- | ----- | -------------------------------------------------------- |
+| `id`                  | `uuid`        | no    | PK, `gen_random_uuid()`                                  |
+| `organization_id`     | `uuid`        | no    | FK → `organizations.id`, `ON DELETE CASCADE`             |
+| `property_id`         | `uuid`        | no    | FK → `properties.id`, `ON DELETE RESTRICT`               |
+| `customer_id`         | `uuid`        | no    | FK → `customers.id`, `ON DELETE RESTRICT`                |
+| `started_at`          | `timestamptz` | no    | `NOT NULL DEFAULT now()`                                 |
+| `ended_at`            | `timestamptz` | yes   | `NULL` = this is the active relationship                 |
+| `actor_membership_id` | `uuid`        | no    | FK → `organization_members.id`; who performed the change |
+| `created_at`          | `timestamptz` | no    | Foundation convention                                    |
+
+Constraints and indexes:
+
+- **Partial unique index** `property_customer_relationships_active_property_unique` on
+  `(organization_id, property_id) WHERE ended_at IS NULL` — the database-level expression of
+  "one active Customer relationship at a time" (`BR-050`).
+- `CHECK (ended_at IS NULL OR ended_at >= started_at)`.
+- Index `(organization_id, customer_id)` — "which Properties does this Customer have?" is the
+  primary management query.
+- The row is **append-only apart from `ended_at`**, which is written exactly once, when the
+  relationship ends. A relationship is never reopened and never rewritten (`BR-067`).
+
+### 4.2 Behaviour
+
+Changing the Customer of a Property is **one atomic action** that performs exactly the four steps
+of `BR-050`:
+
+1. end the previous Customer relationship (set `ended_at`),
+2. create the new Customer relationship (insert a new active row),
+3. preserve the historical relationship (the ended row stays),
+4. leave existing Jobs associated with their original Customer and Property.
+
+Consequences:
+
+- A Property has at most one active relationship row; ending a relationship is never a deletion;
+  the change never touches `jobs`.
+- Attaching the first Customer to a Property creates the first active row.
+- Whether a Property may exist with **no** active Customer relationship is an **OPEN QUESTION**
+  (`BR-050` Notes). The model therefore does not forbid it, and no constraint requires an active
+  row to exist.
+- The Customer and the Property of a relationship must belong to the same organization, enforced
+  by organization-scoped data access and covered by integration tests.
+- `BR-067`: nothing changes silently. The action is explicit, the actor is recorded, and the
+  history is append-only.
+
+## 5. Customer ↔ Job
+
+### 5.1 Rules
+
+- A Job always belongs to exactly one Customer and cannot exist without one (`BR-048`), so
+  `jobs.customer_id` is `NOT NULL`.
+- The Job's Customer is **not** derived from the Property's Customer relationship and **not**
+  derived from the Customer's addresses. Customer and Property stay separate concepts (`BR-049`).
+- A Job keeps the Customer it was created for. Existing Jobs are **never automatically
+  transferred** when a Property's Customer relationship changes (`BR-048`, `BR-050`).
+- A Customer change on a Job is therefore an **explicit, authorized action** (`BR-048`), never a
+  side effect of any other change.
+- `customer_id` is a plain FK to `customers.id`; same-organization membership is enforced by
+  organization-scoped data access (foundation pattern), not by a composite FK.
+
+### 5.2 Proposed table — `job_customer_history` (append-only)
+
+Where a Job's Customer was explicitly changed, the previous Customer must remain visible.
+`BR-033` requires important business changes to be traceable and `BR-067` requires explicit actions
+with complete history. No business rule demands a _reason_ for this change, so none is required.
+
+| Column                 | Type          | Null? | Notes                               |
+| ---------------------- | ------------- | ----- | ----------------------------------- |
+| `id`                   | `uuid`        | no    | PK                                  |
+| `organization_id`      | `uuid`        | no    | FK → `organizations.id`             |
+| `job_id`               | `uuid`        | no    | FK → `jobs.id`, `ON DELETE CASCADE` |
+| `previous_customer_id` | `uuid`        | yes   | `NULL` for the creation event       |
+| `new_customer_id`      | `uuid`        | no    | FK → `customers.id`                 |
+| `actor_membership_id`  | `uuid`        | no    | Who performed the change            |
+| `recorded_at`          | `timestamptz` | no    |                                     |
+| `captured_at`          | `timestamptz` | yes   |                                     |
+| `client_operation_id`  | `uuid`        | yes   |                                     |
+| `created_at`           | `timestamptz` | no    |                                     |
+
+Index: `(organization_id, job_id, recorded_at)`. The current Customer is `jobs.customer_id`; the
+history table is the audit trail and never a second source of truth.
+
+> Traceability note: the business rules explicitly require history for status, schedule,
+> assignment, cancellation and outcome. Recording the Customer-change event is an addition made
+> for traceability (`BR-033`); it is flagged in §21.
+
+## 6. The Job
+
+### 6.1 Proposed table — `jobs`
+
+| Column                      | Type           | Null? | Notes                                                                       |
+| --------------------------- | -------------- | ----- | --------------------------------------------------------------------------- |
+| `id`                        | `uuid`         | no    | PK, `gen_random_uuid()`; immutable (`BR-052`)                               |
+| `organization_id`           | `uuid`         | no    | FK → `organizations.id`, `ON DELETE CASCADE`                                |
+| `job_number`                | `integer`      | no    | Immutable, unique per organization (`BR-052`, §13)                          |
+| `customer_id`               | `uuid`         | no    | FK → `customers.id`; a Job always belongs to a Customer (`BR-048`)          |
+| `property_id`               | `uuid`         | yes   | FK → `properties.id`; `NULL` until a Property is known (`BR-051`, `BR-056`) |
+| `property_address_snapshot` | `jsonb`        | yes   | Immutable address snapshot (§6.3)                                           |
+| `title`                     | `varchar(255)` | no    | Required (`BR-053`)                                                         |
+| `description`               | `text`         | yes   | Optional (`BR-053`)                                                         |
+| `type_code`                 | `varchar(50)`  | yes   | Optional, non-controlling (`BR-053`) — see §6.2                             |
+| `status`                    | `varchar(20)`  | no    | `NOT NULL DEFAULT 'NEW'`; CHECK against the `BR-058` vocabulary             |
+| `owner_membership_id`       | `uuid`         | yes   | Optional Job Owner (`BR-055`); FK → `organization_members.id`               |
+| `final_outcome_code`        | `varchar(30)`  | yes   | Set only when an authorized user closes the Job (`BR-062`)                  |
+| `version`                   | `integer`      | no    | `NOT NULL DEFAULT 1` — optimistic concurrency (§15)                         |
+| `created_at` / `updated_at` | `timestamptz`  | no    | Foundation convention                                                       |
+
+Constraints and indexes:
+
+- `UNIQUE (organization_id, job_number)` — `jobs_organization_job_number_unique` (`BR-052`).
+- `CHECK (job_number > 0)`.
+- `CHECK (btrim(title) <> '')` — `BR-053` requires a title; an empty string is not a title.
+- `CHECK (status IN ('NEW','SCHEDULED','IN_PROGRESS','PENDING_REVIEW','COMPLETED','CANCELED'))` —
+  the `BR-058` vocabulary is confirmed and closed, so freezing it as a CHECK is safe. Adding a
+  Job status later is a business decision (`BR-040`, `BR-042`) and would be a deliberate migration.
+- `CHECK ((property_id IS NULL) = (property_address_snapshot IS NULL))` — the snapshot and the
+  Property reference appear and are cleared together (§6.3).
+- **No** CHECK for `type_code`: the Job category catalogue is an **OPEN QUESTION** (`BR-053`).
+- **No** CHECK for `final_outcome_code`: the `final_outcome` catalogue is undecided (`BR-062`).
+- `CHECK (version > 0)`.
+- Indexes: `(organization_id, status)`, `(organization_id, customer_id)`,
+  `(organization_id, property_id)`, `(organization_id, owner_membership_id)`.
+- The Job Owner is a **membership**, not a bare user id: the owner is always a member of the
+  organization that owns the Job. Comparison note — Job Owner ≠ Visit technician: the owner is
+  never assigned to a Visit by being the owner (`BR-055`).
+
+### 6.2 What a Job needs — and what it deliberately does not have
+
+- **Title is required.** A Job cannot be created without a title (`BR-053`).
+- **Description is optional** (`BR-053`).
+- **Type/category is optional and non-controlling** (`BR-053`). It exists for reporting, filtering
+  and history, and must **not** control scheduling, status or permissions. The catalogue is an
+  **OPEN QUESTION** (`BR-053` Notes).
+  - Modelling decision: `type_code` is a plain `varchar(50)` with **no CHECK constraint and no
+    enum type**. Freezing an enumeration would invent a catalogue the product has not defined
+    (`BR-042`). Illustrative values such as `REPAIR`, `MAINTENANCE`, `INSTALLATION`, `INSPECTION`,
+    `SERVICE_CALL` and `OTHER` appear in the business rules as examples, not as an authoritative
+    catalogue. They must not be hard-coded and no behaviour may branch on them.
+- **No priority.** `BR-054` removes Job priority from v1 entirely. There is no priority column, no
+  priority value derived from another field, and no automatic scheduling order. Scheduling order is
+  controlled by the Manager/authorized user.
+- **No technician on the Job.** Assignment is recorded on Visits (`BR-068`); a Job's technicians
+  are derived from its Visits (§10).
+- **No schedule on the Job.** Scheduling belongs to the Visit (`BR-071`, `BR-072`). A Job is not
+  "scheduled"; `jobs.status = 'SCHEDULED'` is a _consequence_ of a Visit being scheduled
+  (`BR-058`, §8.2).
+- **No outcome on the Job except `final_outcome_code`**, which is only ever set when an authorized
+  office user closes the Job. It is never copied automatically from the latest Visit outcome
+  (`BR-062`).
+- **No stored "Needs Scheduling" flag.** The condition is derived from Visit state and must not be
+  persisted as a Job status or boolean (`BR-060`, §8.4).
+- **No address copy of the Customer.** The Job references a Property and keeps its own immutable
+  address snapshot (`BR-056`, §6.3).
+- **No customer duplication.** The Job references `customers.id`; it does not copy customer name,
+  phone or email. Customer data is read through the Customer.
+- Evidence (photos, audio, files) is attached to Visits and is out of scope for this slice
+  (`BR-027`, `BR-077`, §18).
+
+### 6.3 Property on the Job and the address snapshot
+
+`BR-056` defines how a Job's location behaves:
+
+- A Job may be created with `property_id = NULL` and `property_address_snapshot = NULL`
+  (`BR-051`).
+- A Property may be **added later**. Until a Property exists the Job cannot be scheduled
+  (`BR-056`, `BR-072`).
+- When a Property is associated with a Job, the Job stores an **immutable address snapshot** in
+  `property_address_snapshot` so historical records keep the location that was relevant at that
+  time (`BR-056`, `BR-057`).
+- The snapshot uses the same field names as the Property address, in the wire `camelCase`
+  convention: `propertyName`, `addressLine1`, `addressLine2`, `city`, `province`, `postalCode`,
+  `country`. It is a frozen copy, never a live view of the Property row.
+- Snapshot timing (modelling interpretation, flagged in §21): the snapshot is written when the
+  association is created or changed, and the **previous** association and its snapshot are
+  preserved in `job_property_history` (§7.2). A later edit of the Property's own address does not
+  rewrite the Job's snapshot (`BR-057`). `BR-056` does not state whether the Job snapshot is
+  refreshed when the _Property's_ address changes; that remains open.
+
+Property-change behaviour (`BR-056`, `BR-067`):
+
+- The Job's current Property may change while the Job is active, and changes are allowed only
+  until the Job is `COMPLETED` (`BR-056`, `BR-062`).
+- A change is recorded in history, preserves the previous Property, never creates a new Job and
+  never automatically modifies Visits.
+- If the Job has `SCHEDULED` or active Visits when its Property changes, each affected Visit must
+  be **flagged for review** — for example `Location Changed — Review Schedule` (`BR-056`).
+- The system must **never** silently change a Visit's schedule or operational location as a side
+  effect. The Manager/authorized user must explicitly review and resolve every affected Visit
+  (`BR-056`, `BR-067`).
+
+Proposed table — `visit_location_review_flags`:
+
+| Column                      | Type          | Null? | Notes                                               |
+| --------------------------- | ------------- | ----- | --------------------------------------------------- |
+| `id`                        | `uuid`        | no    | PK                                                  |
+| `organization_id`           | `uuid`        | no    | FK → `organizations.id`                             |
+| `visit_id`                  | `uuid`        | no    | FK → `visits.id`, `ON DELETE CASCADE`               |
+| `job_property_history_id`   | `uuid`        | no    | The Property change that raised the flag (`BR-056`) |
+| `raised_at`                 | `timestamptz` | no    | `NOT NULL DEFAULT now()`                            |
+| `resolved_at`               | `timestamptz` | yes   | `NULL` = still awaiting review                      |
+| `resolved_by_membership_id` | `uuid`        | yes   | Who resolved it                                     |
+| `resolution_note`           | `text`        | yes   | Free text recorded by the resolver                  |
+| `created_at`                | `timestamptz` | no    |                                                     |
+
+- Partial unique index `visit_location_review_flags_open_visit_unique` on `(organization_id,
+visit_id) WHERE resolved_at IS NULL` — at most one open flag per Visit.
+- `Location Changed — Review Schedule` is a **localized UI label** for the derived state "this
+  Visit has an unresolved location review flag". It is never stored as text (`BR-028`, `BR-041`).
+
+### 6.4 Deletion behaviour
+
+Deletion is part of the domain model, so it is stated deliberately instead of being left to
+whatever the ORM defaults to.
+
+- `organization_id → organizations.id` uses `ON DELETE CASCADE` on every Job/Visit table: deleting
+  a tenant removes that tenant's data. This follows the foundation convention.
+- **Aggregate-internal ("part of") references cascade.** A Visit or a history row cannot outlive
+  the aggregate it belongs to: `visits.job_id → jobs.id`, `job_status_history.job_id`,
+  `job_property_history.job_id`, `job_customer_history.job_id`,
+  `visit_status_history.visit_id`, `visit_schedule_history.visit_id`,
+  `visit_technician_history.visit_id`, `visit_outcome_history.visit_id`, `visit_notes.visit_id`,
+  `visit_location_review_flags.visit_id`, and `visit_location_history.visit_id`.
+- **Cross-aggregate references do not cascade.** `jobs.customer_id`, `jobs.property_id`,
+  `jobs.owner_membership_id`, `visits.property_id`,
+  `property_customer_relationships.property_id`, `property_customer_relationships.customer_id` and
+  the actor/member columns keep the default `RESTRICT`/`NO ACTION`. Cascading a Customer, Property
+  or member deletion into Jobs, Visits, Property-Customer relationship history or their history
+  would destroy business history that `BR-050`, `BR-057` and `BR-067` require to be preserved. The
+  model **fails closed**: the delete is refused instead of rewriting history.
+- Manager delete capability for Jobs exists in the permission model (`BR-008`), but the
+  **semantics** of deleting a Job that has history are undefined (`BR-021`). Consequently this
+  slice models **no deletion path and no `deleted_at` column**: neither physical nor soft deletion
+  is defined, so neither is invented. The open decision is recorded in §16 and must be resolved
+  before any delete endpoint or tombstone column is designed.
+
+## 7. Job history
+
+History tables are **append-only**: no update and no delete path exists for them, and they are
+never used as a source of truth for current state (`BR-067`, `BR-041`). All of them carry
+`organization_id` so organization-scoped queries never need a join through the aggregate.
+
+### 7.1 Proposed table — `job_status_history`
+
+| Column                | Type          | Null? | Notes                                    |
+| --------------------- | ------------- | ----- | ---------------------------------------- |
+| `id`                  | `uuid`        | no    | PK                                       |
+| `organization_id`     | `uuid`        | no    | FK → `organizations.id`                  |
+| `job_id`              | `uuid`        | no    | FK → `jobs.id`, `ON DELETE CASCADE`      |
+| `from_status`         | `varchar(20)` | yes   | `NULL` for the creation event            |
+| `to_status`           | `varchar(20)` | no    | CHECK against the `BR-058` vocabulary    |
+| `reason_code`         | `varchar(30)` | yes   | Structured reason (cancellation, reopen) |
+| `note`                | `text`        | yes   | Free-text explanation                    |
+| `actor_membership_id` | `uuid`        | no    | Who caused the transition                |
+| `recorded_at`         | `timestamptz` | no    | Server-authoritative time                |
+| `captured_at`         | `timestamptz` | yes   | Client-captured time for offline actions |
+| `client_operation_id` | `uuid`        | yes   | Idempotency key for offline replay (§15) |
+| `created_at`          | `timestamptz` | no    |                                          |
+
+- `CHECK (to_status IN (...))`, `CHECK (from_status IS NULL OR from_status IN (...))` and
+  `CHECK (from_status IS DISTINCT FROM to_status)`.
+- Index `(organization_id, job_id, recorded_at)`.
+- `reason_code` carries **no CHECK**: the Job cancellation reason catalogue is an **OPEN QUESTION**
+  (`BR-064`). `BR-064` does require a structured reason **and** a mandatory explanation for Job
+  cancellation; because the structured catalogue is undefined, that requirement is enforced in the
+  service layer for the cancellation action rather than frozen as a database enumeration.
+  `BR-063` allows an optional reopen reason.
+- Invariant (service layer, same transaction): the newest row's `to_status` equals `jobs.status`.
+  A database CHECK cannot express "the latest row wins", so this is enforced where the transition
+  is applied, under the Job row lock (§15).
+
+### 7.2 Proposed table — `job_property_history`
+
+| Column                      | Type          | Null? | Notes                                            |
+| --------------------------- | ------------- | ----- | ------------------------------------------------ |
+| `id`                        | `uuid`        | no    | PK                                               |
+| `organization_id`           | `uuid`        | no    | FK → `organizations.id`                          |
+| `job_id`                    | `uuid`        | no    | FK → `jobs.id`, `ON DELETE CASCADE`              |
+| `previous_property_id`      | `uuid`        | yes   | `NULL` for the first association                 |
+| `previous_address_snapshot` | `jsonb`       | yes   | Snapshot of the previous Property                |
+| `new_property_id`           | `uuid`        | no    | The Property being associated                    |
+| `new_address_snapshot`      | `jsonb`       | no    | Snapshot taken at this change                    |
+| `note`                      | `text`        | yes   | Optional note; no reason is required by `BR-056` |
+| `actor_membership_id`       | `uuid`        | no    | Who changed the Property                         |
+| `recorded_at`               | `timestamptz` | no    |                                                  |
+| `captured_at`               | `timestamptz` | yes   |                                                  |
+| `client_operation_id`       | `uuid`        | yes   |                                                  |
+| `created_at`                | `timestamptz` | no    |                                                  |
+
+- `CHECK ((previous_property_id IS NULL) = (previous_address_snapshot IS NULL))`.
+- Index `(organization_id, job_id, recorded_at)`.
+- This table is what `visit_location_review_flags.job_property_history_id` points at: an
+  unresolved flag means "the disposition of this Visit must be reviewed because the Job's location
+  changed" (`BR-056`).
+
+`job_customer_history` is defined in §5.2.
+
+## 8. Job lifecycle
+
+### 8.1 Status vocabulary (`BR-058`)
+
+A Job has exactly one status from this closed, shared vocabulary. The stored value is the stable
+code; labels are localized (`BR-028`, `BR-041`).
+
+| Code             | Meaning                                                |
+| ---------------- | ------------------------------------------------------ |
+| `NEW`            | Created; not yet scheduled                             |
+| `SCHEDULED`      | A Visit is scheduled                                   |
+| `IN_PROGRESS`    | Work has started and/or work remains                   |
+| `PENDING_REVIEW` | Field work appears finished and awaits business review |
+| `COMPLETED`      | Closed by an authorized office user                    |
+| `CANCELED`       | Canceled by an authorized user                         |
+
+Clients must not invent their own Job status vocabulary (`BR-022`, `BR-041`).
+
+### 8.2 Permitted transitions
+
+| From             | To               | Trigger                                                                      |
+| ---------------- | ---------------- | ---------------------------------------------------------------------------- |
+| `NEW`            | `SCHEDULED`      | A Visit on the Job becomes `SCHEDULED` (`BR-072`)                            |
+| `SCHEDULED`      | `IN_PROGRESS`    | A Visit on the Job becomes `EN_ROUTE`, `ON_SITE` or `IN_PROGRESS` (`BR-074`) |
+| `IN_PROGRESS`    | `PENDING_REVIEW` | The `BR-061` conditions are met (§8.4)                                       |
+| `PENDING_REVIEW` | `COMPLETED`      | Explicit close by an authorized office user (`BR-062`)                       |
+| `NEW`            | `CANCELED`       | Explicit authorized cancellation (`BR-064`)                                  |
+| `SCHEDULED`      | `CANCELED`       | Explicit authorized cancellation (`BR-064`)                                  |
+| `IN_PROGRESS`    | `CANCELED`       | Explicit authorized cancellation (`BR-064`)                                  |
+| `PENDING_REVIEW` | `CANCELED`       | Explicit authorized cancellation (`BR-064`)                                  |
+| `COMPLETED`      | `NEW`            | Explicit authorized reopen (`BR-063`)                                        |
+| `CANCELED`       | `NEW`            | Explicit authorized reopen (`BR-063`)                                        |
+
+- Every other combination is **rejected by the backend** (`BR-022`). There is no transition out of
+  `COMPLETED` or `CANCELED` other than reopening to `NEW`, and no transition into `IN_PROGRESS`
+  from a reopen (`BR-058`, `BR-063`).
+- The transition table above is the single source of truth for Job transitions. It belongs in one
+  place in the service layer, keyed only by the Job status and the triggering event, rather than in
+  scattered `if` statements.
+- Job status advances **as a consequence of Visit lifecycle events** and the `BR-060`/`BR-061`
+  conditions; the backend applies and validates the transition. A client never sets a Job status
+  directly (`BR-022`, `BR-058`).
+
+### 8.3 Who may act
+
+- Authorization is **permission-based**, never role-name based (`BR-004`, `BR-006`), so the rules
+  below describe the permission split, not a hard-coded `Manager` role.
+- Technicians **never** change Job status (`BR-059`, `BR-066`). A technician drives the Visit
+  lifecycle (§9); the resulting Job status change is applied by the backend as a consequence.
+- Job-level actions — cancel a Job, reopen a Job, close a Job, change a Job's Property, assign or
+  remove technicians, cancel a Visit, mark `NO_SHOW` — require the corresponding office/dispatch
+  permission (`BR-066`). The API enforces this; UI hiding is convenience only (`BR-007`).
+- The implementation must support custom roles and direct member permissions rather than hard-coding
+  these actions to the Manager system role (`BR-004`, `BR-066`).
+
+### 8.4 Derived conditions (not stored state)
+
+**"Needs Scheduling" / "No Active Visit" (`BR-060`)**
+
+A Job surfaces this signal when:
+
+```text
+jobs.status IN ('NEW', 'IN_PROGRESS')
+AND NOT EXISTS (
+      SELECT 1 FROM visits v
+      WHERE v.job_id = jobs.id
+        AND v.status IN ('SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS')
+    )
+```
+
+- `BR-060` enumerates exactly the four states that count as active work. A `COMPLETED`,
+  `CANCELED` or `NO_SHOW` Visit does not count as active work — and neither does a `DRAFT` Visit,
+  which is not in the enumerated list.
+- The signal is **derived, not stored**: it is not a Job status, not a boolean column and not a
+  materialized field. It must never be persisted as a status (`BR-060`).
+- It is an operational signal for a human. Nothing is auto-scheduled from it (`BR-054`).
+
+**Entry into `PENDING_REVIEW` (`BR-061`)**
+
+Both conditions must hold:
+
+1. No Visit remains active or scheduled — no Visit in `SCHEDULED`, `EN_ROUTE`, `ON_SITE` or
+   `IN_PROGRESS`.
+2. The **latest completed Visit outcome** indicates the Job may be resolved, i.e. it is
+   `RESOLVED`. "Latest completed Visit" means the Job's `COMPLETED` Visit with the greatest
+   completion `recorded_at`.
+
+- If another Visit remains scheduled or active, the Job stays `IN_PROGRESS` even after a `RESOLVED`
+  outcome (`BR-061`).
+- `NEEDS_PARTS`, `NEEDS_FOLLOWUP` and `UNABLE_TO_COMPLETE` keep the Job `IN_PROGRESS` (`BR-061`).
+- `BR-061` does not say whether a remaining `DRAFT` Visit blocks entry into `PENDING_REVIEW`. This
+  model therefore does not classify `DRAFT` for that transition; the unresolved decision is recorded
+  in §21 and must be resolved before implementing automatic `PENDING_REVIEW` entry when draft Visits
+  exist.
+- The Job-status effect of `NEEDS_QUOTE_APPROVAL` is an **OPEN QUESTION** (`BR-061`). No transition
+  is implemented for it: the Job remains `IN_PROGRESS`, because no confirmed rule says the Job may
+  be resolved. The question is recorded in §21 rather than guessed (`BR-042`).
+- The condition is evaluated when a Visit lifecycle event can change whether a Visit is still
+  active or scheduled (i.e. on Visit completion and on the terminal Visit transitions of §9.1).
+
+### 8.5 Completion and reopening
+
+**Completion (`BR-062`)**
+
+- The only closing transition is `PENDING_REVIEW → COMPLETED` (`BR-058`), and it is an **explicit
+  business action** performed by an authorized office user holding the close permission. It is
+  never automatic and never a technician action (`BR-066`).
+- `final_outcome_code` is optional, is set at close, and is **never copied automatically** from
+  the latest Visit outcome (`BR-062`). Its value catalogue is an **OPEN QUESTION**, so the column
+  carries no CHECK.
+- Historical `CANCELED` or `NO_SHOW` Visits do **not** prevent completion. The governing condition
+  is that no remaining work requires another Visit (`BR-062`).
+- Once completed:
+  - the Job's terminal business history is preserved;
+  - Visit outcomes become **immutable** (`BR-079`);
+  - the Job's Property can no longer be changed (`BR-056`);
+  - the Job may still be reopened later (`BR-063`).
+
+**Reopening (`BR-063`)**
+
+- Reopening is `COMPLETED → NEW` or `CANCELED → NEW` (`BR-058`). It never produces `IN_PROGRESS`,
+  because it does not imply that work is currently underway.
+- Reopening does **not** modify or reopen historical completed/canceled Visits, and it does **not**
+  create a Visit automatically. A new field attempt is a new Visit created explicitly (`BR-051`,
+  `BR-071`).
+- Previous completion/cancellation history is preserved; an optional reopen reason may be recorded
+  in `job_status_history` (`BR-063`).
+- Reopening is an authorized office/dispatch action (`BR-066`). After reopening, the Job is `NEW`
+  and the "Needs Scheduling" signal applies again (`BR-060`).
+
+### 8.6 Cancellation (`BR-064`)
+
+- A Job may be canceled from `NEW`, `SCHEDULED`, `IN_PROGRESS` or `PENDING_REVIEW` — **including
+  after field work has started**.
+- Cancellation requires **both** a structured `reason_code` and a mandatory `note` explanation.
+  The structured reason catalogue is an **OPEN QUESTION** (`BR-064`), so this pairing is enforced
+  in the service layer for the cancellation action rather than frozen as a database enumeration.
+  The explanation matters most when field work has already occurred.
+- Cancellation writes a `job_status_history` row (from the current status to `CANCELED`) carrying
+  the reason, the explanation, the actor and the timestamp. Cancellation history is preserved.
+- Completed Visits remain historical and are not touched. Open Visits follow the cascade in §9.5.
+- **Before** the cancellation is confirmed, the UI shows the operational impact: the affected
+  Visits and the assigned technicians (`BR-064`). The model supports that question directly — open
+  Visits are `visits` rows, and assigned technicians are derived from `visit_technician_history`
+  (§10).
+- Canceling a Visit never changes the Job status by itself (`BR-076`); canceling a _Job_ does set
+  the Job status to `CANCELED` (`BR-064`).
+
+## 9. The Visit
+
+A Visit is **one field attempt** to perform work for a Job (`BR-071`). A Job may have zero, one or
+many Visits; a Visit is never created merely because a Job exists; and a Visit is not a permanent
+representation of the Job (`BR-047`, `BR-051`, `BR-071`).
+
+### 9.1 Visit status lifecycle (`BR-074`)
+
+Visit status describes the **field execution lifecycle**. It is a separate state machine from Job
+status and the two must never be merged (`BR-059`).
+
+| Code          | Meaning                                             |
+| ------------- | --------------------------------------------------- |
+| `DRAFT`       | Created; not scheduled                              |
+| `SCHEDULED`   | Scheduled (`BR-072`)                                |
+| `EN_ROUTE`    | Technician is travelling to the Property            |
+| `ON_SITE`     | Technician has arrived                              |
+| `IN_PROGRESS` | Work is being performed                             |
+| `COMPLETED`   | Field attempt completed, with an outcome (`BR-077`) |
+| `CANCELED`    | Canceled (`BR-076`)                                 |
+| `NO_SHOW`     | The field attempt could not be performed            |
+
+Normal lifecycle:
+
+```text
+DRAFT → SCHEDULED → EN_ROUTE → ON_SITE → IN_PROGRESS → COMPLETED
+```
+
+Terminal alternatives:
+
+```text
+SCHEDULED   → CANCELED
+EN_ROUTE    → CANCELED
+ON_SITE     → CANCELED
+IN_PROGRESS → CANCELED
+SCHEDULED   → NO_SHOW
+```
+
+- Once a Visit is `COMPLETED`, `CANCELED` or `NO_SHOW` it is **historical** and can never return to
+  an active state (`BR-074`).
+- Every transition is validated by the backend against this table; clients must not invent their
+  own Visit status vocabulary (`BR-022`, `BR-041`, `BR-074`).
+- Status history is append-only (§9.5).
+- The single defined correction is `EN_ROUTE → SCHEDULED` (§9.5, `BR-075`). Any other backward
+  movement is a business decision that has not been made (`BR-075` Notes).
+- Who may drive each transition is defined by `BR-066` and the permission model: technicians
+  operate the field lifecycle of their assigned Visits; canceling a Visit and marking `NO_SHOW`
+  are office/dispatch actions (`BR-066`, §8.3).
+- The two state machines interact only in one direction: Visit lifecycle events cause Job status
+  consequences (§8.2, §8.4). A Visit may be `COMPLETED` while its Job remains `IN_PROGRESS`
+  (`BR-059`, `BR-077`).
+
+### 9.2 Proposed table — `visits`
+
+| Column                      | Type          | Null? | Notes                                                             |
+| --------------------------- | ------------- | ----- | ----------------------------------------------------------------- |
+| `id`                        | `uuid`        | no    | PK, `gen_random_uuid()`                                           |
+| `organization_id`           | `uuid`        | no    | FK → `organizations.id`, `ON DELETE CASCADE`                      |
+| `job_id`                    | `uuid`        | no    | FK → `jobs.id`, `ON DELETE CASCADE`                               |
+| `property_id`               | `uuid`        | yes   | Operational location; `NULL` while `DRAFT`                        |
+| `location_address_snapshot` | `jsonb`       | yes   | Snapshot taken when the Visit is scheduled / location resolved    |
+| `status`                    | `varchar(20)` | no    | `NOT NULL DEFAULT 'DRAFT'`; CHECK against the `BR-074` vocabulary |
+| `scheduled_start`           | `timestamptz` | yes   | **Internal** start — authoritative (`BR-072`)                     |
+| `scheduled_end`             | `timestamptz` | yes   | **Internal** end — authoritative (`BR-072`)                       |
+| `arrival_window_start`      | `timestamptz` | yes   | Optional customer-facing window                                   |
+| `arrival_window_end`        | `timestamptz` | yes   | Optional customer-facing window                                   |
+| `version`                   | `integer`     | no    | `NOT NULL DEFAULT 1` — optimistic concurrency (§15)               |
+| `created_at` / `updated_at` | `timestamptz` | no    | Foundation convention                                             |
+
+Constraints and indexes:
+
+- `CHECK (status IN ('DRAFT','SCHEDULED','EN_ROUTE','ON_SITE','IN_PROGRESS','COMPLETED',
+'CANCELED','NO_SHOW'))` — the `BR-074` vocabulary is confirmed and closed.
+- `CHECK ((scheduled_start IS NULL) = (scheduled_end IS NULL))` and
+  `CHECK (scheduled_end IS NULL OR scheduled_end > scheduled_start)`.
+- `CHECK ((arrival_window_start IS NULL) = (arrival_window_end IS NULL))` and
+  `CHECK (arrival_window_end IS NULL OR arrival_window_end > arrival_window_start)`.
+  **No** constraint ties the arrival window to the internal schedule: `BR-072` does not define that
+  relationship, so none is invented.
+- `CHECK ((property_id IS NULL) = (location_address_snapshot IS NULL))`.
+- `CHECK (status <> 'SCHEDULED' OR (property_id IS NOT NULL AND scheduled_start IS NOT NULL
+AND scheduled_end IS NOT NULL))` — a Visit cannot be `SCHEDULED` without an operational location
+  and a valid internal schedule (`BR-072`).
+- `CHECK (version > 0)`.
+- Indexes: `(organization_id, job_id)`, `(organization_id, status)`,
+  `(organization_id, scheduled_start)` (dispatch and conflict queries, §10.4).
+- **No** Visit sequence/number column. `BR-052` defines a Job number only; the `Visit #1/#2/#3`
+  labels in the business rules are illustrative. A Visit's ordinal position is derived from
+  creation order for display and is not stored as a numbering scheme the business never defined.
+
+### 9.3 Scheduling (`BR-072`)
+
+- The **internal** `scheduled_start` / `scheduled_end` are authoritative for dispatch and for
+  conflict detection (`BR-070`, `BR-072`). All timestamps are stored as absolute instants
+  (`timestamptz`). Timezone behaviour is an **OPEN QUESTION** (`BR-026`), so no organization-level
+  or Visit-level timezone field is modelled here.
+- The **customer-facing arrival window** is optional. When it is not supplied, the UI may present
+  the scheduled time — a presentation concern, not a stored value.
+- A Visit cannot become `SCHEDULED` unless **all** of the following hold (`BR-072`), validated in
+  the service layer inside one transaction, under a lock on the Visit row (§15):
+  1. the Job has a Property (`BR-056`, `BR-072`),
+  2. the scheduled start and end are valid,
+  3. at least one technician is assigned,
+  4. exactly one assigned technician is `LEAD` (`BR-068`),
+  5. scheduling conflict checks have been performed (`BR-070`),
+  6. any detected conflicts have been **explicitly confirmed** by the authorized user (`BR-070`).
+- A Visit may exist as an **unscheduled/`DRAFT` Visit without technicians** (`BR-068`, `BR-071`,
+  `BR-072`), and a Job cannot be scheduled until a Property exists (`BR-056`).
+- When `visits.status` becomes `SCHEDULED`, the Job transition `NEW → SCHEDULED` follows as a
+  consequence (§8.2).
+
+### 9.4 Rescheduling (`BR-073`)
+
+- Rescheduling **edits the existing Visit**; the Visit identity never changes and no new Visit is
+  created (`BR-073`).
+- It is permitted **only while the Visit is `SCHEDULED`**. A Visit that is `EN_ROUTE`, `ON_SITE`,
+  `IN_PROGRESS`, `COMPLETED`, `CANCELED` or `NO_SHOW` cannot be rescheduled (`BR-073`).
+- If another field attempt is required, a **new Visit** is created instead (`BR-071`, `BR-073`).
+- Every schedule change is recorded: previous schedule, new schedule, actor, timestamp and an
+  optional reason (`BR-073`).
+
+Proposed table — `visit_schedule_history`:
+
+| Column                                                | Type          | Null? | Notes                                          |
+| ----------------------------------------------------- | ------------- | ----- | ---------------------------------------------- |
+| `id`                                                  | `uuid`        | no    | PK                                             |
+| `organization_id`                                     | `uuid`        | no    | FK → `organizations.id`                        |
+| `visit_id`                                            | `uuid`        | no    | FK → `visits.id`, `ON DELETE CASCADE`          |
+| `previous_scheduled_start` / `previous_scheduled_end` | `timestamptz` | yes   | `NULL` for the first schedule                  |
+| `new_scheduled_start` / `new_scheduled_end`           | `timestamptz` | no    | Schedule after the change                      |
+| `previous_arrival_window_start` / `_end`              | `timestamptz` | yes   | Optional customer window, before               |
+| `new_arrival_window_start` / `_end`                   | `timestamptz` | yes   | Optional customer window, after                |
+| `reason`                                              | `text`        | yes   | Optional (`BR-073` requires no reason)         |
+| `actor_membership_id`                                 | `uuid`        | no    | Who rescheduled                                |
+| `recorded_at` / `captured_at` / `client_operation_id` |               |       | Event convention (§14)                         |
+| `confirmed_conflicts`                                 | `jsonb`       | yes   | Schedule conflicts explicitly accepted (§10.4) |
+| `created_at`                                          | `timestamptz` | no    |                                                |
+
+- The customer-facing arrival window is snapshotted in the same row because it is part of "the
+  schedule as it was". The previous schedule must stay fully reconstructible (`BR-073`, `BR-057`).
+- Index `(organization_id, visit_id, recorded_at)`. Append-only: a reschedule never updates or
+  deletes an earlier row.
+
+### 9.5 Status history, corrections and the cancellation record (`BR-074`–`BR-076`)
+
+`visit_status_history` is the authoritative, append-only record of field execution. It is also the
+cancellation record (`BR-076`) and the correction record (`BR-075`). Current status lives in
+`visits.status`; the history is never a second source of truth.
+
+| Column                                                | Type          | Null? | Notes                                                                            |
+| ----------------------------------------------------- | ------------- | ----- | -------------------------------------------------------------------------------- |
+| `id`                                                  | `uuid`        | no    | PK                                                                               |
+| `organization_id`                                     | `uuid`        | no    | FK → `organizations.id`                                                          |
+| `visit_id`                                            | `uuid`        | no    | FK → `visits.id`, `ON DELETE CASCADE`                                            |
+| `from_status`                                         | `varchar(20)` | yes   | `NULL` for the creation event                                                    |
+| `to_status`                                           | `varchar(20)` | no    | CHECK against the `BR-074` vocabulary                                            |
+| `is_correction`                                       | `boolean`     | no    | `NOT NULL DEFAULT false`                                                         |
+| `reason_code`                                         | `varchar(30)` | yes   | Manual Visit cancellation reason (`BR-076`)                                      |
+| `note`                                                | `text`        | yes   | Explanation; mandatory when `reason_code = 'OTHER'`                              |
+| `cancellation_source`                                 | `varchar(20)` | yes   | `MANUAL` or `JOB_CANCELLATION`                                                   |
+| `job_status_history_id`                               | `uuid`        | yes   | FK → `job_status_history.id`; triggering Job cancellation                        |
+| `actor_membership_id`                                 | `uuid`        | no    | Who caused the transition                                                        |
+| `recorded_at` / `captured_at` / `client_operation_id` |               |       | Event convention (§14)                                                           |
+| `confirmed_conflicts`                                 | `jsonb`       | yes   | Schedule conflicts explicitly accepted when the Visit became `SCHEDULED` (§10.4) |
+| `created_at`                                          | `timestamptz` | no    |                                                                                  |
+
+Checks:
+
+- `to_status IN (...)`, `from_status IS NULL OR from_status IN (...)`,
+  `from_status IS DISTINCT FROM to_status`.
+- `NOT is_correction OR (from_status = 'EN_ROUTE' AND to_status = 'SCHEDULED')` — the single
+  correction confirmed by `BR-075`. Any other correction is an undecided business rule, so it is not
+  modelled; adding one is a deliberate migration after a product decision.
+- `to_status <> 'CANCELED' OR cancellation_source IS NOT NULL` and
+  `to_status = 'CANCELED' OR cancellation_source IS NULL`.
+- `cancellation_source IS NULL OR cancellation_source IN ('MANUAL','JOB_CANCELLATION')`.
+- `cancellation_source IS DISTINCT FROM 'JOB_CANCELLATION' OR job_status_history_id IS NOT NULL`.
+- `reason_code IS NULL OR (to_status = 'CANCELED' AND cancellation_source = 'MANUAL')`.
+- `reason_code IS NULL OR reason_code IN ('CUSTOMER_RESCHEDULED','CUSTOMER_CANCELED','WEATHER',
+'TECH_UNAVAILABLE','DUPLICATE','OTHER')` — the shared vocabulary is confirmed by `BR-076`.
+  Whether organizations may add their own cancellation reasons is an **OPEN QUESTION** (§21).
+- Index `(organization_id, visit_id, recorded_at)`. Invariant (service layer): the newest row's
+  `to_status` equals `visits.status`.
+
+Cancellation and correction rules recorded here:
+
+- A canceled Visit requires a structured reason and, for `OTHER`, an explanation (`BR-076`).
+- Canceling a Visit does **not** change the Job status (`BR-076`, §8.2).
+- `cancellation_source` distinguishes a manual cancellation from a cascade caused by Job
+  cancellation (`BR-076`, `BR-065`), and a cascade row always references the Job cancellation that
+  triggered it.
+- `BR-065` requires the cascade record to preserve the cancellation reason. It is preserved through
+  `job_status_history_id` — the Job cancellation that caused it, which carries that reason. Whether
+  a cascade must additionally carry its own Visit-level reason is recorded as an open question
+  (§21) instead of being invented.
+- `ON_SITE` and `IN_PROGRESS` Visits are never cascade-canceled silently (`BR-065`): the row is
+  written only after the authorized user explicitly confirmed that Visit. The row and its actor are
+  the evidence; no separate boolean is modelled.
+- `EN_ROUTE → SCHEDULED` is an explicit correction by an authorized user (`BR-075`). The original
+  row is untouched, the Visit identity does not change, and history stays append-only.
+
+### 9.6 Visit location and `visit_location_history`
+
+A Visit's **operational location** is `visits.property_id` together with the frozen
+`visits.location_address_snapshot` (§9.2), taken when the Visit is scheduled or when a location
+review is resolved. The snapshot is a copy, never a live view of the Property row — which is what
+`BR-057` requires: changing a Customer address, a Property address or a Job's Property must not
+rewrite historical Visit information.
+
+- A Visit's location never changes as a side effect of a Job Property change (`BR-056`). The Job
+  change raises a review flag (§6.3) and the Manager/authorized user must explicitly review and
+  resolve each affected Visit (`BR-056`, `BR-067`).
+- Every location change is recorded in the append-only `visit_location_history` below: previous
+  Property and snapshot, new Property and snapshot, actor, trigger and optional note (`BR-056`,
+  `BR-057`, `BR-067`).
+- **Modelling boundary:** `BR-056` confirms _that_ resolution is explicit and authorized, but does
+  not enumerate the resolution actions (reschedule per `BR-073`, cancel per `BR-076`, accept the new
+  location, or another disposition). This model therefore records what was decided without
+  prescribing the decision; the missing catalogue is an open question (§21).
+- Which Visit statuses permit a location change is likewise not defined. The model imposes no status
+  CHECK of its own (`BR-042`) and relies on `BR-074`: a `COMPLETED`, `CANCELED` or `NO_SHOW` Visit is
+  historical, so a location change is not offered for one.
+
+Proposed table — `visit_location_history` (append-only):
+
+| Column                                                | Type          | Null? | Notes                                                                |
+| ----------------------------------------------------- | ------------- | ----- | -------------------------------------------------------------------- |
+| `id`                                                  | `uuid`        | no    | PK                                                                   |
+| `organization_id`                                     | `uuid`        | no    | FK → `organizations.id`                                              |
+| `visit_id`                                            | `uuid`        | no    | FK → `visits.id`, `ON DELETE CASCADE`                                |
+| `previous_property_id`                                | `uuid`        | yes   | `NULL` for the Visit's first location                                |
+| `previous_address_snapshot`                           | `jsonb`       | yes   | The snapshot that was replaced                                       |
+| `new_property_id`                                     | `uuid`        | no    | The Property now operational for the Visit                           |
+| `new_address_snapshot`                                | `jsonb`       | no    | Snapshot taken at this change (`BR-057`)                             |
+| `job_property_history_id`                             | `uuid`        | yes   | The Job Property change being resolved (§7.2); `NULL` when unrelated |
+| `note`                                                | `text`        | yes   | Free-text explanation recorded by the resolver                       |
+| `actor_membership_id`                                 | `uuid`        | no    | Who changed the location                                             |
+| `recorded_at` / `captured_at` / `client_operation_id` |               |       | Event convention (§14)                                               |
+| `created_at`                                          | `timestamptz` | no    |                                                                      |
+
+- `CHECK ((previous_property_id IS NULL) = (previous_address_snapshot IS NULL))` — the previous
+  location is preserved completely or not at all (`BR-057`).
+- `CHECK (previous_property_id IS DISTINCT FROM new_property_id)` — a row records an actual change;
+  a no-op write is not history.
+- Index `(organization_id, visit_id, recorded_at)`.
+- Invariant (service layer, same transaction): the newest row's `new_property_id` /
+  `new_address_snapshot` equal `visits.property_id` / `visits.location_address_snapshot`, and
+  resolving an open review flag (§6.3) sets that flag's `resolved_at` /
+  `resolved_by_membership_id` in the same transaction, so a pending flag and an unresolved location
+  can never disagree.
+
+## 10. Assignment and technicians
+
+### 10.1 Rules
+
+- Technician assignment is recorded **on the Visit**, never on the Job (`BR-068`). A Job's
+  technicians are **derived** from the technicians assigned across its Visits (`BR-068`); there is
+  deliberately no technician column on `jobs` (§6.2).
+- A Visit may have **multiple** technicians. While a Visit has technicians assigned, exactly one of
+  them is the **Lead**; the others use the role code `TECHNICIAN` (`BR-068`). `LEAD` and `TECHNICIAN`
+  are stable machine-readable codes; their labels are localized (`BR-028`, `BR-041`). The term
+  "Helper" is not part of Servora's vocabulary (`BR-068`).
+- Every assigned technician is considered scheduled for the **full** Visit interval, and all of them
+  take part in conflict detection (`BR-068`, `BR-070`).
+- Assignment changes — add, remove, `TECHNICIAN → LEAD`, `LEAD → TECHNICIAN` — are allowed **during
+  an active Visit**, and assignment history is **append-only** (`BR-069`).
+- Removing the current Lead requires the same action to name the **new Lead explicitly**; the system
+  never promotes another technician automatically (`BR-069`).
+- The Job **Owner** (`jobs.owner_membership_id`, §6.1) is separate from Visit assignment: the Owner
+  is not thereby a Visit technician, not automatically the Lead, does not affect availability and
+  does not take part in conflict detection (`BR-055`, `BR-068`).
+- A Visit may exist as an unscheduled/`DRAFT` Visit with **no** technicians (`BR-068`, `BR-072`).
+- Eligibility, skills, territory and travel/buffer rules are out of scope in v1 (`BR-025`, `BR-070`,
+  §18).
+
+### 10.2 Proposed table — `visit_technicians` (current assignment)
+
+The current assignment set is stored explicitly so that dispatch and conflict queries (§10.4) stay
+simple and so that "at most one Lead per Visit" is enforceable by the database. History is separate
+(§10.3).
+
+| Column                      | Type          | Null? | Notes                                                             |
+| --------------------------- | ------------- | ----- | ----------------------------------------------------------------- |
+| `id`                        | `uuid`        | no    | PK                                                                |
+| `organization_id`           | `uuid`        | no    | FK → `organizations.id`                                           |
+| `visit_id`                  | `uuid`        | no    | FK → `visits.id`, `ON DELETE CASCADE`                             |
+| `technician_membership_id`  | `uuid`        | no    | FK → `organization_members.id` (foundation), `ON DELETE RESTRICT` |
+| `role_code`                 | `varchar(20)` | no    | CHECK `IN ('LEAD','TECHNICIAN')`                                  |
+| `created_at` / `updated_at` | `timestamptz` | no    | Foundation convention                                             |
+
+Constraints and indexes:
+
+- `UNIQUE (organization_id, visit_id, technician_membership_id)` — the same technician cannot be
+  assigned twice to one Visit.
+- `UNIQUE (visit_id) WHERE role_code = 'LEAD'` (partial unique index) — **at most one Lead per
+  Visit** (`BR-068`). The complementary "at least one Lead while technicians are assigned" is not
+  expressible as a plain constraint, so it is enforced as a scheduling precondition in the service
+  layer (`BR-072`, §9.3).
+- Index `(organization_id, technician_membership_id)` — conflict detection by technician (§10.4).
+- This table holds the **current** state only. Removing a technician deletes the row; it never edits
+  history (§10.3). `BR-069`'s "never rewrite previous assignment history" applies to the history
+  table.
+
+### 10.3 Proposed table — `visit_technician_history` (append-only)
+
+| Column                                                | Type          | Null? | Notes                                              |
+| ----------------------------------------------------- | ------------- | ----- | -------------------------------------------------- |
+| `id`                                                  | `uuid`        | no    | PK                                                 |
+| `organization_id`                                     | `uuid`        | no    | FK → `organizations.id`                            |
+| `visit_id`                                            | `uuid`        | no    | FK → `visits.id`, `ON DELETE CASCADE`              |
+| `technician_membership_id`                            | `uuid`        | no    | The technician the event concerns                  |
+| `event`                                               | `varchar(20)` | no    | CHECK `IN ('ASSIGNED','REMOVED','ROLE_CHANGED')`   |
+| `role_code`                                           | `varchar(20)` | yes   | Role **after** the event; `NULL` for `REMOVED`     |
+| `previous_role_code`                                  | `varchar(20)` | yes   | Role **before** the event; only for `ROLE_CHANGED` |
+| `actor_membership_id`                                 | `uuid`        | no    | Who performed the change                           |
+| `recorded_at` / `captured_at` / `client_operation_id` |               |       | Event convention (§14)                             |
+| `created_at`                                          | `timestamptz` | no    |                                                    |
+
+Checks:
+
+- `CHECK (event <> 'ASSIGNED' OR (role_code IS NOT NULL AND previous_role_code IS NULL))`.
+- `CHECK (event <> 'REMOVED' OR (role_code IS NULL AND previous_role_code IS NOT NULL))`.
+- `CHECK (event <> 'ROLE_CHANGED' OR (role_code IS NOT NULL AND previous_role_code IS NOT NULL
+AND role_code <> previous_role_code))`.
+- `CHECK (role_code IS NULL OR role_code IN ('LEAD','TECHNICIAN'))`, and the same for
+  `previous_role_code`.
+- Index `(organization_id, visit_id, recorded_at)`.
+
+- The append-only history is what makes `BR-069` auditable: `REMOVED` never erases the earlier
+  `ASSIGNED` row, and a Lead change writes new rows rather than updating the past. `BR-069`'s
+  example (Mike `LEAD`, John `TECHNICIAN`, Sarah `TECHNICIAN`, John removed, Sarah promoted to
+  `LEAD`) is exactly five rows, alongside the resulting rows in `visit_technicians` (§10.2).
+- Removing the Lead is one user action producing two recorded facts: the removed Lead's `REMOVED`
+  row and the explicitly chosen new Lead's `ROLE_CHANGED` row, both with the same actor. No separate
+  "reassignment" record type is invented.
+
+### 10.4 Technician availability conflicts (`BR-070`)
+
+- A conflict is a **warning with mandatory explicit confirmation**, never a hard block in v1
+  (`BR-070`).
+- A conflict exists when a technician assigned to the Visit being scheduled is also assigned
+  (present in `visit_technicians`, §10.2) to **another non-canceled Visit** whose window overlaps:
+
+```text
+existing.scheduled_start < new.scheduled_end
+AND existing.scheduled_end > new.scheduled_start
+```
+
+- Detection uses the **internal** `scheduled_start` / `scheduled_end`, which are authoritative
+  (`BR-070`, `BR-072`); the customer-facing arrival window is not used. All technicians assigned to
+  the Visit are checked, because each is booked for the whole interval (`BR-068`, `BR-070`).
+  Different technicians never conflict (`BR-070`). A `DRAFT` Visit has no schedule and cannot be in
+  conflict until it is scheduled; the Visit being scheduled is excluded from its own check.
+- `BR-070` excludes **canceled** Visits only. Visits in every other status are compared, because
+  the rule names cancelled Visits as the sole exclusion; in practice an overlap requires
+  intersecting windows, so a historical Visit only matches when a schedule is genuinely backdated.
+- The API must **surface** the conflict — the conflicting Visit, its window and the technician(s) —
+  and the authorized user must confirm explicitly before the Visit can become `SCHEDULED`
+  (`BR-070`, §9.3).
+- The confirmation is recorded as a snapshot on the event that changed the schedule: the
+  `DRAFT → SCHEDULED` row in `visit_status_history` (§9.5) and the `visit_schedule_history` row
+  (§9.4) each carry `confirmed_conflicts jsonb` — the conflicting Visit ids, their windows and the
+  technician ids as they were shown to and accepted by the user. This is a deliberate application of
+  `BR-067` ("history must preserve what actually happened"): a knowingly accepted overlap is part of
+  what happened. It records no new business rule.
+- Overlapping assignments remain **allowed** once confirmed; nothing in the model prevents them
+  (`BR-070`).
+- The check, the confirmation and the transition happen in the same transaction under the Visit row
+  lock, so a concurrent assignment change cannot slip between check and commit (§15).
+- Travel/buffer time is out of scope in v1 (`BR-070`, §18).
+
+## 11. Visit outcome
+
+### 11.1 Rules
+
+- A Visit **cannot be completed without an outcome**: before `IN_PROGRESS → COMPLETED` the Technician
+  supplies an outcome type (`BR-078`) and an outcome summary (`BR-077`).
+- Visit notes/comments are optional but strongly encouraged; photos, audio and files are optional in
+  v1 unless a future workflow requires evidence (`BR-077`, §12, §18).
+- The outcome records its **authoring actor and a timestamp** (`BR-077`).
+- Outcome type codes are the closed `BR-078` vocabulary: `RESOLVED`, `NEEDS_PARTS`,
+  `NEEDS_FOLLOWUP`, `NEEDS_QUOTE_APPROVAL`, `UNABLE_TO_COMPLETE`. They are stable machine-readable
+  codes; labels are localized (`BR-028`, `BR-041`, `BR-078`).
+- **Follow-up expectation is derived from the outcome type** (`RESOLVED` — none expected;
+  `NEEDS_PARTS`, `NEEDS_FOLLOWUP`, `UNABLE_TO_COMPLETE` — follow-up expected; `NEEDS_QUOTE_APPROVAL`
+  — business follow-up expected) and is never stored as a boolean (`BR-078`).
+- Outcome and status are different things (`BR-078`, §9.1): a Visit may be `COMPLETED` while its Job
+  remains `IN_PROGRESS` (`BR-059`, `BR-077`). A new field attempt is a **new Visit**, never a
+  reopened or edited completed Visit (`BR-071`, `BR-078`).
+- Job effect (`BR-061`): a Job may enter `PENDING_REVIEW` only when no Visit remains active or
+  scheduled **and** the latest completed Visit outcome indicates the Job may be resolved
+  (`RESOLVED`). `NEEDS_PARTS`, `NEEDS_FOLLOWUP` and `UNABLE_TO_COMPLETE` keep the Job
+  `IN_PROGRESS`. The Job-status effect of `NEEDS_QUOTE_APPROVAL` is an **OPEN QUESTION** (`BR-061`,
+  §21), so it is treated as **not modelled**: an `IN_PROGRESS` Job is not moved to `PENDING_REVIEW`
+  on that outcome, and no alternative transition is invented for it.
+- Corrections (`BR-079`): every outcome change preserves the previous outcome, the new outcome, the
+  actor, the timestamp and an optional reason. Managers/authorized office users may correct outcomes
+  according to their permissions (`BR-006`, `BR-066`). The **technician self-edit window/policy is
+  undefined** (`BR-079`): no time window is invented, modelled or enforced.
+- **Immutability** (`BR-062`, `BR-079`): once the Job is `COMPLETED`, Visit outcomes are immutable.
+  This is enforced in the service layer from the Job's status inside the same transaction that would
+  change the outcome. Reopening a Job (`BR-063`) does not reopen historical Visits, so it does not
+  un-freeze their outcomes; the boundary case is recorded in §21.
+
+### 11.2 Current outcome and `visit_outcome_history`
+
+The Visit's **current** outcome lives on `visits` (§9.2) as `outcome_code`, `outcome_summary`,
+`outcome_recorded_at` and `outcome_recorded_by_membership_id`. This section defines their semantics
+and constraints. Every outcome and every correction is additionally recorded in the append-only
+`visit_outcome_history`.
+
+Current outcome columns and constraints on `visits`:
+
+- `outcome_code varchar(30) NULL` — CHECK against the five `BR-078` codes.
+- `outcome_summary text NULL` — the required summary of the field attempt.
+- `outcome_recorded_at timestamptz NULL` and
+  `outcome_recorded_by_membership_id uuid NULL` (FK → `organization_members.id`, `ON DELETE RESTRICT`) — the
+  authoring actor and time (`BR-077`).
+- `CHECK ((outcome_code IS NULL) = (outcome_recorded_at IS NULL))` and
+  `CHECK ((outcome_recorded_at IS NULL) =
+(outcome_recorded_by_membership_id IS NULL))` — the outcome fields are written together.
+- `CHECK (status <> 'COMPLETED' OR (outcome_code IS NOT NULL AND outcome_summary IS NOT NULL))` —
+  a completed Visit always carries an outcome (`BR-077`). The outcome columns and the status change
+  to `COMPLETED` are written by one statement, or by one transaction, so this holds at every commit.
+- Note: a _draft_ outcome is not modelled. `BR-077` requires the outcome at completion; storing a
+  partial, unsubmitted outcome is not defined by the business rules and is therefore not invented.
+
+Proposed table — `visit_outcome_history` (append-only):
+
+| Column                                                | Type          | Null? | Notes                                 |
+| ----------------------------------------------------- | ------------- | ----- | ------------------------------------- |
+| `id`                                                  | `uuid`        | no    | PK                                    |
+| `organization_id`                                     | `uuid`        | no    | FK → `organizations.id`               |
+| `visit_id`                                            | `uuid`        | no    | FK → `visits.id`, `ON DELETE CASCADE` |
+| `outcome_code`                                        | `varchar(30)` | no    | CHECK against the `BR-078` vocabulary |
+| `outcome_summary`                                     | `text`        | no    | Summary as recorded                   |
+| `previous_outcome_code`                               | `varchar(30)` | yes   | `NULL` for the first recorded outcome |
+| `previous_outcome_summary`                            | `text`        | yes   | The summary that was replaced         |
+| `reason`                                              | `text`        | yes   | Optional correction reason (`BR-079`) |
+| `actor_membership_id`                                 | `uuid`        | no    | Who recorded the outcome              |
+| `recorded_at` / `captured_at` / `client_operation_id` |               |       | Event convention (§14)                |
+| `created_at`                                          | `timestamptz` | no    |                                       |
+
+Checks:
+
+- `CHECK (outcome_code IN (...))` for the five codes.
+- `CHECK (previous_outcome_code IS NULL OR previous_outcome_code IN (...))`.
+- `CHECK ((previous_outcome_code IS NULL) = (previous_outcome_summary IS NULL))` — a correction
+  always preserves the complete previous outcome (`BR-079`). A row whose
+  `previous_outcome_code IS NULL` is the Visit's initial outcome; a row with a previous value is a
+  correction. No separate flag is needed, and none is added.
+- Index `(organization_id, visit_id, recorded_at)`.
+- Invariant (service layer, same transaction): the newest row's `outcome_code` /
+  `outcome_summary` / actor match the current columns on `visits`.
+- The outcome record and the `IN_PROGRESS → COMPLETED` status row (§9.5) are written in the same
+  transaction, so `BR-077`'s "outcome before completion" is never observable as a completed Visit
+  without an outcome.
+
+## 12. Visit notes and evidence
+
+### 12.1 Rules
+
+- Visit notes/comments are optional in v1 (`BR-077`) and are **user-entered content**: stored and
+  displayed exactly as entered, never translated and never replaced by localized text
+  (`Project.md` §10, `dev.md` §9).
+- A note is part of the record of what happened in the field (`BR-027`) and is included in the Job
+  Activity projection (`BR-080`, §17).
+- Notes are **per Visit**, because the business rules attach field evidence to the field attempt
+  (`BR-047`, `BR-071`). The Job view aggregates the notes of its Visits (`BR-080`). No Job-level note
+  concept is modelled, because no Job note is confirmed (`BR-042`).
+- Notes are append-only in this model: one row per note, carrying its author and time. The model
+  provides no update or delete path, because `BR-027` requires evidence not to be silently discarded
+  and `BR-067` requires history to preserve what happened. Whether a note may ever be edited or
+  deleted is **not defined** by the business rules and is recorded as an open question (§21); no
+  edit window is invented.
+- Photos, audio and files are optional Visit evidence in v1 (`BR-077`) and no confirmed business rule
+  defines their storage, retention or visibility model (`BR-027`, `BR-015`), so **no attachment
+  table is proposed here** (§18).
+
+### 12.2 Proposed table — `visit_notes` (append-only)
+
+| Column                                                | Type          | Null? | Notes                                                |
+| ----------------------------------------------------- | ------------- | ----- | ---------------------------------------------------- |
+| `id`                                                  | `uuid`        | no    | PK                                                   |
+| `organization_id`                                     | `uuid`        | no    | FK → `organizations.id`                              |
+| `visit_id`                                            | `uuid`        | no    | FK → `visits.id`, `ON DELETE CASCADE`                |
+| `author_membership_id`                                | `uuid`        | no    | FK → `organization_members.id`, `ON DELETE RESTRICT` |
+| `body`                                                | `text`        | no    | User-entered text, stored as entered                 |
+| `recorded_at` / `captured_at` / `client_operation_id` |               |       | Event convention (§14)                               |
+| `created_at`                                          | `timestamptz` | no    |                                                      |
+
+- No `updated_at`: there is no update path (§12.1).
+- Index `(organization_id, visit_id, recorded_at)` — notes are always read for a Visit, newest first
+  in the activity projection (`BR-080`).
+- The API rejects an empty or whitespace-only body as input validation (`dev.md` §7). No maximum
+  length is asserted here; a limit is an API-contract decision, not a domain rule.
+
+## 13. Job numbering (`BR-052`)
+
+- `jobs.job_number` is a **sequential integer, unique within its organization**, assigned at
+  creation and **never changed** (`BR-052`, §2.2). It may repeat across different organizations.
+- It is never the primary key and must never be used as a cross-system or API key (`BR-052`). API
+  paths and foreign keys use `jobs.id`.
+- The number-allocation mechanism is explicitly an implementation concern of this slice (`BR-052`
+  Notes), so the proposed mechanism is stated here rather than left implicit.
+
+Proposed constraints and table:
+
+- `jobs.job_number integer NOT NULL`, `CHECK (job_number > 0)`, with
+  `UNIQUE (organization_id, job_number)` — the uniqueness `BR-052` requires is enforced by the
+  database, not only by application code.
+- `organization_job_number_counters`:
+
+| Column            | Type          | Null? | Notes                                            |
+| ----------------- | ------------- | ----- | ------------------------------------------------ |
+| `organization_id` | `uuid`        | no    | PK, FK → `organizations.id`, `ON DELETE CASCADE` |
+| `last_job_number` | `integer`     | no    | `NOT NULL DEFAULT 0`                             |
+| `updated_at`      | `timestamptz` | no    | Foundation convention                            |
+
+- Allocation happens inside the Job-creation transaction, in one statement that both bootstraps the
+  counter for a new organization and increments it:
+
+```sql
+INSERT INTO organization_job_number_counters (organization_id)
+VALUES ($1)
+ON CONFLICT (organization_id)
+DO UPDATE SET last_job_number = organization_job_number_counters.last_job_number + 1
+RETURNING last_job_number;
+```
+
+- The counter row is the serialization point for concurrent Job creation within one organization
+  (§15); the counter is monotonic and never moves backwards.
+- Because the increment and the Job insert share a transaction, a rolled-back creation returns its
+  number to the pool instead of consuming it. **No gap-free guarantee is claimed**: `BR-052`
+  requires uniqueness and immutability, not a gapless sequence, and inventing a gapless guarantee
+  would add a business property the product never asked for.
+- Numbering starts at 1 for a new organization. `BR-052` does not define a starting value; the
+  counter's default is the simplest implementation consistent with "sequential integer", and it
+  carries no product meaning.
+- Display of `Job #<number>` is a presentation concern and follows the shared localization rules
+  (`BR-028`, §19).
+
+## 14. Event convention: business time and offline identifiers
+
+Every history/event table in this domain carries the same columns with the same meaning. This
+section is their single definition (`BR-033`, `BR-041`).
+
+| Column                | Type          | Null? | Meaning                                                                      |
+| --------------------- | ------------- | ----- | ---------------------------------------------------------------------------- |
+| `recorded_at`         | `timestamptz` | no    | Server-authoritative business time of the event (`NOT NULL DEFAULT now()`)   |
+| `captured_at`         | `timestamptz` | yes   | Time the action happened on the client device, as claimed by the client      |
+| `client_operation_id` | `uuid`        | yes   | Client-generated identifier of the offline operation that produced the event |
+| `created_at`          | `timestamptz` | no    | Row insertion time (`NOT NULL DEFAULT now()`)                                |
+
+Rules:
+
+- **`recorded_at` is authoritative** for ordering, history display, reporting and audit. It is set by
+  the backend when the event is applied (`BR-001`, `BR-033`).
+- `captured_at` is **client-claimed evidence, not authority** (`BR-013`, `BR-031`). It may be absent
+  (online action, or a client that does not supply it), it is normally earlier than `recorded_at`
+  when the action was performed offline, and it may be skewed by an incorrect device clock. The
+  backend stores what the client claimed and does not silently rewrite it, because `BR-014` and
+  `BR-027` require field work to be preserved rather than corrected behind the user's back. It must
+  never be used as the authoritative time for a business decision that depends on the true order of
+  events.
+- `client_operation_id` supports idempotent replay of offline operations (`BR-031`, §15). It is
+  scoped, not global: within each event table it is unique per `organization_id`
+  (`UNIQUE (organization_id, client_operation_id)` where the column is non-null), which lets the
+  backend recognise a replayed offline operation per table without inventing a global operation
+  identity the business rules do not define.
+- `recorded_at` and `created_at` are normally equal, because the backend records an event when it
+  accepts it. They are kept separate so that an event whose business time is defined by a rule —
+  for example a cascade record written as part of a wider transaction (`BR-065`) — can carry that
+  time without redefining the row's insertion time. Where no rule defines otherwise, the two are
+  written together.
+- Timestamps are absolute instants (`timestamptz`, stored in UTC). Rendering them in a user's
+  language/locale is presentation (`BR-028`). Scheduling time-zone semantics are **open**
+  (`BR-026`, §21) and are not decided here.
+- No event table stores a localized string; reasons, notes, summaries and explanations are stored
+  as the text the actor entered (`Project.md` §10, §19).
+
+## 15. Concurrency, idempotency and conflict behaviour
+
+`BR-031` requires offline synchronization to preserve business integrity, and `BR-032` forbids
+inventing conflict behaviour. This section records only what the confirmed rules imply.
+
+- **Optimistic concurrency**: `jobs` and `visits` carry a `version` column (§2.2, §9.2). Mutations
+  that change business state require the caller's expected version; a mismatch is rejected as a
+  conflict rather than applied. This is the mechanism `BR-001`'s "backend always takes precedence"
+  and `BR-031`'s "not authoritative until accepted by the backend" rely on.
+- **Idempotent replay**: an offline operation replays with its `client_operation_id` (§14). A repeat
+  of an operation already applied to a table is recognised and does not create a second event or a
+  second business outcome (`BR-031`).
+- **Row locking for invariants**: transitions that must not interleave are validated under the
+  relevant row lock in the same transaction — the Visit lifecycle (`BR-074`–`BR-076`, §9), the
+  "at most one Lead" precondition and the conflict check (`BR-068`, `BR-070`, §10.4), Job numbering
+  (§13) and Job completion (`BR-062`).
+- **Append-only history vs. current state**: history tables are only inserted into (§14). Current
+  state tables are updated, and both the state change and its history row are written in the same
+  transaction, so history is never missing an applied change (`BR-067`).
+- **Conflict behaviour is per operation, not generic** (`BR-032`). Where a specific conflict
+  strategy is required but not yet defined by the business rules, it is left open (§21) and is not
+  implemented as last-write-wins.
+
+## 16. Physical deletion of a Job — the open decision
+
+Deleting a Job is the one part of this domain the business rules do not settle, so it is stated here
+explicitly instead of being answered by default behaviour.
+
+**What is confirmed**
+
+- `BR-008` grants the default Manager role a delete capability for Jobs.
+- `BR-021` records, as an explicit **OPEN QUESTION**, "how deletion of a Job relates to preserved
+  business history".
+- `BR-057` and `BR-067` require historical Job and Visit information to be preserved: location
+  history is append-only and status, schedule, assignment, cancellation and outcome history must
+  not be rewritten.
+- Deleting a Job cascades inside its own aggregate (§6.4): a hard delete would remove the Job's
+  Visits and every history row that hangs off them, erasing the history the rules require to be
+  preserved.
+
+**What this model therefore does**
+
+- No deletion path is modelled: no `DELETE` semantics, no `deleted_at`, no tombstone column, no
+  "archived" status value. None of these is defined by a confirmed rule, so none is invented
+  (`BR-042`).
+- No delete endpoint is designed in this slice. If one is added before the question is resolved it
+  would be implementing an undecided business behaviour.
+- The references that _would_ be destroyed by a Job delete all fail closed in the meantime: a
+  Customer, Property or member referenced by Jobs and Visits cannot be deleted while those
+  references exist (§6.4), which is the safe direction for `BR-057` and `BR-067`.
+
+**What the eventual decision must respect**
+
+- `BR-057`/`BR-067`: history is append-only; deleting a Job must not silently rewrite what already
+  happened.
+- `BR-033`: important changes remain traceable, which argues for an explicit, recorded deletion or
+  closing action rather than a disappearance.
+- `BR-064`/`BR-062`: canceling and completing already exist as explicit, history-preserving
+  terminal actions, so they are available when the product needs a Job to stop being active work.
+- Whatever the decision is, it is a change to the business rules first (`BR-040`) and a schema
+  change with a migration second (`Project.md` §8, `dev.md` §6).
+
+The question is repeated in the open-questions register (§21) and must be resolved before any
+delete endpoint or tombstone column is designed.
+
+## 17. Job Activity projection (`BR-080`)
+
+Job Activity is a **derived read model**, not an entity: it is a chronological projection over the
+authoritative records this document defines. It introduces **no table of its own** and must never
+become a second source of truth (`BR-080`, `BR-001`).
+
+| `BR-080` activity source                                       | Authoritative record               |
+| -------------------------------------------------------------- | ---------------------------------- |
+| Job status changes (incl. completion, cancellation, reopening) | `job_status_history` (§7.1)        |
+| Visit status changes (incl. corrections and cancellation)      | `visit_status_history` (§9.5)      |
+| Visit notes                                                    | `visit_notes` (§12)                |
+| Outcome changes                                                | `visit_outcome_history` (§11.2)    |
+| Assignment changes                                             | `visit_technician_history` (§10.3) |
+| Schedule changes                                               | `visit_schedule_history` (§9.4)    |
+| Job Property changes                                           | `job_property_history` (§7.2)      |
+| Visit location resolution                                      | `visit_location_history` (§9.6)    |
+| Photos, audio and files                                        | Not modelled in v1 (§18)           |
+
+- **Ordering**: newest first by default, ordered by `recorded_at` (§14, `BR-080`). `captured_at` may
+  be displayed as "performed at" but never re-orders the authoritative history (§14).
+- **Content**: who (the actor membership referenced by the record) → when (`recorded_at`) → what
+  happened (the record and its codes). Actor names and avatars come from the foundation model
+  (`organization_members`/`users`); they are never copied into event tables.
+- **Stable codes, localized labels**: each projected event carries a stable machine-readable type
+  derived from its source record and event columns. The localized label for a type code is resolved
+  by the client (`BR-028`, `BR-041`, `Project.md` §10). The canonical activity-type code list is
+  part of the shared API contract (`@servora/shared-types`), defined once for both clients, not a
+  separate stored vocabulary (`BR-041`).
+- **No write path**: Activity is read-only. Nothing writes to "activity"; writing goes to the
+  authoritative records listed above, which is what keeps `BR-067` true.
+- **Authorization**: the projection applies the same authorization and tenant scoping as reading the
+  underlying Job and Visit data (`BR-001`, `BR-006`, §2.1). The default Technician permissions are
+  defined by `BR-009`; direct member permissions may expand a member's effective permission set.
+- **Offline**: Activity adds no synchronization of its own (`BR-031`). A client can only project the
+  records it is entitled to and actually holds.
+
+## 18. Deliberately out of scope in v1
+
+These are named by the business rules but are **not** modelled in this slice. Each one is either
+confirmed out of scope or still an open product question; none of them may be filled in later
+without a business decision (`BR-042`).
+
+| Not modelled here                                 | Rule                         | Disposition                                                                                                                                                            |
+| ------------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Job priority                                      | `BR-054`                     | Confirmed out of v1. No column, no derived priority, no automatic scheduling order.                                                                                    |
+| Job category catalogue                            | `BR-053`                     | Open. `type_code` is an optional free code with no CHECK (§6.1, §6.2); no behaviour may branch on it.                                                                  |
+| Visit evidence attachments (photos, audio, files) | `BR-015`, `BR-027`, `BR-077` | Optional in v1. Storage, retention, visibility and audit rules are open; `BR-015`'s evidence-preservation requirement applies once the evidence slice defines storage. |
+| GPS / location capture                            | `BR-038`                     | Open. No location columns on Visits, no geolocation of field actions.                                                                                                  |
+| Time tracking                                     | `BR-034`                     | Open. No timers, no time entries, no billing basis.                                                                                                                    |
+| Parts and materials                               | `BR-035`                     | Open.                                                                                                                                                                  |
+| Assets and equipment                              | `BR-036`                     | Open.                                                                                                                                                                  |
+| Invoices and billing                              | `BR-037`                     | Open.                                                                                                                                                                  |
+| Technician eligibility, skills, territory         | `BR-025`                     | Open. Assignment records who is assigned; nothing about who is _eligible_.                                                                                             |
+| Travel/buffer time and capacity planning          | `BR-026`, `BR-070`           | Open. Conflict detection uses the internal Visit window only.                                                                                                          |
+| Time-zone semantics                               | `BR-026`                     | Open. Instants (`timestamptz`) only; no organization or Visit time-zone field (§9.3).                                                                                  |
+| Notifications                                     | `BR-029`                     | Open. No notification behaviour is implied by any event table in this document.                                                                                        |
+| Reporting and metrics                             | `BR-030`                     | A separate management capability, not part of this domain model.                                                                                                       |
+| Offline conflict rules per operation              | `BR-032`                     | Open. Synchronization mechanics belong to the offline-first architecture standard (`Project.md` §13).                                                                  |
+| Organization and multi-tenancy administration     | `BR-039`                     | Foundation concern; this document only carries `organization_id` scoping.                                                                                              |
+| Audit retention and visibility                    | `BR-033`                     | Open. The history tables exist; how long they are kept and who may read them is undecided.                                                                             |
+
+## 19. Localization of domain values
+
+- Every closed vocabulary in this model is stored as a **stable, machine-readable code** — Job
+  statuses (`BR-058`), Visit statuses (`BR-074`), outcome types (`BR-078`), Visit cancellation
+  reasons (`BR-076`), assignment role codes `LEAD`/`TECHNICIAN` (`BR-068`) — never as display text
+  (`BR-028`, `BR-041`, `Project.md` §10, `dev.md` §9).
+- Localized labels for those codes are resolved in the clients' message catalogs (`Angular.md`,
+  `Android.md`) and, for system-generated API messages, through the shared API conventions in
+  `docs/api/`. This document defines no new localization mechanism and stores no display text.
+- Derived conditions are labels, not values: "Needs Scheduling" / "No Active Visit" (`BR-060`),
+  "Location Changed — Review Schedule" (`BR-056`, §6.3) and the follow-up expectation of an outcome
+  (`BR-078`) are computed from stored codes and localized for display. None is persisted as text and
+  none may be persisted as a status (`BR-060`, `BR-042`).
+- **No field in this domain requires bilingual storage.** Job title/description (`BR-053`), Visit
+  notes and outcome summaries (`BR-077`), schedule-change reasons (`BR-073`) and location-resolution
+  notes (§9.6) are **user-entered content** and stay in the language the user wrote them in
+  (`Project.md` §10, `dev.md` §9). Bilingual _business data_ is required for roles (`BR-005`), which
+  belongs to the foundation model, not here.
+- Because no language-specific column exists, adding a third language later is catalog work with no
+  schema change (`BR-028`).
+
+## 20. Continuity with the foundation domain model
+
+This document **extends** `docs/domain/foundation-domain-model.md`. It does not redefine, replace or
+modify any foundation entity, and it does not alter a foundation table.
+
+**Foundation concepts reused**
+
+| Foundation concept     | How this slice uses it                                                                                                                                                                             |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `organizations`        | The tenant boundary. Every table in this slice carries `organization_id` and every query is tenant-scoped (`BR-001`, `BR-039`).                                                                    |
+| `organization_members` | The actor identity for every event row (`actor_membership_id`) and for the Job Owner (`owner_membership_id`). A Job Owner is a member of the owning organization, never a bare user id (`BR-055`). |
+| `users`                | Profile and photo (`BR-020`). Users appear here only through organization membership.                                                                                                              |
+| `customers`            | The party receiving service (`BR-023`). A Job always belongs to exactly one Customer (`BR-048`), and the Property ↔ Customer relationship is modelled in §4.                                       |
+
+**Tables proposed by this slice**
+
+| Table                              | Section | Purpose                                                                                                        |
+| ---------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `properties`                       | §3.1    | Organization-owned service location with a structured address (`BR-049`).                                      |
+| `property_customer_relationships`  | §4.1    | Append-only history of the single active Property ↔ Customer relationship (`BR-050`).                          |
+| `job_customer_history`             | §5.2    | Append-only history of a Job's Customer (`BR-048`).                                                            |
+| `jobs`                             | §6.1    | The work request, with the immutable Job number and the address snapshot (`BR-052`, `BR-056`).                 |
+| `job_status_history`               | §7.1    | Append-only Job status events, including completion, cancellation and reopening (`BR-058`, `BR-062`–`BR-064`). |
+| `job_property_history`             | §7.2    | Append-only history of the Job's Property and its snapshot (`BR-056`, `BR-057`).                               |
+| `visits`                           | §9.2    | One field attempt, with scheduling, status and operational location (`BR-071`, `BR-072`, `BR-074`).            |
+| `visit_technicians`                | §10.2   | Current technician assignment and Lead role on a Visit (`BR-068`).                                             |
+| `visit_technician_history`         | §10.3   | Append-only assignment history (`BR-069`).                                                                     |
+| `visit_schedule_history`           | §9.4    | Append-only schedule changes, including confirmed conflicts (`BR-073`).                                        |
+| `visit_status_history`             | §9.5    | Append-only Visit status events, corrections and cancellations (`BR-074`–`BR-076`).                            |
+| `visit_outcome_history`            | §11.2   | Append-only outcome events and corrections (`BR-077`–`BR-079`).                                                |
+| `visit_notes`                      | §12.2   | Append-only per-Visit notes (`BR-027`, `BR-077`).                                                              |
+| `visit_location_history`           | §9.6    | Append-only history of a Visit's operational location (`BR-056`, `BR-057`).                                    |
+| `visit_location_review_flags`      | §6.3    | Open review requirement when a Job's Property changes under scheduled or active Visits (`BR-056`).             |
+| `organization_job_number_counters` | §13     | Per-organization Job-number allocation (`BR-052`).                                                             |
+
+- The slice is **additive**: it adds tables and references, and removes nothing.
+- References into foundation data are restricted, not cascading: this slice never deletes or rewrites
+  foundation rows (§6.4). Only the tenant (`organization_id`) reference follows the foundation's
+  deletion convention.
+- If implementation later needs a change to a _foundation_ table, that is a separate decision with
+  its own business-rule change and migration (`BR-040`, `Project.md` §8).
+
+## 21. Open questions register
+
+Every item below is a product decision the business rules leave open. This model **fails closed** on
+each one: no behaviour, status, catalogue or column was invented for it (`BR-042`, `qa.md` §15).
+
+| #   | Open question                                                                                                                 | Rule               | How this model handles it now                                                                                                                                                                         | Blocks                                  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| 1   | How does deleting a Job relate to preserved business history?                                                                 | `BR-021`           | No deletion path, tombstone or `deleted_at` is modelled; references fail closed (§16).                                                                                                                | Any Job delete endpoint.                |
+| 2   | What is the `final_outcome` value catalogue?                                                                                  | `BR-062`           | `final_outcome_code` exists with **no** CHECK and is never copied from a Visit outcome (§6.1, §8.5).                                                                                                  | Offering a completion picker.           |
+| 3   | Which Job status follows a `NEEDS_QUOTE_APPROVAL` outcome?                                                                    | `BR-061`           | Treated as **not modelled**: an `IN_PROGRESS` Job is not moved to `PENDING_REVIEW` and no alternative transition is invented (§8.4, §11.1).                                                           | `PENDING_REVIEW` entry rule.            |
+| 4   | What is the Job cancellation reason catalogue?                                                                                | `BR-064`           | `reason_code` exists with **no** CHECK; the structured reason plus mandatory note are enforced in the service layer (§7.1, §8.6).                                                                     | The cancellation UI.                    |
+| 5   | May organizations add their own Visit cancellation reasons?                                                                   | `BR-076`           | The confirmed six-code vocabulary is a CHECK; no organization-specific catalogue is modelled (§9.5).                                                                                                  | Organization-level reason management.   |
+| 6   | Must a Job-cancellation cascade carry its own Visit-level reason in addition to the Job cancellation it references?           | `BR-065`           | The cascade row references the Job cancellation that carries the reason; no extra Visit-level reason is required or invented (§9.5).                                                                  | Cascade record completeness.            |
+| 7   | May a Property exist with **no** active Customer relationship?                                                                | `BR-050`           | Not modelled as invalid; the relationship table simply has no open row (§4.1).                                                                                                                        | Property creation rules.                |
+| 8   | What is the Job category/type catalogue?                                                                                      | `BR-053`           | `type_code` is an optional free `varchar` with no CHECK and no behaviour branches on it (§6.1, §6.2).                                                                                                 | Category automation or filtering rules. |
+| 9   | Is the Job address snapshot refreshed when the _Property's_ own address changes?                                              | `BR-056`, `BR-057` | The snapshot is written when the Property association is created or changed; a Property address edit does not rewrite it, and no refresh rule is invented (§6.3).                                     | Snapshot refresh behaviour.             |
+| 10  | May a Visit's operational location be changed at all, by which actions, and in which statuses?                                | `BR-056`           | The requirement (explicit, authorized, recorded) is modelled; the resolution catalogue and permitted statuses are not (§9.6).                                                                         | Location-resolution UI and validation.  |
+| 11  | May a Visit note ever be edited or deleted?                                                                                   | `BR-027`, `BR-067` | `visit_notes` is append-only with no update or delete path and no edit window (§12.2).                                                                                                                | Note editing.                           |
+| 12  | What is the Technician self-edit window for a Visit outcome, and how does reopening a Job interact with outcome immutability? | `BR-079`           | No time window is modelled or enforced; immutability is derived from the Job being `COMPLETED`, and reopening does not un-freeze outcomes (§11.1).                                                    | Technician outcome editing.             |
+| 13  | What is the offline conflict strategy for each synchronization-sensitive operation?                                           | `BR-032`           | Conflict behaviour is per operation; where a strategy is undefined it is left open and never implemented as last-write-wins (§15).                                                                    | Offline mutation design.                |
+| 14  | What are the scheduling time-zone semantics?                                                                                  | `BR-026`           | Only absolute instants (`timestamptz`) are stored; no organization or Visit time-zone field exists (§2.3, §9.3, §14).                                                                                 | Display and input of schedules.         |
+| 15  | What are the audit retention and audit visibility rules?                                                                      | `BR-033`           | The history tables exist and are append-only; retention and read access are not defined (§2.4).                                                                                                       | Retention jobs and audit screens.       |
+| 16  | How may a Property be deleted or its address edited once Jobs and Visits reference it?                                        | `BR-057`           | References restrict deletion; only append-only history records an address change (§3, §6.4).                                                                                                          | Customer/Property management.           |
+| 17  | Does a remaining `DRAFT` Visit block entry into `PENDING_REVIEW`?                                                             | `BR-061`           | `BR-060` excludes `DRAFT` from the "Needs Scheduling" active-work signal, but `BR-061` does not classify it for review entry. No automatic transition is implemented for the draft-Visit case (§8.4). | `PENDING_REVIEW` entry rule.            |
+
+Not an open question, recorded here to prevent a false assumption: **Job-number gaps**. `BR-052`
+requires uniqueness and immutability, not a gapless sequence, so no gap-free guarantee is claimed
+(§13).
