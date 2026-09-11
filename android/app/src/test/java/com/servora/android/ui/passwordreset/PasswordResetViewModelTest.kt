@@ -174,7 +174,9 @@ class PasswordResetViewModelTest {
         runTest(dispatcher) {
             val repository = RecordingResetRepository()
             val viewModel = viewModelAt(PasswordResetStep.NEW_PASSWORD, repository)
+            // The confirmation is checked on the client, so both fields have to be filled.
             viewModel.onNewPasswordChange("a-new-password")
+            viewModel.onConfirmPasswordChange("a-new-password")
 
             viewModel.onSubmit()
             advanceUntilIdle()
@@ -183,6 +185,7 @@ class PasswordResetViewModelTest {
             assertEquals(PasswordResetStep.DONE, state.step)
             assertEquals("", state.code)
             assertEquals("", state.newPassword)
+            assertEquals("", state.confirmPassword)
             assertEquals(
                 "completePasswordReset:user@example.com:654321:a-new-password",
                 repository.calls.last(),
@@ -198,6 +201,7 @@ class PasswordResetViewModelTest {
             AuthActionResult.Failure(AuthFailureReason.TOO_MANY_REQUESTS)
         val viewModel = viewModelAt(PasswordResetStep.NEW_PASSWORD, repository)
         viewModel.onNewPasswordChange("a-new-password")
+        viewModel.onConfirmPasswordChange("a-new-password")
 
         viewModel.onSubmit()
         advanceUntilIdle()
@@ -205,6 +209,8 @@ class PasswordResetViewModelTest {
         assertEquals(PasswordResetStep.NEW_PASSWORD, viewModel.uiState.value.step)
         assertEquals(AuthFailureReason.TOO_MANY_REQUESTS, viewModel.uiState.value.failureReason)
         assertEquals("a-new-password", viewModel.uiState.value.newPassword)
+        // A rejection invalidates nothing the user typed, so both fields are still there.
+        assertEquals("a-new-password", viewModel.uiState.value.confirmPassword)
     }
 
     @Test
@@ -237,6 +243,130 @@ class PasswordResetViewModelTest {
 
         assertFalse(viewModel.uiState.value.isSubmitting)
         assertEquals(PasswordResetStep.CODE, viewModel.uiState.value.step)
+    }
+
+    @Test
+    fun `blocks submission when the confirmation does not match`() = runTest(dispatcher) {
+        val repository = RecordingResetRepository()
+        val viewModel = viewModelAt(PasswordResetStep.NEW_PASSWORD, repository)
+
+        viewModel.onNewPasswordChange("correct-horse")
+        viewModel.onConfirmPasswordChange("correct-hors")
+        viewModel.onSubmit()
+        advanceUntilIdle()
+
+        assertEquals(PasswordResetStep.NEW_PASSWORD, viewModel.uiState.value.step)
+        assertEquals(PasswordResetFieldError.CONFIRM_PASSWORD, viewModel.uiState.value.fieldError)
+        assertFalse(repository.calls.any { it.startsWith("completePasswordReset") })
+    }
+
+    @Test
+    fun `sends the confirmed password once both fields agree`() = runTest(dispatcher) {
+        val repository = RecordingResetRepository()
+        val viewModel = viewModelAt(PasswordResetStep.NEW_PASSWORD, repository)
+
+        viewModel.onNewPasswordChange("correct-horse")
+        viewModel.onConfirmPasswordChange("correct-horse")
+        viewModel.onSubmit()
+        advanceUntilIdle()
+
+        assertEquals(PasswordResetStep.DONE, viewModel.uiState.value.step)
+        assertEquals(
+            listOf("completePasswordReset:user@example.com:654321:correct-horse"),
+            repository.calls.takeLast(1),
+        )
+        // The typed password has served its purpose, so nothing of it is kept.
+        assertEquals("", viewModel.uiState.value.newPassword)
+        assertEquals("", viewModel.uiState.value.confirmPassword)
+    }
+
+    @Test
+    fun `clears the mismatch error when either password field is edited`() = runTest(dispatcher) {
+        val viewModel = viewModelAt(PasswordResetStep.NEW_PASSWORD, RecordingResetRepository())
+
+        viewModel.onNewPasswordChange("correct-horse")
+        viewModel.onConfirmPasswordChange("typo")
+        viewModel.onSubmit()
+        assertEquals(PasswordResetFieldError.CONFIRM_PASSWORD, viewModel.uiState.value.fieldError)
+
+        viewModel.onConfirmPasswordChange("typo-again")
+        assertNull(viewModel.uiState.value.fieldError)
+
+        viewModel.onSubmit()
+        assertEquals(PasswordResetFieldError.CONFIRM_PASSWORD, viewModel.uiState.value.fieldError)
+
+        viewModel.onNewPasswordChange("correct-horse-2")
+        assertNull(viewModel.uiState.value.fieldError)
+    }
+
+    @Test
+    fun `drops the typed passwords when stepping back to the code step`() = runTest(dispatcher) {
+        val viewModel = viewModelAt(PasswordResetStep.NEW_PASSWORD, RecordingResetRepository())
+
+        viewModel.onNewPasswordChange("correct-horse")
+        viewModel.onConfirmPasswordChange("correct-hors")
+        viewModel.onStepBack()
+
+        assertEquals(PasswordResetStep.CODE, viewModel.uiState.value.step)
+        assertEquals("", viewModel.uiState.value.newPassword)
+        assertEquals("", viewModel.uiState.value.confirmPassword)
+    }
+
+    @Test
+    fun `returns to the identity step when the flow is left for sign-in`() = runTest(dispatcher) {
+        val viewModel = viewModelAt(PasswordResetStep.NEW_PASSWORD, RecordingResetRepository())
+        viewModel.onNewPasswordChange("correct-horse")
+        viewModel.onConfirmPasswordChange("correct-horse")
+
+        viewModel.reset()
+
+        assertEquals(PasswordResetStep.IDENTITY, viewModel.uiState.value.step)
+        assertEquals("", viewModel.uiState.value.email)
+        assertEquals("", viewModel.uiState.value.newPassword)
+        assertEquals("", viewModel.uiState.value.confirmPassword)
+        assertNull(viewModel.uiState.value.fieldError)
+        assertFalse(viewModel.uiState.value.isSubmitting)
+    }
+
+    @Test
+    fun `discards a successful answer that arrives after the flow was reset`() =
+        runTest(dispatcher) {
+            val repository = RecordingResetRepository()
+            val gate = CompletableDeferred<Unit>()
+            repository.gate = gate
+            val viewModel = PasswordResetViewModel(repository)
+
+            viewModel.onEmailChange("user@example.com")
+            viewModel.onSubmit()
+            assertTrue(viewModel.uiState.value.isSubmitting)
+
+            viewModel.reset()
+            gate.complete(Unit)
+            advanceUntilIdle()
+
+            // The abandoned attempt neither advances the flow nor reports its outcome.
+            assertEquals(PasswordResetStep.IDENTITY, viewModel.uiState.value.step)
+            assertFalse(viewModel.uiState.value.isSubmitting)
+            assertNull(viewModel.uiState.value.failureReason)
+        }
+
+    @Test
+    fun `discards a rejected answer that arrives after the flow was reset`() = runTest(dispatcher) {
+        val repository = RecordingResetRepository()
+        repository.requestResult = AuthActionResult.Failure(AuthFailureReason.NETWORK)
+        val gate = CompletableDeferred<Unit>()
+        repository.gate = gate
+        val viewModel = PasswordResetViewModel(repository)
+
+        viewModel.onEmailChange("user@example.com")
+        viewModel.onSubmit()
+
+        viewModel.reset()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.failureReason)
+        assertEquals(PasswordResetStep.IDENTITY, viewModel.uiState.value.step)
     }
 
     /**

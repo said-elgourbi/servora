@@ -328,3 +328,61 @@ fix: no padding, offset or spacing value is involved anywhere.
   on these screens at all (the surrounding surface does not clear focus), so that dismissal path does
   not exist yet and needs its own product decision.
 
+
+## Confirmation entry and the completion step (2026-09-11)
+
+The reset form now asks for the new password twice. The pair is compared on the client, so a typo
+never reaches `POST /auth/password-reset/confirm`; a mismatch is reported on the confirmation field
+(`PasswordResetFieldError.CONFIRM_PASSWORD`) and **both** entries are kept, so the user corrects the
+mistake instead of retyping it. Two new strings carry the copy in both languages
+(`password_reset_confirm_password_label`, `password_reset_error_passwords_do_not_match`, in
+`values/strings.xml` and `values-fr/strings.xml`).
+
+Two smaller corrections shipped with it:
+
+- **Returning to sign-in clears the attempt.** `AuthFlowScreen` calls `PasswordResetViewModel.reset()`
+  when it shows the sign-in destination, so an abandoned attempt no longer leaves its email, code or
+  password in the state the next user of the device would see, and a response still in flight is
+  discarded through the same `attemptId` guard the other attempts use.
+- **One way back from the completion step.** `PasswordResetScreen` rendered the primary action for
+  every step, so `DONE` showed "Back to sign in" twice — once as the button, once as the footer link.
+  The primary action is now gated on steps that actually submit, leaving exactly one affordance; the
+  `submitLabel`/`submitPendingLabel` mapping keeps its `DONE` entry only because the enum stays total.
+
+Verification (2026-09-11, host tooling, Android debug build):
+
+- `./gradlew :app:testDebugUnitTest` — 71 tests, 0 failures, 0 errors across 7 suites.
+  `PasswordResetViewModelTest` covers the gate: a mismatch blocks submission without calling the
+  repository, the rejection keeps both fields, and `reset()` clears the attempt.
+- `./gradlew :app:lintDebug :app:assembleDebug` — `BUILD SUCCESSFUL`.
+- `./gradlew :app:compileDebugAndroidTestKotlin` — `BUILD SUCCESSFUL` (the instrumentation sources
+  compile; one `createComposeRule` deprecation warning, same as the existing suite).
+
+Automated cover added:
+`app/src/androidTest/java/com/servora/android/ui/passwordreset/PasswordResetScreenTest.kt`
+(4 Compose UI tests) — the two password fields at the new-password step, the mismatch message under
+the confirmation field, exactly one "Back to sign in" on the completion step (clicking it fires the
+callback once), and the new copy rendered from a French locale. The French test asserts the French
+lookup differs from the English copy first, so a missing `values-fr` entry fails instead of
+comparing English with itself.
+
+Not run — no device or emulator is attached to this environment:
+
+```bash
+cd android && ./gradlew connectedDebugAndroidTest
+```
+
+Manual Android QA checklist (product owner):
+
+1. Sign in screen → **Forgot password?** → enter the email → **Send reset code**.
+2. Enter the 6-digit code → **Verify code**.
+3. At **New password**, type a password, then a different confirmation.
+   Expected: "Passwords do not match." under the confirmation field, and **Save new password** does
+   not submit. Correcting the confirmation clears the message.
+4. Enter matching passwords and save. Expected: the completion step shows the updated message and
+   exactly one **Back to sign in**.
+5. Tap **Back to sign in**, then reopen **Forgot password?**.
+   Expected: an empty form — no email, code or password from step 1–3.
+6. Switch the in-app language to French and repeat step 3.
+   Expected: the confirmation label and the mismatch message are French.
+

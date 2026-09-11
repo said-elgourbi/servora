@@ -17,6 +17,8 @@ data class PasswordResetUiState(
     val email: String = "",
     val code: String = "",
     val newPassword: String = "",
+    /** The confirmation is checked here, so a typo never reaches the backend (`BR-043`). */
+    val confirmPassword: String = "",
     val passwordVisible: Boolean = false,
     val isSubmitting: Boolean = false,
     /** A client-side problem with one field, cleared as soon as that field is edited. */
@@ -48,4 +50,4 @@ enum class PasswordResetStep {
 }
 
 /** The field a client-side validation problem belongs to. */
-enum class PasswordResetFieldError { EMAIL, CODE, PASSWORD }
+enum class PasswordResetFieldError { EMAIL, CODE, PASSWORD, CONFIRM_PASSWORD }

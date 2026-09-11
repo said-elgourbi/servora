@@ -57,6 +57,7 @@
     <string name="password_reset_done_message">Votre mot de passe a été mis à jour. Connectez-vous avec votre nouveau mot de passe.</string>
     <string name="password_reset_code_label">Code de réinitialisation</string>
     <string name="password_reset_code_placeholder">123456</string>
+    <string name="password_reset_confirm_password_label">Confirmer le nouveau mot de passe</string>
     <string name="password_reset_new_password_label">Nouveau mot de passe</string>
     <string name="password_reset_action_send">Envoyer le code</string>
     <string name="password_reset_action_sending">Envoi…</string>
@@ -68,6 +69,7 @@
     <string name="password_reset_back_to_sign_in">Retour à la connexion</string>
     <string name="password_reset_error_email_required">Saisissez votre courriel.</string>
     <string name="password_reset_error_code_required">Saisissez le code à 6 chiffres.</string>
+    <string name="password_reset_error_passwords_do_not_match">Les mots de passe ne correspondent pas.</string>
     <string name="password_reset_error_password_required">Saisissez un nouveau mot de passe.</string>
 
     <!-- Connexion par téléphone ou SMS (`BR-019`). -->
