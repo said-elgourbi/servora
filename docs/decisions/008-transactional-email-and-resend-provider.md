@@ -64,10 +64,12 @@ belongs to the deployment (the domain must be verified in Resend), not to the so
 `Authorization: Bearer <RESEND_API_KEY>` header, a JSON body (`from`, `to`, `subject`, `text`) and
 `AbortSignal.timeout(10s)`.
 
-This is the same choice `ADR-006` D4 made for Sinch, for the same reason: the port is one endpoint
-with four fields, so a provider package would add a dependency, its own error vocabulary and its
-own release cycle to gain nothing (`dev.md` §4). The `FetchLike` type and the fetch implementation
-are injected, which is how the unit test asserts the request without a network.
+This mirrors the reasoning `ADR-006` D4 applied to the SMS provider: the port is one endpoint with
+four fields, so a provider package would add a dependency, its own error vocabulary and its own
+release cycle to gain nothing (`dev.md` §4). The SMS provider was later moved from Sinch to Twilio
+and *does* use the vendor SDK, because Twilio's API requires request signing — `ADR-006` D4 records
+that difference. The `FetchLike` type and the fetch implementation here are injected, which is how
+the unit test asserts the request without a network.
 
 Every non-2xx response, timeout and network failure becomes `EmailDeliveryError`. That error
 carries **no** provider detail: a provider's error body can echo the message it was given — for a

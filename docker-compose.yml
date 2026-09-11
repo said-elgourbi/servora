@@ -45,9 +45,9 @@ services:
       # Authentication-flow configuration (BR-019, BR-043, BR-045; ADR-006). Every value has an
       # approved default, so a local stack only overrides what it wants to change.
       SMS_PROVIDER: ${SMS_PROVIDER:-noop}
-      SINCH_SERVICE_PLAN_ID: ${SINCH_SERVICE_PLAN_ID:-}
-      SINCH_API_TOKEN: ${SINCH_API_TOKEN:-}
-      SINCH_FROM: ${SINCH_FROM:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM: ${TWILIO_FROM:-}
       PASSWORD_RESET_DELIVERY: ${PASSWORD_RESET_DELIVERY:-noop}
       PASSWORD_RESET_DELIVERY_DIRECTORY: ${PASSWORD_RESET_DELIVERY_DIRECTORY:-var/dev-notifications}
       # Transactional email delivery (BR-043, ADR-008). The no-op default keeps the stack bootable;

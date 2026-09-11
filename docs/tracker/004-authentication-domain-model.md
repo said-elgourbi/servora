@@ -124,7 +124,7 @@ a `Sign in with SMS` affordance on the sign-in screen.
 | Database | Migration `0002_auth_flows.sql`: `password_reset_tokens.attempts` (+ `>= 0` check, outstanding-row index) | Migration `0002_auth_flows.sql`: `phone_otp_challenges`; `auth_rate_limit_events` |
 | API | `POST /auth/password-reset/{request,verify,complete}` | `POST /auth/sms/{request,verify}` |
 | Security | Keyed code digest, 30-minute lifetime, single use, 5 attempts, supersession, `202` non-disclosure, persisted rate limiting | 10-minute lifetime, single use, 5 attempts, supersession, 60-second resend cooldown, fail-closed on an ambiguous number, provider failure that stays non-disclosing |
-| Ports | `PasswordResetNotifier` (no-op by default, development-only file sink; `PASSWORD_RESET_DELIVERY=email` binds `EmailPasswordResetNotifier` over the `EMAIL_PROVIDER` port — `ADR-008`) | `SmsProvider` selected by `SMS_PROVIDER` (`noop` default, `sinch`, or a development file sink); `FakeSmsProvider` for tests |
+| Ports | `PasswordResetNotifier` (no-op by default, development-only file sink; `PASSWORD_RESET_DELIVERY=email` binds `EmailPasswordResetNotifier` over the `EMAIL_PROVIDER` port — `ADR-008`) | `SmsProvider` selected by `SMS_PROVIDER` (`noop` default, `twilio`, or a development file sink); `FakeSmsProvider` for tests |
 | Android | `fp-*` flow as a four-step state machine | `sms-phone` → `sms-otp` as a two-step state machine |
 | Localization | EN/FR strings for both flows, and one shared failure vocabulary | Same |
 
@@ -153,7 +153,7 @@ Stack smoke test           PASS  /health 200; reset request (unknown) 202; sms r
 ```
 
 New API coverage: `auth-code`, `phone-number`, `auth-message`, `auth-limits-config`,
-`notifications-config`, `sms-config`, `sinch-sms-provider`, `auth-flow-requests` (unit);
+`notifications-config`, `sms-config`, `twilio-sms-provider`, `auth-flow-requests` (unit);
 `password-reset.e2e-spec.ts` (16) and `sms-authentication.e2e-spec.ts` (18) against real
 PostgreSQL, covering non-disclosure, expiry, single use, supersession, attempt limits, throttling,
 resend cooldown, ambiguous numbers, provider failure and "no session on failure".
@@ -385,4 +385,44 @@ Manual Android QA checklist (product owner):
    Expected: an empty form — no email, code or password from step 1–3.
 6. Switch the in-app language to French and repeat step 3.
    Expected: the confirmation label and the mismatch message are French.
+
+
+## SMS provider replaced: Sinch → Twilio (2026-09-11)
+
+`ADR-006` D4 originally bound **Sinch** through the `SmsProvider` port. Product ownership replaced
+it with **Twilio**, which required no domain change: the port, the OTP rules and the request
+contract are untouched.
+
+| Layer | Change |
+| --- | --- |
+| Configuration | `SmsConfig.twilio` (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`) replaces the `SINCH_*` values. `loadSmsConfig` still refuses to start when a selected provider is missing its credentials. |
+| Sender | `TWILIO_FROM` is validated when the configuration loads: an E.164 number is sent as `from`, an `MG…` Messaging Service SID as `messagingServiceSid` (how an A2P-registered deployment sends), and anything else is rejected before the API serves a request instead of on the first OTP. |
+| Binding | `SmsModule` selects `noop` (default), `twilio` or `file`; the `file` sink is still refused under `NODE_ENV=production`. |
+| Implementation | `TwilioSmsProvider` uses Twilio's official SDK behind an injected client seam, builds the client once, caps the request timeout at 10 seconds and maps every provider rejection to `SmsDeliveryError` without keeping the provider's own error. `SinchSmsProvider` and its spec were deleted rather than left unused (`dev.md` §15). |
+| Deployment | `docker-compose.yml` and `.env.example` pass the `TWILIO_*` values through; local development still defaults to `SMS_PROVIDER=noop`, so nothing changes without credentials. |
+| Docs | `ADR-006` D4 rewritten with the supersession recorded in place, `ADR-005` D7's note and `ADR-008` D3's comparison updated, `BR-019`'s note now names Twilio, and `docs/api/authentication.md` §7 lists the binding and its variables. |
+
+Twilio remains only the *delivery* provider for a code Servora generates: `BR-019` and `BR-046`
+require Servora to own generation, the expiry, the attempt limit, hashed storage and single-use
+invalidation, so Twilio Verify is not used.
+
+Verification (2026-09-11, host tooling → PostgreSQL on host port 5434):
+
+```text
+API typecheck (tsc --noEmit)   PASS  0 errors
+API lint (oxlint)              PASS  0 warnings / 0 errors
+API unit tests (Vitest)        PASS  248 passed / 31 files (sms: 18 passed / 3 files)
+API e2e (Vitest + PostgreSQL)  PASS  98 passed / 7 files
+API build (nest build)         PASS
+Provider import smoke test     PASS  dist/sms/providers/twilio-sms-provider.js loads and exports TwilioSmsProvider
+```
+
+Automated cover rewritten or added: `sms-config.spec.ts` (11 tests — each missing `TWILIO_*` value
+and an invalid sender, both refused at load), `sms.module.spec.ts` (3 tests — the `noop`, `twilio`
+and `file` bindings) and `twilio-sms-provider.spec.ts` (4 tests — the request built for a number
+and for a Messaging Service SID, and the failure mapping).
+
+Not verified: no message was sent through Twilio's live API. That needs real credentials and a
+sender the account is allowed to use, neither of which exists in this environment; the suite
+verifies the request the provider builds and how it reports failure, not Twilio's delivery.
 

@@ -600,7 +600,7 @@ sign-in flow is not defined by this rule and remains **OPEN QUESTION** for the u
 lifecycle.
 
 SMS delivery is provider-specific and is isolated behind an application-level port
-(`SmsProvider`). The initial production provider is Sinch; the domain and application layers
+(`SmsProvider`). The production provider is Twilio; the domain and application layers
 do not depend on provider-specific classes, terminology or response structures.
 
 **Status:**

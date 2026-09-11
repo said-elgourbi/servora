@@ -90,26 +90,43 @@ ever logged on either path (`BR-046`).
 Choosing the production transport (SMTP, a transactional email API, …) and its credentials
 remains a deferred infrastructure decision; nothing in this ADR presumes one.
 
-### D4 — Sinch is bound through the existing `SmsProvider` port
+### D4 — Twilio is bound through the existing `SmsProvider` port
 
 `ADR-005` D5–D7 created `SmsProvider` with a no-op binding and deliberately left provider
-selection open. `BR-019` now approves Sinch as the initial production provider, so
-`SinchSmsProvider` implements the same port and `SmsModule` selects it from `SMS_PROVIDER`
-(`noop` | `sinch`).
+selection open. `BR-019` approves Twilio as the production provider, so `TwilioSmsProvider`
+implements the same port and `SmsModule` selects it from `SMS_PROVIDER`
+(`noop` | `twilio` | `file`).
 
-`SinchSmsProvider` calls Sinch's messaging HTTP API with `fetch` (Node's global `fetch`; no new
-dependency) and reads its credentials from configuration (`SINCH_SERVICE_PLAN_ID`,
-`SINCH_API_TOKEN`, `SINCH_FROM`). It never logs the message body, because the body carries the
-OTP, and it maps a non-2xx response to `SmsDeliveryError` rather than leaking provider
-terminology upward.
+> **Provider replaced (2026-09-11):** this decision originally bound **Sinch**. Product ownership
+> replaced it with **Twilio**, and the Sinch implementation, its `SINCH_*` configuration and its
+> tests were deleted rather than kept as a second, unused provider (`dev.md` §15: no dead code).
+> The port, the OTP rules and every credential requirement below are unchanged — only `SmsModule`,
+> `sms-config` and one implementation file changed, which is exactly what `ADR-005` D5–D7 designed
+> the port for.
 
-**Deliberate interpretation:** Sinch is used as the *delivery* provider for a code Servora
+Twilio's official SDK is used rather than raw HTTP. Twilio's REST API requires request signing
+(an HMAC over the URL and the sorted parameters, keyed with the auth token), and the port owns OTP
+delivery, so hand-writing a signer would be security-sensitive code the vendor already maintains.
+The dependency stays inside `createTwilioClient`; nothing above the port imports it, and the
+provider is tested through an injected client seam rather than over the network.
+
+Credentials come from configuration (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`) and
+are validated by `loadSmsConfig` **at startup**, so a misconfigured deployment fails loudly on boot
+instead of at the first OTP request. `TWILIO_FROM` is either an E.164 number (sent as `from`) or an
+`MG…` Messaging Service SID (sent as `messagingServiceSid`, the normal A2P-registered deployment);
+a value that is neither is refused at startup. The client is built once and reused, and its request
+timeout is capped at 10 seconds so a hung provider cannot hold a technician's request open.
+
+The provider never logs the message body, because the body carries the OTP, and it maps every
+provider rejection to `SmsDeliveryError` rather than leaking provider terminology or a provider
+error body upward — a provider error can quote the message it was given (`BR-046`).
+
+**Deliberate interpretation:** Twilio is used as the *delivery* provider for a code Servora
 generates. The approved rules require Servora to own generation, the 10-minute expiry, the
 five-attempt limit, hashed storage and immediate single-use invalidation (`BR-019`, `BR-046`);
-a provider-side code generator cannot satisfy those properties, so the provider is confined to
-transport. The port keeps that choice reversible: adopting a Sinch verification mode that
-generates its own code, or replacing Sinch entirely, is a change to `SmsModule` and one
-implementation file.
+a provider-side code generator (Twilio Verify) cannot satisfy those properties, so the provider is
+confined to transport. The port keeps that choice reversible: adopting Twilio Verify, or replacing
+Twilio, is a change to `SmsModule` and one implementation file.
 
 `FakeSmsProvider` (in-memory, test-only) is added so the automated suite never sends a real
 message.

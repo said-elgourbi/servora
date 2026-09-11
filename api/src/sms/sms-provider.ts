@@ -5,7 +5,10 @@
  * of 2026-09-10 is that the authentication domain depends on a port rather than
  * on a provider SDK, so a provider can be replaced without touching the domain:
  *
- * `Authentication -> SmsProvider -> provider implementation -> Sinch / Twilio / Telnyx / ...`
+ * `Authentication -> SmsProvider -> provider implementation`
+ *
+ * `TwilioSmsProvider` is the current implementation (`BR-019`, `ADR-006` D4); the port is what
+ * keeps replacing it a change to `SmsModule` and one file.
  *
  * See `docs/decisions/005-sign-in-hardening-and-sms-port.md`.
  *
