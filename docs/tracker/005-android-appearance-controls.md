@@ -56,3 +56,26 @@ verification only, per `qa.md` §17.
 
 Expected: the visible abbreviation and the pill's selected state always match the applied
 appearance, no flash of the wrong theme on launch, and the choice survives a process restart.
+
+## Insets follow-up — status-bar overlap (2026-09-11)
+
+Device review found the two pills rendering **under the system status bar**. The window draws under
+the system bars (edge-to-edge is enforced from Android 15, and the app never opts out), while the
+top bar positioned itself with a fixed 20 dp margin only.
+
+Fix (Android only, `SignInScreen`): the pinned row now offsets itself by the inset the platform
+reports — `Modifier.windowInsetsPadding(WindowInsets.statusBars)` — so the designed 20 dp gutters
+sit inside the status-bar safe area. No fixed status-bar height is introduced (`Project.md` §11,
+`dev.md` §1). The form column below the row is unchanged.
+
+```text
+Android build (make android-build → assembleDebug)          PASS
+Android unit tests (make android-test → testDebugUnitTest)  PASS — 64 tests, 0 failures, 0 errors
+Android lint (make android-lint → lintDebug)                PASS
+```
+
+Physical-device QA (`qa.md` §7): **AWAITING PRODUCT OWNER** — re-check that both pills are fully
+visible below the status bar and that their distance from it still matches the design. If a device
+older than Android 15 shows the row sitting lower than designed, the inset must be conditioned on
+the window actually being edge-to-edge.
+

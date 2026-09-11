@@ -226,6 +226,11 @@ track), language segment min width 52 dp, theme segment width 44 dp, segment ico
 controls sit in the page gutters (20 dp) above the form, language leading and appearance trailing,
 so the form keeps its own centred column below them.
 
+The row also sits inside the status-bar safe area: the window draws under the system bars
+(edge-to-edge is enforced from Android 15, and the Android app does not opt out), so the top bar is
+offset by the inset the platform reports — `Modifier.windowInsetsPadding(WindowInsets.statusBars)`
+— and the 20 dp gutters sit inside that inset. No status-bar height is hard-coded.
+
 Accessibility: the pair is a `selectableGroup` of `Role.RadioButton` segments. Each segment is
 labelled by its own full name — "English" / "Français" for languages, "Light theme" / "Dark theme"
 ("Thème clair" / "Thème sombre") for appearance — and the visible two-letter language abbreviations
