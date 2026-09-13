@@ -31,6 +31,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -64,6 +66,7 @@ fun PasswordResetScreen(
         onEmailChange = viewModel::onEmailChange,
         onCodeChange = viewModel::onCodeChange,
         onNewPasswordChange = viewModel::onNewPasswordChange,
+        onConfirmPasswordChange = viewModel::onConfirmPasswordChange,
         onTogglePasswordVisibility = viewModel::onTogglePasswordVisibility,
         onStepBack = viewModel::onStepBack,
         onSubmit = viewModel::onSubmit,
@@ -85,6 +88,7 @@ internal fun PasswordResetScreen(
     onEmailChange: (String) -> Unit,
     onCodeChange: (String) -> Unit,
     onNewPasswordChange: (String) -> Unit,
+    onConfirmPasswordChange: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onStepBack: () -> Unit,
     onSubmit: () -> Unit,
@@ -129,6 +133,7 @@ internal fun PasswordResetScreen(
                         NewPasswordStep(
                             uiState,
                             onNewPasswordChange,
+                            onConfirmPasswordChange,
                             onTogglePasswordVisibility,
                             onSubmit,
                         )
@@ -146,7 +151,7 @@ internal fun PasswordResetScreen(
                 }
 
                 Spacer(Modifier.height(16.dp))
-                SubmitButton(uiState, onSubmit)
+                if (uiState.step != PasswordResetStep.DONE) SubmitButton(uiState, onSubmit)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -235,9 +240,17 @@ private fun CodeStep(
 private fun NewPasswordStep(
     uiState: PasswordResetUiState,
     onNewPasswordChange: (String) -> Unit,
+    onConfirmPasswordChange: (String) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onSubmit: () -> Unit,
 ) {
+    val focusManager = LocalFocusManager.current
+    val visualTransformation =
+        if (uiState.passwordVisible) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation()
+        }
     AuthTextField(
         value = uiState.newPassword,
         onValueChange = onNewPasswordChange,
@@ -246,12 +259,21 @@ private fun NewPasswordStep(
         placeholder = stringResource(R.string.sign_in_password_placeholder),
         isError = uiState.fieldError == PasswordResetFieldError.PASSWORD,
         supportingText = stringResource(R.string.password_reset_error_password_required),
-        visualTransformation =
-            if (uiState.passwordVisible) {
-                VisualTransformation.None
-            } else {
-                PasswordVisualTransformation()
-            },
+        visualTransformation = visualTransformation,
+        keyboardOptions =
+            KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+        keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
+    )
+    Spacer(Modifier.height(12.dp))
+    AuthTextField(
+        value = uiState.confirmPassword,
+        onValueChange = onConfirmPasswordChange,
+        enabled = !uiState.isSubmitting,
+        label = stringResource(R.string.password_reset_confirm_password_label),
+        placeholder = stringResource(R.string.sign_in_password_placeholder),
+        isError = uiState.fieldError == PasswordResetFieldError.CONFIRM_PASSWORD,
+        supportingText = stringResource(R.string.password_reset_error_passwords_do_not_match),
+        visualTransformation = visualTransformation,
         keyboardOptions =
             KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { onSubmit() }),

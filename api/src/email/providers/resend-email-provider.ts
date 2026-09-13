@@ -14,10 +14,10 @@ import {
  * can guarantee. Confining the provider to transport is what keeps that rule implementable, and
  * keeps replacing Resend a change to this file and `EmailModule` only.
  *
- * Resend's HTTP API is called directly rather than through its SDK, for the same reason
- * `SinchSmsProvider` calls Sinch directly: one endpoint and one payload do not justify a vendor
- * dependency in the API (`dev.md` §4). `FetchLike` is declared locally, deliberately repeating
- * the shape `SinchSmsProvider` uses, so the email feature never imports the SMS feature.
+ * Resend's HTTP API is called directly rather than through its SDK: one endpoint and one payload
+ * do not justify a vendor dependency in the API (`dev.md` §4). The SMS feature does bind Twilio's
+ * official SDK, which is a separate decision recorded in `ADR-006` D4. `FetchLike` is declared
+ * locally, so the email feature never imports the SMS feature.
  *
  * Delivery reporting (Resend's webhooks) is a deferred decision, so this implementation reports
  * only "accepted or not".

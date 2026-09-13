@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { MemberRole } from '../members/organization-member.types.js';
+import type { SystemRoleCode } from '../members/organization-member.types.js';
 import {
   requireEmail,
   requirePassword,
@@ -31,8 +31,8 @@ const GENERATED_PASSWORD_BYTES = 18;
 
 /** One account the seed guarantees, including where its credential came from. */
 export interface SeedAccount {
-  /** Foundation role code (never a display label). */
-  readonly role: MemberRole;
+  /** Default system role template used to resolve the organization's concrete role row. */
+  readonly role: SystemRoleCode;
   /** Stored lower case: sign-in compares against the lowercased address. */
   readonly email: string;
   readonly password: string;
@@ -51,7 +51,7 @@ export interface DevelopmentSeed {
 }
 
 interface AccountTemplate {
-  readonly role: MemberRole;
+  readonly role: SystemRoleCode;
   readonly emailVariable: string;
   readonly passwordVariable: string;
   readonly defaultEmail: string;
@@ -59,9 +59,8 @@ interface AccountTemplate {
   readonly lastName: string;
 }
 
-// One entry per foundation role: `MEMBER_ROLES` and the
-// `organization_members_role_check` constraint define exactly these two codes,
-// so adding a third one here would be a product decision, not a convenience.
+// One account per default system role. The role code identifies the default
+// organization role template; members store the concrete organization role id.
 const ACCOUNT_TEMPLATES: readonly AccountTemplate[] = [
   {
     role: 'MANAGER',

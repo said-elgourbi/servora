@@ -28,6 +28,12 @@ class PasswordResetViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(PasswordResetUiState())
     val uiState: StateFlow<PasswordResetUiState> = _uiState.asStateFlow()
 
+    /**
+     * Identifies the current attempt. [reset] starts a new one, so a reply that arrives for an
+     * attempt the user has walked away from is discarded instead of reviving the flow.
+     */
+    private var attemptId = 0
+
     fun onEmailChange(email: String) {
         _uiState.update { state ->
             state.copy(
@@ -52,7 +58,22 @@ class PasswordResetViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 newPassword = newPassword,
-                fieldError = state.fieldError.clearedIf(PasswordResetFieldError.PASSWORD),
+                // Either password field can be the one that resolves a mismatch, so editing one
+                // clears a mismatch reported on the other.
+                fieldError =
+                    state.fieldError
+                        .clearedIf(PasswordResetFieldError.PASSWORD)
+                        .clearedIf(PasswordResetFieldError.CONFIRM_PASSWORD),
+                failureReason = null,
+            )
+        }
+    }
+
+    fun onConfirmPasswordChange(confirmPassword: String) {
+        _uiState.update { state ->
+            state.copy(
+                confirmPassword = confirmPassword,
+                fieldError = state.fieldError.clearedIf(PasswordResetFieldError.CONFIRM_PASSWORD),
                 failureReason = null,
             )
         }
@@ -60,6 +81,15 @@ class PasswordResetViewModel @Inject constructor(
 
     fun onTogglePasswordVisibility() {
         _uiState.update { it.copy(passwordVisible = !it.passwordVisible) }
+    }
+
+    /**
+     * Abandons the flow, so a user who leaves for sign-in and comes back starts at the first step
+     * instead of resuming an attempt they walked away from (`BR-043`).
+     */
+    fun reset() {
+        attemptId++
+        _uiState.value = PasswordResetUiState()
     }
 
     /** Returns to the previous step, so a mistyped identity or code is not a dead end. */
@@ -70,7 +100,11 @@ class PasswordResetViewModel @Inject constructor(
                     PasswordResetStep.CODE ->
                         state.copy(step = PasswordResetStep.IDENTITY, code = "")
                     PasswordResetStep.NEW_PASSWORD ->
-                        state.copy(step = PasswordResetStep.CODE, newPassword = "")
+                        state.copy(
+                            step = PasswordResetStep.CODE,
+                            newPassword = "",
+                            confirmPassword = "",
+                        )
                     else -> state
                 }
             stepped.copy(fieldError = null, failureReason = null)
@@ -130,6 +164,14 @@ class PasswordResetViewModel @Inject constructor(
             }
             return
         }
+        // A typo in the replacement password would lock the user out of their own account, and the
+        // confirmation exists only here: the backend is told one password (`BR-043`).
+        if (state.newPassword != state.confirmPassword) {
+            _uiState.update {
+                it.copy(fieldError = PasswordResetFieldError.CONFIRM_PASSWORD, failureReason = null)
+            }
+            return
+        }
 
         submit(
             { authRepository.completePasswordReset(state.email, state.code, state.newPassword) },
@@ -140,6 +182,7 @@ class PasswordResetViewModel @Inject constructor(
                 step = PasswordResetStep.DONE,
                 code = "",
                 newPassword = "",
+                confirmPassword = "",
                 passwordVisible = false,
             )
         }
@@ -155,10 +198,17 @@ class PasswordResetViewModel @Inject constructor(
         operation: suspend () -> AuthActionResult,
         onSuccess: (PasswordResetUiState) -> PasswordResetUiState,
     ) {
+        val startedAttemptId = attemptId
         _uiState.update { it.copy(isSubmitting = true, fieldError = null, failureReason = null) }
 
         viewModelScope.launch {
-            when (val result = operation()) {
+            val result = operation()
+            if (startedAttemptId != attemptId) {
+                // The flow was reset while the call was in flight: the answer belongs to an
+                // attempt nobody is waiting on any more.
+                return@launch
+            }
+            when (result) {
                 is AuthActionResult.Success ->
                     _uiState.update { onSuccess(it).copy(isSubmitting = false) }
 

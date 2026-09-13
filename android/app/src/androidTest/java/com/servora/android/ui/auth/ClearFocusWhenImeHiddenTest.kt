@@ -250,6 +250,7 @@ class ClearFocusWhenImeHiddenTest {
                     onEmailChange = {},
                     onCodeChange = {},
                     onNewPasswordChange = {},
+                    onConfirmPasswordChange = {},
                     onTogglePasswordVisibility = {},
                     onStepBack = {},
                     onSubmit = {},

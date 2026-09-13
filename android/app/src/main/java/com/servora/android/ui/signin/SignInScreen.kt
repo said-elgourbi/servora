@@ -13,8 +13,10 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -101,8 +103,15 @@ internal fun SignInScreen(
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(modifier = Modifier.fillMaxSize()) {
             AppearanceControls(
-                // Pinned in the page margins above the form, as designed (`px-5 pt-5`).
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp),
+                // Pinned in the page margins above the form, as designed (`px-5 pt-5`), and inside
+                // the status-bar inset: the window draws under the system bars (edge-to-edge is
+                // enforced from Android 15, and the app never opts out), so the pinned row is
+                // offset by the inset the platform reports rather than by a fixed height. On
+                // devices where the system still insets the window, the reported inset is zero and
+                // the row keeps the designed 20 dp margin.
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(start = 20.dp, end = 20.dp, top = 20.dp),
             )
 
             Column(

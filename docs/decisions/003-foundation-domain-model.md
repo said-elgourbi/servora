@@ -19,10 +19,11 @@ prohibit inventing business behaviour for `OPEN QUESTION` rules.
 
 ### D1 — Scope is the foundation domain only
 
-The slice covers: organizations, users, user profiles, organization memberships/roles,
-customers (individual & company subtypes), customer contacts and customer addresses. Jobs,
-assignment, scheduling, time tracking, parts, assets, invoices, GPS, notifications and
-reporting are explicitly **out of scope** (see `Business Rules.md` `OPEN QUESTION`s).
+The slice covers: organizations, users, user profiles, organization memberships, organization
+roles, permissions, role-permission assignments, direct member permissions, customers
+(individual & company subtypes), customer contacts and customer addresses. Jobs, assignment,
+scheduling, time tracking, parts, assets, invoices, GPS, notifications and reporting are
+explicitly out of scope.
 
 ### D2 — UUID primary keys via `gen_random_uuid()`
 
@@ -32,8 +33,9 @@ authoritative and clients never mint identity.
 
 ### D3 — Controlled vocabularies are `VARCHAR` + `CHECK`, never native enums
 
-Statuses, roles, customer types and address types are stored as stable machine-readable
-`VARCHAR` codes guarded by `CHECK` constraints. Native PostgreSQL enums were rejected because
+Statuses, setup codes, permission codes, customer types, customer languages, preferred contact
+methods and address types are stored as stable machine-readable `VARCHAR` codes guarded by
+`CHECK` constraints where the catalogue is closed. Native PostgreSQL enums were rejected because
 adding a value requires a schema migration with weaker ergonomics, and because translated
 display labels must never be the stored value (`Project.md` §10).
 
@@ -43,12 +45,15 @@ display labels must never be the stored value (`Project.md` §10).
 through Drizzle `$onUpdate(() => sql\`now()\`)`, so the timestamp comes from the database clock
 and the application never persists an app-local time.
 
-### D5 — `ON DELETE CASCADE` on all foreign keys
+### D5 — Cascades follow ownership; business deletion preserves customers
 
 Child data is owned by its parent: `user_profiles`/`organization_members` → `users`,
-`organization_members`/`customers` → `organizations`, and all customer children
-(`customer_individuals`, `customer_companies`, `customer_contacts`, `customer_addresses`) →
-`customers`. Orphaning is not a state the domain permits.
+`organization_roles`/`organization_members`/`customers` → `organizations`, role-permission rows
+→ roles and permissions, direct member-permission rows → members and permissions, and all
+customer children (`customer_individuals`, `customer_companies`, `customer_contacts`,
+`customer_addresses`) → `customers`. Cross-business references such as the member who soft-deleted
+a customer do not cascade. Customer deletion in product workflows is soft deletion through
+`deleted_at`, `deleted_by_membership_id`, and `delete_reason`.
 
 ### D6 — Customer subtype integrity is enforced in the service layer
 
@@ -72,7 +77,15 @@ lookup by `id` alone; a cross-tenant miss is reported as not-found.
 `organizations.email`, `customers.email` and `customer_contacts.email` are non-unique
 organization/business data. `organization_members` is unique on `(organization_id, user_id)`.
 
-### D10 — Android models are added without the Gradle foundation
+### D10 — Roles are organization records and permissions authorize behavior
+
+An organization member has exactly one `role_id`. Roles store bilingual names/descriptions and
+may be named freely by the organization. Permissions are stable machine-readable codes with
+bilingual labels/descriptions. Roles and permissions are many-to-many, and a member may receive
+extra direct permissions; effective permissions are role permissions plus direct member
+permissions.
+
+### D11 — Android models are added without the Gradle foundation
 
 The on-disk `android/` tree has no Gradle project yet (see ADR-002). Plain Kotlin data classes
 were added under `android/app/src/main/java/com/servora/android/domain/model/` (no external
@@ -81,8 +94,9 @@ verification is deferred to the Android Gradle foundation slice.
 
 ## Consequences
 
-- The PostgreSQL schema is versioned by `api/drizzle/migrations/0000_foundation_domain_model.sql`
-  and reproduced with `make up` + `make migrate`.
+- The PostgreSQL schema is versioned by Drizzle migrations, starting with
+  `api/drizzle/migrations/0000_foundation_domain_model.sql` and extended by later foundation
+  migrations such as the role/permission and soft-delete update.
 - API types/DTOs/validation live in feature folders; shared helpers in `api/src/validation`.
 - Backend verification: `make api-test` (unit) and `make api-test-e2e` (PostgreSQL).
 - Adding a later entity means a new migration, new schema entries, and its own feature module.

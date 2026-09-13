@@ -6,7 +6,7 @@
  * refuses to pretend it delivered an OTP.
  */
 
-export const SMS_PROVIDER_KINDS = ['noop', 'sinch', 'file'] as const;
+export const SMS_PROVIDER_KINDS = ['noop', 'twilio', 'file'] as const;
 export type SmsProviderKind = (typeof SMS_PROVIDER_KINDS)[number];
 
 export const DEFAULT_SMS_PROVIDER_KIND: SmsProviderKind = 'noop';
@@ -17,16 +17,20 @@ export const DEFAULT_SMS_PROVIDER_KIND: SmsProviderKind = 'noop';
  */
 export const DEFAULT_SMS_FILE_DIRECTORY = 'var/dev-notifications';
 
-/** Sinch credentials, present only when the Sinch provider is selected. */
-export interface SinchSmsConfig {
-  readonly servicePlanId: string;
-  readonly apiToken: string;
+/** Twilio credentials, present only when the Twilio provider is selected. */
+export interface TwilioSmsConfig {
+  readonly accountSid: string;
+  readonly authToken: string;
+  /**
+   * Sender identity: an E.164 number, or a Messaging Service SID (`MG…`) when the deployment
+   * sends through a Twilio Messaging Service.
+   */
   readonly from: string;
 }
 
 export interface SmsConfig {
   readonly provider: SmsProviderKind;
-  readonly sinch: SinchSmsConfig | null;
+  readonly twilio: TwilioSmsConfig | null;
   readonly directory: string;
 }
 
@@ -41,14 +45,31 @@ function parseProviderKind(raw: string | undefined): SmsProviderKind {
   return value as SmsProviderKind;
 }
 
-function requireValue(env: NodeJS.ProcessEnv, name: string): string {
+function requireValue(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  provider: SmsProviderKind,
+): string {
   const value = env[name]?.trim();
   if (!value) {
     throw new Error(
-      `${name} is required when SMS_PROVIDER=sinch: the provider cannot be used without it.`,
+      `${name} is required when SMS_PROVIDER=${provider}: the provider cannot be used without it.`,
     );
   }
   return value;
+}
+
+/**
+ * A sender that is neither an E.164 number nor a Messaging Service SID is rejected here rather
+ * than by Twilio on the first OTP, which is the wrong moment to discover a configuration mistake.
+ */
+function parseSender(from: string): string {
+  if (!from.startsWith('+') && !from.startsWith('MG')) {
+    throw new Error(
+      'TWILIO_FROM must be an E.164 phone number (for example +15145550100) or a Messaging Service SID (for example MG0123456789abcdef0123456789abcdef).',
+    );
+  }
+  return from;
 }
 
 /**
@@ -71,17 +92,17 @@ export function loadSmsConfig(env: NodeJS.ProcessEnv = process.env): SmsConfig {
     );
   }
 
-  if (provider !== 'sinch') {
-    return { provider, sinch: null, directory };
+  if (provider !== 'twilio') {
+    return { provider, twilio: null, directory };
   }
 
   return {
     provider,
     directory,
-    sinch: {
-      servicePlanId: requireValue(env, 'SINCH_SERVICE_PLAN_ID'),
-      apiToken: requireValue(env, 'SINCH_API_TOKEN'),
-      from: requireValue(env, 'SINCH_FROM'),
+    twilio: {
+      accountSid: requireValue(env, 'TWILIO_ACCOUNT_SID', provider),
+      authToken: requireValue(env, 'TWILIO_AUTH_TOKEN', provider),
+      from: parseSender(requireValue(env, 'TWILIO_FROM', provider)),
     },
   };
 }

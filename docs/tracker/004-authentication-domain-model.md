@@ -124,7 +124,7 @@ a `Sign in with SMS` affordance on the sign-in screen.
 | Database | Migration `0002_auth_flows.sql`: `password_reset_tokens.attempts` (+ `>= 0` check, outstanding-row index) | Migration `0002_auth_flows.sql`: `phone_otp_challenges`; `auth_rate_limit_events` |
 | API | `POST /auth/password-reset/{request,verify,complete}` | `POST /auth/sms/{request,verify}` |
 | Security | Keyed code digest, 30-minute lifetime, single use, 5 attempts, supersession, `202` non-disclosure, persisted rate limiting | 10-minute lifetime, single use, 5 attempts, supersession, 60-second resend cooldown, fail-closed on an ambiguous number, provider failure that stays non-disclosing |
-| Ports | `PasswordResetNotifier` (no-op by default, development-only file sink; `PASSWORD_RESET_DELIVERY=email` binds `EmailPasswordResetNotifier` over the `EMAIL_PROVIDER` port — `ADR-008`) | `SmsProvider` selected by `SMS_PROVIDER` (`noop` default, `sinch`, or a development file sink); `FakeSmsProvider` for tests |
+| Ports | `PasswordResetNotifier` (no-op by default, development-only file sink; `PASSWORD_RESET_DELIVERY=email` binds `EmailPasswordResetNotifier` over the `EMAIL_PROVIDER` port — `ADR-008`) | `SmsProvider` selected by `SMS_PROVIDER` (`noop` default, `twilio`, or a development file sink); `FakeSmsProvider` for tests |
 | Android | `fp-*` flow as a four-step state machine | `sms-phone` → `sms-otp` as a two-step state machine |
 | Localization | EN/FR strings for both flows, and one shared failure vocabulary | Same |
 
@@ -153,7 +153,7 @@ Stack smoke test           PASS  /health 200; reset request (unknown) 202; sms r
 ```
 
 New API coverage: `auth-code`, `phone-number`, `auth-message`, `auth-limits-config`,
-`notifications-config`, `sms-config`, `sinch-sms-provider`, `auth-flow-requests` (unit);
+`notifications-config`, `sms-config`, `twilio-sms-provider`, `auth-flow-requests` (unit);
 `password-reset.e2e-spec.ts` (16) and `sms-authentication.e2e-spec.ts` (18) against real
 PostgreSQL, covering non-disclosure, expiry, single use, supersession, attempt limits, throttling,
 resend cooldown, ambiguous numbers, provider failure and "no session on failure".
@@ -327,4 +327,102 @@ fix: no padding, offset or spacing value is involved anywhere.
 - Known gap carried forward, not changed here: tapping outside a field does not dismiss the keyboard
   on these screens at all (the surrounding surface does not clear focus), so that dismissal path does
   not exist yet and needs its own product decision.
+
+
+## Confirmation entry and the completion step (2026-09-11)
+
+The reset form now asks for the new password twice. The pair is compared on the client, so a typo
+never reaches `POST /auth/password-reset/confirm`; a mismatch is reported on the confirmation field
+(`PasswordResetFieldError.CONFIRM_PASSWORD`) and **both** entries are kept, so the user corrects the
+mistake instead of retyping it. Two new strings carry the copy in both languages
+(`password_reset_confirm_password_label`, `password_reset_error_passwords_do_not_match`, in
+`values/strings.xml` and `values-fr/strings.xml`).
+
+Two smaller corrections shipped with it:
+
+- **Returning to sign-in clears the attempt.** `AuthFlowScreen` calls `PasswordResetViewModel.reset()`
+  when it shows the sign-in destination, so an abandoned attempt no longer leaves its email, code or
+  password in the state the next user of the device would see, and a response still in flight is
+  discarded through the same `attemptId` guard the other attempts use.
+- **One way back from the completion step.** `PasswordResetScreen` rendered the primary action for
+  every step, so `DONE` showed "Back to sign in" twice — once as the button, once as the footer link.
+  The primary action is now gated on steps that actually submit, leaving exactly one affordance; the
+  `submitLabel`/`submitPendingLabel` mapping keeps its `DONE` entry only because the enum stays total.
+
+Verification (2026-09-11, host tooling, Android debug build):
+
+- `./gradlew :app:testDebugUnitTest` — 71 tests, 0 failures, 0 errors across 7 suites.
+  `PasswordResetViewModelTest` covers the gate: a mismatch blocks submission without calling the
+  repository, the rejection keeps both fields, and `reset()` clears the attempt.
+- `./gradlew :app:lintDebug :app:assembleDebug` — `BUILD SUCCESSFUL`.
+- `./gradlew :app:compileDebugAndroidTestKotlin` — `BUILD SUCCESSFUL` (the instrumentation sources
+  compile; one `createComposeRule` deprecation warning, same as the existing suite).
+
+Automated cover added:
+`app/src/androidTest/java/com/servora/android/ui/passwordreset/PasswordResetScreenTest.kt`
+(4 Compose UI tests) — the two password fields at the new-password step, the mismatch message under
+the confirmation field, exactly one "Back to sign in" on the completion step (clicking it fires the
+callback once), and the new copy rendered from a French locale. The French test asserts the French
+lookup differs from the English copy first, so a missing `values-fr` entry fails instead of
+comparing English with itself.
+
+Not run — no device or emulator is attached to this environment:
+
+```bash
+cd android && ./gradlew connectedDebugAndroidTest
+```
+
+Manual Android QA checklist (product owner):
+
+1. Sign in screen → **Forgot password?** → enter the email → **Send reset code**.
+2. Enter the 6-digit code → **Verify code**.
+3. At **New password**, type a password, then a different confirmation.
+   Expected: "Passwords do not match." under the confirmation field, and **Save new password** does
+   not submit. Correcting the confirmation clears the message.
+4. Enter matching passwords and save. Expected: the completion step shows the updated message and
+   exactly one **Back to sign in**.
+5. Tap **Back to sign in**, then reopen **Forgot password?**.
+   Expected: an empty form — no email, code or password from step 1–3.
+6. Switch the in-app language to French and repeat step 3.
+   Expected: the confirmation label and the mismatch message are French.
+
+
+## SMS provider replaced: Sinch → Twilio (2026-09-11)
+
+`ADR-006` D4 originally bound **Sinch** through the `SmsProvider` port. Product ownership replaced
+it with **Twilio**, which required no domain change: the port, the OTP rules and the request
+contract are untouched.
+
+| Layer | Change |
+| --- | --- |
+| Configuration | `SmsConfig.twilio` (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`) replaces the `SINCH_*` values. `loadSmsConfig` still refuses to start when a selected provider is missing its credentials. |
+| Sender | `TWILIO_FROM` is validated when the configuration loads: an E.164 number is sent as `from`, an `MG…` Messaging Service SID as `messagingServiceSid` (how an A2P-registered deployment sends), and anything else is rejected before the API serves a request instead of on the first OTP. |
+| Binding | `SmsModule` selects `noop` (default), `twilio` or `file`; the `file` sink is still refused under `NODE_ENV=production`. |
+| Implementation | `TwilioSmsProvider` uses Twilio's official SDK behind an injected client seam, builds the client once, caps the request timeout at 10 seconds and maps every provider rejection to `SmsDeliveryError` without keeping the provider's own error. `SinchSmsProvider` and its spec were deleted rather than left unused (`dev.md` §15). |
+| Deployment | `docker-compose.yml` and `.env.example` pass the `TWILIO_*` values through; local development still defaults to `SMS_PROVIDER=noop`, so nothing changes without credentials. |
+| Docs | `ADR-006` D4 rewritten with the supersession recorded in place, `ADR-005` D7's note and `ADR-008` D3's comparison updated, `BR-019`'s note now names Twilio, and `docs/api/authentication.md` §7 lists the binding and its variables. |
+
+Twilio remains only the *delivery* provider for a code Servora generates: `BR-019` and `BR-046`
+require Servora to own generation, the expiry, the attempt limit, hashed storage and single-use
+invalidation, so Twilio Verify is not used.
+
+Verification (2026-09-11, host tooling → PostgreSQL on host port 5434):
+
+```text
+API typecheck (tsc --noEmit)   PASS  0 errors
+API lint (oxlint)              PASS  0 warnings / 0 errors
+API unit tests (Vitest)        PASS  248 passed / 31 files (sms: 18 passed / 3 files)
+API e2e (Vitest + PostgreSQL)  PASS  98 passed / 7 files
+API build (nest build)         PASS
+Provider import smoke test     PASS  dist/sms/providers/twilio-sms-provider.js loads and exports TwilioSmsProvider
+```
+
+Automated cover rewritten or added: `sms-config.spec.ts` (11 tests — each missing `TWILIO_*` value
+and an invalid sender, both refused at load), `sms.module.spec.ts` (3 tests — the `noop`, `twilio`
+and `file` bindings) and `twilio-sms-provider.spec.ts` (4 tests — the request built for a number
+and for a Messaging Service SID, and the failure mapping).
+
+Not verified: no message was sent through Twilio's live API. That needs real credentials and a
+sender the account is allowed to use, neither of which exists in this environment; the suite
+verifies the request the provider builds and how it reports failure, not Twilio's delivery.
 

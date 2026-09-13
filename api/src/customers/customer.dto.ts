@@ -11,6 +11,8 @@ import {
   type Customer,
   type CustomerCompany,
   type CustomerIndividual,
+  type CustomerLanguage,
+  type CustomerPreferredContactMethod,
   type CustomerStatus,
   type CustomerType,
   type IndividualCustomer,
@@ -26,7 +28,12 @@ export interface CustomerDto {
   billingEmail: string | null;
   billingPhone: string | null;
   notes: string | null;
+  preferredContactMethod: CustomerPreferredContactMethod;
+  language: CustomerLanguage;
   status: CustomerStatus;
+  deletedAt: string | null;
+  deletedByMembershipId: string | null;
+  deleteReason: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,6 +69,8 @@ interface CustomerHeaderInput {
   billingEmail?: string | null;
   billingPhone?: string | null;
   notes?: string | null;
+  preferredContactMethod?: CustomerPreferredContactMethod;
+  language?: CustomerLanguage;
 }
 
 export interface CreateIndividualCustomerDto extends CustomerHeaderInput {
@@ -87,7 +96,13 @@ export function toCustomerDto(customer: Customer): CustomerDto {
     billingEmail: customer.billingEmail,
     billingPhone: customer.billingPhone,
     notes: customer.notes,
+    preferredContactMethod:
+      customer.preferredContactMethod as CustomerPreferredContactMethod,
+    language: customer.language as CustomerLanguage,
     status: customer.status as CustomerStatus,
+    deletedAt: customer.deletedAt?.toISOString() ?? null,
+    deletedByMembershipId: customer.deletedByMembershipId,
+    deleteReason: customer.deleteReason,
     createdAt: customer.createdAt.toISOString(),
     updatedAt: customer.updatedAt.toISOString(),
   };
@@ -135,6 +150,18 @@ function parseCustomerHeader(source: Record<string, unknown>): CustomerHeaderInp
     billingEmail: optionalEmail(source.billingEmail, 'billingEmail'),
     billingPhone: optionalText(source.billingPhone, 'billingPhone', 50),
     notes: optionalText(source.notes, 'notes', 4000),
+    preferredContactMethod:
+      source.preferredContactMethod === undefined
+        ? undefined
+        : requireEnum(
+            source.preferredContactMethod,
+            ['EMAIL', 'PHONE', 'SMS', 'NONE'] as const,
+            'preferredContactMethod',
+          ),
+    language:
+      source.language === undefined
+        ? undefined
+        : requireEnum(source.language, ['en-CA', 'fr-CA'] as const, 'language'),
   };
 }
 
@@ -168,4 +195,3 @@ export function parseCreateCustomerDto(input: unknown): CreateCustomerDto {
     },
   };
 }
-

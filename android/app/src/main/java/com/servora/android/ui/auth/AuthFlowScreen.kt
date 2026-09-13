@@ -48,6 +48,11 @@ fun AuthFlowScreen(
     var destination by rememberSaveable { mutableStateOf(AuthDestination.SIGN_IN.name) }
 
     fun show(target: AuthDestination) {
+        // Returning to sign-in abandons whatever flow was open, so its transient state is cleared
+        // (`BR-043`): the password-reset ViewModel outlives the destination it was shown for.
+        if (target == AuthDestination.SIGN_IN) {
+            passwordResetViewModel.reset()
+        }
         destination = target.name
     }
 

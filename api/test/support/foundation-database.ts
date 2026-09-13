@@ -3,7 +3,11 @@ import { inArray } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { loadConfig } from '../../src/config/configuration.js';
-import { organizations, users } from '../../src/database/schema.js';
+import {
+  organizationRoles,
+  organizations,
+  users,
+} from '../../src/database/schema.js';
 
 // A real Argon2id hash used by tests that only need a valid value.
 export const TEST_PASSWORD_HASH = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaGhhc2g';
@@ -109,6 +113,33 @@ export async function createTestUser(
       email: values.email ?? uniqueEmail(),
       passwordHash: values.passwordHash ?? TEST_PASSWORD_HASH,
       phone: values.phone ?? null,
+      ...(values.status === undefined ? {} : { status: values.status }),
+    })
+    .returning();
+  return row;
+}
+
+export async function createTestOrganizationRole(
+  db: TestDb,
+  organizationId: string,
+  values: {
+    systemCode?: string | null;
+    nameEn?: string;
+    nameFr?: string;
+    descriptionEn?: string;
+    descriptionFr?: string;
+    status?: string;
+  } = {},
+) {
+  const [row] = await db
+    .insert(organizationRoles)
+    .values({
+      organizationId,
+      systemCode: values.systemCode ?? null,
+      nameEn: values.nameEn ?? 'Test Role',
+      nameFr: values.nameFr ?? 'Role de test',
+      descriptionEn: values.descriptionEn ?? 'Test role description.',
+      descriptionFr: values.descriptionFr ?? 'Description du role de test.',
       ...(values.status === undefined ? {} : { status: values.status }),
     })
     .returning();

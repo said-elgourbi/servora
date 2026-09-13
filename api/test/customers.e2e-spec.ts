@@ -42,7 +42,11 @@ describe('CustomersService (e2e)', () => {
       type: 'INDIVIDUAL',
       displayName: 'Jane Doe',
       email: 'jane@example.com',
-      individual: { firstName: 'Jane', lastName: 'Doe', dateOfBirth: '1990-05-01' },
+      individual: {
+        firstName: 'Jane',
+        lastName: 'Doe',
+        dateOfBirth: '1990-05-01',
+      },
     });
 
     expect(created.customer.organizationId).toBe(organization.id);
@@ -94,7 +98,12 @@ describe('CustomersService (e2e)', () => {
         billingEmail: null,
         billingPhone: null,
         notes: null,
+        preferredContactMethod: 'NONE',
+        language: 'en-CA',
         status: 'ACTIVE',
+        deletedAt: null,
+        deletedByMembershipId: null,
+        deleteReason: null,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
         updatedAt: new Date('2026-01-01T00:00:00.000Z'),
       },
@@ -106,7 +115,9 @@ describe('CustomersService (e2e)', () => {
       },
     });
 
-    expect(dto.customer.organizationId).toBe('00000000-0000-0000-0000-000000000001');
+    expect(dto.customer.organizationId).toBe(
+      '00000000-0000-0000-0000-000000000001',
+    );
     expect(dto.individual.firstName).toBe('Dto');
   });
 
@@ -165,25 +176,36 @@ describe('CustomersService (e2e)', () => {
       displayName: 'A Co',
       company: { legalName: 'A Co Ltd.' },
     });
-    await service.addContact({ organizationId: organizationA.id }, created.customer.id, {
-      firstName: 'Owner',
-      lastName: 'A',
-      isPrimary: true,
-      isBillingContact: false,
-      isJobContact: false,
-    });
-
-    await expect(
-      service.listContacts({ organizationId: organizationB.id }, created.customer.id),
-    ).rejects.toThrow(CustomerNotFoundError);
-    await expect(
-      service.addContact({ organizationId: organizationB.id }, created.customer.id, {
-        firstName: 'Intruder',
-        lastName: 'B',
-        isPrimary: false,
+    await service.addContact(
+      { organizationId: organizationA.id },
+      created.customer.id,
+      {
+        firstName: 'Owner',
+        lastName: 'A',
+        isPrimary: true,
         isBillingContact: false,
         isJobContact: false,
-      }),
+      },
+    );
+
+    await expect(
+      service.listContacts(
+        { organizationId: organizationB.id },
+        created.customer.id,
+      ),
+    ).rejects.toThrow(CustomerNotFoundError);
+    await expect(
+      service.addContact(
+        { organizationId: organizationB.id },
+        created.customer.id,
+        {
+          firstName: 'Intruder',
+          lastName: 'B',
+          isPrimary: false,
+          isBillingContact: false,
+          isJobContact: false,
+        },
+      ),
     ).rejects.toThrow(CustomerNotFoundError);
   });
 
@@ -195,15 +217,19 @@ describe('CustomersService (e2e)', () => {
       individual: { firstName: 'Addr', lastName: 'Person' },
     });
 
-    await service.addAddress({ organizationId: organization.id }, created.customer.id, {
-      type: 'SERVICE',
-      addressLine1: '1 Main',
-      city: 'Ottawa',
-      province: 'ON',
-      postalCode: 'K1A 0B1',
-      country: 'Canada',
-      isDefault: true,
-    });
+    await service.addAddress(
+      { organizationId: organization.id },
+      created.customer.id,
+      {
+        type: 'SERVICE',
+        addressLine1: '1 Main',
+        city: 'Ottawa',
+        province: 'ON',
+        postalCode: 'K1A 0B1',
+        country: 'Canada',
+        isDefault: true,
+      },
+    );
 
     const addresses = await service.listAddresses(
       { organizationId: organization.id },
@@ -214,5 +240,4 @@ describe('CustomersService (e2e)', () => {
     expect(addresses[0].type).toBe('SERVICE');
     expect(addresses[0].isDefault).toBe(true);
   });
-
 });

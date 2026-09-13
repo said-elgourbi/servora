@@ -69,6 +69,7 @@
     <string name="password_reset_done_message">Your password was updated. Sign in with your new password.</string>
     <string name="password_reset_code_label">Reset code</string>
     <string name="password_reset_code_placeholder">123456</string>
+    <string name="password_reset_confirm_password_label">Confirm new password</string>
     <string name="password_reset_new_password_label">New password</string>
     <string name="password_reset_action_send">Send reset code</string>
     <string name="password_reset_action_sending">Sending…</string>
@@ -80,6 +81,7 @@
     <string name="password_reset_back_to_sign_in">Back to sign in</string>
     <string name="password_reset_error_email_required">Enter your email.</string>
     <string name="password_reset_error_code_required">Enter the 6-digit code.</string>
+    <string name="password_reset_error_passwords_do_not_match">Passwords do not match.</string>
     <string name="password_reset_error_password_required">Enter a new password.</string>
 
     <!-- Phone/SMS sign-in (`BR-019`). -->

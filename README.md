@@ -21,6 +21,9 @@ Initial supported languages are **English** and **French**. Development rules li
 >
 > Authentication persistence (sessions, refresh tokens, password reset tokens) is modelled in
 > `docs/domain/authentication-domain-model.md`.
+>
+> Job, Property and Visit business rules are defined in `Business Rules.md` (§8, §11, §12 and §13;
+> BR-047 – BR-080). The Job & Visit data model is the next domain slice.
 
 ## Layout
 

@@ -1,17 +1,23 @@
+import crypto from 'node:crypto';
 import { eq, inArray } from 'drizzle-orm';
 import {
   customerAddresses,
   customerContacts,
   customerIndividuals,
   customers,
+  organizationMemberPermissions,
   organizationMembers,
+  organizationRoles,
   organizations,
+  permissions,
+  rolePermissions,
   userProfiles,
   users,
 } from '../src/database/schema.js';
 import {
   createFoundationTestDatabase,
   createTestOrganization,
+  createTestOrganizationRole,
   createTestUser,
   expectPostgresError,
   uniqueEmail,
@@ -32,7 +38,9 @@ describe('foundation domain schema (e2e)', () => {
 
   describe('organizations', () => {
     it('persists an organization and defaults its status to ACTIVE', async () => {
-      const organization = await createTestOrganization(database.db, { name: 'Northwind' });
+      const organization = await createTestOrganization(database.db, {
+        name: 'Northwind',
+      });
       database.cleanup.trackOrganization(organization.id);
 
       expect(organization.status).toBe('ACTIVE');
@@ -93,7 +101,11 @@ describe('foundation domain schema (e2e)', () => {
         () =>
           database.db
             .insert(users)
-            .values({ email: uniqueEmail(), passwordHash: 'x', status: 'BANNED' }),
+            .values({
+              email: uniqueEmail(),
+              passwordHash: 'x',
+              status: 'BANNED',
+            }),
         '23514',
       );
     });
@@ -133,44 +145,101 @@ describe('foundation domain schema (e2e)', () => {
         () =>
           database.db
             .insert(userProfiles)
-            .values({ userId: user.id, firstName: 'Duplicate', lastName: 'Profile' }),
+            .values({
+              userId: user.id,
+              firstName: 'Duplicate',
+              lastName: 'Profile',
+            }),
         '23505',
       );
     });
   });
 
   describe('organization_members', () => {
-    it('stores the MANAGER and TECHNICIAN roles from the allowed set', async () => {
+    it('stores one organization role per member and grants permissions through joins', async () => {
       const organization = await createTestOrganization(database.db);
       database.cleanup.trackOrganization(organization.id);
       const manager = await createTestUser(database.db);
       const technician = await createTestUser(database.db);
       database.cleanup.trackUser(manager.id);
       database.cleanup.trackUser(technician.id);
+      const managerRole = await createTestOrganizationRole(
+        database.db,
+        organization.id,
+        {
+          systemCode: 'MANAGER',
+          nameEn: 'Supervisor',
+          nameFr: 'Superviseur',
+        },
+      );
+      const technicianRole = await createTestOrganizationRole(
+        database.db,
+        organization.id,
+        {
+          systemCode: 'TECHNICIAN',
+          nameEn: 'Field Tech',
+          nameFr: 'Technicien terrain',
+        },
+      );
+      const [permission] = await database.db
+        .insert(permissions)
+        .values({
+          code: `CUSTOMER_VIEW_${crypto.randomUUID()}`,
+          nameEn: 'View customers',
+          nameFr: 'Voir les clients',
+          descriptionEn: 'View customer records.',
+          descriptionFr: 'Voir les dossiers client.',
+        })
+        .returning();
+      await database.db.insert(rolePermissions).values({
+        organizationId: organization.id,
+        roleId: managerRole.id,
+        permissionId: permission.id,
+      });
 
       const rows = await database.db
         .insert(organizationMembers)
         .values([
-          { organizationId: organization.id, userId: manager.id, role: 'MANAGER' },
-          { organizationId: organization.id, userId: technician.id, role: 'TECHNICIAN' },
+          {
+            organizationId: organization.id,
+            userId: manager.id,
+            roleId: managerRole.id,
+          },
+          {
+            organizationId: organization.id,
+            userId: technician.id,
+            roleId: technicianRole.id,
+          },
         ])
         .returning();
 
-      expect(rows.map((row) => row.role).sort()).toEqual(['MANAGER', 'TECHNICIAN']);
+      expect(rows.map((row) => row.roleId).sort()).toEqual(
+        [managerRole.id, technicianRole.id].sort(),
+      );
       expect(rows.every((row) => row.status === 'ACTIVE')).toBe(true);
+
+      await database.db.insert(organizationMemberPermissions).values({
+        organizationId: organization.id,
+        memberId: rows[1].id,
+        permissionId: permission.id,
+        grantedByMembershipId: rows[0].id,
+      });
     });
 
-    it('rejects an unknown role through the check constraint', async () => {
+    it('rejects an unknown default role setup code through the check constraint', async () => {
       const organization = await createTestOrganization(database.db);
       database.cleanup.trackOrganization(organization.id);
-      const user = await createTestUser(database.db);
-      database.cleanup.trackUser(user.id);
 
       await expectPostgresError(
         () =>
-          database.db
-            .insert(organizationMembers)
-            .values({ organizationId: organization.id, userId: user.id, role: 'DISPATCHER' }),
+          database.db.insert(organizationRoles).values({
+            organizationId: organization.id,
+            systemCode: 'DISPATCHER',
+            nameEn: 'Dispatcher',
+            nameFr: 'Repartiteur',
+            descriptionEn: 'Dispatch role.',
+            descriptionFr: 'Role de repartition.',
+          }),
         '23514',
       );
     });
@@ -180,20 +249,31 @@ describe('foundation domain schema (e2e)', () => {
       database.cleanup.trackOrganization(organization.id);
       const user = await createTestUser(database.db);
       database.cleanup.trackUser(user.id);
+      const role = await createTestOrganizationRole(
+        database.db,
+        organization.id,
+      );
       await database.db
         .insert(organizationMembers)
-        .values({ organizationId: organization.id, userId: user.id, role: 'MANAGER' });
+        .values({
+          organizationId: organization.id,
+          userId: user.id,
+          roleId: role.id,
+        });
 
       await expectPostgresError(
         () =>
           database.db
             .insert(organizationMembers)
-            .values({ organizationId: organization.id, userId: user.id, role: 'TECHNICIAN' }),
+            .values({
+              organizationId: organization.id,
+              userId: user.id,
+              roleId: role.id,
+            }),
         '23505',
       );
     });
   });
-
 
   describe('customers and subtypes', () => {
     it('rejects an unknown customer type through the check constraint', async () => {
@@ -211,6 +291,50 @@ describe('foundation domain schema (e2e)', () => {
       );
     });
 
+    it('defaults customer language/contact settings and supports soft deletion', async () => {
+      const organization = await createTestOrganization(database.db);
+      database.cleanup.trackOrganization(organization.id);
+      const user = await createTestUser(database.db);
+      database.cleanup.trackUser(user.id);
+      const role = await createTestOrganizationRole(
+        database.db,
+        organization.id,
+      );
+      const [member] = await database.db
+        .insert(organizationMembers)
+        .values({
+          organizationId: organization.id,
+          userId: user.id,
+          roleId: role.id,
+        })
+        .returning();
+
+      const [customer] = await database.db
+        .insert(customers)
+        .values({
+          organizationId: organization.id,
+          type: 'COMPANY',
+          displayName: 'Soft Delete Co',
+        })
+        .returning();
+
+      expect(customer.preferredContactMethod).toBe('NONE');
+      expect(customer.language).toBe('en-CA');
+
+      const [deleted] = await database.db
+        .update(customers)
+        .set({
+          deletedAt: new Date(),
+          deletedByMembershipId: member.id,
+          deleteReason: 'Duplicate account.',
+        })
+        .where(eq(customers.id, customer.id))
+        .returning();
+
+      expect(deleted.deletedAt).toBeInstanceOf(Date);
+      expect(deleted.deletedByMembershipId).toBe(member.id);
+    });
+
     it('keeps an individual subtype keyed by customer_id and cascades on customer delete', async () => {
       const organization = await createTestOrganization(database.db);
       database.cleanup.trackOrganization(organization.id);
@@ -224,7 +348,11 @@ describe('foundation domain schema (e2e)', () => {
         .returning();
       await database.db
         .insert(customerIndividuals)
-        .values({ customerId: customer.id, firstName: 'Jane', lastName: 'Doe' });
+        .values({
+          customerId: customer.id,
+          firstName: 'Jane',
+          lastName: 'Doe',
+        });
 
       await database.db.delete(customers).where(eq(customers.id, customer.id));
 
@@ -240,7 +368,11 @@ describe('foundation domain schema (e2e)', () => {
       database.cleanup.trackOrganization(organization.id);
       const [customer] = await database.db
         .insert(customers)
-        .values({ organizationId: organization.id, type: 'COMPANY', displayName: 'Acme' })
+        .values({
+          organizationId: organization.id,
+          type: 'COMPANY',
+          displayName: 'Acme',
+        })
         .returning();
 
       await database.db.insert(customerContacts).values([
@@ -302,7 +434,6 @@ describe('foundation domain schema (e2e)', () => {
     });
   });
 
-
   describe('customer addresses and tenant ownership', () => {
     it('rejects an unknown address type through the check constraint', async () => {
       const organization = await createTestOrganization(database.db);
@@ -334,9 +465,17 @@ describe('foundation domain schema (e2e)', () => {
       const organization = await createTestOrganization(database.db);
       const user = await createTestUser(database.db);
       database.cleanup.trackUser(user.id);
+      const role = await createTestOrganizationRole(
+        database.db,
+        organization.id,
+      );
       await database.db
         .insert(organizationMembers)
-        .values({ organizationId: organization.id, userId: user.id, role: 'MANAGER' });
+        .values({
+          organizationId: organization.id,
+          userId: user.id,
+          roleId: role.id,
+        });
       const [customer] = await database.db
         .insert(customers)
         .values({
@@ -346,7 +485,9 @@ describe('foundation domain schema (e2e)', () => {
         })
         .returning();
 
-      await database.db.delete(organizations).where(eq(organizations.id, organization.id));
+      await database.db
+        .delete(organizations)
+        .where(eq(organizations.id, organization.id));
 
       expect(
         await database.db
@@ -355,7 +496,10 @@ describe('foundation domain schema (e2e)', () => {
           .where(eq(organizationMembers.organizationId, organization.id)),
       ).toHaveLength(0);
       expect(
-        await database.db.select().from(customers).where(inArray(customers.id, [customer.id])),
+        await database.db
+          .select()
+          .from(customers)
+          .where(inArray(customers.id, [customer.id])),
       ).toHaveLength(0);
     });
   });
@@ -368,7 +512,9 @@ describe('foundation domain schema (e2e)', () => {
           and column_name in ('created_at', 'updated_at')`;
 
       expect(columns).toHaveLength(2);
-      expect(columns.every((row) => row.data_type === 'timestamp with time zone')).toBe(true);
+      expect(
+        columns.every((row) => row.data_type === 'timestamp with time zone'),
+      ).toBe(true);
     });
 
     it('refreshes updated_at on update', async () => {
@@ -382,8 +528,9 @@ describe('foundation domain schema (e2e)', () => {
         .where(eq(organizations.id, organization.id))
         .returning();
 
-      expect(updated.updatedAt.getTime()).toBeGreaterThan(organization.updatedAt.getTime());
+      expect(updated.updatedAt.getTime()).toBeGreaterThan(
+        organization.updatedAt.getTime(),
+      );
     });
   });
-
 });
