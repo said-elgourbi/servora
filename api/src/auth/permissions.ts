@@ -15,8 +15,8 @@ export type CustomerPermission =
  * a Customer capability, and vice versa. The codes follow the resource-prefixed `resource.action`
  * convention shared by every permission (`BR-006`, `BR-041`).
  *
- * `VIEW` and `CREATE` are enforced by the Property routes that exist in this slice; `EDIT`,
- * `ARCHIVE` and `DELETE` are the confirmed catalogue entries the Property lifecycle slice wires up.
+ * `VIEW`, `CREATE`, `EDIT`, `ARCHIVE` and `DELETE` are all enforced by the Property routes in
+ * `PropertiesController` and `CustomersController`.
  */
 export const PROPERTY_PERMISSIONS = {
   VIEW: 'properties.view',
@@ -30,6 +30,4 @@ export type PropertyPermission =
   (typeof PROPERTY_PERMISSIONS)[keyof typeof PROPERTY_PERMISSIONS];
 
 export type PermissionCode =
-  | CustomerPermission
-  | PropertyPermission
-  | (string & {});
+  CustomerPermission | PropertyPermission | (string & {});

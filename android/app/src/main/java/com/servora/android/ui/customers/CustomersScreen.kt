@@ -156,6 +156,8 @@ fun ServoraHomeScreen(
     permissions: CustomerPermissionsUiState,
     customersViewModel: CustomersViewModel,
     addPropertyViewModel: AddPropertyViewModel,
+    propertyDetailViewModel: PropertyDetailViewModel,
+    editPropertyViewModel: EditPropertyViewModel,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -218,6 +220,8 @@ fun ServoraHomeScreen(
             navController = navController,
             customersViewModel = customersViewModel,
             addPropertyViewModel = addPropertyViewModel,
+            propertyDetailViewModel = propertyDetailViewModel,
+            editPropertyViewModel = editPropertyViewModel,
             permissions = permissions,
             // The bottom-navigation area is the graph's root destination; the drill-down screens are
             // pushed on top of it.

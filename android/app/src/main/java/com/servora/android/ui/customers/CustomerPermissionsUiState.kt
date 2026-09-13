@@ -12,6 +12,11 @@ data class CustomerPermissionsUiState(
     val canArchiveCustomer: Boolean,
     val canViewProperties: Boolean,
     val canCreateProperty: Boolean,
+    // The Property lifecycle capabilities default to denied, because a caller that does not name
+    // one has not been granted it (`BR-007`, `BR-085`).
+    val canEditProperty: Boolean = false,
+    val canArchiveProperty: Boolean = false,
+    val canDeleteProperty: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -26,4 +31,7 @@ fun customerPermissionsUiState(
         // permissions and never inferred from the customer ones.
         canViewProperties = permissionChecker.has(Permission.PROPERTIES_VIEW),
         canCreateProperty = permissionChecker.has(Permission.PROPERTIES_CREATE),
+        canEditProperty = permissionChecker.has(Permission.PROPERTIES_EDIT),
+        canArchiveProperty = permissionChecker.has(Permission.PROPERTIES_ARCHIVE),
+        canDeleteProperty = permissionChecker.has(Permission.PROPERTIES_DELETE),
     )

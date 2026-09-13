@@ -53,7 +53,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.servora.android.R
-import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.domain.model.PropertyProvince
 
 /** Root of the Add Property form, so a test can assert the screen and that it carries no FAB. */
@@ -106,6 +105,8 @@ private val PropertyAlertIconSize = 16.dp
  *
  * @param onSaved invoked once the backend has created the Property, so the destination can return to
  *   the customer it was opened from.
+ * @param saveLabelRes the primary action's label. Add Property and Edit Property share the form, and
+ *   only the label differs.
  */
 @Composable
 fun AddPropertyScreen(
@@ -121,6 +122,7 @@ fun AddPropertyScreen(
     onCancel: () -> Unit,
     onSaved: () -> Unit,
     modifier: Modifier = Modifier,
+    saveLabelRes: Int = R.string.property_save,
 ) {
     LaunchedEffect(state.isSaved) {
         if (state.isSaved) {
@@ -229,9 +231,12 @@ fun AddPropertyScreen(
         }
 
         PropertyFormActions(
-            isSaving = state.isSaving,
+            // An edit waits for the Property it edits before its action can be used, so the form
+            // reports that wait on the same control a save uses. The create form never loads.
+            isSaving = state.isSaving || state.isLoading,
             onCancel = onCancel,
             onSave = onSave,
+            saveLabelRes = saveLabelRes,
         )
     }
 
@@ -599,12 +604,13 @@ private fun ProvinceOption(
     }
 }
 
-/** The form's two actions: the design's outlined Cancel and the brand-filled Save. */
+/** The form's two actions: the design's outlined Cancel and the brand-filled save. */
 @Composable
 private fun PropertyFormActions(
     isSaving: Boolean,
     onCancel: () -> Unit,
     onSave: () -> Unit,
+    saveLabelRes: Int,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -640,7 +646,7 @@ private fun PropertyFormActions(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                 } else {
-                    Text(stringResource(R.string.property_save))
+                    Text(stringResource(saveLabelRes))
                 }
             }
         }
@@ -700,14 +706,4 @@ private fun provinceLabelRes(province: PropertyProvince): Int =
         PropertyProvince.YT -> R.string.property_province_yt
     }
 
-/** The message a create failure is reported with; the reason stays a stable code (`BR-041`). */
-private fun CustomersFailureReason.messageRes(): Int =
-    when (this) {
-        CustomersFailureReason.UNAUTHENTICATED -> R.string.property_error_unauthenticated
-        CustomersFailureReason.FORBIDDEN -> R.string.property_error_forbidden
-        CustomersFailureReason.VALIDATION -> R.string.property_error_validation
-        CustomersFailureReason.NETWORK -> R.string.property_error_network
-        CustomersFailureReason.SERVER -> R.string.property_error_server
-        CustomersFailureReason.UNEXPECTED -> R.string.property_error_server
-    }
 

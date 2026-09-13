@@ -98,6 +98,29 @@ class CustomersViewModelTest {
     }
 
     @Test
+    fun `re-reads the list when a confirmed mutation changes a derived count`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            result = CustomersResult.Success(listOf(customer(id = "c1", propertyCount = 3))),
+        )
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.load()
+        advanceUntilIdle()
+        assertEquals(1, repository.reads)
+        assertEquals(3, viewModel.uiState.value.customers.single().propertyCount)
+
+        // A Property was archived on the backend while the detail was open, so the list is re-read
+        // rather than left describing the earlier count (`BR-001`).
+        repository.result =
+            CustomersResult.Success(listOf(customer(id = "c1", propertyCount = 2)))
+        viewModel.reload()
+        advanceUntilIdle()
+
+        assertEquals(2, repository.reads)
+        assertEquals(2, viewModel.uiState.value.customers.single().propertyCount)
+    }
+
+    @Test
     fun `carries the derived property and job counts onto the row`() = runTest(dispatcher) {
         val repository = RecordingCustomersRepository(
             result = CustomersResult.Success(

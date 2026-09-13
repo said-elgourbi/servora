@@ -8,6 +8,7 @@ import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerStatusFilter
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.PropertyStatus
 import java.io.IOException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
@@ -243,6 +244,27 @@ class CustomersRepositoryTest {
     }
 
     @Test
+    fun `asks for the archived Property projection separately and carries it`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            detailAnswer = { detailDto() },
+            propertiesAnswer = { listOf(propertyDto()) },
+            archivedPropertiesAnswer = { listOf(propertyDto(id = "p2", status = "ARCHIVED")) },
+            jobsAnswer = { listOf(jobDto()) },
+        )
+        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+
+        val detail = assertDetailSuccess(repository.loadCustomerDetail("c1"))
+
+        // The default projection excludes an archived Property (`BR-081`), so it is asked for
+        // explicitly and carried separately; without it the detail has no way to reach a Restore.
+        assertEquals(listOf("ACTIVE", "ARCHIVED"), api.propertyStatuses)
+        assertEquals(listOf("p1"), detail.properties.map { it.id })
+        assertEquals(listOf("p2"), detail.archivedProperties.map { it.id })
+        assertEquals(PropertyStatus.ARCHIVED, detail.archivedProperties.single().status)
+    }
+
+    @Test
     fun `omits the Property projection when the caller may not view Properties`() = runTest {
         val api = FakeCustomersApi(
             answer = { emptyList() },
@@ -471,14 +493,18 @@ class CustomersRepositoryTest {
         company = CustomerCompanyDto(customerId = "c1", legalName = "ABC Property Management Ltd."),
     )
 
-    private fun propertyDto() = CustomerPropertyDto(
-        id = "p1",
+    private fun propertyDto(
+        id: String = "p1",
+        status: String = "ACTIVE",
+    ) = CustomerPropertyDto(
+        id = id,
         name = "Cedar Lane Building",
         addressLine1 = "987 Cedar Lane",
         city = "Montreal",
         province = "QC",
         postalCode = "H3A 2T6",
         country = "Canada",
+        status = status,
         jobCount = 4,
         lastServiceAt = "2026-08-28T13:00:00Z",
     )
@@ -567,6 +593,7 @@ private class FakeCustomersApi(
         error("the detail was not scripted for this test")
     },
     private val propertiesAnswer: suspend () -> List<CustomerPropertyDto> = { emptyList() },
+    private val archivedPropertiesAnswer: suspend () -> List<CustomerPropertyDto> = { emptyList() },
     private val jobsAnswer: suspend () -> List<CustomerJobDto> = { emptyList() },
     private val createPropertyAnswer: suspend () -> CustomerPropertyDto = {
         error("the property create was not scripted for this test")
@@ -580,6 +607,9 @@ private class FakeCustomersApi(
     var lastCreateRequest: CreatePropertyRequest? = null
     var calls: Int = 0
 
+    /** The lifecycle projection each Property read asked for, in call order. */
+    val propertyStatuses = mutableListOf<String?>()
+
     /** Failures consumed by successive calls, so a test can script a sequence of answers. */
     val failures = mutableListOf<Throwable>()
 
@@ -587,7 +617,7 @@ private class FakeCustomersApi(
      * Fails only the Property projection.
      *
      * The shared [failures] queue is consumed by whichever call runs next, so it cannot script a
-     * refusal of the second of the detail read's three calls.
+     * refusal of one of the detail read's Property calls.
      */
     var propertiesFailure: Throwable? = null
 
@@ -618,13 +648,19 @@ private class FakeCustomersApi(
     override suspend fun properties(
         authorization: String,
         id: String,
+        status: String?,
     ): List<CustomerPropertyDto> {
         calls += 1
         lastAuthorization = authorization
         lastDetailId = id
+        propertyStatuses += status
         failures.removeFirstOrNull()?.let { throw it }
         propertiesFailure?.let { throw it }
-        return propertiesAnswer()
+        return if (status == PropertyStatus.ARCHIVED.name) {
+            archivedPropertiesAnswer()
+        } else {
+            propertiesAnswer()
+        }
     }
 
     override suspend fun jobs(

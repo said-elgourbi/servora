@@ -28,7 +28,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > migrated yet.
 >
 > Customer, Property-permission and Property-lifecycle work is tracked in
-> `docs/tracker/006-customers-feature-permissions.md` … `docs/tracker/012-property-permissions-and-lifecycle-schema.md`.
+> `docs/tracker/006-customers-feature-permissions.md` … `docs/tracker/013-property-lifecycle.md`.
 > The Property permission set and the lifecycle decisions are recorded in
 > `docs/decisions/012-property-lifecycle-and-permissions.md`, and the offline/outbox standard the
 > Property lifecycle follows is `docs/architecture/offline-first-architecture.md`.
@@ -123,6 +123,8 @@ make android-build       # Android debug APK (requires Android SDK)
 - Property permissions, the archived projection and the Property lifecycle schema:
   `docs/tracker/012-property-permissions-and-lifecycle-schema.md`
   (decision: `docs/decisions/012-property-lifecycle-and-permissions.md`).
+- Property lifecycle (edit, archive, restore, permanent delete) across the API and Android:
+  `docs/tracker/013-property-lifecycle.md`.
 - Offline/outbox standard for Android: `docs/architecture/offline-first-architecture.md`.
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.
 

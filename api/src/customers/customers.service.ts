@@ -36,7 +36,12 @@ import {
 } from './customer-list-filter.dto.js';
 import type { CreateCustomerAddressDto } from './customer-address.dto.js';
 import type { CreateCustomerContactDto } from './customer-contact.dto.js';
-import { PROPERTY_COUNTRY, type CreatePropertyDto } from './property.dto.js';
+import {
+  DEFAULT_PROPERTY_LIST_FILTERS,
+  PROPERTY_COUNTRY,
+  type CreatePropertyDto,
+  type PropertyListFilters,
+} from './property.dto.js';
 import type {
   AssignmentRoleCode,
   CustomerDetail,
@@ -691,19 +696,21 @@ export class CustomersService {
   }
 
   /**
-   * Lists the `ACTIVE` Properties the customer is currently related to, each with the values its
-   * row renders (`BR-050`, `BR-081`, `BR-082`).
+   * Lists the Properties the customer is related to, each with the values its row renders
+   * (`BR-050`, `BR-081`, `BR-082`).
    *
    * `jobCount` counts every Job the Property is associated with, whatever its status.
    * `lastServiceAt` is the scheduled start of the most recent `COMPLETED` Visit across those Jobs,
    * or `null` when there is none. Both are derived; neither is stored (`BR-081`).
    *
-   * An `ARCHIVED` Property is still one of the customer's relationships but is not part of the
-   * default projection; it is reached through the explicit archived views.
+   * The default filter is `ACTIVE`, because archiving is how a Property leaves active use
+   * (`BR-083`); an archived Property is still one of the customer's relationships and is requested
+   * explicitly with `status=ARCHIVED` or `status=ALL`.
    */
   async findCustomerPropertiesInOrganization(
     scope: OrganizationScope,
     customerId: string,
+    filters: PropertyListFilters = DEFAULT_PROPERTY_LIST_FILTERS,
   ): Promise<CustomerPropertySummary[]> {
     await this.requireCustomerInScope(scope, customerId);
 
@@ -744,7 +751,9 @@ export class CustomersService {
           ),
           eq(propertyCustomerRelationships.customerId, customerId),
           sql`${propertyCustomerRelationships.endedAt} is null`,
-          eq(properties.status, ACTIVE_PROPERTY_STATUS),
+          filters.status === 'ALL'
+            ? undefined
+            : eq(properties.status, filters.status),
         ),
       )
       .groupBy(properties.id)
@@ -945,10 +954,7 @@ export class CustomersService {
       .from(visitTechnicians)
       .innerJoin(
         organizationMembers,
-        eq(
-          organizationMembers.id,
-          visitTechnicians.technicianMembershipId,
-        ),
+        eq(organizationMembers.id, visitTechnicians.technicianMembershipId),
       )
       .leftJoin(
         userProfiles,
@@ -1024,7 +1030,7 @@ export class CustomersService {
  * text depending on how the driver types it. Both shapes describe the same instant, so both are
  * accepted here rather than trusted to be one.
  */
-function asDate(value: Date | string | null): Date | null {
+export function asDate(value: Date | string | null): Date | null {
   if (value === null) {
     return null;
   }

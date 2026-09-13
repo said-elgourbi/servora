@@ -19,6 +19,11 @@ import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
 import com.servora.android.data.customers.PropertyCreateResult
+import com.servora.android.data.customers.PropertyDeleteResult
+import com.servora.android.data.customers.PropertyLifecycleRequest
+import com.servora.android.data.customers.PropertyRepository
+import com.servora.android.data.customers.PropertyResult
+import com.servora.android.data.customers.UpdatePropertyRequest
 import com.servora.android.domain.model.Customer
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerFilters
@@ -43,10 +48,13 @@ import com.servora.android.ui.customers.CustomerDetailSeeAllJobsTag
 import com.servora.android.ui.customers.CustomerPermissionsUiState
 import com.servora.android.ui.customers.CustomersViewModel
 import com.servora.android.ui.customers.EditCustomerActionTag
+import com.servora.android.ui.customers.EditPropertyViewModel
+import com.servora.android.ui.customers.PropertyDetailViewModel
 import com.servora.android.ui.customers.ServoraHomeScreen
 import com.servora.android.ui.customers.customerDetailJobTag
 import com.servora.android.ui.customers.customerRowTag
 import com.servora.android.ui.theme.ServoraTheme
+import java.time.Clock
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -245,6 +253,12 @@ class ServoraHomeNavigationTest {
         val repository = FakeCustomersRepository(jobCount = jobCount)
         viewModel = CustomersViewModel(repository)
         val addPropertyViewModel = AddPropertyViewModel(repository)
+        // The Property lifecycle destinations are wired by the shell too; the fake answers "not
+        // found", because these tests cover navigation rather than Property behaviour.
+        val propertyRepository = FakePropertyRepository()
+        val propertyDetailViewModel =
+            PropertyDetailViewModel(propertyRepository, Clock.systemUTC())
+        val editPropertyViewModel = EditPropertyViewModel(propertyRepository)
         composeTestRule.setContent {
             ServoraTheme {
                 ServoraHomeScreen(
@@ -259,6 +273,8 @@ class ServoraHomeNavigationTest {
                         ),
                     customersViewModel = viewModel,
                     addPropertyViewModel = addPropertyViewModel,
+                    propertyDetailViewModel = propertyDetailViewModel,
+                    editPropertyViewModel = editPropertyViewModel,
                     onSignOut = {},
                 )
             }
@@ -397,3 +413,41 @@ private fun job(index: Int) = CustomerJob(
     scheduledStart = "2026-09-08T13:00:00Z",
     technicians = listOf(CustomerJobTechnician("lead-1", "Mike Lead", "LEAD")),
 )
+
+/**
+ * A [PropertyRepository] that answers "not found".
+ *
+ * The navigation tests exercise the signed-in back stack, not Property behaviour, so the Property
+ * destinations are wired to a repository that reports nothing rather than to scripted Property data.
+ */
+private class FakePropertyRepository : PropertyRepository {
+    override suspend fun loadProperty(
+        customerId: String,
+        propertyId: String,
+    ): PropertyResult = PropertyResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun updateProperty(
+        customerId: String,
+        propertyId: String,
+        request: UpdatePropertyRequest,
+    ): PropertyResult = PropertyResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun archiveProperty(
+        customerId: String,
+        propertyId: String,
+        request: PropertyLifecycleRequest,
+    ): PropertyResult = PropertyResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun restoreProperty(
+        customerId: String,
+        propertyId: String,
+        request: PropertyLifecycleRequest,
+    ): PropertyResult = PropertyResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun deleteProperty(
+        customerId: String,
+        propertyId: String,
+    ): PropertyDeleteResult =
+        PropertyDeleteResult.Failure(CustomersFailureReason.NOT_FOUND)
+}
+

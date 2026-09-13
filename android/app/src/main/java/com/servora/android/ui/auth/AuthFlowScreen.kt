@@ -16,6 +16,8 @@ import com.servora.android.data.session.AuthState
 import com.servora.android.domain.auth.asPermissionChecker
 import com.servora.android.ui.customers.AddPropertyViewModel
 import com.servora.android.ui.customers.CustomersViewModel
+import com.servora.android.ui.customers.EditPropertyViewModel
+import com.servora.android.ui.customers.PropertyDetailViewModel
 import com.servora.android.ui.customers.ServoraHomeScreen
 import com.servora.android.ui.customers.customerPermissionsUiState
 import com.servora.android.ui.passwordreset.PasswordResetScreen
@@ -64,6 +66,8 @@ fun AuthFlowScreen(
     smsSignInViewModel: SmsSignInViewModel,
     customersViewModel: CustomersViewModel,
     addPropertyViewModel: AddPropertyViewModel,
+    propertyDetailViewModel: PropertyDetailViewModel,
+    editPropertyViewModel: EditPropertyViewModel,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -85,6 +89,8 @@ fun AuthFlowScreen(
                 permissions = customerPermissionsUiState(state.permissions.asPermissionChecker()),
                 customersViewModel = customersViewModel,
                 addPropertyViewModel = addPropertyViewModel,
+                propertyDetailViewModel = propertyDetailViewModel,
+                editPropertyViewModel = editPropertyViewModel,
                 onSignOut = onSignOut,
                 modifier = modifier,
             )

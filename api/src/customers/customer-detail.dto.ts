@@ -10,6 +10,7 @@ import {
   toCustomerContactDto,
   type CustomerContactDto,
 } from './customer-contact.dto.js';
+import type { PropertyStatus } from './property.dto.js';
 import type {
   Customer,
   CustomerCompany,
@@ -94,6 +95,13 @@ export interface CustomerPropertyDto {
   province: string;
   postalCode: string;
   country: string;
+  /**
+   * The Property's lifecycle state (`BR-082`).
+   *
+   * The default projection is `ACTIVE` (`BR-081`); the state is carried so an explicit archived
+   * request can be presented with the lifecycle it actually has.
+   */
+  status: PropertyStatus;
   jobCount: number;
   lastServiceAt: string | null;
 }
@@ -164,6 +172,7 @@ export function toCustomerPropertyDto(
     province: property.province,
     postalCode: property.postalCode,
     country: property.country,
+    status: property.status as PropertyStatus,
     jobCount: summary.jobCount,
     lastServiceAt: summary.lastServiceAt?.toISOString() ?? null,
   };

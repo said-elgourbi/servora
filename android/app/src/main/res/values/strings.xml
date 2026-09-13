@@ -203,6 +203,16 @@
     <string name="customers_detail_no_jobs">No jobs yet</string>
     <string name="customers_detail_last_service_format">Last service %1$s</string>
     <string name="customers_detail_never_serviced">Never serviced</string>
+    <!--
+      The customer's archived Properties (`BR-082`). The section shows the active projection
+      (`BR-081`), so these stay behind an explicit disclosure that keeps them reachable to restore.
+    -->
+    <plurals name="customers_detail_archived_properties">
+        <item quantity="one">%1$d archived property</item>
+        <item quantity="other">%1$d archived properties</item>
+    </plurals>
+    <string name="customers_detail_archived_properties_show">Show archived properties</string>
+    <string name="customers_detail_archived_properties_hide">Hide archived properties</string>
     <string name="customers_detail_see_all_jobs">See all %1$d jobs</string>
     <string name="customers_all_jobs_title">Job History</string>
     <string name="customers_property_city_format">%1$s, %2$s %3$s</string>
@@ -246,10 +256,43 @@
     <string name="property_save">Save Property</string>
     <string name="property_form_incomplete">Please fill in street address, city, province and postal code.</string>
     <string name="property_error_unauthenticated">Your session has expired. Sign in again.</string>
-    <string name="property_error_forbidden">You do not have permission to add properties.</string>
+    <string name="property_error_forbidden">You do not have permission to manage properties.</string>
     <string name="property_error_validation">Check the details you entered.</string>
+    <string name="property_error_conflict">This property changed since you opened it. Reopen it and try again.</string>
+    <string name="property_error_not_found">This property no longer exists.</string>
     <string name="property_error_network">Check your network and try again.</string>
     <string name="property_error_server">Please try again.</string>
+    <!-- Property lifecycle: the detail screen, its actions and their confirmations. -->
+    <string name="property_detail_title">Property</string>
+    <string name="property_edit_title">Edit Property</string>
+    <string name="property_edit_action">Save Changes</string>
+    <string name="property_status_archived">Archived</string>
+    <string name="property_actions_section">Actions</string>
+    <string name="property_archive_action">Archive Property</string>
+    <string name="property_archive_description">Unavailable for new jobs. Existing work and history remain.</string>
+    <string name="property_restore_action">Restore Property</string>
+    <string name="property_restore_description">Available for new jobs again.</string>
+    <string name="property_delete_action">Permanently Delete</string>
+    <string name="property_delete_description">Cannot be undone. Only possible when nothing references it.</string>
+    <string name="property_archive_confirm_title">Archive this property?</string>
+    <string name="property_archive_confirm_message">The property will no longer be available for new jobs. Existing jobs, visits and history remain unchanged.</string>
+    <string name="property_archive_open_work_lead">Current work on this property:</string>
+    <string name="property_archive_open_work_continue">This work will continue. Archiving does not cancel, reschedule or modify it.</string>
+    <string name="property_restore_confirm_title">Restore this property?</string>
+    <string name="property_restore_confirm_message">The property becomes available for new jobs again. Its existing work and history are not changed.</string>
+    <string name="property_delete_confirm_title">Permanently delete this property?</string>
+    <string name="property_delete_confirm_message">This cannot be undone. A property can only be deleted while no job, visit, note or history references it.</string>
+    <string name="property_delete_confirm_action">Delete Permanently</string>
+    <string name="property_delete_blocked_title">This property cannot be deleted</string>
+    <string name="property_delete_blocked_message">It has jobs, visits or history, so it must be kept. Archive it to take it out of active use.</string>
+    <plurals name="property_archive_open_jobs">
+        <item quantity="one">%1$d active job</item>
+        <item quantity="other">%1$d active jobs</item>
+    </plurals>
+    <plurals name="property_archive_open_visits">
+        <item quantity="one">%1$d active visit</item>
+        <item quantity="other">%1$d active visits</item>
+    </plurals>
     <!-- Canadian province and territory names, keyed by the stable code the API exchanges. -->
     <string name="property_province_ab">Alberta</string>
     <string name="property_province_bc">British Columbia</string>

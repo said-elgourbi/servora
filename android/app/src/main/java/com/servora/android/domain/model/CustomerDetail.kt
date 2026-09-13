@@ -28,6 +28,8 @@ data class CustomerProperty(
     val jobCount: Int,
     /** ISO-8601 UTC instant of the newest completed Visit; `null` when never serviced. */
     val lastServiceAt: String?,
+    /** The Property's lifecycle state (`BR-082`); the default projection is `ACTIVE`. */
+    val status: PropertyStatus = PropertyStatus.ACTIVE,
 )
 
 /** One technician assigned to a Visit (`BR-068`). [name] is absent without a member profile. */
@@ -71,4 +73,12 @@ data class CustomerDetail(
     val contacts: List<CustomerContact>,
     val properties: List<CustomerProperty>,
     val jobs: List<CustomerJob>,
+    /**
+     * The customer's archived Properties (`BR-082`).
+     *
+     * The default projection excludes them (`BR-081`), so they are read explicitly and presented
+     * separately: an archived Property is not active work, but it stays a retrievable record and
+     * must remain reachable so it can be restored.
+     */
+    val archivedProperties: List<CustomerProperty> = emptyList(),
 )

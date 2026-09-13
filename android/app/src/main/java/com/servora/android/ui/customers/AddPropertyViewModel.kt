@@ -98,6 +98,11 @@ class AddPropertyViewModel @Inject constructor(
     private fun edit(transform: (AddPropertyUiState) -> AddPropertyUiState) {
         _uiState.update { state -> transform(state).copy(failureReason = null) }
     }
+
+    /** Releases the form's values when the session ends (`BR-001`). */
+    fun reset() {
+        _uiState.value = AddPropertyUiState()
+    }
 }
 
 /** The form's values as the API request, with blank optional fields left absent. */

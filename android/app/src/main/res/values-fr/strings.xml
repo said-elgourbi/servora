@@ -174,6 +174,16 @@
     <string name="customers_detail_no_jobs">Aucune intervention</string>
     <string name="customers_detail_last_service_format">Dernier service %1$s</string>
     <string name="customers_detail_never_serviced">Jamais desservi</string>
+    <!--
+      Propriétés archivées du client (`BR-082`). La section montre la projection active (`BR-081`) ;
+      ce dépliant explicite les garde accessibles pour les restaurer.
+    -->
+    <plurals name="customers_detail_archived_properties">
+        <item quantity="one">%1$d propriété archivée</item>
+        <item quantity="other">%1$d propriétés archivées</item>
+    </plurals>
+    <string name="customers_detail_archived_properties_show">Afficher les propriétés archivées</string>
+    <string name="customers_detail_archived_properties_hide">Masquer les propriétés archivées</string>
     <string name="customers_detail_see_all_jobs">Voir les %1$d interventions</string>
     <string name="customers_all_jobs_title">Historique des interventions</string>
     <string name="customers_property_city_format">%1$s, %2$s %3$s</string>
@@ -217,10 +227,43 @@
     <string name="property_save">Enregistrer la propriété</string>
     <string name="property_form_incomplete">Veuillez indiquer l\'adresse municipale, la ville, la province et le code postal.</string>
     <string name="property_error_unauthenticated">Votre session a expiré. Reconnectez-vous.</string>
-    <string name="property_error_forbidden">Vous n\'avez pas la permission d\'ajouter des propriétés.</string>
+    <string name="property_error_forbidden">Vous n\'avez pas la permission de gérer les propriétés.</string>
     <string name="property_error_validation">Vérifiez les renseignements saisis.</string>
+    <string name="property_error_conflict">Cette propriété a changé depuis son ouverture. Rouvrez-la et réessayez.</string>
+    <string name="property_error_not_found">Cette propriété n\'existe plus.</string>
     <string name="property_error_network">Vérifiez votre réseau et réessayez.</string>
     <string name="property_error_server">Veuillez réessayer.</string>
+    <!-- Cycle de vie de la propriété : l\'écran de détail, ses actions et leurs confirmations. -->
+    <string name="property_detail_title">Propriété</string>
+    <string name="property_edit_title">Modifier la propriété</string>
+    <string name="property_edit_action">Enregistrer les modifications</string>
+    <string name="property_status_archived">Archivée</string>
+    <string name="property_actions_section">Actions</string>
+    <string name="property_archive_action">Archiver la propriété</string>
+    <string name="property_archive_description">Non disponible pour de nouveaux travaux. Les travaux et l\'historique existants sont conservés.</string>
+    <string name="property_restore_action">Restaurer la propriété</string>
+    <string name="property_restore_description">De nouveau disponible pour de nouveaux travaux.</string>
+    <string name="property_delete_action">Supprimer définitivement</string>
+    <string name="property_delete_description">Irréversible. Possible seulement si rien ne la référence.</string>
+    <string name="property_archive_confirm_title">Archiver cette propriété ?</string>
+    <string name="property_archive_confirm_message">La propriété ne sera plus disponible pour de nouveaux travaux. Les travaux, visites et l\'historique existants demeurent inchangés.</string>
+    <string name="property_archive_open_work_lead">Travaux en cours sur cette propriété :</string>
+    <string name="property_archive_open_work_continue">Ces travaux se poursuivent. L\'archivage ne les annule, ne les replanifie ni ne les modifie.</string>
+    <string name="property_restore_confirm_title">Restaurer cette propriété ?</string>
+    <string name="property_restore_confirm_message">La propriété redevient disponible pour de nouveaux travaux. Ses travaux et son historique existants ne sont pas modifiés.</string>
+    <string name="property_delete_confirm_title">Supprimer définitivement cette propriété ?</string>
+    <string name="property_delete_confirm_message">Cette action est irréversible. Une propriété ne peut être supprimée que si aucun travail, aucune visite, aucune note ni aucun historique ne la référence.</string>
+    <string name="property_delete_confirm_action">Supprimer définitivement</string>
+    <string name="property_delete_blocked_title">Cette propriété ne peut pas être supprimée</string>
+    <string name="property_delete_blocked_message">Elle a des travaux, des visites ou un historique, et doit donc être conservée. Archivez-la pour la retirer de l\'utilisation active.</string>
+    <plurals name="property_archive_open_jobs">
+        <item quantity="one">%1$d travail actif</item>
+        <item quantity="other">%1$d travaux actifs</item>
+    </plurals>
+    <plurals name="property_archive_open_visits">
+        <item quantity="one">%1$d visite active</item>
+        <item quantity="other">%1$d visites actives</item>
+    </plurals>
     <!-- Noms des provinces et territoires canadiens, indexés par le code stable échangé par l'API. -->
     <string name="property_province_ab">Alberta</string>
     <string name="property_province_bc">Colombie-Britannique</string>

@@ -48,6 +48,17 @@ enum class CustomersFailureReason {
     /** The backend rejected the submitted values. */
     VALIDATION,
 
+    /**
+     * The Property moved past the version the client last saw (`BR-086`).
+     *
+     * The API is the final authority: the mutation was rejected rather than applied, and the client
+     * re-reads the Property before the user tries again.
+     */
+    VERSION_CONFLICT,
+
+    /** The record the request addressed no longer exists. */
+    NOT_FOUND,
+
     /** The request never reached the backend. */
     NETWORK,
 

@@ -30,6 +30,10 @@ import com.servora.android.ui.customers.CustomerPermissionsUiState
 import com.servora.android.ui.customers.CustomersScreen
 import com.servora.android.ui.customers.CustomersViewModel
 import com.servora.android.ui.customers.EditCustomerActionTag
+import com.servora.android.ui.customers.EditPropertyActionTag
+import com.servora.android.ui.customers.EditPropertyViewModel
+import com.servora.android.ui.customers.PropertyDetailScreen
+import com.servora.android.ui.customers.PropertyDetailViewModel
 
 /**
  * Every destination the signed-in application can be at.
@@ -43,11 +47,15 @@ object ServoraRoutes {
 
     const val CUSTOMER_ID = "customerId"
 
+    const val PROPERTY_ID = "propertyId"
+
     const val CUSTOMER_DETAIL = "customer/detail/{customerId}"
     const val CUSTOMER_EDIT = "customer/edit/{customerId}"
     const val CUSTOMER_JOBS = "customer/jobs/{customerId}"
     const val CUSTOMER_CREATE = "customer/create"
     const val CUSTOMER_ADD_PROPERTY = "customer/properties/new/{customerId}"
+    const val PROPERTY_DETAIL = "customer/properties/detail/{customerId}/{propertyId}"
+    const val PROPERTY_EDIT = "customer/properties/edit/{customerId}/{propertyId}"
 
     fun customerDetail(customerId: String): String = "customer/detail/${Uri.encode(customerId)}"
 
@@ -57,13 +65,27 @@ object ServoraRoutes {
 
     fun customerAddProperty(customerId: String): String =
         "customer/properties/new/${Uri.encode(customerId)}"
+
+    fun propertyDetail(customerId: String, propertyId: String): String =
+        "customer/properties/detail/${Uri.encode(customerId)}/${Uri.encode(propertyId)}"
+
+    fun propertyEdit(customerId: String, propertyId: String): String =
+        "customer/properties/edit/${Uri.encode(customerId)}/${Uri.encode(propertyId)}"
 }
 
 private fun NavBackStackEntry.customerId(): String =
     arguments?.getString(ServoraRoutes.CUSTOMER_ID).orEmpty()
 
+private fun NavBackStackEntry.propertyId(): String =
+    arguments?.getString(ServoraRoutes.PROPERTY_ID).orEmpty()
+
 private fun customerIdArgument() =
     listOf(navArgument(ServoraRoutes.CUSTOMER_ID) { type = NavType.StringType })
+
+private fun propertyArguments() = listOf(
+    navArgument(ServoraRoutes.CUSTOMER_ID) { type = NavType.StringType },
+    navArgument(ServoraRoutes.PROPERTY_ID) { type = NavType.StringType },
+)
 
 /**
  * The back stack for the signed-in area.
@@ -84,6 +106,8 @@ fun ServoraNavHost(
     navController: NavHostController,
     customersViewModel: CustomersViewModel,
     addPropertyViewModel: AddPropertyViewModel,
+    propertyDetailViewModel: PropertyDetailViewModel,
+    editPropertyViewModel: EditPropertyViewModel,
     permissions: CustomerPermissionsUiState,
     rootContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
@@ -114,6 +138,11 @@ fun ServoraNavHost(
                 },
                 onSeeAllJobs = { navController.push(ServoraRoutes.customerJobs(customerId)) },
                 onRetry = customersViewModel::retryCustomerDetail,
+                onOpenProperty = { propertyId ->
+                    navController.push(
+                        ServoraRoutes.propertyDetail(customerId, propertyId),
+                    )
+                },
             )
         }
 
@@ -137,11 +166,84 @@ fun ServoraNavHost(
                 onSave = addPropertyViewModel::save,
                 onCancel = { navController.navigateUp() },
                 onSaved = {
-                    // The Property now exists on the backend, so the customer's detail is re-read
-                    // rather than patched locally (`BR-001`).
+                    // The Property now exists on the backend, so the customer's detail and the
+                    // list's Property count are re-read rather than patched locally (`BR-001`).
                     customersViewModel.reloadCustomerDetail(customerId)
+                    customersViewModel.reload()
                     navController.popBackStack()
                 },
+            )
+        }
+
+        composable(ServoraRoutes.PROPERTY_DETAIL, propertyArguments()) { entry ->
+            val customerId = entry.customerId()
+            val propertyId = entry.propertyId()
+            // Reaching this screen directly, such as from a restored back stack, must still read the
+            // Property it shows and the customer whose name the destination's context line carries.
+            LaunchedEffect(customerId) { customersViewModel.openCustomerDetail(customerId) }
+            LaunchedEffect(customerId, propertyId) {
+                propertyDetailViewModel.start(customerId, propertyId)
+            }
+            val state by propertyDetailViewModel.uiState.collectAsState()
+            PropertyDetailScreen(
+                state = state,
+                canArchiveProperty = permissions.canArchiveProperty,
+                canDeleteProperty = permissions.canDeleteProperty,
+                onArchive = propertyDetailViewModel::archive,
+                onRestore = propertyDetailViewModel::restore,
+                onDelete = propertyDetailViewModel::delete,
+                onDismissActionFailure = propertyDetailViewModel::dismissActionFailure,
+                onRetry = propertyDetailViewModel::retry,
+                onDeleted = {
+                    // The Property is gone on the backend, so the customer's detail and the list's
+                    // Property count are re-read rather than patched locally (`BR-001`), and the
+                    // destination leaves.
+                    customersViewModel.reloadCustomerDetail(customerId)
+                    customersViewModel.reload()
+                    navController.popBackStack()
+                },
+                onLifecycleChanged = {
+                    // The archive or restore is on the backend now, so the customer's Property
+                    // rows, its counts and the list's count are re-read rather than patched
+                    // locally (`BR-001`). Acknowledging the signal keeps re-entering this screen
+                    // from reading again.
+                    customersViewModel.reloadCustomerDetail(customerId)
+                    customersViewModel.reload()
+                    propertyDetailViewModel.acknowledgeLifecycleChange()
+                },
+            )
+        }
+
+        composable(ServoraRoutes.PROPERTY_EDIT, propertyArguments()) { entry ->
+            val customerId = entry.customerId()
+            val propertyId = entry.propertyId()
+            // The destination carries the Property it edits, so the form is scoped to one Property
+            // rather than being a single shared screen. The customer's detail is read as well, for
+            // the destination's context line.
+            LaunchedEffect(customerId) { customersViewModel.openCustomerDetail(customerId) }
+            LaunchedEffect(customerId, propertyId) {
+                editPropertyViewModel.start(customerId, propertyId)
+            }
+            val state by editPropertyViewModel.uiState.collectAsState()
+            AddPropertyScreen(
+                state = state,
+                onStreetAddressChange = editPropertyViewModel::onStreetAddressChange,
+                onUnitChange = editPropertyViewModel::onUnitChange,
+                onCityChange = editPropertyViewModel::onCityChange,
+                onProvinceChange = editPropertyViewModel::onProvinceChange,
+                onPostalCodeChange = editPropertyViewModel::onPostalCodeChange,
+                onNameChange = editPropertyViewModel::onNameChange,
+                onNotesChange = editPropertyViewModel::onNotesChange,
+                onSave = editPropertyViewModel::save,
+                onCancel = { navController.navigateUp() },
+                onSaved = {
+                    // The edit is on the backend now, so both the customer's Property rows and the
+                    // Property's own screen are re-read rather than patched locally (`BR-001`).
+                    customersViewModel.reloadCustomerDetail(customerId)
+                    propertyDetailViewModel.reload(customerId, propertyId)
+                    navController.popBackStack()
+                },
+                saveLabelRes = R.string.property_edit_action,
             )
         }
 
@@ -226,6 +328,42 @@ fun servoraTopBarState(
 
         ServoraRoutes.CUSTOMER_ADD_PROPERTY -> ServoraTopBarState(
             title = stringResource(R.string.property_add_title),
+            isRoot = false,
+            onBack = { navController.navigateUp() },
+            subtitle = customerName(
+                entry?.arguments?.getString(ServoraRoutes.CUSTOMER_ID).orEmpty(),
+            ),
+        )
+
+        ServoraRoutes.PROPERTY_DETAIL -> {
+            val customerId = entry?.arguments?.getString(ServoraRoutes.CUSTOMER_ID).orEmpty()
+            val propertyId = entry?.arguments?.getString(ServoraRoutes.PROPERTY_ID).orEmpty()
+            ServoraTopBarState(
+                title = stringResource(R.string.property_detail_title),
+                isRoot = false,
+                onBack = { navController.navigateUp() },
+                subtitle = customerName(customerId),
+                actions = {
+                    // Editing is its own Property capability (`BR-085`), so the action is drawn only
+                    // when the user holds it; the backend remains the authority (`BR-007`).
+                    if (permissions.canEditProperty) {
+                        TextButton(
+                            modifier = Modifier.testTag(EditPropertyActionTag),
+                            onClick = {
+                                navController.push(
+                                    ServoraRoutes.propertyEdit(customerId, propertyId),
+                                )
+                            },
+                        ) {
+                            Text(stringResource(R.string.customers_edit_short))
+                        }
+                    }
+                },
+            )
+        }
+
+        ServoraRoutes.PROPERTY_EDIT -> ServoraTopBarState(
+            title = stringResource(R.string.property_edit_title),
             isRoot = false,
             onBack = { navController.navigateUp() },
             subtitle = customerName(

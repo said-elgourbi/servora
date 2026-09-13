@@ -39,13 +39,18 @@ interface CustomersApi {
     ): CustomerDetailDto
 
     /**
-     * `GET /customers/{id}/properties` — the customer's active Properties with their derived row
-     * values (`BR-081`).
+     * `GET /customers/{id}/properties` — the customer's Properties with their derived row values
+     * (`BR-081`).
+     *
+     * [status] selects the lifecycle projection: the backend defaults to `ACTIVE` and an archived
+     * Property must be asked for explicitly (`BR-082`, `BR-083`), so a `null` omits the parameter.
+     * The value is a stable code the API validates (`BR-041`).
      */
     @GET("customers/{id}/properties")
     suspend fun properties(
         @Header("Authorization") authorization: String,
         @Path("id") id: String,
+        @Query("status") status: String? = null,
     ): List<CustomerPropertyDto>
 
     /**

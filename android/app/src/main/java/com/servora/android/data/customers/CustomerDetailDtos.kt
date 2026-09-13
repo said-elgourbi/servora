@@ -67,6 +67,8 @@ data class CustomerPropertyDto(
     val province: String,
     val postalCode: String,
     val country: String,
+    /** The Property's lifecycle state (`BR-082`); the default projection is `ACTIVE`. */
+    val status: String = "ACTIVE",
     val jobCount: Int = 0,
     /** The most recent completed Visit's scheduled start, or `null` when never serviced. */
     val lastServiceAt: String? = null,

@@ -4,6 +4,8 @@ import com.servora.android.data.auth.AuthRepository
 import com.servora.android.data.auth.DefaultAuthRepository
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.DefaultCustomersRepository
+import com.servora.android.data.customers.DefaultPropertyRepository
+import com.servora.android.data.customers.PropertyRepository
 import com.servora.android.data.device.DeviceIdentity
 import com.servora.android.data.device.DeviceIdentityProvider
 import com.servora.android.data.session.DefaultSessionAuthenticator
@@ -49,6 +51,12 @@ abstract class DataModule {
     abstract fun bindCustomersRepository(
         implementation: DefaultCustomersRepository,
     ): CustomersRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPropertyRepository(
+        implementation: DefaultPropertyRepository,
+    ): PropertyRepository
 
     companion object {
         /** Exposes the installation identity as a plain value for injection. */

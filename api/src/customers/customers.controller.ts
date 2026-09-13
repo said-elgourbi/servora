@@ -14,7 +14,10 @@ import {
 } from '@nestjs/common';
 import { AuthApiError } from '../auth/auth-error.js';
 import { AuthGuard } from '../auth/auth.guard.js';
-import { CUSTOMER_PERMISSIONS, PROPERTY_PERMISSIONS } from '../auth/permissions.js';
+import {
+  CUSTOMER_PERMISSIONS,
+  PROPERTY_PERMISSIONS,
+} from '../auth/permissions.js';
 import { RequirePermissions } from '../auth/permissions.decorator.js';
 import { PermissionsGuard } from '../auth/permissions.guard.js';
 import type { PermissionedRequest } from '../auth/permissions.guard.js';
@@ -39,7 +42,10 @@ import type {
   CustomerPropertyDto,
 } from './customer-detail.dto.js';
 import { parseCustomerListFilters } from './customer-list-filter.dto.js';
-import { parseCreatePropertyDto } from './property.dto.js';
+import {
+  parseCreatePropertyDto,
+  parsePropertyListFilters,
+} from './property.dto.js';
 import {
   CustomerNotFoundError,
   CustomersService,
@@ -87,11 +93,19 @@ export class CustomersController {
   async properties(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
+    @Query() query: unknown,
   ): Promise<CustomerPropertyDto[]> {
     const scope = requireAuthorization(request);
+    // Archived Properties are excluded by default; a client asks for them explicitly with
+    // `?status=ARCHIVED` or `?status=ALL` (`BR-082`, `BR-083`).
+    const filters = parseInput(() => parsePropertyListFilters(query));
     try {
       const summaries =
-        await this.customers.findCustomerPropertiesInOrganization(scope, id);
+        await this.customers.findCustomerPropertiesInOrganization(
+          scope,
+          id,
+          filters,
+        );
       return summaries.map(toCustomerPropertyDto);
     } catch (error) {
       if (error instanceof CustomerNotFoundError) {
