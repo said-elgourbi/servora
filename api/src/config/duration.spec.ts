@@ -18,7 +18,9 @@ describe('parseDuration', () => {
   it.each(['15', '15 minutes', '1.5h', '-15m', 'm', '', '15M', '0m'])(
     'rejects an invalid duration (%s)',
     (value) => {
-      expect(() => parseDuration(value, 'TEST_LIFETIME')).toThrow(/Invalid TEST_LIFETIME/);
+      expect(() => parseDuration(value, 'TEST_LIFETIME')).toThrow(
+        /Invalid TEST_LIFETIME/,
+      );
     },
   );
 

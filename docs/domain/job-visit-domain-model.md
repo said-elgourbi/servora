@@ -4,12 +4,12 @@
 > Property relationships, Jobs, Visits, scheduling, assignment, field execution, history and the
 > offline/concurrency behaviour those aggregates require.
 >
-> **This document is documentation only.** It changes no application code, no database schema and
-> no migration. It defines the domain and the proposed PostgreSQL shape so the Job & Visit
-> implementation slice can be reviewed and approved _before_ anything is built
+> **This document defines the domain and the target PostgreSQL shape.** The **Property** part of it
+> (§3, §4) is now implemented by migration `0007_property_lifecycle_and_permissions` and the
+> customer/property API; the Job and Visit tables remain **proposed** and are not migrated yet
 > (`Project.md` §8, `dev.md` §2).
 >
-> - Business rules: `Business Rules.md` — principally BR-047 – BR-080 (and BR-001, BR-007,
+> - Business rules: `Business Rules.md` — principally BR-047 – BR-086 (and BR-001, BR-007,
 >   BR-013 – BR-015, BR-022, BR-028, BR-031, BR-033, BR-041, BR-042).
 > - Foundation domain: `docs/domain/foundation-domain-model.md` (organizations, users, members,
 >   customers, contacts, addresses).
@@ -118,6 +118,9 @@ introduces each table describes its own history table.
 - Physical deletion of a Job is an **OPEN QUESTION** (`BR-021`): `BR-008` grants Managers a delete
   capability, but the relationship between deleting a Job and preserving business history is not
   defined. No deletion behaviour is modelled here (§16).
+- The **Property** lifecycle is now defined (`BR-082` – `BR-086`): a Property is archived and
+  restored, and may be permanently deleted only when no business record references it (§3.1, §3.3).
+  Job deletion remains the open question above.
 - Deletion behaviour is therefore stated deliberately per reference rather than inherited blindly
   from the ORM default. Aggregate-internal references cascade; references to _other_ aggregates
   (Customer, Property, member) do not, because a cascade would destroy Job/Visit history that
@@ -125,7 +128,7 @@ introduces each table describes its own history table.
 
 ## 3. Properties
 
-### 3.1 Proposed table — `properties`
+### 3.1 Table — `properties` (migrated: `0007_property_lifecycle_and_permissions`)
 
 A Property is the physical location where service is performed, owned by the organization
 (`BR-049`).
@@ -142,17 +145,23 @@ A Property is the physical location where service is performed, owned by the org
 | `postal_code`               | `varchar(20)`  | no    |                                              |
 | `country`                   | `varchar(100)` | no    | `NOT NULL DEFAULT 'Canada'`                  |
 | `notes`                     | `text`         | yes   | Optional Property notes (`BR-049`)           |
+| `status`                    | `varchar(16)`  | no    | `NOT NULL DEFAULT 'ACTIVE'`; CHECK (§3.3)    |
+| `archived_at`               | `timestamptz`  | yes   | `NULL` while `ACTIVE` (`BR-082`)             |
+| `archived_by_membership_id` | `uuid`         | yes   | FK → `organization_members.id`; who archived |
+| `version`                   | `integer`      | no    | `NOT NULL DEFAULT 1` — concurrency (§15)     |
 | `created_at` / `updated_at` | `timestamptz`  | no    | Foundation convention                        |
 
 Constraints and indexes:
 
-- No `status` column and no lifecycle columns. `BR-049` defines a Property as a name, a structured
-  address and optional notes. No Property lifecycle is defined by the business rules, so none is
-  invented (`BR-042`).
+- `CHECK (status IN ('ACTIVE','ARCHIVED'))` — the `BR-082` lifecycle vocabulary is confirmed and
+  closed (§3.3). `CHECK ((status = 'ARCHIVED') = (archived_at IS NOT NULL))` and
+  `CHECK ((status = 'ARCHIVED') = (archived_by_membership_id IS NOT NULL))`.
+- `CHECK (version > 0)` — the same optimistic-concurrency convention as `jobs` and `visits` (§15).
 - No uniqueness constraint on the address. The business rules do not forbid two Properties sharing
   an address, and Property de-duplication is a data-quality concern rather than a modelled rule.
 - Indexes: `(organization_id)`, `(organization_id, postal_code)` — the organization-scoped address
-  lookup a management UI needs.
+  lookup a management UI needs — and `(organization_id, status)` for the active-list and selector
+  queries `BR-083` requires.
 
 ### 3.2 Address shape
 
@@ -166,9 +175,128 @@ foundation shape keeps one vocabulary for one concept (`BR-041`).
   `customer_addresses`.
 - A Property is an **independently identified entity**. It does not share a primary key with any
   `customer_addresses` row, and a customer address change never rewrites a Property (`BR-057`).
-- Editing a Property's own address is allowed, because Jobs and Visits keep immutable address
-  snapshots (§6.3, §9.3). Whether the Property's own address history must additionally be retained
-  is not defined by the business rules and is recorded as an open question (§21, `BR-057`).
+- Editing a Property's own address is allowed in either lifecycle state, because Jobs and Visits
+  keep immutable address snapshots (`BR-084`, §6.3, §9.3). Whether the Property's own address
+  change history must additionally be retained is not defined by the business rules and is recorded
+  as an open question (§21, `BR-057`).
+
+### 3.3 Property lifecycle — archive, restore and permanent deletion (`BR-082` – `BR-086`)
+
+A Property leaves active use by being **archived**. Permanent deletion is the exception, available
+only when nothing has ever referenced the Property.
+
+**State**
+
+| State      | Meaning                                                                     |
+| ---------- | --------------------------------------------------------------------------- |
+| `ACTIVE`   | Available for new Jobs and shown in normal active lists and selectors.       |
+| `ARCHIVED` | Out of active use; still a retrievable record with its identity and history. |
+
+- `properties.status` carries the state (`NOT NULL DEFAULT 'ACTIVE'`, closed CHECK, §3.1).
+- `archived_at` / `archived_by_membership_id` record the **current** archive event for fast reads and
+  are `NULL` while the Property is `ACTIVE`. They are current state, never history (`BR-041`).
+- Archive and restore are explicit actions. Editing never changes `status` (`BR-084`).
+- Restoring returns the Property to `ACTIVE`. It never creates a Property and never changes
+  `properties.id` (`BR-082`).
+
+**Table — `property_lifecycle_history` (append-only; migrated: `0007_property_lifecycle_and_permissions`)**
+
+| Column                 | Type          | Null? | Notes                                          |
+| ---------------------- | ------------- | ----- | ---------------------------------------------- |
+| `id`                   | `uuid`        | no    | PK, `gen_random_uuid()`                        |
+| `organization_id`      | `uuid`        | no    | FK → `organizations.id`                        |
+| `property_id`          | `uuid`        | no    | FK → `properties.id`, default `RESTRICT`       |
+| `action`               | `varchar(16)` | no    | CHECK (`ARCHIVED`, `RESTORED`) (`BR-082`)      |
+| `actor_membership_id`  | `uuid`        | no    | Who performed the action (`BR-086`)            |
+| `note`                 | `text`        | yes   | Optional; no rule requires a reason (`BR-042`) |
+| `recorded_at`          | `timestamptz` | no    | Authoritative business time (§14)              |
+| `captured_at`          | `timestamptz` | yes   | Device time, display only (§14)                |
+| `client_operation_id`  | `uuid`        | yes   | Offline replay idempotency (§14)               |
+| `created_at`           | `timestamptz` | no    |                                                |
+
+- `CHECK (action IN ('ARCHIVED','RESTORED'))` — the vocabulary is closed and confirmed (`BR-082`).
+- No uniqueness constraint: a Property may be archived and restored repeatedly.
+- Index `(organization_id, property_id, recorded_at)`.
+- The `property_id` reference is deliberately **`CASCADE`, not `RESTRICT`**. This table records the
+  Property's own archive/restore events, and `BR-082`/`BR-086` confirm that this history does **not**
+  by itself make the Property permanently undeletable: it is removed with the Property when permanent
+  deletion is allowed. Permanent deletion stays blocked by **other** business records (§6.4), which
+  is what makes a Property created through the API undeletable in practice.
+- This table is the Property lifecycle's authoritative history. `properties.archived_at` /
+  `archived_by_membership_id` are not a second history (`BR-041`, `BR-067`).
+
+**Archiving implications (`BR-083`)**
+
+- New Jobs for the archived Property are **blocked**.
+- The Property is excluded from normal active lists and from Property selectors used to choose a
+  location for new work.
+- Existing Jobs and Visits are untouched: nothing is cancelled, archived, rescheduled or otherwise
+  modified.
+- `SCHEDULED` and ongoing Visits continue. An existing Visit may still be rescheduled (`BR-073`), and
+  additional Visits may be added to an existing open Job (`BR-071`).
+- `jobs.property_id`, `job_property_history` and the Job's frozen `property_address_snapshot` are
+  unchanged (`BR-056`).
+- The active `property_customer_relationships` row is not ended: archiving is not a
+  Customer-relationship change (`BR-050`).
+- Archiving is allowed while active work exists. Android must require **explicit confirmation**, using
+  the classification below. This is a client presentation requirement; the API remains authoritative
+  (`BR-007`).
+
+**Archive-warning classification (`BR-083`)**
+
+| Concept      | Set for the archive warning                        |
+| ------------ | -------------------------------------------------- |
+| Active Job   | `NEW`, `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW` |
+| Active Visit | any Visit not `COMPLETED`, `CANCELED` or `NO_SHOW` |
+
+- This set is named `archiveWarningOpenWork`. It is **not** the derived "Needs Scheduling / No Active
+  Visit" condition of `BR-060`, whose Visit set is named `needsSchedulingActiveVisit` and uses
+  `NEW`/`IN_PROGRESS` Jobs and `SCHEDULED`/`EN_ROUTE`/`ON_SITE`/`IN_PROGRESS` Visits. `BR-060` asks
+  "does this Job need scheduling?"; `BR-083` asks "could archiving disturb current work?". The two
+  are deliberately different **named** concepts (`BR-041`) and neither vocabulary replaces the other.
+- A `DRAFT` Visit counts as active for the archive warning because it is not terminal. `BR-060`
+  excludes it because it is not yet scheduled work.
+
+**Permanent deletion (`BR-082`)**
+
+- Permanent deletion physically removes the `properties` row. It is allowed **only** when the Property
+  has never been referenced by any business record (Job, Visit, note, attachment, history or other).
+- The model enforces the precondition **fail-closed** with the existing `RESTRICT`/`NO ACTION`
+  references (§6.4): `jobs.property_id`, `visits.property_id`,
+  `job_property_history.previous_property_id`/`new_property_id`, `property_customer_relationships.property_id`
+  and any future referencing table (such as an address/use history), all refuse the delete while a
+  referencing row exists. The Property's **own** lifecycle history is the one exception: it is
+  `ON DELETE CASCADE` and is removed with the Property.
+- Because those other tables are append-only or never cleared by another path, a Property that has
+  ever been referenced by one of them keeps at least one referencing row and therefore cannot be
+  deleted. Job deletion is not defined (`BR-021`), so no path currently erases a reference; if Job
+  deletion is later defined it must not erase Property references (`BR-082`, `BR-057`).
+- The reference check runs in the service layer in the same transaction as the delete, under the
+  Property row lock, so the outcome cannot change between check and delete (§15).
+- Deleting a Property never cascades to any other table. The tenant reference
+  (`organization_id → organizations.id ON DELETE CASCADE`) is unchanged: it is the tenant, not the
+  Property, that is being removed.
+
+**Editing (`BR-084`)**
+
+- An `ACTIVE` or `ARCHIVED` Property may be edited.
+- Editing an `ARCHIVED` Property leaves it `ARCHIVED`; restoring is a separate explicit action.
+- An address edit never rewrites `jobs.property_address_snapshot`, `job_property_history.*_snapshot`
+  or `visit_location_history` (`BR-056`, `BR-057`, `BR-084`).
+- Whether the Property's own address changes are additionally retained is an **OPEN QUESTION**
+  (`BR-057`, §21).
+
+**Audit, offline and concurrency (`BR-086`)**
+
+- Archive and restore append to `property_lifecycle_history`. They are **offline-capable** and follow
+  the project offline/outbox conventions (`BR-013`, `BR-014`, `BR-031`). The specific standard to
+  follow is an **OPEN QUESTION** (§21, `BR-086`).
+- **Permanent deletion is online-only** and is never queued offline (`BR-086`).
+- Concurrent Property mutations are resolved by the API; a mutation against stale state is rejected
+  rather than applied. That is why `properties` carries a `version` column (§15).
+- Update is traceable through the row's `updated_at` and, where the audit architecture later requires
+  it, its own event record (`BR-033`). No audit-event table beyond `property_lifecycle_history` is
+  invented here (`BR-042`).
 
 ## 4. Property ↔ Customer relationship
 
@@ -368,6 +496,15 @@ Property-change behaviour (`BR-056`, `BR-067`):
   effect. The Manager/authorized user must explicitly review and resolve every affected Visit
   (`BR-056`, `BR-067`).
 
+Archive interaction (`BR-083`):
+
+- Archiving a Property never clears or changes `jobs.property_id` and never rewrites
+  `property_address_snapshot`. An existing Job keeps its location and its frozen address.
+- The Job's Property may still be changed while the Job is active (`BR-056`). The archive state of the
+  current Property does not block that change.
+- A **new** Job cannot be created for an archived Property (`BR-083`). Existing Jobs remain fully
+  readable regardless of the Property's lifecycle state.
+
 Proposed table — `visit_location_review_flags`:
 
 | Column                      | Type          | Null? | Notes                                               |
@@ -407,6 +544,10 @@ whatever the ORM defaults to.
   or member deletion into Jobs, Visits, Property-Customer relationship history or their history
   would destroy business history that `BR-050`, `BR-057` and `BR-067` require to be preserved. The
   model **fails closed**: the delete is refused instead of rewriting history.
+- **A Property's own lifecycle history follows the Property.** `property_lifecycle_history.property_id`
+  is `ON DELETE CASCADE` (`BR-082`, `BR-086`). It records the Property's own archive/restore events,
+  so it does not by itself block the Property's permanent deletion and is removed with it. It is
+  therefore not part of the cross-aggregate list above.
 - Manager delete capability for Jobs exists in the permission model (`BR-008`), but the
   **semantics** of deleting a Job that has history are undefined (`BR-021`). Consequently this
   slice models **no deletion path and no `deleted_at` column**: neither physical nor soft deletion
@@ -531,7 +672,7 @@ Clients must not invent their own Job status vocabulary (`BR-022`, `BR-041`).
 
 ### 8.4 Derived conditions (not stored state)
 
-**"Needs Scheduling" / "No Active Visit" (`BR-060`)**
+**"Needs Scheduling" / "No Active Visit" (`BR-060`) — the `needsSchedulingActiveVisit` set**
 
 A Job surfaces this signal when:
 
@@ -550,6 +691,68 @@ AND NOT EXISTS (
 - The signal is **derived, not stored**: it is not a Job status, not a boolean column and not a
   materialized field. It must never be persisted as a status (`BR-060`).
 - It is an operational signal for a human. Nothing is auto-scheduled from it (`BR-054`).
+
+**Customer-list filter conditions (`GET /customers?jobs=`)**
+
+The customer list offers two derived Jobs-condition filters. They are query predicates over the
+authoritative Job and Visit tables (`BR-080`), not stored values and not new statuses (`BR-042`).
+
+*Open Job* — a Job whose status is not terminal (`BR-058`):
+
+```text
+jobs.status IN ('NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW')
+```
+
+*Overdue Visit* — a Visit still `SCHEDULED` (`BR-074`) whose scheduled end has passed:
+
+```text
+visits.status = 'SCHEDULED' AND visits.scheduled_end < now()
+```
+
+- `COMPLETED` and `CANCELED` Jobs are not open; a customer with no Jobs has no open Jobs, so "No
+  open jobs" includes a customer with no Jobs at all.
+- A Visit that has progressed (`EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`) is field work in progress, not
+  overdue; a terminal Visit is history.
+- Both conditions are evaluated by the backend inside the tenant-scoped query, so a client cannot
+  widen its own scope (`BR-001`, `BR-007`). The product decision and API contract are recorded in
+  `docs/tracker/008-android-customers-filter.md`.
+
+**Customer detail projections (`BR-081`)**
+
+The customer detail view projects a customer's Properties and Jobs. Every value is derived from the
+authoritative tables above; nothing is stored and nothing becomes a second source of truth
+(`BR-080`, `BR-042`).
+
+*Property row* — a Property the customer is currently related to (`BR-050`, §4):
+
+```text
+jobCount        = count(jobs WHERE jobs.property_id = property.id)
+lastServiceDate = max(visits.scheduled_start)
+                  WHERE visits.status = 'COMPLETED'
+                    AND visits.job_id IN (SELECT id FROM jobs WHERE jobs.property_id = property.id)
+```
+
+- `jobCount` counts every Job currently associated with the Property, whatever its status (`BR-048`,
+  `BR-056`).
+- When no `COMPLETED` Visit exists, `lastServiceDate` is absent and the client presents the
+  localized "never serviced" state (`BR-028`).
+
+*Job row* — a Job belonging to the customer (`BR-048`, §5). Exactly one **selected Visit** is chosen
+per Job; the displayed date and technicians always come from that same Visit:
+
+```text
+selected = the Visit with the earliest scheduled_start among the Job's Visits
+             WHERE scheduled_start >= now() AND status <> 'CANCELED'
+           else the Visit with the greatest scheduled_start among the Job's past Visits
+           else none
+```
+
+- displayed date = `selected.scheduled_start`
+- displayed technicians = the current `visit_technicians` rows of `selected` (§10.2), Lead first
+- no `selected` → no date and no technicians; `selected` with no assignments → no technicians. Both
+  are presented by the client as a localized "unassigned" state (`BR-028`).
+- `CANCELED` is excluded from the upcoming candidate only; the past fallback is defined over any past
+  Visit by scheduled start. That literal reading is flagged for product confirmation in §21.
 
 **Entry into `PENDING_REVIEW` (`BR-061`)**
 
@@ -730,6 +933,10 @@ AND scheduled_end IS NOT NULL))` — a Visit cannot be `SCHEDULED` without an op
   6. any detected conflicts have been **explicitly confirmed** by the authorized user (`BR-070`).
 - A Visit may exist as an **unscheduled/`DRAFT` Visit without technicians** (`BR-068`, `BR-071`,
   `BR-072`), and a Job cannot be scheduled until a Property exists (`BR-056`).
+- Archiving the Property does not invalidate scheduling (`BR-083`): a Visit belonging to an existing
+  open Job may still be created, scheduled or rescheduled against an archived Property. Only the
+  creation of a **new Job** for that Property is blocked. `BR-072`'s precondition is unaffected — the
+  Job still has a Property.
 - When `visits.status` becomes `SCHEDULED`, the Job transition `NEW → SCHEDULED` follows as a
   consequence (§8.2).
 
@@ -1231,6 +1438,9 @@ inventing conflict behaviour. This section records only what the confirmed rules
 Deleting a Job is the one part of this domain the business rules do not settle, so it is stated here
 explicitly instead of being answered by default behaviour.
 
+> This section is about **Jobs** only. The **Property** lifecycle — archive, restore and permanent
+> deletion — is defined by `BR-082` – `BR-086` (§3.3) and does not answer the Job question.
+
 **What is confirmed**
 
 - `BR-008` grants the default Manager role a delete capability for Jobs.
@@ -1368,7 +1578,8 @@ modify any foundation entity, and it does not alter a foundation table.
 
 | Table                              | Section | Purpose                                                                                                        |
 | ---------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------- |
-| `properties`                       | §3.1    | Organization-owned service location with a structured address (`BR-049`).                                      |
+| `properties`                       | §3.1    | Organization-owned service location with a structured address and lifecycle state (`BR-049`, `BR-082`).        |
+| `property_lifecycle_history`       | §3.3    | Append-only Property archive/restore events (`BR-082`, `BR-086`).                                              |
 | `property_customer_relationships`  | §4.1    | Append-only history of the single active Property ↔ Customer relationship (`BR-050`).                          |
 | `job_customer_history`             | §5.2    | Append-only history of a Job's Customer (`BR-048`).                                                            |
 | `jobs`                             | §6.1    | The work request, with the immutable Job number and the address snapshot (`BR-052`, `BR-056`).                 |
@@ -1394,8 +1605,10 @@ modify any foundation entity, and it does not alter a foundation table.
 
 ## 21. Open questions register
 
-Every item below is a product decision the business rules leave open. This model **fails closed** on
-each one: no behaviour, status, catalogue or column was invented for it (`BR-042`, `qa.md` §15).
+Every item below is a product decision. Items marked **Decided** or **Deferred** were closed during
+this slice and are recorded in `docs/decisions/012-property-lifecycle-and-permissions.md`; the rest
+remain open. Where an item is open, this model **fails closed** on it: no behaviour, status,
+catalogue or column was invented for it (`BR-042`, `qa.md` §15).
 
 | #   | Open question                                                                                                                 | Rule               | How this model handles it now                                                                                                                                                                         | Blocks                                  |
 | --- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
@@ -1414,8 +1627,14 @@ each one: no behaviour, status, catalogue or column was invented for it (`BR-042
 | 13  | What is the offline conflict strategy for each synchronization-sensitive operation?                                           | `BR-032`           | Conflict behaviour is per operation; where a strategy is undefined it is left open and never implemented as last-write-wins (§15).                                                                    | Offline mutation design.                |
 | 14  | What are the scheduling time-zone semantics?                                                                                  | `BR-026`           | Only absolute instants (`timestamptz`) are stored; no organization or Visit time-zone field exists (§2.3, §9.3, §14).                                                                                 | Display and input of schedules.         |
 | 15  | What are the audit retention and audit visibility rules?                                                                      | `BR-033`           | The history tables exist and are append-only; retention and read access are not defined (§2.4).                                                                                                       | Retention jobs and audit screens.       |
-| 16  | How may a Property be deleted or its address edited once Jobs and Visits reference it?                                        | `BR-057`           | References restrict deletion; only append-only history records an address change (§3, §6.4).                                                                                                          | Customer/Property management.           |
+| 16  | Must a Property's own address-change history be retained, beyond the Job/Visit snapshots that must not be rewritten?          | `BR-057`, `BR-084` | **Deferred** by product ownership: no Property address-history table is modelled. Editing never rewrites Job/Visit snapshots, which remain the authoritative record of the address used at the time. | Property address-history UI and audit.  |
 | 17  | Does a remaining `DRAFT` Visit block entry into `PENDING_REVIEW`?                                                             | `BR-061`           | `BR-060` excludes `DRAFT` from the "Needs Scheduling" active-work signal, but `BR-061` does not classify it for review entry. No automatic transition is implemented for the draft-Visit case (§8.4). | `PENDING_REVIEW` entry rule.            |
+| 18  | Does the customer-detail Job row's past-Visit fallback include a `CANCELED` past Visit?                                        | `BR-081`           | Implemented literally: only the upcoming candidate excludes `CANCELED`; the past fallback considers any past Visit by scheduled start (§8.4).                                                          | Customer-detail Job row only.           |
+| 19  | Which capability authorizes **creating** a Property?                                                                          | `BR-085`           | **Decided:** `properties.create` (`ADR-012` D1). Enforced by `POST /customers/:id/properties`; the interim `customers.edit` authorization is removed.                                                | —                                       |
+| 20  | Does an archived Property still appear in the customer-detail Property projection?                                            | `BR-081`, `BR-083` | **Decided:** the projection and `propertyCount` cover the customer's `ACTIVE` relationships only (`ADR-012` D3). Archived Properties remain retrievable through explicit archived views.                | —                                       |
+| 21  | Is the archive-warning "active" classification reconciled with `BR-060`'s narrower derived condition?                         | `BR-060`, `BR-083` | **Decided:** kept as two named concepts — `needsSchedulingActiveVisit` (`BR-060`) and `archiveWarningOpenWork` (`BR-083`) (`ADR-012` D4). No shared vocabulary is imposed.                            | —                                       |
+| 22  | Which offline/outbox architecture standard do Property archive and restore follow?                                            | `BR-086`           | **Decided:** `docs/architecture/offline-first-architecture.md` defines the working set, outbox, idempotency, replay and conflict model (`ADR-012` D7).                                                 | Offline Property lifecycle.             |
+| 23  | Does a Property's own lifecycle history permanently block its deletion?                                                       | `BR-082`           | **Decided:** no. `property_lifecycle_history.property_id` is `ON DELETE CASCADE`; deletion stays blocked by other references (`ADR-012` D5).                                                          | —                                       |
 
 Not an open question, recorded here to prevent a false assumption: **Job-number gaps**. `BR-052`
 requires uniqueness and immutability, not a gapless sequence, so no gap-free guarantee is claimed

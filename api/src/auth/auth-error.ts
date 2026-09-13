@@ -12,6 +12,7 @@ export const AUTH_ERROR_CODES = {
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   REFRESH_TOKEN_INVALID: 'REFRESH_TOKEN_INVALID',
   UNAUTHENTICATED: 'UNAUTHENTICATED',
+  FORBIDDEN: 'FORBIDDEN',
   /**
    * A password-reset credential was wrong, expired, superseded, consumed or no longer
    * eligible. One code for all of those, so the response cannot be used to learn whether
@@ -87,6 +88,14 @@ export class AuthApiError extends HttpException {
       HttpStatus.UNAUTHORIZED,
       AUTH_ERROR_CODES.UNAUTHENTICATED,
       'Authentication is required.',
+    );
+  }
+
+  static forbidden(): AuthApiError {
+    return new AuthApiError(
+      HttpStatus.FORBIDDEN,
+      AUTH_ERROR_CODES.FORBIDDEN,
+      'You do not have permission to perform this action.',
     );
   }
 

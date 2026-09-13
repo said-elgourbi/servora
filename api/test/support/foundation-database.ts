@@ -10,7 +10,8 @@ import {
 } from '../../src/database/schema.js';
 
 // A real Argon2id hash used by tests that only need a valid value.
-export const TEST_PASSWORD_HASH = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaGhhc2g';
+export const TEST_PASSWORD_HASH =
+  '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaGhhc2g';
 
 export type TestDb = PostgresJsDatabase<Record<string, never>>;
 
@@ -89,7 +90,12 @@ export function uniquePhone(): string {
 
 export async function createTestOrganization(
   db: TestDb,
-  values: { name?: string; email?: string | null; phone?: string | null; status?: string } = {},
+  values: {
+    name?: string;
+    email?: string | null;
+    phone?: string | null;
+    status?: string;
+  } = {},
 ) {
   const [row] = await db
     .insert(organizations)
@@ -105,7 +111,12 @@ export async function createTestOrganization(
 
 export async function createTestUser(
   db: TestDb,
-  values: { email?: string; passwordHash?: string; phone?: string | null; status?: string } = {},
+  values: {
+    email?: string;
+    passwordHash?: string;
+    phone?: string | null;
+    status?: string;
+  } = {},
 ) {
   const [row] = await db
     .insert(users)
@@ -176,5 +187,7 @@ export async function expectPostgresError(
     expect(postgresErrorCode(error)).toBe(code);
     return;
   }
-  throw new Error(`Expected PostgreSQL error ${code}, but the operation succeeded.`);
+  throw new Error(
+    `Expected PostgreSQL error ${code}, but the operation succeeded.`,
+  );
 }

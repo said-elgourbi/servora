@@ -122,15 +122,20 @@ val MaterialTheme.stateColors: ServoraStateColors
     get() = LocalStateColors.current
 
 /**
- * Applies the Servora design system: the brand colour scheme (light or dark) and the shape
- * scale. Typography stays on the Material 3 scale, which the design system maps to Roboto on
- * Android, so no font resources are required.
+ * Applies the Servora design system: the brand colour scheme (light or dark), the shape scale and
+ * the matching system bar content. Typography stays on the Material 3 scale, which the design
+ * system maps to Roboto on Android, so no font resources are required.
+ *
+ * The system bar content is painted from the same [darkTheme] the colour scheme uses, so the
+ * status/navigation bar icons can never disagree with the screen behind them
+ * (`SystemBarAppearance`).
  */
 @Composable
 fun ServoraTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    SystemBarAppearance(darkTheme = darkTheme)
     CompositionLocalProvider(
         LocalStateColors provides if (darkTheme) DarkStateColors else LightStateColors,
     ) {

@@ -129,8 +129,10 @@ class SmsSignInViewModel @Inject constructor(
             when (val result = authRepository.verifySmsCode(state.phone, state.code)) {
                 is SignInResult.Success ->
                     _uiState.update {
-                        // The code has served its purpose once a session exists.
-                        it.copy(isSubmitting = false, code = "", signedIn = true)
+                        // The code has served its purpose once a session exists. The app moves to
+                        // the authenticated area because the session manager saw the issued
+                        // session, so this screen keeps no session state of its own.
+                        it.copy(isSubmitting = false, code = "")
                     }
 
                 is SignInResult.Failure ->

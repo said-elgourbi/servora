@@ -509,7 +509,9 @@ describe('password reset (e2e)', () => {
       // The subject and body were composed by the authentication domain, in the recipient's
       // language, so the transport adds no copy of its own (`BR-028`).
       expect(message?.subject).toBe('Reset your Servora password');
-      expect(message?.text).toMatch(/Use this code to reset your Servora password: \d{6}/);
+      expect(message?.text).toMatch(
+        /Use this code to reset your Servora password: \d{6}/,
+      );
     });
 
     it('answers 202 with the same empty body when the provider rejects the message', async () => {

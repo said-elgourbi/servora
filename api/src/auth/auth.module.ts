@@ -7,7 +7,9 @@ import { AuthController } from './auth.controller.js';
 import { AuthGuard } from './auth.guard.js';
 import { AuthRateLimiter } from './auth-rate-limiter.js';
 import { AuthService } from './auth.service.js';
+import { AuthorizationService } from './authorization.service.js';
 import { PasswordResetService } from './password-reset.service.js';
+import { PermissionsGuard } from './permissions.guard.js';
 import { SmsOtpService } from './sms-otp.service.js';
 
 @Module({
@@ -17,12 +19,20 @@ import { SmsOtpService } from './sms-otp.service.js';
     authConfigProvider,
     AuthService,
     AuthGuard,
+    AuthorizationService,
+    PermissionsGuard,
     AuthRateLimiter,
     PasswordResetService,
     SmsOtpService,
   ],
   // `AUTH_CONFIG` is exported so a later resource module can reuse `AuthGuard`
   // without re-declaring the configuration provider.
-  exports: [AuthService, AuthGuard, AUTH_CONFIG],
+  exports: [
+    AuthService,
+    AuthGuard,
+    AuthorizationService,
+    PermissionsGuard,
+    AUTH_CONFIG,
+  ],
 })
 export class AuthModule {}

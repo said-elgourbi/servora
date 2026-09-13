@@ -76,6 +76,14 @@ role permissions + direct member permissions
 
 - A member with direct permissions beyond the base role may be displayed as `Role Name*`. The star
   is a UI indicator only; authorization uses the effective permission set.
+- Customer capability codes are:
+  - `customers.view` — show and open the Customers area, list customers, retrieve customer details
+    and display customer-owned properties.
+  - `customers.create` — show and execute customer creation actions.
+  - `customers.edit` — show and execute customer edit actions for customer-level data.
+  - `customers.archive` — show and execute customer archive/deactivate actions. Normal customer
+    removal is soft deletion; historical rows are preserved and no hard-delete customer permission
+    exists in this feature.
 
 ## 6. Password rules
 
@@ -204,7 +212,9 @@ Legend: 1──* one-to-many · 1──0..1 one-to-zero-or-one (subtype) · *─
 | Tenant scope type                   | `api/src/tenancy/tenant-scope.ts`                                                                           |
 | Customer subtype invariant          | `api/src/customers/customer-subtype.ts`                                                                     |
 | Tenant-scoped customer persistence  | `api/src/customers/customers.service.ts`                                                                    |
+| Customer API authorization          | `api/src/auth/permissions.guard.ts`, `api/src/customers/customers.controller.ts`                             |
 | Android models (Kotlin)             | `android/app/src/main/java/com/servora/android/domain/model/`                                               |
+| Android customer permission checks  | `android/app/src/main/java/com/servora/android/domain/auth/Permission.kt`, `android/app/src/main/java/com/servora/android/ui/customers/` |
 
 ## 14. Verification
 

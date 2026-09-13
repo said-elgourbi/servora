@@ -130,15 +130,6 @@ internal fun SmsSignInScreen(
                     CodeStep(uiState, onCodeChange, onSubmit)
                 }
 
-                if (uiState.signedIn) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.sms_sign_in_signed_in),
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-
                 uiState.failureReason?.let { reason ->
                     Spacer(Modifier.height(12.dp))
                     Text(

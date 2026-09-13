@@ -29,6 +29,13 @@ data class Customer(
     val status: CustomerStatus,
     val createdAt: String,
     val updatedAt: String,
+    /**
+     * Current Properties linked to the customer, derived by the backend (`BR-050`). A relationship
+     * that has ended is history, so it is not counted.
+     */
+    val propertyCount: Int,
+    /** Jobs that belong to the customer, whatever their status (`BR-048`). */
+    val jobCount: Int,
 )
 
 /** Subtype record for a customer of type [CustomerType.INDIVIDUAL]. */

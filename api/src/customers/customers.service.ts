@@ -1,5 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, getTableColumns, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  ne,
+  notExists,
+  sql,
+} from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
   customerAddresses,
@@ -7,13 +20,34 @@ import {
   customerContacts,
   customerIndividuals,
   customers,
+  jobs,
+  organizationMembers,
+  properties,
+  propertyCustomerRelationships,
+  userProfiles,
+  visitTechnicians,
+  visits,
 } from '../database/schema.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
+import {
+  DEFAULT_CUSTOMER_LIST_FILTERS,
+  type CustomerJobFilter,
+  type CustomerListFilters,
+} from './customer-list-filter.dto.js';
 import type { CreateCustomerAddressDto } from './customer-address.dto.js';
 import type { CreateCustomerContactDto } from './customer-contact.dto.js';
+import { PROPERTY_COUNTRY, type CreatePropertyDto } from './property.dto.js';
+import type {
+  AssignmentRoleCode,
+  CustomerDetail,
+  CustomerJobSummary,
+  CustomerJobTechnician,
+  CustomerPropertySummary,
+} from './customer-detail.dto.js';
 import type {
   CreateCompanyCustomerDto,
   CreateIndividualCustomerDto,
+  UpdateCustomerDto,
 } from './customer.dto.js';
 import { assertCustomerSubtypeIntegrity } from './customer-subtype.js';
 import type {
@@ -32,9 +66,41 @@ import type {
  */
 export class CustomerNotFoundError extends Error {
   constructor(customerId: string) {
-    super(`Customer ${customerId} was not found in the requested organization.`);
+    super(
+      `Customer ${customerId} was not found in the requested organization.`,
+    );
     this.name = 'CustomerNotFoundError';
   }
+}
+
+/**
+ * The Job statuses that count as an *open Job* for the customer list filter.
+ *
+ * This is the Job lifecycle's non-terminal set (`BR-058`): every status except `COMPLETED` and
+ * `CANCELED`. It defines a derived filter condition and is not a new Job status (`BR-042`).
+ */
+const OPEN_JOB_STATUSES = [
+  'NEW',
+  'SCHEDULED',
+  'IN_PROGRESS',
+  'PENDING_REVIEW',
+] as const;
+
+/**
+ * The Property lifecycle state the customer-detail Property projection shows (`BR-081`, `BR-082`).
+ *
+ * Archiving is how a Property leaves active use, so the default projection over the customer's
+ * current relationships shows `ACTIVE` Properties only and `propertyCount` counts the same set, so
+ * the header and the list agree. An archived Property stays a retrievable business record; it is
+ * reached through the explicit archived/history views rather than the default projection.
+ */
+const ACTIVE_PROPERTY_STATUS = 'ACTIVE';
+
+/** A customer plus the derived counts the list renders. */
+export interface CustomerWithCounts {
+  readonly customer: Customer;
+  readonly propertyCount: number;
+  readonly jobCount: number;
 }
 
 /**
@@ -132,21 +198,312 @@ export class CustomersService {
     return row ?? null;
   }
 
-  /** Lists the customers owned by the caller's organization. */
+  /** Fetches one customer with its required subtype scoped to the caller's organization. */
+  async findCustomerDetailsInOrganization(
+    scope: OrganizationScope,
+    customerId: string,
+  ): Promise<IndividualCustomer | CompanyCustomer | null> {
+    const customer = await this.findCustomerInOrganization(scope, customerId);
+    if (customer === null) {
+      return null;
+    }
+
+    if (customer.type === 'INDIVIDUAL') {
+      const [individual] = await this.db
+        .select()
+        .from(customerIndividuals)
+        .where(eq(customerIndividuals.customerId, customer.id))
+        .limit(1);
+      if (individual === undefined) {
+        return null;
+      }
+      return { customer, individual };
+    }
+
+    const [company] = await this.db
+      .select()
+      .from(customerCompanies)
+      .where(eq(customerCompanies.customerId, customer.id))
+      .limit(1);
+    if (company === undefined) {
+      return null;
+    }
+    return { customer, company };
+  }
+
+  /**
+   * Lists the customers owned by the caller's organization with the counts the list renders.
+   *
+   * `propertyCount` counts the customer's active Property relationships (`BR-050`); an ended
+   * relationship stays in history but is no longer one of the customer's properties. `jobCount`
+   * counts the Jobs that belong to the customer, whatever their status (`BR-048`). Both are
+   * derived, never stored on the customer.
+   *
+   * [options.filters] narrows the list **in the database** rather than on the client, so the
+   * backend stays the authority for which rows a caller receives (`BR-001`, `BR-007`). `ALL`
+   * applies no constraint on a dimension.
+   */
   async listCustomersInOrganization(
     scope: OrganizationScope,
-    options: { includeDeleted?: boolean } = {},
-  ): Promise<Customer[]> {
+    options: {
+      includeDeleted?: boolean;
+      filters?: CustomerListFilters;
+    } = {},
+  ): Promise<CustomerWithCounts[]> {
+    const filters = options.filters ?? DEFAULT_CUSTOMER_LIST_FILTERS;
     const predicates = [eq(customers.organizationId, scope.organizationId)];
     if (options.includeDeleted !== true) {
       predicates.push(sql`${customers.deletedAt} is null`);
     }
+    if (filters.status !== 'ALL') {
+      predicates.push(eq(customers.status, filters.status));
+    }
+    const jobsPredicate = this.jobsFilterPredicate(scope, filters.jobs);
+    if (jobsPredicate !== undefined) {
+      predicates.push(jobsPredicate);
+    }
 
     return this.db
-      .select()
+      .select({
+        customer: getTableColumns(customers),
+        // `distinct` stops the two left joins from multiplying each other's rows.
+        propertyCount: sql<number>`count(distinct ${properties.id})`.mapWith(
+          Number,
+        ),
+        jobCount: sql<number>`count(distinct ${jobs.id})`.mapWith(Number),
+      })
       .from(customers)
+      .leftJoin(
+        propertyCustomerRelationships,
+        and(
+          eq(
+            propertyCustomerRelationships.organizationId,
+            scope.organizationId,
+          ),
+          eq(propertyCustomerRelationships.customerId, customers.id),
+          sql`${propertyCustomerRelationships.endedAt} is null`,
+        ),
+      )
+      .leftJoin(
+        properties,
+        and(
+          eq(properties.organizationId, scope.organizationId),
+          eq(properties.id, propertyCustomerRelationships.propertyId),
+          eq(properties.status, ACTIVE_PROPERTY_STATUS),
+        ),
+      )
+      .leftJoin(
+        jobs,
+        and(
+          eq(jobs.organizationId, scope.organizationId),
+          eq(jobs.customerId, customers.id),
+        ),
+      )
       .where(and(...predicates))
+      .groupBy(customers.id)
       .orderBy(desc(customers.createdAt));
+  }
+
+  /**
+   * The predicate a job dimension adds to the customer list (`GET /customers?jobs=`).
+   *
+   * The conditions are derived, never stored (`BR-080`): an *open Job* is a Job in the Job
+   * lifecycle's non-terminal states (`BR-058`), and an *overdue Visit* is a Visit still
+   * `SCHEDULED` (`BR-074`) whose scheduled end has passed. A Visit that has progressed
+   * (`EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`) is field work in progress, not overdue, and a terminal
+   * Visit is history.
+   *
+   * Each condition is a semi-join (`EXISTS` / `NOT EXISTS`) so it filters customers without
+   * multiplying the grouped count rows the list also selects.
+   */
+  private jobsFilterPredicate(
+    scope: OrganizationScope,
+    filter: CustomerJobFilter,
+  ): SQL | undefined {
+    switch (filter) {
+      case 'ALL':
+        return undefined;
+      case 'NO_JOBS':
+        return notExists(this.customerJobs(scope));
+      case 'HAS_OPEN_JOBS':
+        return exists(this.customerOpenJobs(scope));
+      case 'NO_OPEN_JOBS':
+        return notExists(this.customerOpenJobs(scope));
+      case 'HAS_OVERDUE_VISITS':
+        return exists(this.customerOverdueVisits(scope));
+    }
+  }
+
+  /** Matches the customer's Jobs, whatever their status (`BR-048`). */
+  private customerJobs(scope: OrganizationScope) {
+    return this.db
+      .select({ present: sql`1` })
+      .from(jobs)
+      .where(this.customerJobsCondition(scope));
+  }
+
+  /** Matches the customer's Jobs that are not terminal (`BR-058`). */
+  private customerOpenJobs(scope: OrganizationScope) {
+    return this.db
+      .select({ present: sql`1` })
+      .from(jobs)
+      .where(
+        and(
+          this.customerJobsCondition(scope),
+          inArray(jobs.status, [...OPEN_JOB_STATUSES]),
+        ),
+      );
+  }
+
+  /** Matches the customer's Visits that are still `SCHEDULED` past their scheduled end. */
+  private customerOverdueVisits(scope: OrganizationScope) {
+    return this.db
+      .select({ present: sql`1` })
+      .from(jobs)
+      .innerJoin(
+        visits,
+        and(
+          eq(visits.organizationId, scope.organizationId),
+          eq(visits.jobId, jobs.id),
+        ),
+      )
+      .where(
+        and(
+          this.customerJobsCondition(scope),
+          eq(visits.status, 'SCHEDULED'),
+          sql`${visits.scheduledEnd} < now()`,
+        ),
+      );
+  }
+
+  /** Scopes a Job subquery to the caller's organization and one customer of the outer query. */
+  private customerJobsCondition(scope: OrganizationScope) {
+    return and(
+      eq(jobs.organizationId, scope.organizationId),
+      eq(jobs.customerId, customers.id),
+    );
+  }
+
+  /** Updates customer-level data while preserving the customer's existing subtype. */
+  async updateCustomer(
+    scope: OrganizationScope,
+    customerId: string,
+    input: UpdateCustomerDto,
+  ): Promise<IndividualCustomer | CompanyCustomer> {
+    const existing = await this.requireCustomerInScope(scope, customerId);
+
+    await this.db.transaction(async (tx) => {
+      const header = {
+        ...(input.displayName === undefined
+          ? {}
+          : { displayName: input.displayName }),
+        ...(input.email === undefined ? {} : { email: input.email }),
+        ...(input.phone === undefined ? {} : { phone: input.phone }),
+        ...(input.billingEmail === undefined
+          ? {}
+          : { billingEmail: input.billingEmail }),
+        ...(input.billingPhone === undefined
+          ? {}
+          : { billingPhone: input.billingPhone }),
+        ...(input.notes === undefined ? {} : { notes: input.notes }),
+        ...(input.preferredContactMethod === undefined
+          ? {}
+          : { preferredContactMethod: input.preferredContactMethod }),
+        ...(input.language === undefined ? {} : { language: input.language }),
+        ...(input.status === undefined ? {} : { status: input.status }),
+      };
+
+      if (Object.keys(header).length > 0) {
+        await tx
+          .update(customers)
+          .set(header)
+          .where(
+            and(
+              eq(customers.organizationId, scope.organizationId),
+              eq(customers.id, customerId),
+            ),
+          );
+      }
+
+      if (existing.type === 'INDIVIDUAL' && input.individual !== undefined) {
+        const individual = {
+          ...(input.individual.firstName === undefined
+            ? {}
+            : { firstName: input.individual.firstName }),
+          ...(input.individual.lastName === undefined
+            ? {}
+            : { lastName: input.individual.lastName }),
+          ...(input.individual.dateOfBirth === undefined
+            ? {}
+            : { dateOfBirth: input.individual.dateOfBirth }),
+        };
+        if (Object.keys(individual).length > 0) {
+          await tx
+            .update(customerIndividuals)
+            .set(individual)
+            .where(eq(customerIndividuals.customerId, customerId));
+        }
+      }
+
+      if (existing.type === 'COMPANY' && input.company !== undefined) {
+        const company = {
+          ...(input.company.legalName === undefined
+            ? {}
+            : { legalName: input.company.legalName }),
+          ...(input.company.businessName === undefined
+            ? {}
+            : { businessName: input.company.businessName }),
+          ...(input.company.taxNumber === undefined
+            ? {}
+            : { taxNumber: input.company.taxNumber }),
+        };
+        if (Object.keys(company).length > 0) {
+          await tx
+            .update(customerCompanies)
+            .set(company)
+            .where(eq(customerCompanies.customerId, customerId));
+        }
+      }
+    });
+
+    const updated = await this.findCustomerDetailsInOrganization(
+      scope,
+      customerId,
+    );
+    if (updated === null) {
+      throw new CustomerNotFoundError(customerId);
+    }
+    return updated;
+  }
+
+  /** Archives a customer by soft deletion, preserving historical references. */
+  async archiveCustomer(
+    scope: OrganizationScope & { membershipId: string },
+    customerId: string,
+    input: { reason?: string | null },
+    now: Date = new Date(),
+  ): Promise<Customer> {
+    await this.requireCustomerInScope(scope, customerId);
+
+    const [archived] = await this.db
+      .update(customers)
+      .set({
+        status: 'INACTIVE',
+        deletedAt: now,
+        deletedByMembershipId: scope.membershipId,
+        deleteReason: input.reason ?? null,
+      })
+      .where(
+        and(
+          eq(customers.organizationId, scope.organizationId),
+          eq(customers.id, customerId),
+        ),
+      )
+      .returning();
+    if (archived === undefined) {
+      throw new CustomerNotFoundError(customerId);
+    }
+    return archived;
   }
 
   /** Adds a contact to a customer the caller's organization owns. */
@@ -180,7 +537,19 @@ export class CustomersService {
     customerId: string,
   ): Promise<CustomerContact[]> {
     await this.requireCustomerInScope(scope, customerId);
+    return this.selectContacts(scope, customerId);
+  }
 
+  /**
+   * Reads a customer's contacts for a caller that has already resolved the customer in scope.
+   *
+   * Kept separate so composing the customer detail does not repeat the customer lookup:
+   * `findCustomerDetailInOrganization` has already verified the customer exists in scope.
+   */
+  private async selectContacts(
+    scope: OrganizationScope,
+    customerId: string,
+  ): Promise<CustomerContact[]> {
     return this.db
       .select(getTableColumns(customerContacts))
       .from(customerContacts)
@@ -239,6 +608,383 @@ export class CustomersService {
       .orderBy(desc(customerAddresses.createdAt));
   }
 
+  /**
+   * Fetches the customer detail the detail view renders: the header with the derived counts its
+   * sections show, its required subtype record and its contacts (`BR-023`, `BR-081`).
+   *
+   * The counts are derived from the authoritative tables, never stored on the customer (`BR-080`).
+   */
+  async findCustomerDetailInOrganization(
+    scope: OrganizationScope,
+    customerId: string,
+  ): Promise<CustomerDetail | null> {
+    const details = await this.findCustomerDetailsInOrganization(
+      scope,
+      customerId,
+    );
+    if (details === null) {
+      return null;
+    }
+    const [counts, contacts] = await Promise.all([
+      this.customerCounts(scope, customerId),
+      this.selectContacts(scope, customerId),
+    ]);
+    return {
+      customer: details.customer,
+      individual: 'individual' in details ? details.individual : null,
+      company: 'company' in details ? details.company : null,
+      propertyCount: counts.propertyCount,
+      jobCount: counts.jobCount,
+      contacts,
+    };
+  }
+
+  /** The derived Property and Job counts the customer detail sections render (`BR-081`). */
+  private async customerCounts(
+    scope: OrganizationScope,
+    customerId: string,
+  ): Promise<{ propertyCount: number; jobCount: number }> {
+    const [row] = await this.db
+      .select({
+        propertyCount: sql<number>`count(distinct ${properties.id})`.mapWith(
+          Number,
+        ),
+        jobCount: sql<number>`count(distinct ${jobs.id})`.mapWith(Number),
+      })
+      .from(customers)
+      .leftJoin(
+        propertyCustomerRelationships,
+        and(
+          eq(
+            propertyCustomerRelationships.organizationId,
+            scope.organizationId,
+          ),
+          eq(propertyCustomerRelationships.customerId, customers.id),
+          sql`${propertyCustomerRelationships.endedAt} is null`,
+        ),
+      )
+      .leftJoin(
+        properties,
+        and(
+          eq(properties.organizationId, scope.organizationId),
+          eq(properties.id, propertyCustomerRelationships.propertyId),
+          eq(properties.status, ACTIVE_PROPERTY_STATUS),
+        ),
+      )
+      .leftJoin(
+        jobs,
+        and(
+          eq(jobs.organizationId, scope.organizationId),
+          eq(jobs.customerId, customers.id),
+        ),
+      )
+      .where(
+        and(
+          eq(customers.organizationId, scope.organizationId),
+          eq(customers.id, customerId),
+        ),
+      );
+    return {
+      propertyCount: row?.propertyCount ?? 0,
+      jobCount: row?.jobCount ?? 0,
+    };
+  }
+
+  /**
+   * Lists the `ACTIVE` Properties the customer is currently related to, each with the values its
+   * row renders (`BR-050`, `BR-081`, `BR-082`).
+   *
+   * `jobCount` counts every Job the Property is associated with, whatever its status.
+   * `lastServiceAt` is the scheduled start of the most recent `COMPLETED` Visit across those Jobs,
+   * or `null` when there is none. Both are derived; neither is stored (`BR-081`).
+   *
+   * An `ARCHIVED` Property is still one of the customer's relationships but is not part of the
+   * default projection; it is reached through the explicit archived views.
+   */
+  async findCustomerPropertiesInOrganization(
+    scope: OrganizationScope,
+    customerId: string,
+  ): Promise<CustomerPropertySummary[]> {
+    await this.requireCustomerInScope(scope, customerId);
+
+    const rows = await this.db
+      .select({
+        property: getTableColumns(properties),
+        jobCount: sql<number>`count(distinct ${jobs.id})`.mapWith(Number),
+        lastServiceAt: sql<Date | string | null>`max(${visits.scheduledStart})`,
+      })
+      .from(propertyCustomerRelationships)
+      .innerJoin(
+        properties,
+        and(
+          eq(properties.organizationId, scope.organizationId),
+          eq(properties.id, propertyCustomerRelationships.propertyId),
+        ),
+      )
+      .leftJoin(
+        jobs,
+        and(
+          eq(jobs.organizationId, scope.organizationId),
+          eq(jobs.propertyId, properties.id),
+        ),
+      )
+      .leftJoin(
+        visits,
+        and(
+          eq(visits.organizationId, scope.organizationId),
+          eq(visits.jobId, jobs.id),
+          eq(visits.status, 'COMPLETED'),
+        ),
+      )
+      .where(
+        and(
+          eq(
+            propertyCustomerRelationships.organizationId,
+            scope.organizationId,
+          ),
+          eq(propertyCustomerRelationships.customerId, customerId),
+          sql`${propertyCustomerRelationships.endedAt} is null`,
+          eq(properties.status, ACTIVE_PROPERTY_STATUS),
+        ),
+      )
+      .groupBy(properties.id)
+      .orderBy(asc(properties.name), asc(properties.addressLine1));
+
+    return rows.map((row) => ({
+      property: row.property,
+      jobCount: row.jobCount,
+      lastServiceAt: asDate(row.lastServiceAt),
+    }));
+  }
+
+  /**
+   * Creates an organization-owned Property and relates it to one of the organization's customers
+   * (`BR-049`, `BR-050`).
+   *
+   * The Property is its own entity and is **not** stored on the customer: the customer association
+   * is the active row in `property_customer_relationships`, whose actor is the calling membership
+   * (`BR-049`, `BR-050`, `docs/domain/job-visit-domain-model.md` §3.2). Creating the Property and
+   * establishing that relationship are one atomic operation, so a Property is never left with no
+   * owner.
+   *
+   * A brand-new Property has no Jobs and no completed Visit, so its row projection is zero/absent
+   * (`BR-081`); it is not read back and re-derived because that could not differ.
+   */
+  async createPropertyForCustomer(
+    scope: OrganizationScope & { membershipId: string },
+    customerId: string,
+    input: CreatePropertyDto,
+  ): Promise<CustomerPropertySummary> {
+    return this.db.transaction(async (tx) => {
+      const [customer] = await tx
+        .select({ id: customers.id })
+        .from(customers)
+        .where(
+          and(
+            eq(customers.organizationId, scope.organizationId),
+            eq(customers.id, customerId),
+            sql`${customers.deletedAt} is null`,
+          ),
+        )
+        .limit(1);
+      if (customer === undefined) {
+        throw new CustomerNotFoundError(customerId);
+      }
+
+      const [property] = await tx
+        .insert(properties)
+        .values({
+          organizationId: scope.organizationId,
+          name: input.name ?? null,
+          addressLine1: input.addressLine1,
+          addressLine2: input.addressLine2 ?? null,
+          city: input.city,
+          province: input.province,
+          postalCode: input.postalCode,
+          country: PROPERTY_COUNTRY,
+          notes: input.notes ?? null,
+        })
+        .returning();
+
+      await tx.insert(propertyCustomerRelationships).values({
+        organizationId: scope.organizationId,
+        propertyId: property.id,
+        customerId,
+        actorMembershipId: scope.membershipId,
+      });
+
+      return { property, jobCount: 0, lastServiceAt: null };
+    });
+  }
+
+  /**
+   * Lists the customer's Jobs, most recently created first, each with its selected Visit's schedule
+   * and technicians (`BR-048`, `BR-081`).
+   */
+  async findCustomerJobsInOrganization(
+    scope: OrganizationScope,
+    customerId: string,
+  ): Promise<CustomerJobSummary[]> {
+    await this.requireCustomerInScope(scope, customerId);
+
+    const rows = await this.db
+      .select(getTableColumns(jobs))
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.organizationId, scope.organizationId),
+          eq(jobs.customerId, customerId),
+        ),
+      )
+      .orderBy(desc(jobs.jobNumber));
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const selectedVisits = await this.selectedVisitsForJobs(
+      scope,
+      rows.map((job) => job.id),
+    );
+    const technicians = await this.techniciansForVisits(
+      scope,
+      [...selectedVisits.values()].map((visit) => visit.visitId),
+    );
+
+    return rows.map((job) => {
+      const selected = selectedVisits.get(job.id);
+      return {
+        job,
+        selectedVisit:
+          selected === undefined
+            ? null
+            : { scheduledStart: selected.scheduledStart },
+        technicians:
+          selected === undefined
+            ? []
+            : (technicians.get(selected.visitId) ?? []),
+      };
+    });
+  }
+
+  /**
+   * Chooses each Job's single **selected Visit** (`BR-081`).
+   *
+   * The selected Visit is the Job's earliest upcoming non-canceled Visit by scheduled start,
+   * falling back to the most recent past Visit by scheduled start. A Visit with no scheduled start
+   * is never selected: the schedule is exactly what the Visit would have to supply.
+   *
+   * Upcoming and past are settled with `DISTINCT ON` so the choice is made in the database and the
+   * result stays one row per Job.
+   */
+  private async selectedVisitsForJobs(
+    scope: OrganizationScope,
+    jobIds: string[],
+  ): Promise<Map<string, { visitId: string; scheduledStart: Date }>> {
+    const selection = {
+      jobId: visits.jobId,
+      visitId: visits.id,
+      scheduledStart: visits.scheduledStart,
+    };
+    const scoped = and(
+      eq(visits.organizationId, scope.organizationId),
+      inArray(visits.jobId, jobIds),
+      isNotNull(visits.scheduledStart),
+    );
+
+    const [upcoming, past] = await Promise.all([
+      this.db
+        .selectDistinctOn([visits.jobId], selection)
+        .from(visits)
+        .where(
+          and(
+            scoped,
+            sql`${visits.scheduledStart} >= now()`,
+            ne(visits.status, 'CANCELED'),
+          ),
+        )
+        .orderBy(visits.jobId, asc(visits.scheduledStart)),
+      this.db
+        .selectDistinctOn([visits.jobId], selection)
+        .from(visits)
+        .where(and(scoped, sql`${visits.scheduledStart} < now()`))
+        .orderBy(visits.jobId, desc(visits.scheduledStart)),
+    ]);
+
+    const selected = new Map<
+      string,
+      { visitId: string; scheduledStart: Date }
+    >();
+    // The past Visit is the fallback, so it is written first and an upcoming Visit overrides it.
+    for (const row of [...past, ...upcoming]) {
+      selected.set(row.jobId, {
+        visitId: row.visitId,
+        scheduledStart: row.scheduledStart as Date,
+      });
+    }
+    return selected;
+  }
+
+  /** The technicians currently assigned to each Visit, Lead first (`BR-068`, `BR-081`). */
+  private async techniciansForVisits(
+    scope: OrganizationScope,
+    visitIds: string[],
+  ): Promise<Map<string, CustomerJobTechnician[]>> {
+    if (visitIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      .select({
+        visitId: visitTechnicians.visitId,
+        membershipId: visitTechnicians.technicianMembershipId,
+        roleCode: visitTechnicians.roleCode,
+        displayName: userProfiles.displayName,
+        firstName: userProfiles.firstName,
+        lastName: userProfiles.lastName,
+      })
+      .from(visitTechnicians)
+      .innerJoin(
+        organizationMembers,
+        eq(
+          organizationMembers.id,
+          visitTechnicians.technicianMembershipId,
+        ),
+      )
+      .leftJoin(
+        userProfiles,
+        eq(userProfiles.userId, organizationMembers.userId),
+      )
+      .where(
+        and(
+          eq(visitTechnicians.organizationId, scope.organizationId),
+          inArray(visitTechnicians.visitId, visitIds),
+        ),
+      )
+      .orderBy(
+        sql`case when ${visitTechnicians.roleCode} = 'LEAD' then 0 else 1 end`,
+        asc(visitTechnicians.createdAt),
+      );
+
+    const byVisit = new Map<string, CustomerJobTechnician[]>();
+    for (const row of rows) {
+      const name =
+        row.displayName ??
+        ([row.firstName, row.lastName]
+          .filter((part): part is string => part !== null)
+          .join(' ')
+          .trim() ||
+          null);
+      const assigned = byVisit.get(row.visitId) ?? [];
+      assigned.push({
+        membershipId: row.membershipId,
+        name,
+        roleCode: row.roleCode as AssignmentRoleCode,
+      });
+      byVisit.set(row.visitId, assigned);
+    }
+    return byVisit;
+  }
+
   /** Resolves a customer within the tenant boundary or fails closed. */
   private async requireCustomerInScope(
     scope: OrganizationScope,
@@ -269,4 +1015,18 @@ export class CustomersService {
       language: input.language ?? 'en-CA',
     };
   }
+}
+
+/**
+ * Normalises a date the driver returned for an aggregate expression.
+ *
+ * PostgreSQL hands a column value back as a `Date`, but an expression such as `max()` can arrive as
+ * text depending on how the driver types it. Both shapes describe the same instant, so both are
+ * accepted here rather than trusted to be one.
+ */
+function asDate(value: Date | string | null): Date | null {
+  if (value === null) {
+    return null;
+  }
+  return value instanceof Date ? value : new Date(value);
 }

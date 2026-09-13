@@ -11,6 +11,7 @@ import type { UserStatus } from '../users/user.types.js';
 import { issueAccessToken } from './access-token.js';
 import { AUTH_CONFIG } from './auth-config.provider.js';
 import type { AuthConfig } from './auth-config.js';
+import { AuthorizationService } from './authorization.service.js';
 import { toAuthSessionDto, type AuthSessionDto } from './auth.dto.js';
 import { AuthApiError } from './auth-error.js';
 import type {
@@ -36,6 +37,7 @@ import {
 /** Successful sign-in and refresh body (`docs/api/authentication.md` §3.1). */
 export interface SignInResponse extends IssuedAuthTokens {
   readonly sessionId: string;
+  readonly permissions: readonly string[];
 }
 
 /**
@@ -49,6 +51,7 @@ export interface SignInResponse extends IssuedAuthTokens {
 export class AuthService {
   constructor(
     private readonly database: DatabaseService,
+    private readonly authorization: AuthorizationService,
     @Inject(AUTH_CONFIG) private readonly config: AuthConfig,
   ) {}
 
@@ -240,6 +243,11 @@ export class AuthService {
     return sessions.map(toAuthSessionDto);
   }
 
+  /** Effective permission codes for the authenticated user. */
+  async listPermissionCodes(userId: string): Promise<readonly string[]> {
+    return this.authorization.resolveEffectivePermissionCodesForUser(userId);
+  }
+
   /** Loads a session for `AuthGuard`; `null` means the caller must not be trusted. */
   async findActiveSession(
     sessionId: string,
@@ -280,12 +288,15 @@ export class AuthService {
       lifetimeMs: this.config.accessTokenLifetimeMs,
       now,
     });
+    const permissions =
+      await this.authorization.resolveEffectivePermissionCodesForUser(userId);
 
     return {
       sessionId,
       accessToken: issued.accessToken,
       accessTokenExpiresAt: issued.expiresAt.toISOString(),
       refreshToken,
+      permissions,
     };
   }
 }

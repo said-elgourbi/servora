@@ -1,6 +1,10 @@
 package com.servora.android.data.auth
 
 import com.servora.android.data.device.DeviceIdentity
+import com.servora.android.data.session.FakeSessionManager
+import com.servora.android.data.session.SessionManager
+import com.servora.android.data.session.SessionStore
+import com.servora.android.data.session.inMemorySessionStore
 import com.servora.android.domain.model.IssuedSession
 import java.io.IOException
 import kotlinx.coroutines.test.runTest
@@ -9,6 +13,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import retrofit2.HttpException
@@ -31,8 +36,10 @@ class DefaultAuthRepositoryTest {
 
     @Test
     fun `sends the credentials with this installation's identity`() = runTest {
-        val api = FakeAuthApi { signInResponse() }
-        val repository = DefaultAuthRepository(api, JSON, deviceIdentity)
+        val api = FakeAuthApi(
+            signInAnswer = { signInResponse(permissions = listOf("customers.view")) },
+        )
+        val repository = repository(api)
 
         val result = repository.signIn(EMAIL, PASSWORD)
 
@@ -49,6 +56,90 @@ class DefaultAuthRepositoryTest {
         assertEquals("access-token", session.tokens.accessToken)
         assertEquals("2026-01-01T00:00:00Z", session.tokens.accessTokenExpiresAt)
         assertEquals("refresh-token", session.tokens.refreshToken)
+        assertEquals(setOf("customers.view"), session.permissions)
+    }
+
+    @Test
+    fun `keeps the issued session so authenticated calls can use its token`() = runTest {
+        val api = FakeAuthApi(signInAnswer = { signInResponse() })
+        val sessionStore = inMemorySessionStore()
+        val repository = repository(api, sessionStore)
+
+        assertNull(sessionStore.accessToken())
+
+        repository.signIn(EMAIL, PASSWORD)
+
+        assertEquals("access-token", sessionStore.accessToken())
+    }
+
+    @Test
+    fun `tells the session manager that a session was issued`() = runTest {
+        val sessionManager = FakeSessionManager()
+        val repository = repository(
+            FakeAuthApi(signInAnswer = { signInResponse() }),
+            sessionManager = sessionManager,
+        )
+
+        repository.signIn(EMAIL, PASSWORD)
+
+        assertEquals(1, sessionManager.authenticated.size)
+        assertEquals("access-token", sessionManager.authenticated.single().tokens.accessToken)
+    }
+
+    @Test
+    fun `does not keep a session when sign-in fails`() = runTest {
+        val api = FakeAuthApi(signInAnswer = { throw IOException("offline") })
+        val sessionStore = inMemorySessionStore()
+        val repository = repository(api, sessionStore)
+
+        repository.signIn(EMAIL, PASSWORD)
+
+        assertNull(sessionStore.accessToken())
+    }
+
+    @Test
+    fun `refreshes permissions from the authenticated user endpoint after sign-in`() = runTest {
+        val api = FakeAuthApi(
+            signInAnswer = { signInResponse(permissions = emptyList()) },
+            meAnswer = {
+                AuthMeDto(
+                    userId = "user-1",
+                    permissions = listOf("customers.view", "customers.create"),
+                )
+            },
+        )
+        val repository = repository(api)
+
+        val session = assertSuccess(repository.signIn(EMAIL, PASSWORD))
+
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals(setOf("customers.view", "customers.create"), session.permissions)
+    }
+
+    @Test
+    fun `uses sign-in permissions when the authenticated user endpoint is unavailable`() = runTest {
+        val api = FakeAuthApi(
+            signInAnswer = { signInResponse(permissions = listOf("customers.view")) },
+            meAnswer = { throw IOException("offline") },
+        )
+        val repository = repository(api)
+
+        val session = assertSuccess(repository.signIn(EMAIL, PASSWORD))
+
+        assertEquals(setOf("customers.view"), session.permissions)
+    }
+
+    @Test
+    fun `does not enter signed-in state when no permission source is available`() = runTest {
+        val api = FakeAuthApi(
+            signInAnswer = { signInResponse(permissions = emptyList()) },
+            meAnswer = { throw IOException("offline") },
+        )
+        val repository = repository(api)
+
+        val result = repository.signIn(EMAIL, PASSWORD)
+
+        assertEquals(AuthFailureReason.NETWORK, assertFailure(result))
     }
 
     @Test
@@ -114,8 +205,15 @@ class DefaultAuthRepositoryTest {
         assertEquals(AuthFailureReason.UNEXPECTED, assertFailure(result))
     }
 
+    private fun repository(
+        api: AuthApi,
+        sessionStore: SessionStore = inMemorySessionStore(),
+        sessionManager: SessionManager = FakeSessionManager(),
+    ): DefaultAuthRepository =
+        DefaultAuthRepository(api, JSON, deviceIdentity, sessionStore, sessionManager)
+
     private fun repositoryFailingWith(failure: Throwable): DefaultAuthRepository =
-        DefaultAuthRepository(FakeAuthApi { throw failure }, JSON, deviceIdentity)
+        repository(FakeAuthApi(signInAnswer = { throw failure }))
 
     private fun assertSuccess(result: SignInResult): IssuedSession {
         assertTrue("expected a session, got $result", result is SignInResult.Success)
@@ -127,11 +225,12 @@ class DefaultAuthRepositoryTest {
         return (result as SignInResult.Failure).reason
     }
 
-    private fun signInResponse() = SignInResponseDto(
+    private fun signInResponse(permissions: List<String> = listOf("customers.view")) = SignInResponseDto(
         sessionId = "session-1",
         accessToken = "access-token",
         accessTokenExpiresAt = "2026-01-01T00:00:00Z",
         refreshToken = "refresh-token",
+        permissions = permissions,
     )
 
     /** Mirrors what Retrofit raises when the backend answers with a non-2xx status. */
@@ -157,14 +256,27 @@ class DefaultAuthRepositoryTest {
 
 /** API double standing in for the generated Retrofit implementation. */
 private class FakeAuthApi(
-    private val answer: suspend (SignInRequestDto) -> SignInResponseDto,
+    private val signInAnswer: suspend (SignInRequestDto) -> SignInResponseDto,
+    private val meAnswer: suspend () -> AuthMeDto = {
+        AuthMeDto(userId = "user-1", permissions = listOf("customers.view"))
+    },
 ) : AuthApi {
 
     var lastRequest: SignInRequestDto? = null
+    var lastAuthorization: String? = null
 
     override suspend fun signIn(request: SignInRequestDto): SignInResponseDto {
         lastRequest = request
-        return answer(request)
+        return signInAnswer(request)
+    }
+
+    override suspend fun refresh(request: RefreshRequestDto): SignInResponseDto = unsupported("refresh")
+
+    override suspend fun signOut(authorization: String) = unsupported("signOut")
+
+    override suspend fun me(authorization: String): AuthMeDto {
+        lastAuthorization = authorization
+        return meAnswer()
     }
 
     // The remaining endpoints belong to the password-reset and phone/SMS flows, which this

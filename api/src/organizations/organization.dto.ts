@@ -35,7 +35,9 @@ export function toOrganizationDto(organization: Organization): OrganizationDto {
 }
 
 /** Validates and normalizes untrusted input into a `CreateOrganizationDto`. */
-export function parseCreateOrganizationDto(input: unknown): CreateOrganizationDto {
+export function parseCreateOrganizationDto(
+  input: unknown,
+): CreateOrganizationDto {
   const source = (input ?? {}) as Record<string, unknown>;
   return {
     name: requireText(source.name, 'name', 200),

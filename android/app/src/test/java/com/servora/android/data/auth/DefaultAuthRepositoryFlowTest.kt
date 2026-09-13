@@ -1,6 +1,8 @@
 package com.servora.android.data.auth
 
 import com.servora.android.data.device.DeviceIdentity
+import com.servora.android.data.session.FakeSessionManager
+import com.servora.android.data.session.inMemorySessionStore
 import java.io.IOException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -31,7 +33,7 @@ class DefaultAuthRepositoryFlowTest {
     fun `requests a password reset with the submitted identity`() = runTest {
         val api = RecordingAuthApi()
 
-        val result = DefaultAuthRepository(api, FLOW_JSON, deviceIdentity)
+        val result = DefaultAuthRepository(api, FLOW_JSON, deviceIdentity, inMemorySessionStore(), FakeSessionManager())
             .requestPasswordReset(FLOW_EMAIL)
 
         assertEquals(AuthActionResult.Success, result)
@@ -41,7 +43,7 @@ class DefaultAuthRepositoryFlowTest {
     @Test
     fun `verifies and completes a reset with the code the user typed`() = runTest {
         val api = RecordingAuthApi()
-        val repository = DefaultAuthRepository(api, FLOW_JSON, deviceIdentity)
+        val repository = DefaultAuthRepository(api, FLOW_JSON, deviceIdentity, inMemorySessionStore(), FakeSessionManager())
 
         assertEquals(AuthActionResult.Success, repository.verifyPasswordResetCode(FLOW_EMAIL, FLOW_CODE))
         assertEquals(
@@ -103,7 +105,7 @@ class DefaultAuthRepositoryFlowTest {
     fun `verifying an SMS code sends the device and returns the session`() = runTest {
         val api = RecordingAuthApi()
 
-        val result = DefaultAuthRepository(api, FLOW_JSON, deviceIdentity).verifySmsCode(FLOW_PHONE, FLOW_CODE)
+        val result = DefaultAuthRepository(api, FLOW_JSON, deviceIdentity, inMemorySessionStore(), FakeSessionManager()).verifySmsCode(FLOW_PHONE, FLOW_CODE)
 
         assertEquals(listOf("verifySmsCode:$FLOW_PHONE:${deviceIdentity.deviceId}"), api.calls)
         val session = result as SignInResult.Success
@@ -146,6 +148,18 @@ private class RecordingAuthApi : AuthApi {
     override suspend fun signIn(request: SignInRequestDto): SignInResponseDto {
         record("signIn:${request.email}")
         return session("session-1", "refresh-1")
+    }
+
+    override suspend fun me(authorization: String): AuthMeDto =
+        AuthMeDto(userId = "user-1")
+
+    override suspend fun refresh(request: RefreshRequestDto): SignInResponseDto {
+        record("refresh:${request.refreshToken}")
+        return session("session-1", "refresh-2")
+    }
+
+    override suspend fun signOut(authorization: String) {
+        record("signOut")
     }
 
     override suspend fun requestPasswordReset(request: PasswordResetRequestDto) {
@@ -193,6 +207,8 @@ private fun flowRepositoryFailingWith(throwable: Throwable) =
         RecordingAuthApi().apply { failWith = throwable },
         FLOW_JSON,
         FLOW_DEVICE,
+        inMemorySessionStore(),
+        FakeSessionManager(),
     )
 
 private fun flowAssertFailure(result: AuthActionResult): AuthFailureReason =

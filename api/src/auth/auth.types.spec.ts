@@ -1,4 +1,8 @@
-import { AUTH_SESSION_PLATFORMS, isSessionActive, type AuthSession } from './auth.types.js';
+import {
+  AUTH_SESSION_PLATFORMS,
+  isSessionActive,
+  type AuthSession,
+} from './auth.types.js';
 
 function session(overrides: Partial<AuthSession> = {}): AuthSession {
   return {
@@ -34,13 +38,19 @@ describe('isSessionActive', () => {
 
   it('is inactive once revoked', () => {
     expect(
-      isSessionActive(session({ revokedAt: new Date('2026-01-10T00:00:00.000Z') }), now),
+      isSessionActive(
+        session({ revokedAt: new Date('2026-01-10T00:00:00.000Z') }),
+        now,
+      ),
     ).toBe(false);
   });
 
   it('is inactive once expired', () => {
     expect(
-      isSessionActive(session({ expiresAt: new Date('2026-01-14T00:00:00.000Z') }), now),
+      isSessionActive(
+        session({ expiresAt: new Date('2026-01-14T00:00:00.000Z') }),
+        now,
+      ),
     ).toBe(false);
   });
 

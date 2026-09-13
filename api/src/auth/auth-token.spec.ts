@@ -1,4 +1,8 @@
-import { generateOpaqueToken, hashOpaqueToken, tokenHashesEqual } from './auth-token.js';
+import {
+  generateOpaqueToken,
+  hashOpaqueToken,
+  tokenHashesEqual,
+} from './auth-token.js';
 
 describe('opaque authentication tokens', () => {
   it('generates a URL-safe token carrying 256 bits of entropy', () => {
@@ -10,7 +14,9 @@ describe('opaque authentication tokens', () => {
   });
 
   it('never repeats a generated token', () => {
-    const tokens = new Set(Array.from({ length: 64 }, () => generateOpaqueToken()));
+    const tokens = new Set(
+      Array.from({ length: 64 }, () => generateOpaqueToken()),
+    );
 
     expect(tokens.size).toBe(64);
   });
@@ -36,7 +42,9 @@ describe('opaque authentication tokens', () => {
     });
 
     it('rejects a different hash', () => {
-      expect(tokenHashesEqual(hashOpaqueToken('token'), hashOpaqueToken('other'))).toBe(false);
+      expect(
+        tokenHashesEqual(hashOpaqueToken('token'), hashOpaqueToken('other')),
+      ).toBe(false);
     });
 
     it('rejects a length mismatch without throwing', () => {

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { eq, inArray } from 'drizzle-orm';
 import {
+  authSessions,
   customerAddresses,
   customerContacts,
   customerIndividuals,
@@ -9,6 +10,7 @@ import {
   organizationMembers,
   organizationRoles,
   organizations,
+  passwordResetTokens,
   permissions,
   rolePermissions,
   userProfiles,
@@ -99,13 +101,11 @@ describe('foundation domain schema (e2e)', () => {
     it('rejects an unknown status through the check constraint', async () => {
       await expectPostgresError(
         () =>
-          database.db
-            .insert(users)
-            .values({
-              email: uniqueEmail(),
-              passwordHash: 'x',
-              status: 'BANNED',
-            }),
+          database.db.insert(users).values({
+            email: uniqueEmail(),
+            passwordHash: 'x',
+            status: 'BANNED',
+          }),
         '23514',
       );
     });
@@ -143,13 +143,11 @@ describe('foundation domain schema (e2e)', () => {
 
       await expectPostgresError(
         () =>
-          database.db
-            .insert(userProfiles)
-            .values({
-              userId: user.id,
-              firstName: 'Duplicate',
-              lastName: 'Profile',
-            }),
+          database.db.insert(userProfiles).values({
+            userId: user.id,
+            firstName: 'Duplicate',
+            lastName: 'Profile',
+          }),
         '23505',
       );
     });
@@ -253,24 +251,142 @@ describe('foundation domain schema (e2e)', () => {
         database.db,
         organization.id,
       );
-      await database.db
+      await database.db.insert(organizationMembers).values({
+        organizationId: organization.id,
+        userId: user.id,
+        roleId: role.id,
+      });
+
+      await expectPostgresError(
+        () =>
+          database.db.insert(organizationMembers).values({
+            organizationId: organization.id,
+            userId: user.id,
+            roleId: role.id,
+          }),
+        '23505',
+      );
+    });
+  });
+
+  describe('user inspection views', () => {
+    it('flattens profile, membership, role and effective permission details', async () => {
+      const organization = await createTestOrganization(database.db, {
+        name: 'View Test Org',
+      });
+      database.cleanup.trackOrganization(organization.id);
+      const user = await createTestUser(database.db, {
+        phone: '+14165550101',
+      });
+      database.cleanup.trackUser(user.id);
+      await database.db.insert(userProfiles).values({
+        userId: user.id,
+        firstName: 'View',
+        lastName: 'User',
+        displayName: 'View User',
+      });
+      const role = await createTestOrganizationRole(
+        database.db,
+        organization.id,
+        {
+          systemCode: 'MANAGER',
+          nameEn: 'View Manager',
+          nameFr: 'Gestionnaire vue',
+        },
+      );
+      const [rolePermission, directPermission] = await database.db
+        .insert(permissions)
+        .values([
+          {
+            code: `views.role.${crypto.randomUUID()}`,
+            nameEn: 'Role view permission',
+            nameFr: 'Permission role vue',
+            descriptionEn: 'Permission granted through a role.',
+            descriptionFr: 'Permission accordee par un role.',
+          },
+          {
+            code: `views.direct.${crypto.randomUUID()}`,
+            nameEn: 'Direct view permission',
+            nameFr: 'Permission directe vue',
+            descriptionEn: 'Permission granted directly.',
+            descriptionFr: 'Permission accordee directement.',
+          },
+        ])
+        .returning();
+      await database.db.insert(rolePermissions).values({
+        organizationId: organization.id,
+        roleId: role.id,
+        permissionId: rolePermission.id,
+      });
+      const [member] = await database.db
         .insert(organizationMembers)
         .values({
           organizationId: organization.id,
           userId: user.id,
           roleId: role.id,
-        });
+        })
+        .returning();
+      await database.db.insert(organizationMemberPermissions).values({
+        organizationId: organization.id,
+        memberId: member.id,
+        permissionId: directPermission.id,
+        grantedByMembershipId: member.id,
+      });
+      await database.db.insert(authSessions).values({
+        userId: user.id,
+        platform: 'ANDROID',
+        deviceId: `view-device-${crypto.randomUUID()}`,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      await database.db.insert(passwordResetTokens).values({
+        userId: user.id,
+        tokenHash: `view-reset-${crypto.randomUUID()}`,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
 
-      await expectPostgresError(
-        () =>
-          database.db
-            .insert(organizationMembers)
-            .values({
-              organizationId: organization.id,
-              userId: user.id,
-              roleId: role.id,
-            }),
-        '23505',
+      const [overview] = await database.client`
+        select email, display_name, membership_count, active_session_count,
+          outstanding_password_reset_count
+        from user_overview
+        where user_id = ${user.id}
+      `;
+      expect(overview.email).toBe(user.email);
+      expect(overview.display_name).toBe('View User');
+      expect(overview.membership_count).toBe(1);
+      expect(overview.active_session_count).toBe(1);
+      expect(overview.outstanding_password_reset_count).toBe(1);
+
+      const [membership] = await database.client`
+        select organization_name, role_name_en, role_permission_count,
+          direct_permission_count, effective_permission_count
+        from user_membership_overview
+        where member_id = ${member.id}
+      `;
+      expect(membership.organization_name).toBe('View Test Org');
+      expect(membership.role_name_en).toBe('View Manager');
+      expect(membership.role_permission_count).toBe(1);
+      expect(membership.direct_permission_count).toBe(1);
+      expect(membership.effective_permission_count).toBe(2);
+
+      const effectivePermissions = await database.client`
+        select permission_code, source
+        from user_effective_permissions
+        where member_id = ${member.id}
+        order by permission_code
+      `;
+      expect(effectivePermissions.map((row) => row.source).sort()).toEqual([
+        'DIRECT',
+        'ROLE',
+      ]);
+
+      const [summary] = await database.client`
+        select effective_permission_count, permission_codes
+        from user_permission_summary
+        where member_id = ${member.id}
+      `;
+      expect(summary.effective_permission_count).toBe(2);
+      expect(summary.permission_codes).toEqual(
+        expect.arrayContaining([rolePermission.code, directPermission.code]),
       );
     });
   });
@@ -346,13 +462,11 @@ describe('foundation domain schema (e2e)', () => {
           displayName: 'Jane Doe',
         })
         .returning();
-      await database.db
-        .insert(customerIndividuals)
-        .values({
-          customerId: customer.id,
-          firstName: 'Jane',
-          lastName: 'Doe',
-        });
+      await database.db.insert(customerIndividuals).values({
+        customerId: customer.id,
+        firstName: 'Jane',
+        lastName: 'Doe',
+      });
 
       await database.db.delete(customers).where(eq(customers.id, customer.id));
 
@@ -469,13 +583,11 @@ describe('foundation domain schema (e2e)', () => {
         database.db,
         organization.id,
       );
-      await database.db
-        .insert(organizationMembers)
-        .values({
-          organizationId: organization.id,
-          userId: user.id,
-          roleId: role.id,
-        });
+      await database.db.insert(organizationMembers).values({
+        organizationId: organization.id,
+        userId: user.id,
+        roleId: role.id,
+      });
       const [customer] = await database.db
         .insert(customers)
         .values({

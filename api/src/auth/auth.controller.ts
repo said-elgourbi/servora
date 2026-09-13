@@ -27,7 +27,7 @@ import {
   type AuthenticatedRequest,
   type RequestAuth,
 } from './auth.guard.js';
-import type { AuthSessionDto } from './auth.dto.js';
+import type { AuthMeDto, AuthSessionDto } from './auth.dto.js';
 import { readClientContext } from './client-context.js';
 
 /**
@@ -73,6 +73,16 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async signOut(@Req() request: AuthenticatedRequest): Promise<void> {
     await this.auth.signOut(requireAuth(request).sessionId);
+  }
+
+  @Get('me')
+  @UseGuards(AuthGuard)
+  async me(@Req() request: AuthenticatedRequest): Promise<AuthMeDto> {
+    const auth = requireAuth(request);
+    return {
+      userId: auth.userId,
+      permissions: await this.auth.listPermissionCodes(auth.userId),
+    };
   }
 
   @Get('sessions')

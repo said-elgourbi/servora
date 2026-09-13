@@ -22,7 +22,11 @@ function fail(field: string, rule: string): never {
 }
 
 /** Requires a non-empty, trimmed string no longer than `maxLength`. */
-export function requireText(value: unknown, field: string, maxLength: number): string {
+export function requireText(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     fail(field, 'is required');
   }
@@ -121,4 +125,3 @@ export function optionalDate(value: unknown, field: string): string | null {
   }
   return text;
 }
-

@@ -25,6 +25,15 @@ export interface AuthSessionDto {
   revokedAt: string | null;
 }
 
+/**
+ * Public view of the authenticated principal. It carries only the stable identity and
+ * effective permission codes the client needs for permission-aware UI.
+ */
+export interface AuthMeDto {
+  userId: string;
+  permissions: readonly string[];
+}
+
 export function toAuthSessionDto(session: AuthSession): AuthSessionDto {
   return {
     id: session.id,
@@ -39,6 +48,7 @@ export function toAuthSessionDto(session: AuthSession): AuthSessionDto {
     updatedAt: session.updatedAt.toISOString(),
     lastUsedAt: session.lastUsedAt.toISOString(),
     expiresAt: session.expiresAt.toISOString(),
-    revokedAt: session.revokedAt === null ? null : session.revokedAt.toISOString(),
+    revokedAt:
+      session.revokedAt === null ? null : session.revokedAt.toISOString(),
   };
 }

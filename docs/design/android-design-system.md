@@ -209,6 +209,25 @@ focus never rely on them alone — focus uses the steel-blue primary ring.
 - Field height 52 dp, primary action height 52 dp, touch targets ≥ 48 dp.
 - Content gutters 24 dp; form column max width 360 dp.
 
+## Contextual top bar (signed-in screens)
+
+The signed-in application draws one Material 3 `TopAppBar` (`ui/components/ServoraTopBar.kt`) instead
+of a global brand header plus a separate per-screen header. A root destination shows the selected
+bottom-navigation tab's title and no back control; a pushed screen shows its own title, a back control
+and, where the user's permissions allow, one contextual action
+(`docs/decisions/011-android-contextual-top-bar.md`).
+
+| Part | Token |
+| --- | --- |
+| Container | `colorScheme.background` |
+| Title | `colorScheme.onBackground`, `titleLarge`, bold, single line with ellipsis |
+| Context line | `colorScheme.onSurfaceVariant`, `bodySmall`, single line with ellipsis; drawn only when the destination has one (Add Property names its customer) |
+| Back control | `colorScheme.primary` glyph, `ic_chevron_left`, 22 dp inside a 48 dp `IconButton` |
+| Contextual action | `TextButton` (for example View Customer's **Edit**), drawn only when permitted |
+
+The bar leaves `TopAppBarDefaults.windowInsets` in place, so it applies the status-bar inset itself
+and content begins directly below it. No status-bar height is hard-coded.
+
 ## Appearance controls (sign-in top bar)
 
 The sign-in screen's top bar carries the two app-level appearance controls — the language pill and
@@ -230,6 +249,12 @@ The row also sits inside the status-bar safe area: the window draws under the sy
 (edge-to-edge is enforced from Android 15, and the Android app does not opt out), so the top bar is
 offset by the inset the platform reports — `Modifier.windowInsetsPadding(WindowInsets.statusBars)`
 — and the 20 dp gutters sit inside that inset. No status-bar height is hard-coded.
+
+The system bar *content* follows the app's own appearance rather than the device setting: the
+status-bar icons and the navigation-bar handle are painted dark for the light appearance and light
+for the dark one (`ServoraTheme` → `ui/theme/SystemBarAppearance.kt`). A light app appearance on a
+phone running dark mode therefore keeps readable dark system bar icons. Only the content appearance
+is set; the window's edge-to-edge layout and the insets above are unchanged.
 
 Accessibility: the pair is a `selectableGroup` of `Role.RadioButton` segments. Each segment is
 labelled by its own full name — "English" / "Français" for languages, "Light theme" / "Dark theme"

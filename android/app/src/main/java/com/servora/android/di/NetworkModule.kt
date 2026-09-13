@@ -2,6 +2,7 @@ package com.servora.android.di
 
 import com.servora.android.BuildConfig
 import com.servora.android.data.auth.AuthApi
+import com.servora.android.data.customers.CustomersApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -50,4 +51,9 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideAuthApi(retrofit: Retrofit): AuthApi = retrofit.create(AuthApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideCustomersApi(retrofit: Retrofit): CustomersApi =
+        retrofit.create(CustomersApi::class.java)
 }

@@ -19,8 +19,6 @@ data class SignInUiState(
     val fieldError: SignInFieldError? = null,
     /** Why the last attempt failed as reported by the repository, cleared on the next attempt. */
     val failureReason: AuthFailureReason? = null,
-    /** The backend issued a session. Until a home screen exists this is the end of the flow. */
-    val signedIn: Boolean = false,
 ) {
     /** The action stays tappable while the form is empty so an empty field can be reported. */
     val isSubmitEnabled: Boolean get() = !isSubmitting

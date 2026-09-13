@@ -36,6 +36,27 @@
       "when": 1789135507264,
       "tag": "0004_woozy_spitfire",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789141200000,
+      "tag": "0005_customer_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789144800000,
+      "tag": "0006_user_inspection_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789152000000,
+      "tag": "0007_property_lifecycle_and_permissions",
+      "breakpoints": true
     }
   ]
 }

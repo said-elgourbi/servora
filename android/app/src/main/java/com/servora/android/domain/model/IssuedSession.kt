@@ -11,4 +11,5 @@ package com.servora.android.domain.model
 data class IssuedSession(
     val sessionId: String,
     val tokens: AuthTokens,
+    val permissions: Set<String> = emptySet(),
 )

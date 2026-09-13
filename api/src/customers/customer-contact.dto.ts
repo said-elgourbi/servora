@@ -32,7 +32,9 @@ export interface CreateCustomerContactDto {
   isJobContact: boolean;
 }
 
-export function toCustomerContactDto(contact: CustomerContact): CustomerContactDto {
+export function toCustomerContactDto(
+  contact: CustomerContact,
+): CustomerContactDto {
   return {
     id: contact.id,
     customerId: contact.customerId,
@@ -50,7 +52,9 @@ export function toCustomerContactDto(contact: CustomerContact): CustomerContactD
 }
 
 /** Validates untrusted input into a `CreateCustomerContactDto`. */
-export function parseCreateCustomerContactDto(input: unknown): CreateCustomerContactDto {
+export function parseCreateCustomerContactDto(
+  input: unknown,
+): CreateCustomerContactDto {
   const source = (input ?? {}) as Record<string, unknown>;
   return {
     firstName: requireText(source.firstName, 'firstName', 100),
@@ -59,7 +63,10 @@ export function parseCreateCustomerContactDto(input: unknown): CreateCustomerCon
     phone: optionalText(source.phone, 'phone', 50),
     role: optionalText(source.role, 'role', 100),
     isPrimary: optionalBoolean(source.isPrimary, 'isPrimary'),
-    isBillingContact: optionalBoolean(source.isBillingContact, 'isBillingContact'),
+    isBillingContact: optionalBoolean(
+      source.isBillingContact,
+      'isBillingContact',
+    ),
     isJobContact: optionalBoolean(source.isJobContact, 'isJobContact'),
   };
 }

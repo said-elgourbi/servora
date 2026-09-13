@@ -49,7 +49,6 @@ class SmsSignInViewModelTest {
 
         assertEquals(SmsSignInStep.PHONE, viewModel.uiState.value.step)
         assertEquals("", viewModel.uiState.value.phone)
-        assertFalse(viewModel.uiState.value.signedIn)
         assertFalse(viewModel.uiState.value.canStepBack)
     }
 
@@ -148,7 +147,6 @@ class SmsSignInViewModelTest {
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        assertTrue(state.signedIn)
         assertEquals("", state.code)
         assertFalse(state.isSubmitting)
         assertEquals("verifySmsCode:$SMS_PHONE:$SMS_CODE", repository.calls.last())
@@ -167,7 +165,6 @@ class SmsSignInViewModelTest {
 
         assertEquals(SmsSignInStep.CODE, viewModel.uiState.value.step)
         assertEquals(AuthFailureReason.OTP_CODE_INVALID, viewModel.uiState.value.failureReason)
-        assertFalse(viewModel.uiState.value.signedIn)
     }
 
     @Test

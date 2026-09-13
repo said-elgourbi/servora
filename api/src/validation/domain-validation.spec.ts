@@ -17,12 +17,16 @@ describe('domain validation', () => {
     it.each([undefined, null, '', '   ', 42])(
       'rejects a missing or non-string value (%s)',
       (value) => {
-        expect(() => requireText(value, 'name', 200)).toThrow(DomainValidationError);
+        expect(() => requireText(value, 'name', 200)).toThrow(
+          DomainValidationError,
+        );
       },
     );
 
     it('rejects a value longer than the maximum', () => {
-      expect(() => requireText('abcd', 'name', 3)).toThrow(/at most 3 characters/);
+      expect(() => requireText('abcd', 'name', 3)).toThrow(
+        /at most 3 characters/,
+      );
     });
   });
 
@@ -38,13 +42,17 @@ describe('domain validation', () => {
 
   describe('requireEmail', () => {
     it('accepts a valid address', () => {
-      expect(requireEmail('Manager@Example.COM', 'email')).toBe('Manager@Example.COM');
+      expect(requireEmail('Manager@Example.COM', 'email')).toBe(
+        'Manager@Example.COM',
+      );
     });
 
     it.each(['not-an-email', 'missing@tld', 'a b@example.com'])(
       'rejects %s',
       (value) => {
-        expect(() => requireEmail(value, 'email')).toThrow(/valid email address/);
+        expect(() => requireEmail(value, 'email')).toThrow(
+          /valid email address/,
+        );
       },
     );
 
@@ -55,13 +63,15 @@ describe('domain validation', () => {
 
   describe('requireEnum', () => {
     it('accepts an allowed value', () => {
-      expect(requireEnum('MANAGER', ['MANAGER', 'TECHNICIAN'], 'role')).toBe('MANAGER');
+      expect(requireEnum('MANAGER', ['MANAGER', 'TECHNICIAN'], 'role')).toBe(
+        'MANAGER',
+      );
     });
 
     it('rejects an unknown value', () => {
-      expect(() => requireEnum('DISPATCHER', ['MANAGER', 'TECHNICIAN'], 'role')).toThrow(
-        /must be one of: MANAGER, TECHNICIAN/,
-      );
+      expect(() =>
+        requireEnum('DISPATCHER', ['MANAGER', 'TECHNICIAN'], 'role'),
+      ).toThrow(/must be one of: MANAGER, TECHNICIAN/);
     });
   });
 

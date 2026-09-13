@@ -20,7 +20,6 @@
     <string name="sign_in_hide_password">Hide password</string>
     <string name="sign_in_action">Sign In</string>
     <string name="sign_in_action_pending">Signing in…</string>
-    <string name="sign_in_succeeded">Signed in.</string>
     <string name="sign_in_copyright">© 2026 Servora</string>
 
     <string name="sign_in_error_email_required">Enter your email.</string>
@@ -98,7 +97,171 @@
     <string name="sms_sign_in_action_verifying">Verifying…</string>
     <string name="sms_sign_in_action_resend">Resend code</string>
     <string name="sms_sign_in_back">Back</string>
-    <string name="sms_sign_in_signed_in">Signed in.</string>
     <string name="sms_sign_in_error_phone_required">Enter your phone number.</string>
     <string name="sms_sign_in_error_code_required">Enter the 6-digit code.</string>
+
+    <!-- Customers (`customers.*` permissions). -->
+    <string name="nav_home">Home</string>
+    <string name="nav_schedule">Schedule</string>
+    <string name="nav_customers">Customers</string>
+    <string name="nav_settings">Settings</string>
+
+    <!--
+      The back control a secondary screen shows is an icon, so its meaning exists only for a screen
+      reader (`BR-028`). It says where the control goes, not that it is decorative.
+    -->
+    <string name="nav_back">Back</string>
+    <string name="settings_sign_out">Sign out</string>
+    <string name="home_attention_title">Needs attention</string>
+    <string name="home_attention_sample_title">2 jobs need a technician</string>
+    <string name="home_attention_sample_detail">Today · 10:30 AM · 11:00 AM</string>
+    <string name="home_today_title">Today</string>
+    <string name="home_today_jobs_sample">8 jobs</string>
+    <string name="home_today_detail_sample">3 completed · 5 remaining</string>
+    <string name="customers_title">Customers</string>
+    <string name="customers_subtitle">Manage customers and their service properties</string>
+    <string name="customers_search_placeholder">Name, phone, address…</string>
+    <string name="customers_filter">Filter</string>
+    <string name="customers_filter_title">Filter Customers</string>
+    <string name="customers_filter_close">Close filters</string>
+    <string name="customers_filter_status_label">Customer Status</string>
+    <string name="customers_filter_status_all">All</string>
+    <string name="customers_filter_jobs_label">Jobs</string>
+    <string name="customers_filter_jobs_all">All</string>
+    <string name="customers_filter_jobs_has_open">Has open jobs</string>
+    <string name="customers_filter_jobs_no_open">No open jobs</string>
+    <string name="customers_filter_jobs_has_overdue">Has overdue visits</string>
+    <string name="customers_filter_jobs_none">No jobs yet</string>
+    <string name="customers_filter_clear">Clear</string>
+    <string name="customers_filter_apply">Apply</string>
+    <string name="customers_filter_clear_all">Clear all</string>
+    <string name="customers_filter_remove_format">Remove %1$s filter</string>
+    <string name="customers_new">New Customer</string>
+    <string name="customers_count_format">%1$d %2$s</string>
+    <string name="customers_count_singular">customer</string>
+    <string name="customers_count_plural">customers</string>
+    <string name="customers_empty_title">No customers yet</string>
+    <string name="customers_empty_message">Create your first customer to start managing service jobs.</string>
+    <string name="customers_no_access_title">Customers unavailable</string>
+    <string name="customers_no_access_message">Your account does not have access to customer records.</string>
+    <string name="customers_edit">Edit Customer</string>
+    <string name="customers_edit_short">Edit</string>
+    <string name="customers_archive">Archive Customer</string>
+    <string name="customers_create_job">Create Job</string>
+    <string name="customers_view_title">View Customer</string>
+    <string name="customers_create_title">New Customer</string>
+    <string name="customers_edit_title">Edit Customer</string>
+    <string name="customers_save">Save Changes</string>
+    <string name="customers_create_action">Create Customer</string>
+    <string name="customers_status_active">Active</string>
+    <string name="customers_status_inactive">Inactive</string>
+    <string name="customers_since_format">Since %1$s</string>
+    <string name="customers_business_mark">Business</string>
+    <string name="customers_loading">Loading customers…</string>
+    <string name="customers_error_title">Couldn\'t load customers</string>
+    <string name="customers_error_message">Check your connection and try again.</string>
+    <string name="customers_retry">Try again</string>
+    <string name="customers_no_contact">No contact details on record.</string>
+    <string name="customers_search_clear">Clear search</string>
+    <string name="customers_no_match_title">No customers match these filters</string>
+    <string name="customers_no_match_action">Clear search and filters</string>
+    <string name="section_count_format">%1$s · %2$d</string>
+
+    <!--
+      The customer row's derived counts. Plurals keep "1 property"/"1 job" correct in English and
+      select the French form, where 0 and 1 share "one" (`BR-028`). "Job" follows the `intervention`
+      term the rest of the French copy uses.
+    -->
+    <plurals name="customers_property_count">
+        <item quantity="one">%1$d property</item>
+        <item quantity="other">%1$d properties</item>
+    </plurals>
+    <plurals name="customers_job_count">
+        <item quantity="one">%1$d job</item>
+        <item quantity="other">%1$d jobs</item>
+    </plurals>
+
+    <!--
+      The filter control's accessible label while a filter is applied: its visible label is the
+      count of applied filters, which on its own does not say what the number means (`BR-028`).
+    -->
+    <plurals name="customers_filter_applied_count">
+        <item quantity="one">%1$d filter applied</item>
+        <item quantity="other">%1$d filters applied</item>
+    </plurals>
+    <string name="customers_counts_separator" translatable="false">·</string>
+
+    <!--
+      Customer detail (`BR-081`). The Property and Job rows render values the backend derived:
+      these strings only label and format what the API sent, never re-derive it.
+    -->
+    <string name="customers_detail_properties">Properties</string>
+    <string name="customers_detail_recent_jobs">Recent Jobs</string>
+    <string name="customers_detail_notes">Notes</string>
+    <string name="customers_detail_no_properties_title">No properties added yet</string>
+    <string name="customers_detail_no_properties_message">Add a service property before creating a job.</string>
+    <string name="customers_detail_no_jobs">No jobs yet</string>
+    <string name="customers_detail_last_service_format">Last service %1$s</string>
+    <string name="customers_detail_never_serviced">Never serviced</string>
+    <string name="customers_detail_see_all_jobs">See all %1$d jobs</string>
+    <string name="customers_all_jobs_title">Job History</string>
+    <string name="customers_property_city_format">%1$s, %2$s %3$s</string>
+    <string name="customers_job_number_format">#%1$d</string>
+    <string name="customers_job_unassigned">Unassigned</string>
+    <!-- Stable Job status codes rendered as labels (`BR-058`, `BR-041`). -->
+    <string name="customers_job_status_new">New</string>
+    <string name="customers_job_status_scheduled">Scheduled</string>
+    <string name="customers_job_status_in_progress">In progress</string>
+    <string name="customers_job_status_pending_review">Pending review</string>
+    <string name="customers_job_status_completed">Completed</string>
+    <string name="customers_job_status_canceled">Canceled</string>
+
+    <!--
+      Add Property (`BR-049`, `BR-050`). The form draws only the authoritative Property fields:
+      street, unit, city, province and postal code, then the optional name and notes. The province is
+      a picker over the stable Canadian codes, whose names are localized below (`BR-028`, `BR-041`).
+    -->
+    <string name="property_add_title">Add Property</string>
+    <string name="property_add_action">Add Property</string>
+    <string name="property_section_service_address">Service address</string>
+    <string name="property_section_details">Property details</string>
+    <string name="property_street_label">Street address</string>
+    <string name="property_street_placeholder">987 Cedar Lane</string>
+    <string name="property_unit_label">Unit / Suite</string>
+    <string name="property_unit_placeholder">Suite 200</string>
+    <string name="property_city_label">City</string>
+    <string name="property_city_placeholder">Montréal</string>
+    <string name="property_province_label">Province</string>
+    <string name="property_province_placeholder">Select province</string>
+    <string name="property_province_value_format">%1$s — %2$s</string>
+    <string name="property_province_close">Close province picker</string>
+    <string name="property_postal_code_label">Postal code</string>
+    <string name="property_postal_code_placeholder">H3A 2T6</string>
+    <string name="property_name_label">Property name / label</string>
+    <string name="property_name_placeholder">Main Building, Unit 3…</string>
+    <string name="property_notes_label">Notes</string>
+    <string name="property_notes_placeholder">Any notes about this property…</string>
+    <string name="property_field_optional">(optional)</string>
+    <string name="property_cancel">Cancel</string>
+    <string name="property_save">Save Property</string>
+    <string name="property_form_incomplete">Please fill in street address, city, province and postal code.</string>
+    <string name="property_error_unauthenticated">Your session has expired. Sign in again.</string>
+    <string name="property_error_forbidden">You do not have permission to add properties.</string>
+    <string name="property_error_validation">Check the details you entered.</string>
+    <string name="property_error_network">Check your network and try again.</string>
+    <string name="property_error_server">Please try again.</string>
+    <!-- Canadian province and territory names, keyed by the stable code the API exchanges. -->
+    <string name="property_province_ab">Alberta</string>
+    <string name="property_province_bc">British Columbia</string>
+    <string name="property_province_mb">Manitoba</string>
+    <string name="property_province_nb">New Brunswick</string>
+    <string name="property_province_nl">Newfoundland and Labrador</string>
+    <string name="property_province_ns">Nova Scotia</string>
+    <string name="property_province_nt">Northwest Territories</string>
+    <string name="property_province_nu">Nunavut</string>
+    <string name="property_province_on">Ontario</string>
+    <string name="property_province_pe">Prince Edward Island</string>
+    <string name="property_province_qc">Quebec</string>
+    <string name="property_province_sk">Saskatchewan</string>
+    <string name="property_province_yt">Yukon</string>
 </resources>

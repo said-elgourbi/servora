@@ -17,7 +17,9 @@ export interface CustomerSubtypePresence {
 }
 
 /** Throws a `DomainValidationError` when the subtype/type combination is invalid. */
-export function assertCustomerSubtypeIntegrity(presence: CustomerSubtypePresence): void {
+export function assertCustomerSubtypeIntegrity(
+  presence: CustomerSubtypePresence,
+): void {
   const issues: string[] = [];
 
   if (presence.type === 'INDIVIDUAL') {

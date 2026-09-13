@@ -18,8 +18,6 @@ data class SmsSignInUiState(
     val isSubmitting: Boolean = false,
     val fieldError: SmsSignInFieldError? = null,
     val failureReason: AuthFailureReason? = null,
-    /** The backend issued a session. Until a home screen exists this is the end of the flow. */
-    val signedIn: Boolean = false,
 ) {
     val isSubmitEnabled: Boolean get() = !isSubmitting
 

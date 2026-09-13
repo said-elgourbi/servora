@@ -38,6 +38,19 @@ export interface CustomerDto {
   updatedAt: string;
 }
 
+/**
+ * A customer list row: the customer plus the derived counts the list renders.
+ *
+ * `propertyCount` is the customer's **active** Property relationships (`BR-050`); an ended
+ * relationship stays in history but is no longer one of the customer's properties. `jobCount`
+ * counts the Jobs that belong to the customer, whatever their status (`BR-048`). Neither count is
+ * stored on the customer; both are derived from the authoritative tables (`BR-080`).
+ */
+export interface CustomerSummaryDto extends CustomerDto {
+  propertyCount: number;
+  jobCount: number;
+}
+
 export interface CustomerIndividualDto {
   customerId: string;
   firstName: string;
@@ -75,15 +88,50 @@ interface CustomerHeaderInput {
 
 export interface CreateIndividualCustomerDto extends CustomerHeaderInput {
   type: 'INDIVIDUAL';
-  individual: { firstName: string; lastName: string; dateOfBirth?: string | null };
+  individual: {
+    firstName: string;
+    lastName: string;
+    dateOfBirth?: string | null;
+  };
 }
 
 export interface CreateCompanyCustomerDto extends CustomerHeaderInput {
   type: 'COMPANY';
-  company: { legalName: string; businessName?: string | null; taxNumber?: string | null };
+  company: {
+    legalName: string;
+    businessName?: string | null;
+    taxNumber?: string | null;
+  };
 }
 
-export type CreateCustomerDto = CreateIndividualCustomerDto | CreateCompanyCustomerDto;
+export type CreateCustomerDto =
+  CreateIndividualCustomerDto | CreateCompanyCustomerDto;
+
+export interface UpdateCustomerDto {
+  displayName?: string;
+  email?: string | null;
+  phone?: string | null;
+  billingEmail?: string | null;
+  billingPhone?: string | null;
+  notes?: string | null;
+  preferredContactMethod?: CustomerPreferredContactMethod;
+  language?: CustomerLanguage;
+  status?: CustomerStatus;
+  individual?: {
+    firstName?: string;
+    lastName?: string;
+    dateOfBirth?: string | null;
+  };
+  company?: {
+    legalName?: string;
+    businessName?: string | null;
+    taxNumber?: string | null;
+  };
+}
+
+export interface ArchiveCustomerDto {
+  reason?: string | null;
+}
 
 export function toCustomerDto(customer: Customer): CustomerDto {
   return {
@@ -108,6 +156,17 @@ export function toCustomerDto(customer: Customer): CustomerDto {
   };
 }
 
+export function toCustomerSummaryDto(
+  customer: Customer,
+  counts: { propertyCount: number; jobCount: number },
+): CustomerSummaryDto {
+  return {
+    ...toCustomerDto(customer),
+    propertyCount: counts.propertyCount,
+    jobCount: counts.jobCount,
+  };
+}
+
 export function toCustomerIndividualDto(
   individual: CustomerIndividual,
 ): CustomerIndividualDto {
@@ -119,7 +178,9 @@ export function toCustomerIndividualDto(
   };
 }
 
-export function toCustomerCompanyDto(company: CustomerCompany): CustomerCompanyDto {
+export function toCustomerCompanyDto(
+  company: CustomerCompany,
+): CustomerCompanyDto {
   return {
     customerId: company.customerId,
     legalName: company.legalName,
@@ -128,21 +189,27 @@ export function toCustomerCompanyDto(company: CustomerCompany): CustomerCompanyD
   };
 }
 
-export function toIndividualCustomerDto(input: IndividualCustomer): IndividualCustomerDto {
+export function toIndividualCustomerDto(
+  input: IndividualCustomer,
+): IndividualCustomerDto {
   return {
     customer: toCustomerDto(input.customer),
     individual: toCustomerIndividualDto(input.individual),
   };
 }
 
-export function toCompanyCustomerDto(input: CompanyCustomer): CompanyCustomerDto {
+export function toCompanyCustomerDto(
+  input: CompanyCustomer,
+): CompanyCustomerDto {
   return {
     customer: toCustomerDto(input.customer),
     company: toCustomerCompanyDto(input.company),
   };
 }
 
-function parseCustomerHeader(source: Record<string, unknown>): CustomerHeaderInput {
+function parseCustomerHeader(
+  source: Record<string, unknown>,
+): CustomerHeaderInput {
   return {
     displayName: requireText(source.displayName, 'displayName', 255),
     email: optionalEmail(source.email, 'email'),
@@ -177,9 +244,16 @@ export function parseCreateCustomerDto(input: unknown): CreateCustomerDto {
       ...header,
       type,
       individual: {
-        firstName: requireText(individual.firstName, 'individual.firstName', 100),
+        firstName: requireText(
+          individual.firstName,
+          'individual.firstName',
+          100,
+        ),
         lastName: requireText(individual.lastName, 'individual.lastName', 100),
-        dateOfBirth: optionalDate(individual.dateOfBirth, 'individual.dateOfBirth'),
+        dateOfBirth: optionalDate(
+          individual.dateOfBirth,
+          'individual.dateOfBirth',
+        ),
       },
     };
   }
@@ -190,8 +264,116 @@ export function parseCreateCustomerDto(input: unknown): CreateCustomerDto {
     type,
     company: {
       legalName: requireText(company.legalName, 'company.legalName', 255),
-      businessName: optionalText(company.businessName, 'company.businessName', 255),
+      businessName: optionalText(
+        company.businessName,
+        'company.businessName',
+        255,
+      ),
       taxNumber: optionalText(company.taxNumber, 'company.taxNumber', 100),
     },
   };
+}
+
+/** Validates untrusted input into a partial customer edit. */
+export function parseUpdateCustomerDto(input: unknown): UpdateCustomerDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const output: UpdateCustomerDto = {};
+
+  if (source.displayName !== undefined) {
+    output.displayName = requireText(source.displayName, 'displayName', 255);
+  }
+  if (source.email !== undefined) {
+    output.email = optionalEmail(source.email, 'email');
+  }
+  if (source.phone !== undefined) {
+    output.phone = optionalText(source.phone, 'phone', 50);
+  }
+  if (source.billingEmail !== undefined) {
+    output.billingEmail = optionalEmail(source.billingEmail, 'billingEmail');
+  }
+  if (source.billingPhone !== undefined) {
+    output.billingPhone = optionalText(source.billingPhone, 'billingPhone', 50);
+  }
+  if (source.notes !== undefined) {
+    output.notes = optionalText(source.notes, 'notes', 4000);
+  }
+  if (source.preferredContactMethod !== undefined) {
+    output.preferredContactMethod = requireEnum(
+      source.preferredContactMethod,
+      ['EMAIL', 'PHONE', 'SMS', 'NONE'] as const,
+      'preferredContactMethod',
+    );
+  }
+  if (source.language !== undefined) {
+    output.language = requireEnum(
+      source.language,
+      ['en-CA', 'fr-CA'] as const,
+      'language',
+    );
+  }
+  if (source.status !== undefined) {
+    output.status = requireEnum(
+      source.status,
+      ['ACTIVE', 'INACTIVE'] as const,
+      'status',
+    );
+  }
+
+  if (source.individual !== undefined) {
+    const individual = source.individual as Record<string, unknown>;
+    output.individual = {};
+    if (individual.firstName !== undefined) {
+      output.individual.firstName = requireText(
+        individual.firstName,
+        'individual.firstName',
+        100,
+      );
+    }
+    if (individual.lastName !== undefined) {
+      output.individual.lastName = requireText(
+        individual.lastName,
+        'individual.lastName',
+        100,
+      );
+    }
+    if (individual.dateOfBirth !== undefined) {
+      output.individual.dateOfBirth = optionalDate(
+        individual.dateOfBirth,
+        'individual.dateOfBirth',
+      );
+    }
+  }
+
+  if (source.company !== undefined) {
+    const company = source.company as Record<string, unknown>;
+    output.company = {};
+    if (company.legalName !== undefined) {
+      output.company.legalName = requireText(
+        company.legalName,
+        'company.legalName',
+        255,
+      );
+    }
+    if (company.businessName !== undefined) {
+      output.company.businessName = optionalText(
+        company.businessName,
+        'company.businessName',
+        255,
+      );
+    }
+    if (company.taxNumber !== undefined) {
+      output.company.taxNumber = optionalText(
+        company.taxNumber,
+        'company.taxNumber',
+        100,
+      );
+    }
+  }
+
+  return output;
+}
+
+export function parseArchiveCustomerDto(input: unknown): ArchiveCustomerDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  return { reason: optionalText(source.reason, 'reason', 1000) };
 }

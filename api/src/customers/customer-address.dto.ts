@@ -36,7 +36,9 @@ export interface CreateCustomerAddressDto {
   isDefault: boolean;
 }
 
-export function toCustomerAddressDto(address: CustomerAddress): CustomerAddressDto {
+export function toCustomerAddressDto(
+  address: CustomerAddress,
+): CustomerAddressDto {
   return {
     id: address.id,
     customerId: address.customerId,
@@ -54,7 +56,9 @@ export function toCustomerAddressDto(address: CustomerAddress): CustomerAddressD
 }
 
 /** Validates untrusted input into a `CreateCustomerAddressDto`. */
-export function parseCreateCustomerAddressDto(input: unknown): CreateCustomerAddressDto {
+export function parseCreateCustomerAddressDto(
+  input: unknown,
+): CreateCustomerAddressDto {
   const source = (input ?? {}) as Record<string, unknown>;
   return {
     type: requireEnum(source.type, CUSTOMER_ADDRESS_TYPES, 'type'),

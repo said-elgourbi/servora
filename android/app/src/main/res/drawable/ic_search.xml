@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Search glyph for the customers search field.
+
+  Geometry matches the icon set the design uses (`Figma/src/screens/Customers.tsx`, lucide
+  `Search`): an 8-unit circle at (11, 11) with a 45° handle, stroked rather than filled. The
+  control that draws it supplies the colour, so the stroke colour here is only a placeholder.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M11,3a8,8 0 1,0 0,16a8,8 0 1,0 0,-16"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+    <path
+        android:pathData="M21,21L16.65,16.65"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

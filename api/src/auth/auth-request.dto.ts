@@ -176,7 +176,9 @@ export function parseSmsOtpRequest(body: unknown): SmsOtpRequestDto {
   return { phone: normalizePhoneNumber(source['phone']) };
 }
 
-export function parseSmsOtpVerifyRequest(body: unknown): SmsOtpVerifyRequestDto {
+export function parseSmsOtpVerifyRequest(
+  body: unknown,
+): SmsOtpVerifyRequestDto {
   const source = requireRecord(body, 'body');
   return {
     phone: normalizePhoneNumber(source['phone']),

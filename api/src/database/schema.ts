@@ -24,6 +24,7 @@ import {
   index,
   inet,
   integer,
+  pgView,
   jsonb,
   pgTable,
   text,
@@ -460,6 +461,12 @@ export const properties = pgTable(
     postalCode: varchar('postal_code', { length: 20 }).notNull(),
     country: varchar('country', { length: 100 }).notNull().default('Canada'),
     notes: text('notes'),
+    status: varchar('status', { length: 16 }).notNull().default('ACTIVE'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    archivedByMembershipId: uuid('archived_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    version: integer('version').notNull().default(1),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -469,6 +476,72 @@ export const properties = pgTable(
       table.organizationId,
       table.postalCode,
     ),
+    index('properties_organization_status_idx').on(
+      table.organizationId,
+      table.status,
+    ),
+    check(
+      'properties_status_check',
+      sql`${table.status} in ('ACTIVE', 'ARCHIVED')`,
+    ),
+    check(
+      'properties_archived_state_check',
+      sql`(${table.status} = 'ARCHIVED') = (${table.archivedAt} is not null)`,
+    ),
+    check(
+      'properties_archived_actor_check',
+      sql`(${table.status} = 'ARCHIVED') = (${table.archivedByMembershipId} is not null)`,
+    ),
+    check('properties_version_check', sql`${table.version} > 0`),
+  ],
+);
+
+// ------------------------------------------------- property_lifecycle_history
+
+/**
+ * Append-only Property archive/restore events (`BR-082`, `BR-086`).
+ *
+ * The reference to `properties` is deliberately `ON DELETE CASCADE`: a Property's own lifecycle
+ * history does not by itself make the Property permanently undeletable. Permanent deletion is
+ * blocked only by references from other business records (`BR-082`), and when it is allowed the
+ * Property's own history is removed with it.
+ */
+export const propertyLifecycleHistory = pgTable(
+  'property_lifecycle_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    propertyId: uuid('property_id')
+      .notNull()
+      .references(() => properties.id, { onDelete: 'cascade' }),
+    action: varchar('action', { length: 16 }).notNull(),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    note: text('note'),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'property_lifecycle_history_action_check',
+      sql`${table.action} in ('ARCHIVED', 'RESTORED')`,
+    ),
+    index('property_lifecycle_history_organization_property_idx').on(
+      table.organizationId,
+      table.propertyId,
+      table.recordedAt,
+    ),
+    // Offline replay must not append the same lifecycle event twice (`BR-031`).
+    uniqueIndex('property_lifecycle_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
   ],
 );
 
@@ -1417,6 +1490,79 @@ export const passwordResetTokens = pgTable(
       .where(sql`${table.usedAt} is null`),
   ],
 );
+
+// --------------------------------------------------------------- user views
+
+export const userOverview = pgView('user_overview', {
+  userId: uuid('user_id'),
+  email: varchar('email', { length: 320 }),
+  userPhone: varchar('user_phone', { length: 50 }),
+  userStatus: varchar('user_status', { length: 20 }),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  userCreatedAt: timestamp('user_created_at', { withTimezone: true }),
+  userUpdatedAt: timestamp('user_updated_at', { withTimezone: true }),
+  firstName: varchar('first_name', { length: 100 }),
+  lastName: varchar('last_name', { length: 100 }),
+  displayName: varchar('display_name', { length: 201 }),
+  profilePhone: varchar('profile_phone', { length: 50 }),
+  avatarUrl: varchar('avatar_url', { length: 500 }),
+  locale: varchar('locale', { length: 10 }),
+  timezone: varchar('timezone', { length: 100 }),
+  membershipCount: integer('membership_count'),
+  activeMembershipCount: integer('active_membership_count'),
+  activeSessionCount: integer('active_session_count'),
+  lastSessionUsedAt: timestamp('last_session_used_at', { withTimezone: true }),
+  outstandingPasswordResetCount: integer('outstanding_password_reset_count'),
+}).existing();
+
+export const userMembershipOverview = pgView('user_membership_overview', {
+  memberId: uuid('member_id'),
+  userId: uuid('user_id'),
+  email: varchar('email', { length: 320 }),
+  displayName: varchar('display_name', { length: 201 }),
+  firstName: varchar('first_name', { length: 100 }),
+  lastName: varchar('last_name', { length: 100 }),
+  userStatus: varchar('user_status', { length: 20 }),
+  organizationId: uuid('organization_id'),
+  organizationName: varchar('organization_name', { length: 200 }),
+  organizationStatus: varchar('organization_status', { length: 20 }),
+  membershipStatus: varchar('membership_status', { length: 20 }),
+  joinedAt: timestamp('joined_at', { withTimezone: true }),
+  roleId: uuid('role_id'),
+  roleSystemCode: varchar('role_system_code', { length: 20 }),
+  roleNameEn: varchar('role_name_en', { length: 150 }),
+  roleNameFr: varchar('role_name_fr', { length: 150 }),
+  roleStatus: varchar('role_status', { length: 20 }),
+  rolePermissionCount: integer('role_permission_count'),
+  directPermissionCount: integer('direct_permission_count'),
+  effectivePermissionCount: integer('effective_permission_count'),
+}).existing();
+
+export const userEffectivePermissions = pgView('user_effective_permissions', {
+  memberId: uuid('member_id'),
+  organizationId: uuid('organization_id'),
+  userId: uuid('user_id'),
+  email: varchar('email', { length: 320 }),
+  organizationName: varchar('organization_name', { length: 200 }),
+  roleId: uuid('role_id'),
+  roleNameEn: varchar('role_name_en', { length: 150 }),
+  permissionId: uuid('permission_id'),
+  permissionCode: varchar('permission_code', { length: 100 }),
+  permissionNameEn: varchar('permission_name_en', { length: 150 }),
+  permissionNameFr: varchar('permission_name_fr', { length: 150 }),
+  source: varchar('source', { length: 20 }),
+}).existing();
+
+export const userPermissionSummary = pgView('user_permission_summary', {
+  memberId: uuid('member_id'),
+  organizationId: uuid('organization_id'),
+  userId: uuid('user_id'),
+  email: varchar('email', { length: 320 }),
+  organizationName: varchar('organization_name', { length: 200 }),
+  roleNameEn: varchar('role_name_en', { length: 150 }),
+  effectivePermissionCount: integer('effective_permission_count'),
+  permissionCodes: text('permission_codes').array(),
+}).existing();
 
 // ------------------------------------------------------ phone_otp_challenges
 

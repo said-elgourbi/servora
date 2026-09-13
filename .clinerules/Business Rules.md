@@ -276,6 +276,9 @@ These capabilities are subject to any later domain-specific business rules conce
 **Exceptions:**
 Domain-specific restrictions may prevent deletion or modification of particular records once those rules are formally defined.
 
+**Notes:**
+Property capabilities are defined by BR-085 and are governed by BR-006 like every other capability. No Property capability is implied by the Customer capabilities listed here.
+
 **Status:**
 **CONFIRMED**
 
@@ -907,7 +910,7 @@ Android, Angular, API, Database
 None.
 
 **Notes:**
-The structured address shape belongs to the Job & Visit data-model slice.
+The structured address shape belongs to the Job & Visit data-model slice. Property editing, archiving, restoring and permanent deletion are defined by BR-082 – BR-086.
 
 **Status:**
 **CONFIRMED**
@@ -1099,7 +1102,7 @@ Android, Angular, API, Database
 None.
 
 **Notes:**
-After a Job is `COMPLETED`, its Property cannot be changed (BR-062). Historical location changes are governed by BR-057.
+After a Job is `COMPLETED`, its Property cannot be changed (BR-062). Historical location changes are governed by BR-057. Archiving a Property never changes a Job's Property reference or its address snapshot (BR-083).
 
 **Status:**
 **CONFIRMED**
@@ -1122,6 +1125,9 @@ Android, Angular, API, Database
 
 **Exceptions:**
 None.
+
+**Notes:**
+Editing a Property never retroactively changes a Job's or Visit's stored address snapshot (BR-084). Whether the Property's own address history must additionally be retained remains an **OPEN QUESTION**, and product ownership has **deferred** a dedicated Property address-history table until an audit screen or a compliance requirement needs it. The Job and Visit snapshots remain the authoritative record of the address used at the time.
 
 **Status:**
 **CONFIRMED**
@@ -1222,6 +1228,9 @@ Android, Angular, API
 
 **Exceptions:**
 None.
+
+**Notes:**
+The Visit set this condition considers is named `needsSchedulingActiveVisit`; the broader set the archive warning considers (`BR-083`) is named `archiveWarningOpenWork`. The two are deliberately different named concepts, because they answer different questions: a `DRAFT` Visit counts as open work for the archive warning but is not yet scheduled work for this signal. Neither vocabulary replaces the other.
 
 **Status:**
 **CONFIRMED**
@@ -1427,6 +1436,187 @@ None.
 
 **Status:**
 **CONFIRMED**
+
+---
+
+## BR-082 — Property lifecycle: archive, restore and permanent deletion
+
+**Description:**
+A Property leaves active service through an explicit lifecycle state, not through generic deletion.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- **Archive is the normal way to remove a Property from active use.**
+- Archiving is an explicit business state (`ACTIVE` / `ARCHIVED`), not generic soft deletion and not a side effect of any other action.
+- An archived Property remains a real, retrievable business record with its identity, address and relationships intact.
+- An archived Property can be **restored** to active use.
+- Restoring returns the Property to `ACTIVE`. It never creates a new Property and never changes the Property's identity.
+- **Permanent deletion** is allowed only when the Property has **never been referenced** by another business record — including a Job, a Visit, a Property ↔ Customer relationship, a note, an attachment, an address/use history entry or any other record.
+- The Property's **own archive/restore lifecycle history is not a blocking reference**: it follows the Property and is removed with it, so archiving and restoring an otherwise never-used Property does not permanently trap it.
+- A Property that has ever been referenced by another business record cannot be permanently deleted. Archiving is the available removal for it.
+- Referenced records must never be cascade-deleted. Deleting a Property must never delete or rewrite Jobs, Visits, notes, attachments or history.
+- Archive, restore and permanent deletion are explicit authorized actions (BR-085), never automatic.
+- The API is authoritative for the Property's lifecycle state; clients never decide it (BR-001, BR-007).
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- The permanent-deletion test covers archived and historical references, not only currently active ones. The one exception is the Property's own lifecycle history (BR-086), which is deleted with the Property rather than blocking it.
+- A Property created through the API always has an active Customer relationship, so it is not permanently deletable; archiving is its removal. Permanent deletion remains reachable for a Property that has no relationship and no other reference.
+- Retention of an archived Property and its history is governed by the audit-retention open question (BR-033).
+- This rule defines Property deletion only. Job deletion remains an **OPEN QUESTION** (BR-021) and is not resolved here.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-083 — Archiving a Property does not disturb existing Jobs or Visits
+
+**Description:**
+Archiving stops a Property being chosen for new work while work already associated with it can finish normally.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+Archiving a Property:
+
+- Blocks the creation of new Jobs for that Property.
+- Removes the Property from normal active lists and Property selectors used to choose a location for new work.
+- Does not cancel, archive, reschedule or otherwise modify existing Jobs or Visits.
+- Allows existing `SCHEDULED` and ongoing Visits to continue.
+- Allows an existing Visit to be rescheduled (BR-073).
+- Allows additional Visits to be added to an existing open Job (BR-071).
+- Preserves access to the Property from its active and historical Jobs.
+- Preserves the Property ↔ Customer relationship (BR-050).
+- Preserves the Job's frozen address snapshot (BR-056).
+- May be performed even when active work exists, but Android must require **explicit confirmation** before doing so (BR-012, BR-070).
+
+For the archive warning:
+
+- An **active Job** is a Job in `NEW`, `SCHEDULED`, `IN_PROGRESS` or `PENDING_REVIEW` (BR-058). `COMPLETED` and `CANCELED` Jobs are not active.
+- An **active Visit** is a Visit whose status is not `COMPLETED`, `CANCELED` or `NO_SHOW` (BR-074).
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- The archive-warning sets above are the sets product ownership defined for this warning. They are **not** the same classification as the derived "Needs Scheduling / No Active Visit" condition (BR-060), which considers only `NEW`/`IN_PROGRESS` Jobs and only `SCHEDULED`/`EN_ROUTE`/`ON_SITE`/`IN_PROGRESS` Visits and therefore excludes `DRAFT`.
+- The two sets are kept as two named concepts rather than merged into one "active" vocabulary, because they answer different questions: `needsSchedulingActiveVisit` (BR-060) asks "does this Job need scheduling?", while `archiveWarningOpenWork` (this rule) asks "could archiving disturb current work?".
+- The customer-detail Property projection (BR-081) excludes an archived Property, and the customer's `propertyCount` follows the same set.
+
+**Status:**
+**CONFIRMED** — archiving behaviour, including the `archiveWarningOpenWork` classification
+
+---
+
+## BR-084 — Editing and restoring a Property
+
+**Description:**
+Property data can be corrected in either lifecycle state, and restoring is a separate explicit action.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Authorized users can edit a Property whether it is `ACTIVE` or `ARCHIVED`.
+- Editing an `ARCHIVED` Property does **not** restore it. The Property stays archived until an explicit restore.
+- Restoring is a separate explicit action that makes the Property available for new Jobs again.
+- Editing a Property's address never retroactively changes a historical address snapshot held by a Job or a Visit (BR-056, BR-057).
+- Editing a Property does not change its identity and does not end its Property ↔ Customer relationship (BR-050).
+- Whether a given client offers edit or restore actions for an archived Property is a presentation decision; the API remains authoritative (BR-001, BR-007).
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- Action labels and confirmation copy are localized (BR-028).
+- Whether the Property's own address-change history must additionally be retained remains an **OPEN QUESTION** (BR-057), and a dedicated address-history table is **deferred** until an audit screen or a compliance requirement needs it. This rule only confirms that historical snapshots are not rewritten.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-085 — Property permissions
+
+**Description:**
+Property management is authorized by its own capability set, not by a role name and not by the Customer capability set.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+The permission catalogue defines these stable, machine-readable capabilities:
+
+| Permission           | Capability                                                                     |
+| -------------------- | ------------------------------------------------------------------------------ |
+| `properties.view`    | View Properties and resolve a Property where a location is displayed/selected. |
+| `properties.create`  | Create a Property and relate it to a Customer.                                 |
+| `properties.edit`    | Edit a Property.                                                               |
+| `properties.archive` | Archive and restore a Property.                                                |
+| `properties.delete`  | Permanently delete a Property that has never been referenced (BR-082).         |
+
+- The codes follow the existing resource-prefixed `resource.action` convention already used by `customers.view`, `customers.create`, `customers.edit` and `customers.archive` (BR-006, BR-041).
+- Creating a Property is a distinct, common permission boundary rather than a reuse of `properties.edit`: a role may legitimately add a service location without being allowed to change existing ones.
+- Archive and restore share one capability because they are one lifecycle concern. Permanent deletion is a separate capability because it is destructive and irreversible.
+- A Property is an independently identified entity (BR-049). Property capabilities are independent of `customers.*`; a Property capability is never implied by a Customer capability, and vice versa.
+- Authorization must never depend on the Manager role or any role name. Custom roles and direct member permissions grant these capabilities (BR-004, BR-006).
+- The API enforces every Property capability. Client-side visibility is never authorization (BR-007).
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- **Changed decision.** Property creation (`POST /customers/:id/properties`) was previously authorized by `customers.edit` as an interim decision, because no `properties.*` capability existed. Property actions now use Property capabilities: creation requires `properties.create` and the customer-detail Property projection requires `properties.view`. The interim `customers.edit` authorization no longer applies.
+- The Manager system role receives all five Property capabilities (BR-008 direction); the Technician role receives none of them (BR-009).
+
+**Status:**
+**CONFIRMED** — `properties.view`, `properties.create`, `properties.edit`, `properties.archive`, `properties.delete`
+
+---
+
+## BR-086 — Property lifecycle actions are audited, offline-safe and API-authoritative
+
+**Description:**
+Update, archive, restore and permanent deletion are business actions with the domain's normal traceability, synchronization and authority expectations.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Every Property update, archive, restore and permanent deletion is performed by an authenticated, authorized member as an explicit action.
+- Each action is recorded through the existing audit/history architecture (BR-033) so that who performed it, what changed, when, and the relevant previous/current state remain traceable.
+- Lifecycle history is append-only. A restore records the previous archived state; it never rewrites or removes the archive event (BR-067).
+- Archive and restore are **offline-capable** operations: they follow the project's offline/outbox conventions, are stored durably on the device until the backend accepts them, and are never silently lost (BR-013, BR-014, BR-031).
+- **Permanent deletion is online-only.** Because it is destructive, irreversible and must be validated against every referencing record, it is executed against the API and is never queued as an offline operation (BR-014, BR-031).
+- Concurrent changes are resolved by the API as the final authority. A client never overwrites a newer Property state, and a mutation that conflicts with newer state is rejected rather than applied (BR-001, BR-031, BR-032).
+- Clients present the synchronization state the API reports; they never invent a different outcome.
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- The offline/outbox architecture standard to follow is `docs/architecture/offline-first-architecture.md`, recorded by `docs/decisions/012-property-lifecycle-and-permissions.md`. It defines the local store, outbox, idempotency, replay, synchronization-state and conflict model that archive and restore follow, so no one-off synchronization design is invented for Property lifecycle.
+- The per-operation offline conflict strategy remains an open product question (BR-032). The standard defines the general model and records what a specific operation must still decide.
+
+**Status:**
+**CONFIRMED** — audit expectations, offline-capable archive/restore, online-only permanent deletion, API authority
+**OPEN QUESTION** — the per-operation offline conflict strategy (BR-032)
 
 ---
 
@@ -2004,6 +2194,72 @@ Android, Angular, API
 
 **Exceptions:**
 None.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-081 — Customer detail projections are derived, not stored
+
+**Description:**
+The customer detail view presents a customer's Properties and Jobs. The values shown on those rows
+are derived projections over authoritative records, not stored fields.
+
+**Applies to:**
+Android, Angular, API
+
+**Expected behavior:**
+
+- Nothing in this rule is stored. Every value is derived from authoritative records and must never
+  become a duplicate source of truth (`BR-001`, `BR-080`, `BR-042`).
+- **Property row** (an `ACTIVE` Property the customer is currently related to, `BR-050`, `BR-082`):
+  - `jobCount` is the total number of Jobs associated with the Property (`BR-048`, `BR-056`),
+    whatever their status.
+  - `lastServiceDate` is the scheduled date of the most recent Visit with status `COMPLETED`
+    (`BR-074`) across all Jobs associated with the Property. When no such Visit exists, no date is
+    shown and the client presents a localized "never serviced" state.
+  - An `ARCHIVED` Property is excluded from the default projection, and the customer header's
+    `propertyCount` counts the same set, so the header and the list agree. The archived Property
+    remains a retrievable business record, reached through the explicit archived/history views
+    (`BR-082`, `BR-083`), which this rule does not define.
+- **Job row** (a Job belonging to the customer, `BR-048`):
+  - Exactly one **selected Visit** is chosen for the Job. The displayed date and the displayed
+    technicians both come from that same selected Visit; they are never taken from different Visits.
+  - The selected Visit is the Job's earliest **upcoming** Visit whose scheduled start is at or after
+    the current time and whose status is not `CANCELED` (`BR-074`), ordered by scheduled start.
+  - When the Job has no such upcoming Visit, the selected Visit is the Job's Visit with the most
+    recent past scheduled start.
+  - The displayed date is the selected Visit's scheduled start.
+  - The displayed technicians are the technicians currently assigned to the selected Visit
+    (`BR-068`), with the Lead first.
+  - When the Job has no selected Visit, or the selected Visit has no assigned technicians, no
+    technicians are shown and the client presents a localized "unassigned" state. A Job with no
+    Visit shows no date and the "unassigned" state.
+- The API exposes these projections so that every client presents the same values. A client must not
+  derive a different definition of the same value locally (`BR-041`).
+- The projections carry stable identifiers and dates, never localized display text (`BR-028`,
+  `BR-041`).
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- The past-Visit fallback is defined over any past Visit by scheduled start. It does not exclude a
+  `CANCELED` past Visit; only the upcoming candidate excludes `CANCELED`. This is the literal reading
+  of the confirmed decision and is flagged for product confirmation.
+- A Job has no scheduled date of its own; scheduling is performed on Visits (`BR-072`). The Job row's
+  date is therefore the selected Visit's scheduled start, not a Job field.
+- Ordering and row limits of the customer's Property and Job lists are presentation concerns and are
+  not fixed by this rule.
+- Row-level actions on these projections (open a Job, add a Property) are governed by their own
+  permissions (`BR-006`) and are not defined by this rule.
+- Archiving a Property removes it from normal active lists and Property selectors (`BR-083`). The
+  default projection is therefore the customer's current `ACTIVE` relationships (`BR-050`,
+  `BR-082`): an `ARCHIVED` Property, and its contribution to the customer's `propertyCount`, are
+  excluded. The archived Property is not deleted and stays retrievable through the explicit
+  archived/history views.
 
 **Status:**
 **CONFIRMED**

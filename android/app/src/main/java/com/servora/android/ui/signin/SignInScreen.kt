@@ -49,7 +49,6 @@ import com.servora.android.R
 import com.servora.android.data.auth.AuthFailureReason
 import com.servora.android.ui.appearance.AppearanceControls
 import com.servora.android.ui.auth.ClearFocusWhenImeHidden
-import com.servora.android.ui.theme.stateColors
 
 /**
  * Sign-in entry point of the Android application.
@@ -268,31 +267,18 @@ internal fun SignInScreen(
     }
 }
 
-/** Renders whatever the last attempt produced: a session, or the reason it failed. */
+/** Renders the reason the last attempt failed, if it did. */
 @Composable
 private fun SignInStatus(uiState: SignInUiState, modifier: Modifier = Modifier) {
-    val reason = uiState.failureReason
-    val stateColors = MaterialTheme.stateColors
-    when {
-        uiState.signedIn -> SignInAlert(
-            title = null,
-            message = stringResource(R.string.sign_in_succeeded),
-            containerColor = stateColors.successContainer,
-            contentColor = stateColors.onSuccessContainer,
-            modifier = modifier,
-        )
-
-        reason != null -> {
-            val failure = reason.localizedMessage()
-            SignInAlert(
-                title = failure.title,
-                message = failure.message,
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = modifier,
-            )
-        }
-    }
+    val reason = uiState.failureReason ?: return
+    val failure = reason.localizedMessage()
+    SignInAlert(
+        title = failure.title,
+        message = failure.message,
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = modifier,
+    )
 }
 
 /** Localized copy for the failure reasons a sign-in attempt can produce. */

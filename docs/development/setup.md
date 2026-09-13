@@ -40,8 +40,9 @@ Notes:
 ## 3. Development seed data (`make seed`)
 
 The foundation database starts empty and the API has no user-creation endpoint yet, so a
-fresh environment cannot sign in. `make seed` creates the smallest dataset that can:
-two active accounts, one per default foundation role (`BR-003`), inside one organization.
+fresh environment cannot sign in. `make seed` creates two active accounts, one per default
+foundation role (`BR-003`), inside one organization. It also adds a deterministic operational
+demo dataset for local scrolling/filtering checks.
 
 ```bash
 make seed
@@ -58,6 +59,19 @@ Written per account: the `users` row (address, Argon2id hash, `ACTIVE`), the `us
 row (`Dev Manager` / `Dev Technician`), and the `organization_members` row (`role_id`,
 `ACTIVE`). The seed also upserts the default permission catalogue, default organization roles and
 role-permission assignments.
+
+Operational demo data:
+
+- 20 customers in the same organization, mixing companies and individuals, active and inactive
+  status, English and French language preferences, and several preferred contact methods.
+- Customer contacts, billing addresses, 1-4 service Properties per customer, and active
+  Property-Customer relationship rows.
+- 44 Jobs numbered from `1001`, spread across `NEW`, `SCHEDULED`, `IN_PROGRESS`,
+  `PENDING_REVIEW`, `COMPLETED` and `CANCELED`.
+- Visits, visit assignments and visit notes for scheduled/field-work scenarios, including
+  scheduled, active, completed and canceled Visit states.
+- Rows created by the operational demo are tagged with `[dev-seed-operational]`. Re-running
+  `make seed` refreshes those tagged rows instead of appending another copy.
 
 Credential policy:
 
@@ -86,12 +100,10 @@ curl -s -X POST http://localhost:3000/auth/sign-in -H 'content-type: application
 Expected: `200` with `sessionId`, `accessToken` and `refreshToken`. A wrong password returns
 `401 INVALID_CREDENTIALS` with the same body shape, and a request without `device` returns `400`.
 
-Implementation: `api/src/database/development-seed.ts` resolves the dataset from the
+Implementation: `api/src/database/development-seed.ts` resolves the credential dataset from the
 environment (pure, unit-tested in `development-seed.spec.ts`) and
-`api/src/database/run-development-seed.ts` performs the writes (`npm run db:seed`).
-
-Customers, jobs, assignments and evidence are intentionally **not** seeded: those rows are not
-needed for authentication smoke testing.
+`api/src/database/run-development-seed.ts` performs the account, permission and operational demo
+writes (`npm run db:seed`).
 
 ## 4. Android against a local API (physical device or emulator)
 

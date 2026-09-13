@@ -29,19 +29,22 @@ describe('loadConfig', () => {
   });
 
   it('treats empty values as unset', () => {
-    expect(loadConfig({ NODE_ENV: '', PORT: '', DATABASE_URL: '', LOG_LEVEL: '' }))
-      .toEqual({
-        nodeEnv: 'development',
-        port: 3000,
-        databaseUrl: 'postgres://servora:servora@localhost:5432/servora',
-        logLevel: 'info',
-      });
+    expect(
+      loadConfig({ NODE_ENV: '', PORT: '', DATABASE_URL: '', LOG_LEVEL: '' }),
+    ).toEqual({
+      nodeEnv: 'development',
+      port: 3000,
+      databaseUrl: 'postgres://servora:servora@localhost:5432/servora',
+      logLevel: 'info',
+    });
   });
 
   it.each(['staging', 'PRODUCTION'])(
     'rejects an invalid NODE_ENV (%s)',
     (nodeEnv) => {
-      expect(() => loadConfig({ NODE_ENV: nodeEnv })).toThrow(/Invalid NODE_ENV/);
+      expect(() => loadConfig({ NODE_ENV: nodeEnv })).toThrow(
+        /Invalid NODE_ENV/,
+      );
     },
   );
 
@@ -53,7 +56,10 @@ describe('loadConfig', () => {
   );
 
   it.each([
-    { value: 'mysql://servora:servora@localhost:5432/servora', note: 'a non-postgres protocol' },
+    {
+      value: 'mysql://servora:servora@localhost:5432/servora',
+      note: 'a non-postgres protocol',
+    },
     { value: 'not a url', note: 'a malformed URL' },
     { value: 'postgres://', note: 'a URL without a host' },
   ])('rejects DATABASE_URL with $note', ({ value }) => {
@@ -68,4 +74,3 @@ describe('loadConfig', () => {
     );
   });
 });
-

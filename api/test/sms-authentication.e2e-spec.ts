@@ -308,6 +308,7 @@ describe('phone/SMS authentication (e2e)', () => {
         accessToken: expect.any(String),
         accessTokenExpiresAt: expect.any(String),
         refreshToken: expect.any(String),
+        permissions: expect.any(Array),
       });
       expect(Date.parse(response.body.accessTokenExpiresAt)).toBeGreaterThan(
         Date.now(),

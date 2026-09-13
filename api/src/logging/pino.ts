@@ -1,5 +1,10 @@
 import { LoggerService } from '@nestjs/common';
-import { pino, type LogFn, type Logger as PinoLogger, type LoggerOptions } from 'pino';
+import {
+  pino,
+  type LogFn,
+  type Logger as PinoLogger,
+  type LoggerOptions,
+} from 'pino';
 import type { AppConfig } from '../config/configuration.js';
 
 /**
@@ -94,7 +99,11 @@ export class PinoNestLogger implements LoggerService {
 
     if (message instanceof Error) {
       logAt({
-        err: { name: message.name, message: message.message, stack: message.stack },
+        err: {
+          name: message.name,
+          message: message.message,
+          stack: message.stack,
+        },
       });
       return;
     }

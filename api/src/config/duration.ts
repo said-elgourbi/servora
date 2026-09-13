@@ -27,9 +27,12 @@ export function parseDuration(value: string, field: string): number {
   }
 
   const [, amount, unit] = match;
-  const milliseconds = Number(amount) * MILLISECONDS_PER_UNIT[unit as DurationUnit];
+  const milliseconds =
+    Number(amount) * MILLISECONDS_PER_UNIT[unit as DurationUnit];
   if (milliseconds <= 0) {
-    throw new Error(`Invalid ${field} "${value}". The duration must be greater than zero.`);
+    throw new Error(
+      `Invalid ${field} "${value}". The duration must be greater than zero.`,
+    );
   }
 
   return milliseconds;

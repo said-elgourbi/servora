@@ -137,8 +137,11 @@ not communicated by colour alone (`docs/design/android-design-system.md`). Both 
 * Changing the language recreates the activity, because the platform reloads resources. This is
   platform behaviour, and it is acceptable here: the control sits on the sign-in screen, before any
   work is in progress.
-* `ServoraTheme` is unchanged: its `isSystemInDarkTheme()` default now reports the night mode the
-  delegate applies, so Compose colours and `-night` resources follow one value.
+* `ServoraTheme`'s `isSystemInDarkTheme()` default reports the night mode the delegate applies, so
+  Compose colours and `-night` resources follow one value. Because the platform's default system bar
+  content follows the *device* setting and this theme sets no `windowLightStatusBar`, `ServoraTheme`
+  also paints the status/navigation bar content from the same resolved appearance
+  (`ui/theme/SystemBarAppearance.kt`, 2026-09-13), so the icons contrast with the screen.
 * Unit tests `AppThemeTest` and `AppLanguageTest` pin the two mappings (choice → night mode, stored
   value → choice, locale tag → language).
 

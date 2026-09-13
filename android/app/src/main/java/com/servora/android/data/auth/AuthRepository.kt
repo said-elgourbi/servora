@@ -1,7 +1,8 @@
 package com.servora.android.data.auth
 
 import com.servora.android.data.device.DeviceIdentity
-import com.servora.android.domain.model.AuthTokens
+import com.servora.android.data.session.SessionManager
+import com.servora.android.data.session.SessionStore
 import com.servora.android.domain.model.IssuedSession
 import java.io.IOException
 import javax.inject.Inject
@@ -51,11 +52,25 @@ class DefaultAuthRepository @Inject constructor(
     private val api: AuthApi,
     private val json: Json,
     private val deviceIdentity: DeviceIdentity,
+    private val sessionStore: SessionStore,
+    private val sessionManager: SessionManager,
 ) : AuthRepository {
 
     override suspend fun signIn(email: String, password: String): SignInResult =
-        when (val attempt = attempt { api.signIn(signInRequest(email, password)) }) {
-            is Attempt.Value -> SignInResult.Success(attempt.value.toIssuedSession())
+        when (
+            val attempt = attempt {
+                api.signIn(signInRequest(email, password)).toIssuedSessionWithFreshPermissions()
+            }
+        ) {
+            is Attempt.Value -> {
+                // Authenticated calls read the token from here, so the session is kept the moment
+                // the backend issues it (`BR-001`). Persisting it is what lets a restarted process
+                // restore the session instead of asking for credentials again (`BR-014`).
+                sessionStore.store(attempt.value)
+                sessionManager.onAuthenticated(attempt.value)
+                SignInResult.Success(attempt.value)
+            }
+
             is Attempt.Failed -> SignInResult.Failure(attempt.reason)
         }
 
@@ -117,10 +132,15 @@ class DefaultAuthRepository @Inject constructor(
             val attempt = attempt {
                 api.verifySmsCode(
                     SmsCodeVerifyRequestDto(phone = phone, code = code, device = device()),
-                )
+                ).toIssuedSessionWithFreshPermissions()
             }
         ) {
-            is Attempt.Value -> SignInResult.Success(attempt.value.toIssuedSession())
+            is Attempt.Value -> {
+                sessionStore.store(attempt.value)
+                sessionManager.onAuthenticated(attempt.value)
+                SignInResult.Success(attempt.value)
+            }
+
             is Attempt.Failed -> SignInResult.Failure(attempt.reason)
         }
 
@@ -135,6 +155,35 @@ class DefaultAuthRepository @Inject constructor(
             deviceName = deviceIdentity.deviceName,
             appVersion = deviceIdentity.appVersion,
         )
+
+    /**
+     * Refreshes capabilities from the authenticated session endpoint after login.
+     *
+     * The sign-in response remains the fallback, so older API builds still authenticate normally,
+     * but current builds give the UI one authoritative permission read before navigation is built.
+     */
+    private suspend fun SignInResponseDto.toIssuedSessionWithFreshPermissions(): IssuedSession {
+        val freshPermissions =
+            try {
+                api.me(authorization = "Bearer $accessToken").permissions
+            } catch (failure: IOException) {
+                if (permissions.isEmpty()) {
+                    throw failure
+                }
+                permissions
+            } catch (failure: HttpException) {
+                if (permissions.isEmpty()) {
+                    throw failure
+                }
+                permissions
+            } catch (failure: SerializationException) {
+                if (permissions.isEmpty()) {
+                    throw failure
+                }
+                permissions
+            }
+        return toIssuedSession(permissions = freshPermissions)
+    }
 
     /**
      * Runs one call and classifies its failure.
@@ -153,17 +202,6 @@ class DefaultAuthRepository @Inject constructor(
             // A body this build cannot represent is a contract mismatch, not a user error.
             Attempt.Failed(AuthFailureReason.UNEXPECTED)
         }
-
-    /** Converts the wire response into the domain session. */
-    private fun SignInResponseDto.toIssuedSession(): IssuedSession =
-        IssuedSession(
-            sessionId = sessionId,
-            tokens = AuthTokens(
-                accessToken = accessToken,
-                accessTokenExpiresAt = accessTokenExpiresAt,
-                refreshToken = refreshToken,
-            ),
-        )
 
     private fun HttpException.toFailureReason(): AuthFailureReason =
         when (errorCode()) {

@@ -128,7 +128,12 @@ export class PasswordResetService {
       this.lifetimeMinutes,
     );
 
-    await this.deliverResetMessage(account.email, message.subject, message.body, code);
+    await this.deliverResetMessage(
+      account.email,
+      message.subject,
+      message.body,
+      code,
+    );
   }
 
   /**

@@ -77,8 +77,10 @@ class SignInViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = authRepository.signIn(email, current.password)) {
                 is SignInResult.Success -> _uiState.update {
-                    // The password has served its purpose once a session exists.
-                    it.copy(isSubmitting = false, password = "", signedIn = true)
+                    // The password has served its purpose once a session exists. The app moves to
+                    // the authenticated area because the session manager saw the issued session,
+                    // so this screen keeps no session state of its own.
+                    it.copy(isSubmitting = false, password = "")
                 }
 
                 is SignInResult.Failure -> _uiState.update {

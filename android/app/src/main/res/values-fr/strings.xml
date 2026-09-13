@@ -16,7 +16,6 @@
     <string name="sign_in_hide_password">Masquer le mot de passe</string>
     <string name="sign_in_action">Se connecter</string>
     <string name="sign_in_action_pending">Connexion…</string>
-    <string name="sign_in_succeeded">Connexion réussie.</string>
     <string name="sign_in_copyright">© 2026 Servora</string>
 
     <string name="sign_in_error_email_required">Saisissez votre courriel.</string>
@@ -86,7 +85,154 @@
     <string name="sms_sign_in_action_verifying">Vérification…</string>
     <string name="sms_sign_in_action_resend">Renvoyer le code</string>
     <string name="sms_sign_in_back">Retour</string>
-    <string name="sms_sign_in_signed_in">Connexion réussie.</string>
     <string name="sms_sign_in_error_phone_required">Saisissez votre numéro de téléphone.</string>
     <string name="sms_sign_in_error_code_required">Saisissez le code à 6 chiffres.</string>
+
+    <!-- Clients (`customers.*`). -->
+    <string name="nav_home">Accueil</string>
+    <string name="nav_schedule">Horaire</string>
+    <string name="nav_customers">Clients</string>
+    <string name="nav_settings">Réglages</string>
+    <!-- Le contrôle de retour d'un écran secondaire est une icône (`BR-028`). -->
+    <string name="nav_back">Retour</string>
+    <string name="settings_sign_out">Se déconnecter</string>
+    <string name="home_attention_title">À traiter</string>
+    <string name="home_attention_sample_title">2 interventions ont besoin d\'un technicien</string>
+    <string name="home_attention_sample_detail">Aujourd\'hui · 10 h 30 · 11 h 00</string>
+    <string name="home_today_title">Aujourd\'hui</string>
+    <string name="home_today_jobs_sample">8 interventions</string>
+    <string name="home_today_detail_sample">3 terminées · 5 restantes</string>
+    <string name="customers_title">Clients</string>
+    <string name="customers_subtitle">Gérer les clients et leurs propriétés de service</string>
+    <string name="customers_search_placeholder">Nom, téléphone, adresse…</string>
+    <string name="customers_filter">Filtrer</string>
+    <string name="customers_filter_title">Filtrer les clients</string>
+    <string name="customers_filter_close">Fermer les filtres</string>
+    <string name="customers_filter_status_label">Statut du client</string>
+    <string name="customers_filter_status_all">Tous</string>
+    <string name="customers_filter_jobs_label">Interventions</string>
+    <string name="customers_filter_jobs_all">Toutes</string>
+    <string name="customers_filter_jobs_has_open">Avec interventions ouvertes</string>
+    <string name="customers_filter_jobs_no_open">Sans intervention ouverte</string>
+    <string name="customers_filter_jobs_has_overdue">Avec visites en retard</string>
+    <string name="customers_filter_jobs_none">Aucune intervention</string>
+    <string name="customers_filter_clear">Effacer</string>
+    <string name="customers_filter_apply">Appliquer</string>
+    <string name="customers_filter_clear_all">Tout effacer</string>
+    <string name="customers_filter_remove_format">Retirer le filtre %1$s</string>
+    <string name="customers_new">Nouveau client</string>
+    <string name="customers_count_format">%1$d %2$s</string>
+    <string name="customers_count_singular">client</string>
+    <string name="customers_count_plural">clients</string>
+    <string name="customers_empty_title">Aucun client pour le moment</string>
+    <string name="customers_empty_message">Créez votre premier client pour commencer à gérer les interventions.</string>
+    <string name="customers_no_access_title">Clients non disponibles</string>
+    <string name="customers_no_access_message">Votre compte n\'a pas accès aux dossiers client.</string>
+    <string name="customers_edit">Modifier le client</string>
+    <string name="customers_edit_short">Modifier</string>
+    <string name="customers_archive">Archiver le client</string>
+    <string name="customers_create_job">Créer une intervention</string>
+    <string name="customers_view_title">Voir le client</string>
+    <string name="customers_create_title">Nouveau client</string>
+    <string name="customers_edit_title">Modifier le client</string>
+    <string name="customers_save">Enregistrer</string>
+    <string name="customers_create_action">Créer le client</string>
+    <string name="customers_status_active">Actif</string>
+    <string name="customers_status_inactive">Inactif</string>
+    <string name="customers_since_format">Depuis %1$s</string>
+    <string name="customers_business_mark">Entreprise</string>
+    <string name="customers_loading">Chargement des clients…</string>
+    <string name="customers_error_title">Impossible de charger les clients</string>
+    <string name="customers_error_message">Vérifiez votre connexion et réessayez.</string>
+    <string name="customers_retry">Réessayer</string>
+    <string name="customers_no_contact">Aucune coordonnée au dossier.</string>
+    <string name="customers_search_clear">Effacer la recherche</string>
+    <string name="customers_no_match_title">Aucun client ne correspond à ces filtres</string>
+    <string name="customers_no_match_action">Effacer la recherche et les filtres</string>
+    <string name="section_count_format">%1$s · %2$d</string>
+
+    <plurals name="customers_property_count">
+        <item quantity="one">%1$d propriété</item>
+        <item quantity="other">%1$d propriétés</item>
+    </plurals>
+    <plurals name="customers_job_count">
+        <item quantity="one">%1$d intervention</item>
+        <item quantity="other">%1$d interventions</item>
+    </plurals>
+
+    <plurals name="customers_filter_applied_count">
+        <item quantity="one">%1$d filtre appliqué</item>
+        <item quantity="other">%1$d filtres appliqués</item>
+    </plurals>
+
+    <!-- Détail du client (`BR-081`) : ces chaînes mettent en forme ce que l'API a dérivé. -->
+    <string name="customers_detail_properties">Propriétés</string>
+    <string name="customers_detail_recent_jobs">Interventions récentes</string>
+    <string name="customers_detail_notes">Notes</string>
+    <string name="customers_detail_no_properties_title">Aucune propriété ajoutée</string>
+    <string name="customers_detail_no_properties_message">Ajoutez une propriété de service avant de créer une intervention.</string>
+    <string name="customers_detail_no_jobs">Aucune intervention</string>
+    <string name="customers_detail_last_service_format">Dernier service %1$s</string>
+    <string name="customers_detail_never_serviced">Jamais desservi</string>
+    <string name="customers_detail_see_all_jobs">Voir les %1$d interventions</string>
+    <string name="customers_all_jobs_title">Historique des interventions</string>
+    <string name="customers_property_city_format">%1$s, %2$s %3$s</string>
+    <string name="customers_job_number_format">N° %1$d</string>
+    <string name="customers_job_unassigned">Non assigné</string>
+    <!-- Codes d\'état d\'intervention stables, affichés en libellés (`BR-058`, `BR-041`). -->
+    <string name="customers_job_status_new">Nouveau</string>
+    <string name="customers_job_status_scheduled">Planifié</string>
+    <string name="customers_job_status_in_progress">En cours</string>
+    <string name="customers_job_status_pending_review">En attente de révision</string>
+    <string name="customers_job_status_completed">Terminé</string>
+    <string name="customers_job_status_canceled">Annulé</string>
+
+    <!--
+      Ajouter une propriété (`BR-049`, `BR-050`). Le formulaire n'affiche que les champs autoritatifs
+      de la propriété; la province est un sélecteur sur les codes canadiens stables (`BR-028`,
+      `BR-041`).
+    -->
+    <string name="property_add_title">Ajouter une propriété</string>
+    <string name="property_add_action">Ajouter une propriété</string>
+    <string name="property_section_service_address">Adresse du service</string>
+    <string name="property_section_details">Détails de la propriété</string>
+    <string name="property_street_label">Adresse municipale</string>
+    <string name="property_street_placeholder">987, chemin Cedar</string>
+    <string name="property_unit_label">Appartement / bureau</string>
+    <string name="property_unit_placeholder">Bureau 200</string>
+    <string name="property_city_label">Ville</string>
+    <string name="property_city_placeholder">Montréal</string>
+    <string name="property_province_label">Province</string>
+    <string name="property_province_placeholder">Choisir une province</string>
+    <string name="property_province_value_format">%1$s — %2$s</string>
+    <string name="property_province_close">Fermer le sélecteur de province</string>
+    <string name="property_postal_code_label">Code postal</string>
+    <string name="property_postal_code_placeholder">H3A 2T6</string>
+    <string name="property_name_label">Nom / libellé de la propriété</string>
+    <string name="property_name_placeholder">Bâtiment principal, local 3…</string>
+    <string name="property_notes_label">Notes</string>
+    <string name="property_notes_placeholder">Toutes les notes sur cette propriété…</string>
+    <string name="property_field_optional">(facultatif)</string>
+    <string name="property_cancel">Annuler</string>
+    <string name="property_save">Enregistrer la propriété</string>
+    <string name="property_form_incomplete">Veuillez indiquer l\'adresse municipale, la ville, la province et le code postal.</string>
+    <string name="property_error_unauthenticated">Votre session a expiré. Reconnectez-vous.</string>
+    <string name="property_error_forbidden">Vous n\'avez pas la permission d\'ajouter des propriétés.</string>
+    <string name="property_error_validation">Vérifiez les renseignements saisis.</string>
+    <string name="property_error_network">Vérifiez votre réseau et réessayez.</string>
+    <string name="property_error_server">Veuillez réessayer.</string>
+    <!-- Noms des provinces et territoires canadiens, indexés par le code stable échangé par l'API. -->
+    <string name="property_province_ab">Alberta</string>
+    <string name="property_province_bc">Colombie-Britannique</string>
+    <string name="property_province_mb">Manitoba</string>
+    <string name="property_province_nb">Nouveau-Brunswick</string>
+    <string name="property_province_nl">Terre-Neuve-et-Labrador</string>
+    <string name="property_province_ns">Nouvelle-Écosse</string>
+    <string name="property_province_nt">Territoires du Nord-Ouest</string>
+    <string name="property_province_nu">Nunavut</string>
+    <string name="property_province_on">Ontario</string>
+    <string name="property_province_pe">Île-du-Prince-Édouard</string>
+    <string name="property_province_qc">Québec</string>
+    <string name="property_province_sk">Saskatchewan</string>
+    <string name="property_province_yt">Yukon</string>
 </resources>

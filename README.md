@@ -5,7 +5,7 @@ Field-service management platform.
 Servora is a monorepo built feature by feature as controlled vertical slices.
 
 - **API** — NestJS (TypeScript ESM) + PostgreSQL (Drizzle ORM). The backend is the authoritative system of record (BR-001).
-- **Android** — Kotlin / Jetpack Compose native field application (offline-first). *Not yet implemented.*
+- **Android** — Kotlin / Jetpack Compose native field application (offline-first). Implemented for authentication, appearance controls, customers and the customer Property surface.
 - **Angular** — management/office client. *Not yet implemented.*
 
 Initial supported languages are **English** and **French**. Development rules live in
@@ -23,7 +23,15 @@ Initial supported languages are **English** and **French**. Development rules li
 > `docs/domain/authentication-domain-model.md`.
 >
 > Job, Property and Visit business rules are defined in `Business Rules.md` (§8, §11, §12 and §13;
-> BR-047 – BR-080). The Job & Visit data model is the next domain slice.
+> BR-047 – BR-086). The **Property** part of the Job & Visit data model is migrated
+> (`0007_property_lifecycle_and_permissions`); the Job and Visit tables are designed but not
+> migrated yet.
+>
+> Customer, Property-permission and Property-lifecycle work is tracked in
+> `docs/tracker/006-customers-feature-permissions.md` … `docs/tracker/012-property-permissions-and-lifecycle-schema.md`.
+> The Property permission set and the lifecycle decisions are recorded in
+> `docs/decisions/012-property-lifecycle-and-permissions.md`, and the offline/outbox standard the
+> Property lifecycle follows is `docs/architecture/offline-first-architecture.md`.
 
 ## Layout
 
@@ -31,9 +39,10 @@ Initial supported languages are **English** and **French**. Development rules li
 api/        NestJS REST API (system of record)
 android/    Android client (scaffold — not yet implemented)
 docs/
-  decisions/   Architecture decision records
-  tracker/     Feature milestone tracker
-  domain/      Domain model documentation
+  decisions/     Architecture decision records
+  architecture/  Architecture standards
+  tracker/       Feature milestone tracker
+  domain/        Domain model documentation
 docker-compose.yml   Foundation local stack (PostgreSQL + API)
 Makefile             Local development orchestration
 ```
@@ -110,5 +119,10 @@ make android-build       # Android debug APK (requires Android SDK)
   (decision: `docs/decisions/004-authentication-domain-model.md`).
 - Android appearance controls: `docs/tracker/005-android-appearance-controls.md`
   (decision: `docs/decisions/007-android-appearance-controls.md`).
+- Android customers, customer detail and Add Property: `docs/tracker/006-…` – `docs/tracker/012-…`.
+- Property permissions, the archived projection and the Property lifecycle schema:
+  `docs/tracker/012-property-permissions-and-lifecycle-schema.md`
+  (decision: `docs/decisions/012-property-lifecycle-and-permissions.md`).
+- Offline/outbox standard for Android: `docs/architecture/offline-first-architecture.md`.
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.
 

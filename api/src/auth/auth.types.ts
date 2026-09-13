@@ -21,13 +21,17 @@ export type AuthRefreshToken = InferSelectModel<typeof authRefreshTokens>;
 export type NewAuthRefreshToken = InferInsertModel<typeof authRefreshTokens>;
 
 export type PasswordResetToken = InferSelectModel<typeof passwordResetTokens>;
-export type NewPasswordResetToken = InferInsertModel<typeof passwordResetTokens>;
+export type NewPasswordResetToken = InferInsertModel<
+  typeof passwordResetTokens
+>;
 
 export type PhoneOtpChallenge = InferSelectModel<typeof phoneOtpChallenges>;
 export type NewPhoneOtpChallenge = InferInsertModel<typeof phoneOtpChallenges>;
 
 export type AuthRateLimitEvent = InferSelectModel<typeof authRateLimitEvents>;
-export type NewAuthRateLimitEvent = InferInsertModel<typeof authRateLimitEvents>;
+export type NewAuthRateLimitEvent = InferInsertModel<
+  typeof authRateLimitEvents
+>;
 
 /**
  * Stable, machine-readable rate-limit scopes (`BR-045`). One scope per authentication entry
@@ -54,7 +58,9 @@ export type AuthSessionPlatform = (typeof AUTH_SESSION_PLATFORMS)[number];
  * the server's notion of "now" instead of a client-supplied timestamp.
  */
 export function isSessionActive(session: AuthSession, now: Date): boolean {
-  return session.revokedAt === null && session.expiresAt.getTime() > now.getTime();
+  return (
+    session.revokedAt === null && session.expiresAt.getTime() > now.getTime()
+  );
 }
 
 /**

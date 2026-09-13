@@ -34,6 +34,25 @@ data class SignInResponseDto(
     val accessToken: String,
     val accessTokenExpiresAt: String,
     val refreshToken: String,
+    val permissions: List<String> = emptyList(),
+)
+
+/**
+ * Request body of `POST /auth/refresh`: the refresh token the client holds
+ * (`docs/api/authentication.md` §3.2).
+ *
+ * The raw token is the credential, so it is never logged.
+ */
+@Serializable
+data class RefreshRequestDto(
+    val refreshToken: String,
+)
+
+/** Response body of `GET /auth/me`. */
+@Serializable
+data class AuthMeDto(
+    val userId: String,
+    val permissions: List<String> = emptyList(),
 )
 
 /**

@@ -59,7 +59,6 @@ class SignInViewModelTest {
 
         assertEquals(SignInFieldError.EMAIL, viewModel.uiState.value.fieldError)
         assertTrue(repository.attempts.isEmpty())
-        assertFalse(viewModel.uiState.value.signedIn)
     }
 
     @Test
@@ -113,7 +112,6 @@ class SignInViewModelTest {
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        assertTrue(state.signedIn)
         assertFalse(state.isSubmitting)
         assertEquals("", state.password)
         assertNull(state.failureReason)
@@ -134,7 +132,6 @@ class SignInViewModelTest {
 
         val state = viewModel.uiState.value
         assertEquals(AuthFailureReason.SERVER, state.failureReason)
-        assertFalse(state.signedIn)
         assertFalse(state.isSubmitting)
     }
 

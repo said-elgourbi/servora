@@ -72,9 +72,15 @@ Success `200`:
   "sessionId": "uuid",
   "accessToken": "…",
   "accessTokenExpiresAt": "2026-09-10T10:15:00.000Z",
-  "refreshToken": "…"
+  "refreshToken": "…",
+  "permissions": ["customers.view", "customers.create"]
 }
 ```
+
+`permissions` is the caller's effective permission set resolved by the backend: role permissions
+plus direct member permissions across the user's active organization memberships (`BR-006`).
+Clients use it for UX visibility only. Backend resource endpoints still enforce authorization
+independently (`BR-007`).
 
 | Status | Code                  | When                                                                                                                 |
 | ------ | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -128,11 +134,26 @@ Success `200`: array of `AuthSessionDto` (`src/auth/auth.dto.ts`) for the caller
 user, active sessions first, selected from the `auth_sessions_active_idx` predicate plus
 `expires_at > now()` (`ADR-004` D8). No other user's session is ever readable.
 
+### 3.4a `GET /auth/me` — Bearer access token
+
+Success `200`:
+
+```json
+{
+  "userId": "uuid",
+  "permissions": ["customers.view", "customers.create"]
+}
+```
+
+`permissions` is the same effective permission set described in §3.1. Android refreshes this
+endpoint immediately after sign-in/SMS sign-in so bottom navigation and customer actions are built
+from the backend's current authorization state. This remains UX state only: protected resource
+endpoints still enforce permissions on every request.
+
 ### 3.5 Decision required — endpoints deliberately not specified
 
 | Candidate                                          | Why it is not specified here                                                                                                                                                       |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /auth/me`                                     | Permission-driven UI (`BR-011`) needs the caller's effective permissions; the role/permission persistence model exists, but this auth slice has not specified the endpoint payload |
 | `POST /auth/sign-out-all`                          | Not named in the tracker; revoking other devices' sessions needs its own confirmation                                                                                              |
 | Max concurrent sessions / revoke-oldest-on-sign-in | Explicitly open in the tracker and domain §12                                                                                                                                      |
 
@@ -252,10 +273,23 @@ code (`BR-046`, `ADR-006` D1).
 ## 4. `401` vs `403`
 
 - `401` — no valid access token, or the session behind it is inactive.
-- `403` — authenticated but not permitted. **No `/auth` endpoint in this slice performs a
-  permission check**: sign-in, refresh and sign-out act on the caller's own credentials and
-  the caller's own session. `403` coverage therefore belongs to the first permission-protected
-  resource endpoint (`qa.md` §4.3), together with the guard.
+- `403` — authenticated but not permitted. `/auth` endpoints act on the caller's own credentials,
+  principal or session and therefore do not perform resource permission checks. `403` coverage
+  belongs to permission-protected resource endpoints (`qa.md` §4.3), together with the guard.
+
+Customer resource endpoints are the first permission-protected HTTP resource in the API:
+
+| Endpoint                 | Permission          |
+| ------------------------ | ------------------- |
+| `GET /customers`         | `customers.view`    |
+| `GET /customers/:id`     | `customers.view`    |
+| `POST /customers`        | `customers.create`  |
+| `PATCH /customers/:id`   | `customers.edit`    |
+| `PUT /customers/:id`     | `customers.edit`    |
+| `POST /customers/:id/archive` | `customers.archive` |
+
+Authenticated callers missing the required permission receive `403 FORBIDDEN`. Missing or invalid
+access tokens continue to receive `401 UNAUTHENTICATED`.
 
 ## 5. C3 — access-token format (resolved: HS256 JWT)
 

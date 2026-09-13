@@ -79,3 +79,56 @@ visible below the status bar and that their distance from it still matches the d
 older than Android 15 shows the row sitting lower than designed, the inset must be conditioned on
 the window actually being edge-to-edge.
 
+
+## Follow-up — system bar content contrast (2026-09-13)
+
+Device review found the status bar content (clock, Wi-Fi, battery) still drawn in white while the
+app showed the **light** appearance on a phone running dark mode, leaving the icons unreadable
+against the light screen.
+
+Cause: the app never declared the system bar content appearance. `Theme.Servora` descends from
+`Theme.AppCompat.DayNight.NoActionBar`, whose `DayNight` variant sets no
+`android:windowLightStatusBar`, so the platform default — light content — applied in both
+appearances.
+
+Fix: `ServoraTheme` now paints the system bar content from the same resolved `darkTheme` it hands to
+the colour scheme, through the new `ui/theme/SystemBarAppearance.kt`
+(`WindowInsetsControllerCompat.isAppearanceLightStatusBars` /
+`isAppearanceLightNavigationBars`). Dark content on the light appearance, light content on the dark
+one, for both the status bar and the navigation bar.
+
+Only the content appearance is set: the window's edge-to-edge layout and the insets the screens
+apply are unchanged, and no deprecated `statusBarColor`/`navigationBarColor` API is used. Because
+the value is the *resolved app appearance*, a system-following option would be covered by the same
+code should the product add one — it is not offered today (ADR-007 D2).
+
+```text
+Android build (make android-build → assembleDebug, assembleDebugAndroidTest)  PASS
+Android unit tests (make android-test → testDebugUnitTest)                    PASS — 160 tests, 0 failures, 0 errors
+Android lint (make android-lint → lintDebug)                                  PASS
+Android instrumentation (SystemBarAppearanceTest)                             NOT RUN — no device/emulator attached to the agent; APK compiles
+```
+
+Physical-device QA (`qa.md` §7): **AWAITING PRODUCT OWNER** — see the manual QA below. Per `qa.md`
+§17 the agent claims automated verification only.
+
+## Manual QA — system bar content (Android, appearance control)
+
+Run each step with the control on the sign-in screen and note the status bar icons (clock, Wi-Fi,
+battery) and the navigation bar handle.
+
+1. Set the **phone** itself to Dark theme. In Servora, select **Light theme**.
+   Expected: the app is light and the status bar icons are **dark**.
+2. Still on the dark phone, select **Dark theme**.
+   Expected: the app is dark and the status bar icons are **light**.
+3. Set the **phone** itself to Light theme and repeat steps 1–2.
+   Expected: the same result in both choices — the icons follow the Servora appearance, never the
+   phone setting.
+4. Kill and relaunch the app after each choice.
+   Expected: the icons match the remembered appearance from the first frame (no white-on-light
+   flash).
+5. Change the appearance while a signed-in screen is open, then reopen the sign-in screen.
+   Expected: the icons flip with the appearance on every screen, with no content shift — the
+   edge-to-edge layout and the existing insets are unchanged.
+
+

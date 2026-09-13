@@ -5,6 +5,8 @@ import {
   customerContacts,
   customerIndividuals,
   customers,
+  jobs,
+  properties,
 } from '../database/schema.js';
 
 // Stable, machine-readable codes. Never persist localized display labels.
@@ -38,7 +40,9 @@ export type Customer = InferSelectModel<typeof customers>;
 export type NewCustomer = InferInsertModel<typeof customers>;
 
 export type CustomerIndividual = InferSelectModel<typeof customerIndividuals>;
-export type NewCustomerIndividual = InferInsertModel<typeof customerIndividuals>;
+export type NewCustomerIndividual = InferInsertModel<
+  typeof customerIndividuals
+>;
 
 export type CustomerCompany = InferSelectModel<typeof customerCompanies>;
 export type NewCustomerCompany = InferInsertModel<typeof customerCompanies>;
@@ -60,3 +64,12 @@ export interface CompanyCustomer {
   readonly customer: Customer;
   readonly company: CustomerCompany;
 }
+
+/**
+ * The Property and Job rows the customer detail projections read (`BR-081`).
+ *
+ * The Job & Visit domain owns these entities; there is no Jobs/Properties module yet, so the
+ * customer module reads them here rather than duplicating a second set of row types.
+ */
+export type Property = InferSelectModel<typeof properties>;
+export type Job = InferSelectModel<typeof jobs>;
