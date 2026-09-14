@@ -182,12 +182,13 @@ Notes:
 
 | Command                                                | Purpose                                          |
 | ------------------------------------------------------ | ------------------------------------------------ |
-| `make up` / `make down` / `make down-v`                | Start / stop / stop + delete the database volume |
+| `make up` / `make down` / `make down-v`                | Start / stop / stop + delete the database and storage volumes |
 | `make logs` / `make ps`                                | Follow logs / show service status                |
 | `make migrate`                                         | Apply migrations (host tooling)                  |
 | `make migration NAME=<name>`                           | Generate a migration from the Drizzle schema     |
 | `make seed`                                            | Seed the development dataset (§3)                |
 | `make db-shell`                                        | `psql` against the local database                |
+| `make minio-ls` / `minio-shell` / `minio-console`      | Object storage: list objects / shell / Console (§7) |
 | `make api-build` / `api-start` / `api-start-dev`       | Build / run the API on the host                  |
 | `make api-test` / `api-test-e2e`                       | API unit tests / API e2e tests (needs `make up`) |
 | `make api-lint` / `api-format`                         | Lint / format the API sources                    |
@@ -225,7 +226,55 @@ A provider rejection never changes the API response: the reset request answers `
 (`BR-044`), the failure is logged without the message body (`BR-046`), and a misconfigured
 `EMAIL_PROVIDER=resend` stops the process at startup rather than at the first reset request.
 
-## 7. Troubleshooting
+## 7. Object storage (MinIO, `ADR-013`)
+
+The local stack includes **MinIO**, an S3-compatible object store, so the evidence features can be
+built against real storage. It is a development stand-in: the application's contract is S3, and a
+deployment runs against a third-party S3-compatible provider through configuration only
+(`docs/decisions/013-object-storage-minio-and-s3.md`).
+
+| What          | Value                                                                    |
+| ------------- | ------------------------------------------------------------------------ |
+| S3 API (host) | `http://localhost:9000`                                                  |
+| Console       | `http://localhost:9001` (`make minio-console`)                            |
+| Credentials   | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` in the repository-root `.env`   |
+| Bucket        | `S3_BUCKET` (default `servora-dev`), provisioned **private**              |
+| Data          | the `minio-data` named volume; `make down-v` deletes it                   |
+
+`make up` starts `minio` and then runs the one-shot `minio-init` service, which creates the bucket
+if it does not exist and leaves it private. The bootstrap is idempotent, so it runs harmlessly on
+every `make up`. A deployment provisions its own bucket out of band, which is why the API never
+assumes it may create one.
+
+```bash
+make minio-ls          # list the bucket's objects (empty on a fresh stack)
+make minio-shell       # a shell in the container, with an authenticated `mc` alias
+make minio-console     # the Console URL and how to sign in
+```
+
+The image ships an **unauthenticated** `local` alias, so the `make` targets set their own alias
+from the container's own credentials. Running `mc` against `local` directly reports `Access Denied`
+on the private bucket — that is expected, not a broken stack.
+
+### Moving to an S3-compatible provider later
+
+Nothing in the application names MinIO. When the API is deployed to a VPS with a provider, the
+`S3_*` values documented in `.env.example` are set instead, and the `minio` services stay out of the
+deployment entirely. `S3_BUCKET` remains the one name the stack and the application share.
+
+`S3_ENDPOINT` differs by where the process runs, exactly like `DATABASE_URL`: the API container
+uses the service name (`http://minio:9000`) while host tooling uses the published port
+(`http://localhost:9000`).
+
+### Evidence and the Android device
+
+Evidence travels through the API, so the device keeps the single network path it already has — the
+API base URL, reached today through `adb reverse`. **MinIO's port is not reversed and does not need
+to be.** If reads ever move to presigned URLs, the signature is bound to the exact host in the URL:
+that change would need `S3_PUBLIC_ENDPOINT` plus a second tunnel (`adb reverse tcp:9000 tcp:9000`)
+locally, and an HTTPS endpoint in a release build. The reasoning is recorded in `ADR-013` D7.
+
+## 8. Troubleshooting
 
 | Symptom                                                                         | Cause                                                                | Fix                                                                                                             |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -235,3 +284,8 @@ A provider rejection never changes the API response: the reset request answers `
 | A base-URL change has no effect                                                 | `API_BASE_URL` is compiled into the APK                              | `./gradlew installDebug` again                                                                                  |
 | `make seed` reports an invalid `SEED_*_PASSWORD`                                | Password shorter than the 8-character domain minimum                 | Use a longer value, or leave the variable empty to generate one                                                 |
 | `make seed` / `make migrate` cannot reach PostgreSQL                            | `DATABASE_URL` does not match the published `POSTGRES_PORT`          | Keep both values in sync in `.env`                                                                              |
+| `make up` fails because ports 9000 or 9001 are taken                            | Another local service publishes them                                 | Set `MINIO_PORT` / `MINIO_CONSOLE_PORT` in `.env` and re-run `make up`                                           |
+| `mc` reports `Access Denied` on the bucket                                      | The image's built-in `local` alias is not authenticated              | Use `make minio-ls` or `make minio-shell`, which set their own alias from the container's credentials            |
+| The `minio` container restarts repeatedly, or its healthcheck never goes healthy | The pinned image cannot run on this CPU                              | Use the `-cpuv1` variant of `quay.io/minio/minio` at the same release in `docker-compose.yml`                     |
+| `http://localhost:9001` does not answer                                         | The Console binds a random port when `--console-address` is missing  | Keep `--console-address ":9001"` in the `minio` command                                                          |
+| A presigned URL returns `SignatureDoesNotMatch` (once presigning exists)        | SigV4 covers the `Host` header, so the URL was signed for another host | Sign for exactly the host the client calls; see `ADR-013` D7 and `S3_PUBLIC_ENDPOINT`                             |
