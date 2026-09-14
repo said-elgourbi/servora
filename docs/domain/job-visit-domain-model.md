@@ -5,12 +5,16 @@
 > offline/concurrency behaviour those aggregates require.
 >
 > **This document defines the domain and the target PostgreSQL shape.** The **Property** part of it
-> (§3, §4) is now implemented by migration `0007_property_lifecycle_and_permissions` and the
-> customer/property API; the Job and Visit tables remain **proposed** and are not migrated yet
-> (`Project.md` §8, `dev.md` §2).
+> (§3, §4) is implemented by migration `0007_property_lifecycle_and_permissions` and the
+> customer/property API; the **Job and Visit** tables are implemented by migration `0003`, and the
+> first read over them — one Job with the Visit that represents it and that Visit's technicians — is
+> `GET /jobs/:id` (`docs/api/job-details.md`,
+> `docs/tracker/017-android-job-details.md`). Their **write** behaviour (scheduling, assignment,
+> status transitions, outcomes) is not implemented, because no `jobs.*` capability exists yet
+> (`BR-006`, `BR-042`).
 >
-> - Business rules: `Business Rules.md` — principally BR-047 – BR-086 (and BR-001, BR-007,
->   BR-013 – BR-015, BR-022, BR-028, BR-031, BR-033, BR-041, BR-042).
+> - Business rules: `Business Rules.md` — principally BR-047 – BR-086 and BR-FV-001 – BR-FV-013
+>   (and BR-001, BR-007, BR-013 – BR-015, BR-022, BR-028, BR-031, BR-033, BR-041, BR-042).
 > - Foundation domain: `docs/domain/foundation-domain-model.md` (organizations, users, members,
 >   customers, contacts, addresses).
 > - Conventions: `Project.md`, `dev.md`, `qa.md`.
@@ -69,6 +73,7 @@ jobs
             ├── visit_technicians             (§10.2, current assignment)
             ├── visit_technician_history      (§10.3)
             ├── visit_outcome_history         (§11.2)
+            ├── follow_up_visit_requests      (§11.3)
             ├── visit_notes                   (§12)
             ├── visit_location_history        (§9.6)
             └── visit_location_review_flags   (§6.3)
@@ -535,8 +540,9 @@ whatever the ORM defaults to.
   the aggregate it belongs to: `visits.job_id → jobs.id`, `job_status_history.job_id`,
   `job_property_history.job_id`, `job_customer_history.job_id`,
   `visit_status_history.visit_id`, `visit_schedule_history.visit_id`,
-  `visit_technician_history.visit_id`, `visit_outcome_history.visit_id`, `visit_notes.visit_id`,
-  `visit_location_review_flags.visit_id`, and `visit_location_history.visit_id`.
+  `visit_technician_history.visit_id`, `visit_outcome_history.visit_id`,
+  `follow_up_visit_requests.job_id`, `visit_notes.visit_id`, `visit_location_review_flags.visit_id`,
+  and `visit_location_history.visit_id`.
 - **Cross-aggregate references do not cascade.** `jobs.customer_id`, `jobs.property_id`,
   `jobs.owner_membership_id`, `visits.property_id`,
   `property_customer_relationships.property_id`, `property_customer_relationships.customer_id` and
@@ -688,6 +694,8 @@ AND NOT EXISTS (
 - `BR-060` enumerates exactly the four states that count as active work. A `COMPLETED`,
   `CANCELED` or `NO_SHOW` Visit does not count as active work — and neither does a `DRAFT` Visit,
   which is not in the enumerated list.
+- A pending follow-up request is not an active Visit. It does not satisfy this condition and does
+  not by itself suppress the derived signal (`BR-FV-002`).
 - The signal is **derived, not stored**: it is not a Job status, not a boolean column and not a
   materialized field. It must never be persisted as a status (`BR-060`).
 - It is an operational signal for a human. Nothing is auto-scheduled from it (`BR-054`).
@@ -754,19 +762,67 @@ selected = the Visit with the earliest scheduled_start among the Job's Visits
 - `CANCELED` is excluded from the upcoming candidate only; the past fallback is defined over any past
   Visit by scheduled start. That literal reading is flagged for product confirmation in §21.
 
+**Manager home projection (`GET /home/manager`)**
+
+The manager home (`docs/api/manager-home.md`) projects one local day of the organization's operation
+for the signed-in manager. Nothing is stored: every value comes from the tables above, and every
+condition is one of the derived conditions this section defines (`BR-080`, `BR-042`).
+
+*Day window.* The caller names the IANA time zone it renders in and the API resolves the half-open
+window `[local midnight, next local midnight)` for that zone. "Today" is therefore one window over
+authoritative records rather than a device's opinion, and two clients of the same operation asked at
+the same moment agree on which Visits are today's (`BR-001`).
+
+*Today's schedule* — the Visits whose `scheduled_start` falls inside the window and whose status is
+not `CANCELED` or `NO_SHOW` (`BR-074`). A `COMPLETED` Visit stays in the list, so the day's counts
+and the list describe the same set. Presentation order is operational, and every rank is derived
+from a Visit status and the schedule:
+
+```text
+1. overdue   = status = 'SCHEDULED' AND scheduled_end < now()      (the customer-list condition above)
+2. active    = status IN ('EN_ROUTE', 'ON_SITE', 'IN_PROGRESS')
+3. upcoming  = everything else not completed
+4. completed = status = 'COMPLETED'
+```
+
+*Today's summary* — `total`, `completed`, `inProgress` (`EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`) and
+`upcoming`, over the same set, so `completed + inProgress + upcoming = total`. Exception counts are
+deliberately **not** repeated here: they belong to the attention list below.
+
+*Attention list.* Three conditions, each already defined above; a client presents them and never
+decides one:
+
+| Kind                   | Condition                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `VISIT_OVERDUE`        | The overdue-Visit condition defined for the customer-list filters (above).     |
+| `JOB_PENDING_REVIEW`   | `jobs.status = 'PENDING_REVIEW'` (§8.4, `BR-061`).                             |
+| `JOB_NEEDS_SCHEDULING` | The "Needs Scheduling" signal defined at the start of this section (`BR-060`). |
+
+- The overdue condition is not restricted to the requested day: a Visit scheduled for an earlier day
+  that never advanced is still work that has gone wrong, so hiding it because its day passed would
+  hide exactly the exception a manager has to resolve.
+- Work of a Customer the organization has deleted (`customers.deleted_at`) is excluded, and no Job
+  or Visit of another organization is reachable (`BR-023`, `BR-001`).
+- The list is capped at `MANAGER_HOME_ATTENTION_LIMIT` items and reports the full count alongside it.
+
 **Entry into `PENDING_REVIEW` (`BR-061`)**
 
 Both conditions must hold:
 
 1. No Visit remains active or scheduled — no Visit in `SCHEDULED`, `EN_ROUTE`, `ON_SITE` or
    `IN_PROGRESS`.
-2. The **latest completed Visit outcome** indicates the Job may be resolved, i.e. it is
-   `RESOLVED`. "Latest completed Visit" means the Job's `COMPLETED` Visit with the greatest
-   completion `recorded_at`.
+2. The **latest completed Visit outcome** indicates the Job may be resolved (`RESOLVED`), or an
+   authorized office decision has resolved the follow-up requirement by determining that no further
+   Visit is necessary (`BR-FV-007`). "Latest completed Visit" means the Job's `COMPLETED` Visit with
+   the greatest completion `recorded_at`.
 
 - If another Visit remains scheduled or active, the Job stays `IN_PROGRESS` even after a `RESOLVED`
   outcome (`BR-061`).
-- `NEEDS_PARTS`, `NEEDS_FOLLOWUP` and `UNABLE_TO_COMPLETE` keep the Job `IN_PROGRESS` (`BR-061`).
+- `NEEDS_PARTS`, `NEEDS_FOLLOWUP` and `UNABLE_TO_COMPLETE` keep the Job `IN_PROGRESS` while the
+  required follow-up work remains unresolved (`BR-061`, `BR-FV-007`).
+- A pending or clarification-needed follow-up request blocks review entry. If an authorized office
+  user rejects the request because no additional Visit is required, that decision resolves the
+  follow-up requirement for review-entry purposes (`BR-FV-004`, `BR-FV-007`, `BR-FV-013`).
 - `BR-061` does not say whether a remaining `DRAFT` Visit blocks entry into `PENDING_REVIEW`. This
   model therefore does not classify `DRAFT` for that transition; the unresolved decision is recorded
   in §21 and must be resolved before implementing automatic `PENDING_REVIEW` entry when draft Visits
@@ -914,6 +970,9 @@ AND scheduled_end IS NOT NULL))` — a Visit cannot be `SCHEDULED` without an op
 - **No** Visit sequence/number column. `BR-052` defines a Job number only; the `Visit #1/#2/#3`
   labels in the business rules are illustrative. A Visit's ordinal position is derived from
   creation order for display and is not stored as a numbering scheme the business never defined.
+  The Job Activity read (`BR-080`) exposes that derived ordinal as `visitSequence` — `Visit 1`,
+  `Visit 2`, … — for Visit-level events, and never exposes a database id (`docs/api/job-activity.md`,
+  `docs/tracker/022-android-job-activity-timeline.md`).
 
 ### 9.3 Scheduling (`BR-072`)
 
@@ -1215,15 +1274,21 @@ AND existing.scheduled_end > new.scheduled_start
 - **Follow-up expectation is derived from the outcome type** (`RESOLVED` — none expected;
   `NEEDS_PARTS`, `NEEDS_FOLLOWUP`, `UNABLE_TO_COMPLETE` — follow-up expected; `NEEDS_QUOTE_APPROVAL`
   — business follow-up expected) and is never stored as a boolean (`BR-078`).
+- A follow-up expectation is not the same thing as a follow-up request. The expectation is derived
+  from the Visit outcome; the request is a separate workflow record created by an assigned
+  technician, unless a technician has explicit scheduling permission and creates the follow-up Visit
+  directly (`BR-FV-001`, `BR-FV-011`).
 - Outcome and status are different things (`BR-078`, §9.1): a Visit may be `COMPLETED` while its Job
   remains `IN_PROGRESS` (`BR-059`, `BR-077`). A new field attempt is a **new Visit**, never a
   reopened or edited completed Visit (`BR-071`, `BR-078`).
 - Job effect (`BR-061`): a Job may enter `PENDING_REVIEW` only when no Visit remains active or
-  scheduled **and** the latest completed Visit outcome indicates the Job may be resolved
-  (`RESOLVED`). `NEEDS_PARTS`, `NEEDS_FOLLOWUP` and `UNABLE_TO_COMPLETE` keep the Job
-  `IN_PROGRESS`. The Job-status effect of `NEEDS_QUOTE_APPROVAL` is an **OPEN QUESTION** (`BR-061`,
-  §21), so it is treated as **not modelled**: an `IN_PROGRESS` Job is not moved to `PENDING_REVIEW`
-  on that outcome, and no alternative transition is invented for it.
+  scheduled and either the latest completed Visit outcome indicates the Job may be resolved
+  (`RESOLVED`) or an authorized rejection of the follow-up request because no additional Visit is
+  required resolves that requirement for review entry (`BR-FV-004`, `BR-FV-007`). `NEEDS_PARTS`,
+  `NEEDS_FOLLOWUP` and `UNABLE_TO_COMPLETE` keep the Job `IN_PROGRESS` while the follow-up
+  requirement remains unresolved. The Job-status effect of `NEEDS_QUOTE_APPROVAL` is an **OPEN
+  QUESTION** (`BR-061`, §21), so it is treated as **not modelled**: an `IN_PROGRESS` Job is not
+  moved to `PENDING_REVIEW` on that outcome, and no alternative transition is invented for it.
 - Corrections (`BR-079`): every outcome change preserves the previous outcome, the new outcome, the
   actor, the timestamp and an optional reason. Managers/authorized office users may correct outcomes
   according to their permissions (`BR-006`, `BR-066`). The **technician self-edit window/policy is
@@ -1286,6 +1351,91 @@ Checks:
 - The outcome record and the `IN_PROGRESS → COMPLETED` status row (§9.5) are written in the same
   transaction, so `BR-077`'s "outcome before completion" is never observable as a completed Visit
   without an outcome.
+
+### 11.3 Follow-up Visit requests (`BR-FV-001` – `BR-FV-013`)
+
+A follow-up request records that an assigned technician believes another field attempt is needed.
+It is **not** a Visit, not a schedule and not a confirmed appointment (`BR-FV-002`, `BR-FV-010`).
+It stays on the Job until an authorized decision is made.
+
+Rules:
+
+- Only a technician assigned to the source Visit may submit the request unless they also hold direct
+  scheduling permission and create the follow-up Visit directly (`BR-FV-001`, `BR-FV-011`).
+- Every request references the source Visit, and that Visit must belong to the same Job and
+  organization (`BR-FV-008`).
+- Proposed date/time, expected duration, notes and same-technician preference are informational
+  until an authorized user approves and schedules the request (`BR-FV-003`, `BR-FV-010`).
+- Office review is permission-based, never role-name based. A Manager, Dispatcher, Scheduler or
+  custom role may act only through the appropriate effective permission (`BR-004`, `BR-006`,
+  `BR-FV-004`).
+- Approval creates the new Visit in the same transaction and records the resulting `visit_id`.
+  The new Visit then follows the normal Visit scheduling, assignment and conflict rules (`BR-068`,
+  `BR-070`, `BR-072`, `BR-FV-005`).
+- A request returned for clarification remains unresolved; a rejection means no new Visit is created
+  and records the office decision that no additional Visit is required or why the request was refused
+  (`BR-FV-004`, `BR-FV-012`, `BR-FV-013`).
+- A technician may complete the current Visit after submitting the request; the Job remains open
+  while the follow-up requirement is unresolved (`BR-FV-006`, `BR-FV-007`).
+- Multiple requests are allowed over a Job's lifetime. Each request is independently traceable and
+  may originate from a different completed Visit (`BR-FV-009`).
+
+Proposed table — `follow_up_visit_requests`:
+
+| Column                         | Type          | Null? | Notes                                                                   |
+| ------------------------------ | ------------- | ----- | ----------------------------------------------------------------------- |
+| `id`                           | `uuid`        | no    | PK, `gen_random_uuid()`                                                 |
+| `organization_id`              | `uuid`        | no    | FK → `organizations.id`, `ON DELETE CASCADE`                            |
+| `job_id`                       | `uuid`        | no    | FK → `jobs.id`, `ON DELETE CASCADE`                                     |
+| `source_visit_id`              | `uuid`        | no    | FK → `visits.id`; the Visit that caused the request (`BR-FV-008`)       |
+| `requested_by_membership_id`   | `uuid`        | no    | Assigned technician who submitted the request                           |
+| `status`                       | `varchar(24)` | no    | CHECK against §11.3's status vocabulary                                 |
+| `reason`                       | `text`        | yes   | Why another Visit is needed                                             |
+| `proposed_start`               | `timestamptz` | yes   | Informational preferred/customer-agreed time (`BR-FV-003`, `BR-FV-010`) |
+| `proposed_end`                 | `timestamptz` | yes   | Informational proposed end                                              |
+| `expected_duration_minutes`    | `integer`     | yes   | Informational duration when no exact proposed end is known              |
+| `same_technician_preferred`    | `boolean`     | no    | `NOT NULL DEFAULT false`; preference only, not assignment               |
+| `notes`                        | `text`        | yes   | Technician-entered notes                                                |
+| `reviewed_by_membership_id`    | `uuid`        | yes   | Who returned, approved or rejected the request                          |
+| `reviewed_at`                  | `timestamptz` | yes   | When the current review decision was made                               |
+| `decision_note`                | `text`        | yes   | Clarification request or rejection/approval note                        |
+| `created_visit_id`             | `uuid`        | yes   | FK → `visits.id`; set only when approved                                |
+| `recorded_at` / `captured_at`  |               |       | Event convention (§14)                                                  |
+| `client_operation_id`          | `uuid`        | yes   | Offline replay idempotency (§15)                                        |
+| `created_at` / `updated_at`    | `timestamptz` | no    | Foundation convention                                                   |
+
+Status vocabulary:
+
+| Code                  | Meaning                                                                  |
+| --------------------- | ------------------------------------------------------------------------ |
+| `PENDING`             | Submitted and awaiting office review                                     |
+| `NEEDS_CLARIFICATION` | Returned to the technician or field team for more information            |
+| `APPROVED`            | Approved; the resulting Visit has been created                           |
+| `REJECTED`            | Rejected because no additional Visit is required or the request is refused |
+
+Constraints and indexes:
+
+- `CHECK (status IN ('PENDING','NEEDS_CLARIFICATION','APPROVED','REJECTED'))`.
+- `CHECK ((proposed_start IS NULL) = (proposed_end IS NULL))` and
+  `CHECK (proposed_end IS NULL OR proposed_end > proposed_start)`.
+- `CHECK (expected_duration_minutes IS NULL OR expected_duration_minutes > 0)`.
+- `CHECK ((status IN ('APPROVED','REJECTED','NEEDS_CLARIFICATION')) =
+  (reviewed_by_membership_id IS NOT NULL AND reviewed_at IS NOT NULL))`.
+- `CHECK ((status = 'APPROVED') = (created_visit_id IS NOT NULL))`.
+- Invariant (service layer): `source_visit_id` belongs to `job_id` and to the same organization.
+- Invariant (service layer): approval creates `created_visit_id` in the same transaction as the
+  status change to `APPROVED`.
+- Indexes: `(organization_id, job_id, status)`, `(organization_id, source_visit_id)` and
+  `(organization_id, requested_by_membership_id, recorded_at)`.
+- Unique partial index on `(organization_id, client_operation_id) WHERE client_operation_id IS NOT
+  NULL` for offline idempotency.
+
+The request's current `status` is stored for operational reads. The audit requirement is met by the
+request row plus `requested_by_membership_id`/`recorded_at`,
+`reviewed_by_membership_id`/`reviewed_at`, `decision_note` and `created_visit_id` (`BR-FV-013`).
+If later product requirements need every return-for-clarification/resubmission as separate events,
+that can be split into an append-only history table without changing the rule that the request itself
+has one explicit current lifecycle state.
 
 ## 12. Visit notes and evidence
 
@@ -1490,6 +1640,7 @@ become a second source of truth (`BR-080`, `BR-001`).
 | Visit status changes (incl. corrections and cancellation)      | `visit_status_history` (§9.5)      |
 | Visit notes                                                    | `visit_notes` (§12)                |
 | Outcome changes                                                | `visit_outcome_history` (§11.2)    |
+| Follow-up request decisions                                    | `follow_up_visit_requests` (§11.3) |
 | Assignment changes                                             | `visit_technician_history` (§10.3) |
 | Schedule changes                                               | `visit_schedule_history` (§9.4)    |
 | Job Property changes                                           | `job_property_history` (§7.2)      |
@@ -1543,8 +1694,9 @@ without a business decision (`BR-042`).
 
 - Every closed vocabulary in this model is stored as a **stable, machine-readable code** — Job
   statuses (`BR-058`), Visit statuses (`BR-074`), outcome types (`BR-078`), Visit cancellation
-  reasons (`BR-076`), assignment role codes `LEAD`/`TECHNICIAN` (`BR-068`) — never as display text
-  (`BR-028`, `BR-041`, `Project.md` §10, `dev.md` §9).
+  reasons (`BR-076`), assignment role codes `LEAD`/`TECHNICIAN` (`BR-068`) and follow-up request
+  statuses (`BR-FV-012`) — never as display text (`BR-028`, `BR-041`, `Project.md` §10, `dev.md`
+  §9).
 - Localized labels for those codes are resolved in the clients' message catalogs (`Angular.md`,
   `Android.md`) and, for system-generated API messages, through the shared API conventions in
   `docs/api/`. This document defines no new localization mechanism and stores no display text.
@@ -1554,9 +1706,10 @@ without a business decision (`BR-042`).
   none may be persisted as a status (`BR-060`, `BR-042`).
 - **No field in this domain requires bilingual storage.** Job title/description (`BR-053`), Visit
   notes and outcome summaries (`BR-077`), schedule-change reasons (`BR-073`) and location-resolution
-  notes (§9.6) are **user-entered content** and stay in the language the user wrote them in
-  (`Project.md` §10, `dev.md` §9). Bilingual _business data_ is required for roles (`BR-005`), which
-  belongs to the foundation model, not here.
+  notes (§9.6), and follow-up request reasons, notes and decision notes (§11.3), are
+  **user-entered content** and stay in the language the user wrote them in (`Project.md` §10,
+  `dev.md` §9). Bilingual _business data_ is required for roles (`BR-005`), which belongs to the
+  foundation model, not here.
 - Because no language-specific column exists, adding a third language later is catalog work with no
   schema change (`BR-028`).
 
@@ -1591,6 +1744,7 @@ modify any foundation entity, and it does not alter a foundation table.
 | `visit_schedule_history`           | §9.4    | Append-only schedule changes, including confirmed conflicts (`BR-073`).                                        |
 | `visit_status_history`             | §9.5    | Append-only Visit status events, corrections and cancellations (`BR-074`–`BR-076`).                            |
 | `visit_outcome_history`            | §11.2   | Append-only outcome events and corrections (`BR-077`–`BR-079`).                                                |
+| `follow_up_visit_requests`         | §11.3   | Technician follow-up requests and office decisions (`BR-FV-001`–`BR-FV-013`).                                  |
 | `visit_notes`                      | §12.2   | Append-only per-Visit notes (`BR-027`, `BR-077`).                                                              |
 | `visit_location_history`           | §9.6    | Append-only history of a Visit's operational location (`BR-056`, `BR-057`).                                    |
 | `visit_location_review_flags`      | §6.3    | Open review requirement when a Job's Property changes under scheduled or active Visits (`BR-056`).             |
@@ -1635,6 +1789,9 @@ catalogue or column was invented for it (`BR-042`, `qa.md` §15).
 | 21  | Is the archive-warning "active" classification reconciled with `BR-060`'s narrower derived condition?                         | `BR-060`, `BR-083` | **Decided:** kept as two named concepts — `needsSchedulingActiveVisit` (`BR-060`) and `archiveWarningOpenWork` (`BR-083`) (`ADR-012` D4). No shared vocabulary is imposed.                            | —                                       |
 | 22  | Which offline/outbox architecture standard do Property archive and restore follow?                                            | `BR-086`           | **Decided:** `docs/architecture/offline-first-architecture.md` defines the working set, outbox, idempotency, replay and conflict model (`ADR-012` D7).                                                 | Offline Property lifecycle.             |
 | 23  | Does a Property's own lifecycle history permanently block its deletion?                                                       | `BR-082`           | **Decided:** no. `property_lifecycle_history.property_id` is `ON DELETE CASCADE`; deletion stays blocked by other references (`ADR-012` D5).                                                          | —                                       |
+| 24  | What formally defines a technician as "running late"?                                                                         | `BR-070`, `BR-038` | Not defined. The manager home presents only the **overdue Visit** condition above, which compares the Visit's own scheduled window against the server clock and needs no travel time, location or estimate. No "running late" alert is produced, and no ETA is derived from GPS or travel data (`docs/tracker/016-android-manager-home.md`). | A "running late" alert; any ETA or travel-time estimate. |
+| 25  | Which attention conditions should a cancelled Visit raised **today** produce on the manager home?                             | `BR-076`           | Not defined. A `CANCELED` Visit is excluded from today's schedule and counts, and no "cancelled today" condition is produced: the Visit row carries no cancellation instant of its own (only the status history does), and "today" for it is undefined. Recorded rather than inferred. | A "cancelled today" attention condition. |
+| 26  | Does the manager home's "Needs attention" list need a capability of its own?                                                 | `BR-006`, `BR-008` | The read is guarded by the existing `customers.view`, the same capability the Job/Visit projections already use. The permission model has no `jobs.*` capability yet, and inventing one is forbidden (`BR-042`) — see `docs/tracker/016-android-manager-home.md`. | The Jobs feature's permission set; the manager home's own capability. |
 
 Not an open question, recorded here to prevent a false assumption: **Job-number gaps**. `BR-052`
 requires uniqueness and immutability, not a gapless sequence, so no gap-free guarantee is claimed

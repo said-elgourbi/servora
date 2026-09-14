@@ -1,6 +1,6 @@
 # Tracker 007 — Android Customers list
 
-**Status: COMPLETE** (Android list read; 2026-09-12 follow-ups add derived counts to the list payload and refine the row's status/since line, chevron and pressed tint)
+**Status: COMPLETE** (Android list read; 2026-09-12 follow-ups add derived counts to the list payload and refine the row's status/since line, chevron and pressed tint; the 2026-09-14 follow-up makes the row's contact values display-only)
 
 Date: 2026-09-11
 Predecessor: `docs/tracker/006-customers-feature-permissions.md`
@@ -108,7 +108,7 @@ are now derived by the backend and returned with the row.
 | Element     | Change                                                                                                                                                             |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Row spacing | Name, phone and email are stacked with deliberate gaps (4 dp under the name, 2 dp between the contacts, 6 dp before the counts) instead of abutting text lines.       |
-| Contacts    | The phone dials and the email composes, each an `ACTION_DIAL`/`ACTION_SENDTO` link with a leading glyph (`ic_phone`/`ic_mail`) in the interaction colour.             |
+| Contacts    | The phone dials and the email composes, each an `ACTION_DIAL`/`ACTION_SENDTO` link with a leading glyph (`ic_phone`/`ic_mail`) in the interaction colour. Superseded for the list row by the 2026-09-14 follow-up below, which makes both display-only; Customer Details still links them. |
 | Counts      | An "N properties · N jobs" meta line with Home/Briefcase glyphs (`ic_home`/`ic_briefcase`), localized through plurals (`customers_property_count`, `customers_job_count`). |
 
 ### Payload finding and API change
@@ -132,8 +132,9 @@ not decided by product (`BR-042`). The design only says "Number of jobs", so the
 and the question is recorded rather than guessed.
 
 Android mirrors the fields in `CustomerDto` (with defaults, so a payload without them still parses),
-`Customer`, `CustomerListItem` and the row. `CustomersScreenTest` asserts the counts render and that
-both contact links carry a click action.
+`Customer`, `CustomerListItem` and the row. `CustomersScreenTest` asserts the counts render, that the
+row's contact values carry no click action of their own and that tapping one opens the customer
+(2026-09-14 follow-up below).
 
 ## Verification
 
@@ -305,7 +306,8 @@ releasing opens the customer.
 
 3. Press and hold the phone number, then the email.
 Expected: the pressed feedback appears on the contact line itself rather than the row; the dialer/
-composer is offered as before.
+composer is offered as before. **Superseded by the 2026-09-14 follow-up below:** the row's contact
+values are no longer links, so these presses now show the row's feedback and open the customer.
 ```
 
 ## Follow-up — App-shell header and icon bottom navigation (2026-09-12)
@@ -344,3 +346,71 @@ cd android && ./gradlew connectedDebugAndroidTest
 Physical-device QA: **Awaiting product owner.** Inspect the header (brand name only, no date) and
 the bottom navigation (icon above each label, selected destination in brand colour) on the
 signed-in screen.
+
+## Follow-up — List rows no longer dial or compose (2026-09-14)
+
+Product-directed change after using the list: tapping a customer's phone number or email dialled or
+composed when the intent was to open the customer. The two contact values in a **list row** are now
+display-only. Android UI only — no API, database, migration, shared contract or Angular change, and
+no permission change.
+
+| Element           | Change                                                                                                                                                                                                                                                                                    |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| List row contacts | The phone number and email are still drawn with their `ic_phone`/`ic_mail` glyphs and the same spacing, but the lines carry no click action of their own. A tap anywhere in the row — including on a contact value — opens Customer Details, so the row has one target and one outcome.          |
+| Customer Details  | Unchanged: the phone still dials and the email still composes, each an `ACTION_DIAL`/`ACTION_SENDTO` link.                                                                                                                                                                                  |
+
+- The shared composable is now `CustomerContactLine(text, glyph, modifier, onClick = null)`: it renders
+  a link only when the caller supplies an action, and Customer Details is the only caller that does.
+  `dialIntent`/`mailIntent`/`startContactIntent` are unchanged and still used by Customer Details.
+- This deliberately departs from the design, which draws the row's contacts as `tel:`/`mailto:`
+  anchors (`Figma/src/screens/Customers.tsx`): by product direction the row is a single target. The
+  `customerPhoneTag`/`customerEmailTag` tags are kept so the row's contact values stay addressable.
+- No business rule is affected: the contact actions were never permission-gated and no API, storage
+  or synchronization behaviour changes (`BR-066` scopes field execution, not a contact tap).
+- The contact values keep the interaction colour they are drawn in; whether the list should also
+  present them in a quieter, non-link colour is a further presentation question and is **not**
+  decided here.
+
+### Verification (2026-09-14)
+
+```text
+Android
+  ./gradlew testDebugUnitTest          PASS   205 tests, 0 failures, 0 errors
+  ./gradlew lintDebug                  PASS   0 errors (abortOnError is on; the remaining findings
+                                              are pre-existing warnings in files this change does not touch)
+  ./gradlew assembleDebug              PASS   debug APK
+  ./gradlew assembleDebugAndroidTest   PASS   CustomersScreenTest compiles
+```
+
+`CustomersScreenTest` now asserts that both contact values have no click action of their own
+(`contactValuesAreNotTapTargetsOfTheirOwn`) and that tapping either one reports the customer to open
+(`tappingAContactValueOpensTheCustomerLikeTheRestOfTheRow`) — the regression test for the reported
+accidental call/compose.
+
+Instrumented execution is **NOT RUN — no online device/emulator was attached**; the agent does not run
+device commands on this project:
+
+```text
+cd android && ./gradlew connectedDebugAndroidTest
+```
+
+Physical-device QA: **Awaiting product owner.**
+
+```text
+Android QA — Customers list contact values
+
+1. Sign in as a Manager whose role has customers.view and open the Customers tab.
+2. Tap directly on a row's phone number.
+Expected: no dialer; Customer Details for that customer opens.
+
+3. Go back and tap directly on the same row's email.
+Expected: no email composer; Customer Details for that customer opens.
+
+4. Open that customer's details and tap the phone number, then the email.
+Expected: unchanged — the dialer opens prefilled with the number and places no call; the composer
+opens addressed to the address and sends nothing.
+
+5. Return to the list and confirm each row still shows the phone number with its phone glyph and the
+email underneath it with its mail glyph.
+```
+

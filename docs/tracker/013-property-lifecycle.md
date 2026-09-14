@@ -387,3 +387,78 @@ No API, schema or migration change, so no backend or e2e suite was affected.
    Expect: French plural, labels and badge.
 ```
 
+
+
+## Fix — 2026-09-13: Edit Property and Property Detail showed the previous session's error
+
+**Symptom.** Two reports of the same shape.
+
+1. Open Edit Property, clear the street address, press Save Property. The form correctly marks what
+   is missing. Go back to the Property and open Edit Property again: the message is still there
+   before anything is typed, together with any save the API refused.
+2. Open a Property, press Archive, and have the API refuse it. Go back to the customer and open the
+   same Property again: the refusal panel is still shown for an action nobody just took.
+
+**Cause.** The ViewModels are built by the shell and live for as long as the Activity
+(`MainActivity`), not for as long as the destination they drive. `EditPropertyViewModel.start()`
+returned early for the same Property while it had not been saved, which kept `saveAttempted` and
+`failureReason`; `PropertyDetailViewModel.start()` returned early for a Property it had already
+settled, which kept `actionFailure`. Neither could tell a re-composition of the same screen from a
+newly opened one.
+
+**Fix.** The destination instance is now the session. Each destination passes its
+`NavBackStackEntry` id — stable across a configuration change, fresh for every navigation instance —
+and the ViewModel starts a new session whenever that id changes:
+
+| ViewModel | New session |
+| --------- | ----------- |
+| `EditPropertyViewModel` | resets the form and re-reads the authoritative Property, so a previous session's values, validation message or save error cannot appear |
+| `PropertyDetailViewModel` | clears the action outcome (`actionFailure`); the Property it already read is still reused rather than re-fetched |
+
+Re-entering the same id is a no-op, so rotating the device keeps what the screen was showing. A reply
+that arrives after the session has ended is dropped instead of being reported by the next session,
+and an incomplete or new save attempt clears the previous answer before it is sent.
+
+**Files.**
+
+```text
+android/app/src/main/java/com/servora/android/ui/customers/EditPropertyViewModel.kt     session id; incomplete save clears the error
+android/app/src/main/java/com/servora/android/ui/customers/PropertyDetailViewModel.kt   session id clears the action outcome; late replies dropped
+android/app/src/main/java/com/servora/android/ui/navigation/ServoraNavHost.kt           begins each session before the screen composes
+```
+
+### Regression coverage
+
+| Test | Covers |
+| ---- | ------ |
+| `EditPropertyViewModelTest` (new) | the read; a same-session re-composition keeps the form while a new one re-reads; neither a validation message nor a refused save survives a new session; a form that has not finished reading is never sent; the expected version travels with the request |
+| `PropertyDetailViewModelTest` — `does not carry a failed action into a new session` | the reported archive/restore/delete defect, with the read Property reused |
+
+### Verification (2026-09-13)
+
+```text
+Android
+  ./gradlew testDebugUnitTest              PASS   205 tests
+  ./gradlew compileDebugAndroidTestKotlin  PASS
+  ./gradlew lintDebug                      PASS
+  ./gradlew assembleDebug                  PASS
+  ./gradlew connectedDebugAndroidTest      NOT RUN — device QA belongs to the product owner
+```
+
+No API, schema or migration change.
+
+### Physical-device QA (product owner)
+
+```text
+1. Open a Property → Edit → clear Street → Save Property.
+   Expect: the form marks what is missing.
+2. Back to the Property, then open Edit again.
+   Expect: the form re-reads the Property with no message from the previous attempt.
+3. Open a Property → Archive Property; refuse it (turn connectivity off and press Archive).
+   Expect: the refusal is shown.
+4. Back to the customer, then reopen the same Property.
+   Expect: no refusal panel; the Property is shown as the API last described it.
+5. Open Edit, change a value, rotate the device.
+   Expect: the typed value is still there.
+```
+

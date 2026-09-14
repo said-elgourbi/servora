@@ -176,3 +176,66 @@ assertions themselves run only on a device.
 ```
 
 
+
+
+## Fix — 2026-09-13: a reopened form still showed the previous attempt's error
+
+**Symptom.** Submit Add Property with a required field missing. The form correctly marks what is
+missing. Go back to the customer and open Add Property again: the message from the previous attempt
+is still there before anything is typed, together with any save the API refused.
+
+**Cause.** The form ViewModels are built by the shell and live for as long as the Activity
+(`MainActivity`), not for as long as the destination they drive. `AddPropertyViewModel.start()`
+deliberately returned early for the same customer while `isSaved` was false — that kept an
+in-progress form, but it also kept `saveAttempted` and `failureReason`, and it could not tell a
+re-composition of the same screen from a newly opened one.
+
+**Fix.** The destination instance is now the form session. The destination passes its
+`NavBackStackEntry` id — stable across a configuration change, fresh for every navigation instance —
+and the ViewModel starts an empty session whenever that id changes. Re-entering the same id is a
+no-op, so rotating the device still keeps what the user typed, while leaving and reopening the screen
+cannot carry a validation or submission error over. A reply that arrives after the session has ended
+is dropped instead of being folded into the next session, and a new attempt clears the previous
+answer before it is sent.
+
+**Files.**
+
+```text
+android/app/src/main/java/com/servora/android/ui/customers/AddPropertyViewModel.kt   session id; incomplete save clears the error
+android/app/src/main/java/com/servora/android/ui/navigation/ServoraNavHost.kt        begins the session before the screen composes
+```
+
+### Regression coverage
+
+| Test | Covers |
+| ---- | ------ |
+| `AddPropertyViewModelTest` — `does not carry a validation message into a new form session` | the reported defect |
+| `AddPropertyViewModelTest` — `does not carry a refused save into a new form session` | a backend refusal, not only a client check |
+| `AddPropertyViewModelTest` — `keeps an in-progress form within a session and starts empty for a new one` | a rotation keeps the form; leaving and returning does not |
+| `AddPropertyViewModelTest` — `clears the validation message once the missing fields are filled` | the message stops as soon as the form is valid |
+| `AddPropertyViewModelTest` — `clears the previous submission error when the next save starts` | a new attempt does not show the previous answer |
+
+### Verification (2026-09-13)
+
+```text
+Android
+  ./gradlew testDebugUnitTest              PASS   205 tests
+  ./gradlew compileDebugAndroidTestKotlin  PASS
+  ./gradlew lintDebug                      PASS
+  ./gradlew assembleDebug                  PASS
+  ./gradlew connectedDebugAndroidTest      NOT RUN — device QA belongs to the product owner
+```
+
+No API, schema or migration change.
+
+### Physical-device QA (product owner)
+
+```text
+1. Open a customer → Add Property → leave Street empty → Save Property.
+   Expect: the form marks what is missing.
+2. Back to the customer, then open Add Property again.
+   Expect: an empty form with no message from the previous attempt.
+3. Open Add Property, type a partial address, rotate the device.
+   Expect: the typed values are still there.
+```
+

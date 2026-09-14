@@ -105,7 +105,33 @@ environment (pure, unit-tested in `development-seed.spec.ts`) and
 `api/src/database/run-development-seed.ts` performs the account, permission and operational demo
 writes (`npm run db:seed`).
 
+### What `make seed` writes
+
+Beyond the two accounts, the seed writes operational demo data so the management screens have something
+real to present:
+
+- 20 customers, their contacts, addresses and Properties, and Jobs spread across every Job status;
+- **four further Technician members** (`Sarah Moreau`, `John Tremblay`, `Priya Raman`, `Luc Gagnon`) so
+  a Visit can carry a real crew (`BR-068`). They are members only: the two documented credentials above
+  remain the only seeded logins and no password is generated for them;
+- **two or three technicians per Visit** with exactly one `LEAD`, rotating the Lead between Visits, with
+  the assignment **history** `BR-069` describes — a Lead who was first assigned as an ordinary technician
+  and promoted later, and a technician who was removed again — recorded as history rows rather than a
+  rewritten assignment;
+- **three notes per Visit** from the manager and the crew (`BR-027`);
+- the **Visit and Job status history** along the only paths `BR-074` and `BR-058` permit.
+
+Re-running `make seed` refreshes this demo data rather than duplicating it: the previous run's customers,
+Properties, Jobs, Visits and their history are removed first.
+
 ## 4. Android against a local API (physical device or emulator)
+
+> **Who runs the `adb` steps below.** The commands in this section are for the **product owner**, who
+> is the Android QA tester and owns the phone. An AI agent must never run `adb` — not to list devices,
+> install, launch, forward a port or read `logcat` — and must not run Gradle tasks that drive a device
+> through it (`installDebug`, `connectedDebugAndroidTest`). The agent's device-free Android
+> verification is `make android-test`, `make android-lint` and `make android-build`, plus compiling
+> the device-test sources. See `.clinerules/qa.md` §7.3.
 
 The Android client reads a **compile-time** base URL. It is resolved in
 `android/app/build.gradle.kts` in this order:
