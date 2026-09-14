@@ -13,13 +13,34 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.servora.android.R
+import com.servora.android.data.customers.ContactCreateResult
+import com.servora.android.data.customers.CreateCustomerContactRequest
+import com.servora.android.data.customers.CreateCustomerRequest
 import com.servora.android.data.customers.CreatePropertyRequest
+import com.servora.android.data.customers.CustomerCreateResult
 import com.servora.android.data.customers.CustomerDetailResult
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
+import com.servora.android.data.customers.CustomerUpdateResult
 import com.servora.android.data.customers.PropertyCreateResult
+import com.servora.android.data.customers.PropertyDeleteResult
+import com.servora.android.data.customers.PropertyLifecycleRequest
+import com.servora.android.data.customers.PropertyRepository
+import com.servora.android.data.customers.PropertyResult
+import com.servora.android.data.customers.UpdateCustomerRequest
+import com.servora.android.data.customers.UpdatePropertyRequest
+import com.servora.android.data.home.ManagerHomeRepository
+import com.servora.android.data.home.ManagerHomeResult
+import com.servora.android.data.jobs.AssignableTechniciansResult
+import com.servora.android.data.jobs.JobActionResult
+import com.servora.android.data.jobs.JobActivityResult
+import com.servora.android.data.jobs.JobDetailsRepository
+import com.servora.android.data.jobs.JobDetailsResult
+import com.servora.android.data.jobs.VisitNoteResult
+import java.time.Instant
 import com.servora.android.domain.model.Customer
+import com.servora.android.domain.model.CustomerCompany
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerFilters
 import com.servora.android.domain.model.CustomerJob
@@ -29,9 +50,16 @@ import com.servora.android.domain.model.CustomerProperty
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.ManagerHome
+import com.servora.android.domain.model.ManagerHomeTodaySummary
+import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.ui.components.ServoraTopBarBackTag
 import com.servora.android.ui.components.ServoraTopBarSubtitleTag
 import com.servora.android.ui.components.ServoraTopBarTitleTag
+import com.servora.android.ui.customers.AddCustomerActionTag
+import com.servora.android.ui.customers.AddCustomerCancelTag
+import com.servora.android.ui.customers.AddCustomerTag
+import com.servora.android.ui.customers.AddCustomerViewModel
 import com.servora.android.ui.customers.AddPropertyTag
 import com.servora.android.ui.customers.AddPropertyViewModel
 import com.servora.android.ui.customers.CustomerDetailAddPropertyTag
@@ -43,10 +71,16 @@ import com.servora.android.ui.customers.CustomerDetailSeeAllJobsTag
 import com.servora.android.ui.customers.CustomerPermissionsUiState
 import com.servora.android.ui.customers.CustomersViewModel
 import com.servora.android.ui.customers.EditCustomerActionTag
+import com.servora.android.ui.customers.EditCustomerViewModel
+import com.servora.android.ui.customers.EditPropertyViewModel
+import com.servora.android.ui.customers.PropertyDetailViewModel
 import com.servora.android.ui.customers.ServoraHomeScreen
 import com.servora.android.ui.customers.customerDetailJobTag
 import com.servora.android.ui.customers.customerRowTag
+import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.theme.ServoraTheme
+import java.time.Clock
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -203,6 +237,33 @@ class ServoraHomeNavigationTest {
     }
 
     @Test
+    fun newCustomerOpensItsOwnScreenFromTheList() {
+        render()
+
+        composeTestRule.onNodeWithTag(AddCustomerActionTag).performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag(AddCustomerTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(ServoraTopBarTitleTag)
+            .assertTextEquals(string(R.string.customers_create_title))
+        // A pushed screen offers a way back to what it was opened from.
+        composeTestRule.onNodeWithTag(ServoraTopBarBackTag).assertIsDisplayed()
+    }
+
+    @Test
+    fun cancellingTheNewCustomerFormReturnsToTheList() {
+        render()
+        composeTestRule.onNodeWithTag(AddCustomerActionTag).performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag(AddCustomerCancelTag).performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag(customerRowTag(CUSTOMER_ID)).assertIsDisplayed()
+    }
+
+    @Test
     fun addPropertyOpensItsOwnScreenWithTheCustomerAsContext() {
         render()
         openTheCustomer()
@@ -244,7 +305,21 @@ class ServoraHomeNavigationTest {
     ) {
         val repository = FakeCustomersRepository(jobCount = jobCount)
         viewModel = CustomersViewModel(repository)
+        val addCustomerViewModel = AddCustomerViewModel(repository)
+        val editCustomerViewModel = EditCustomerViewModel(repository)
         val addPropertyViewModel = AddPropertyViewModel(repository)
+        // The Property lifecycle destinations are wired by the shell too; the fake answers "not
+        // found", because these tests cover navigation rather than Property behaviour.
+        val propertyRepository = FakePropertyRepository()
+        val propertyDetailViewModel =
+            PropertyDetailViewModel(propertyRepository, Clock.systemUTC())
+        val editPropertyViewModel = EditPropertyViewModel(propertyRepository)
+        // The manager home is wired by the shell too. These tests cover navigation, so it answers an
+        // empty day rather than a scripted one.
+        val managerHomeViewModel = ManagerHomeViewModel(FakeManagerHomeRepository())
+        // The Job Details destination is wired by the shell too; the fake answers "not found",
+        // because these tests cover navigation rather than Job behaviour.
+        val jobDetailsViewModel = JobDetailsViewModel(FakeJobDetailsRepository())
         composeTestRule.setContent {
             ServoraTheme {
                 ServoraHomeScreen(
@@ -258,7 +333,13 @@ class ServoraHomeNavigationTest {
                             canCreateProperty = canCreateProperty,
                         ),
                     customersViewModel = viewModel,
+                    addCustomerViewModel = addCustomerViewModel,
+                    editCustomerViewModel = editCustomerViewModel,
                     addPropertyViewModel = addPropertyViewModel,
+                    propertyDetailViewModel = propertyDetailViewModel,
+                    editPropertyViewModel = editPropertyViewModel,
+                    managerHomeViewModel = managerHomeViewModel,
+                    jobDetailsViewModel = jobDetailsViewModel,
                     onSignOut = {},
                 )
             }
@@ -336,8 +417,29 @@ class ServoraHomeNavigationTest {
             request: CreatePropertyRequest,
         ): PropertyCreateResult = PropertyCreateResult.Success(property())
 
+        override suspend fun createCustomer(
+            request: CreateCustomerRequest,
+        ): CustomerCreateResult =
+            CustomerCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+        override suspend fun createContact(
+            customerId: String,
+            request: CreateCustomerContactRequest,
+        ): ContactCreateResult = ContactCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+        override suspend fun updateCustomer(
+            customerId: String,
+            request: UpdateCustomerRequest,
+        ): CustomerUpdateResult = CustomerUpdateResult.Success
+
         private fun detail(jobs: List<CustomerJob>) = CustomerDetail(
             customer = customer(),
+            company = CustomerCompany(
+                customerId = CUSTOMER_ID,
+                legalName = "ABC Property Management Ltd.",
+                businessName = null,
+                taxNumber = null,
+            ),
             contacts = emptyList(),
             properties = listOf(property()),
             jobs = jobs,
@@ -397,3 +499,113 @@ private fun job(index: Int) = CustomerJob(
     scheduledStart = "2026-09-08T13:00:00Z",
     technicians = listOf(CustomerJobTechnician("lead-1", "Mike Lead", "LEAD")),
 )
+
+/**
+ * A [PropertyRepository] that answers "not found".
+ *
+ * The navigation tests exercise the signed-in back stack, not Property behaviour, so the Property
+ * destinations are wired to a repository that reports nothing rather than to scripted Property data.
+ */
+private class FakePropertyRepository : PropertyRepository {
+    override suspend fun loadProperty(
+        customerId: String,
+        propertyId: String,
+    ): PropertyResult = PropertyResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun updateProperty(
+        customerId: String,
+        propertyId: String,
+        request: UpdatePropertyRequest,
+    ): PropertyResult = PropertyResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun archiveProperty(
+        customerId: String,
+        propertyId: String,
+        request: PropertyLifecycleRequest,
+    ): PropertyResult = PropertyResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun restoreProperty(
+        customerId: String,
+        propertyId: String,
+        request: PropertyLifecycleRequest,
+    ): PropertyResult = PropertyResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun deleteProperty(
+        customerId: String,
+        propertyId: String,
+    ): PropertyDeleteResult =
+        PropertyDeleteResult.Failure(CustomersFailureReason.NOT_FOUND)
+}
+
+/** A [ManagerHomeRepository] that answers an empty day, so the shell always has one to render. */
+private class FakeManagerHomeRepository : ManagerHomeRepository {
+
+    override suspend fun loadManagerHome(timeZone: String): ManagerHomeResult =
+        ManagerHomeResult.Success(
+            ManagerHome(
+                displayName = "Sarah Tremblay",
+                attention = emptyList(),
+                attentionTotal = 0,
+                today = ManagerHomeTodaySummary(
+                    total = 0,
+                    completed = 0,
+                    inProgress = 0,
+                    upcoming = 0,
+                ),
+                visits = emptyList(),
+            ),
+        )
+}
+
+/**
+ * A [JobDetailsRepository] that answers "not found".
+ *
+ * The navigation tests exercise the signed-in back stack, not Job Details behaviour, so the Job
+ * Details destination is wired to a repository that reports nothing rather than to scripted Job data.
+ */
+private class FakeJobDetailsRepository : JobDetailsRepository {
+    override suspend fun loadJobDetails(jobId: String): JobDetailsResult =
+        JobDetailsResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun loadJobActivity(jobId: String): JobActivityResult =
+        JobActivityResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun addVisitNote(
+        jobId: String,
+        visitId: String,
+        body: String,
+    ): VisitNoteResult = unreachable()
+
+    // The navigation tests never reach a Job or Visit action: the destination reports that no Job is
+    // readable, so its action row is never drawn.
+    override suspend fun changeJobStatus(
+        jobId: String,
+        status: JobStatus,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unreachable()
+
+    override suspend fun rescheduleVisit(
+        jobId: String,
+        visitId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        reason: String?,
+        confirmConflicts: Boolean,
+        expectedVersion: Int,
+    ): JobActionResult = unreachable()
+
+    override suspend fun assignVisitTechnicians(
+        jobId: String,
+        visitId: String,
+        assignments: List<TechnicianAssignment>,
+        confirmConflicts: Boolean,
+        expectedVersion: Int,
+    ): JobActionResult = unreachable()
+
+    override suspend fun loadAssignableTechnicians(): AssignableTechniciansResult =
+        unreachable()
+
+    private fun unreachable(): Nothing =
+        throw AssertionError("the navigation tests do not act on a Job")
+}

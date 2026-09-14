@@ -8,6 +8,12 @@
 >
 > Decision record: `docs/decisions/012-property-lifecycle-and-permissions.md`.
 >
+> **Update (2026-09-13).** The **server** half of this contract exists: Property archive and restore
+> accept a client-generated `clientOperationId` and the device `capturedAt`, persist them, and
+> recognise a replay instead of applying it twice (`docs/tracker/013-property-lifecycle.md`,
+> `docs/api/customers.md` §4.2). The local working set and outbox described below are still **not**
+> implemented, so an archive performed with no connectivity is not queued yet.
+>
 > Read together with `Project.md` §13–§15, `Android.md`, `dev.md` §10 and the business rules
 > `BR-013`, `BR-014`, `BR-015`, `BR-031`, `BR-032` and `BR-086`.
 

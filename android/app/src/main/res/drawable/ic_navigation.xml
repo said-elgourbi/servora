@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Navigation glyph marking a Job's address row as opening the device's map application.
+
+  Geometry matches the icon set the design uses (`Figma/src/screens/JobDetails.tsx`, lucide
+  `Navigation`). The control that draws it supplies the colour, so the stroke colour here is only a
+  placeholder.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M3,11L22,2L13,21L11,13z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+</vector>

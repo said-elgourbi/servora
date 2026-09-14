@@ -1,4 +1,10 @@
 import {
+  ASSIGNMENT_ROLE_CODES,
+  JOB_STATUSES,
+  type AssignmentRoleCode,
+  type JobStatus,
+} from '../jobs/job.types.js';
+import {
   toCustomerCompanyDto,
   toCustomerIndividualDto,
   toCustomerSummaryDto,
@@ -10,6 +16,12 @@ import {
   toCustomerContactDto,
   type CustomerContactDto,
 } from './customer-contact.dto.js';
+import {
+  readAddressSnapshot,
+  type AddressSnapshot,
+} from '../address/address-snapshot.js';
+import type { AssignedTechnician } from '../jobs/visit-assignment.js';
+import type { PropertyStatus } from './property.dto.js';
 import type {
   Customer,
   CustomerCompany,
@@ -20,24 +32,14 @@ import type {
 } from './customer.types.js';
 
 /**
- * The Job status vocabulary the API exchanges (`BR-058`, `BR-041`).
+ * The Job status and assignment-role vocabularies the API exchanges (`BR-058`, `BR-068`, `BR-041`).
  *
- * It is the backend's single definition; clients present localized labels for these codes and must
- * not invent a parallel vocabulary.
+ * The Job & Visit domain declares them once in `jobs/job.types.ts`; they are re-exported here because
+ * the customer-detail projection was their first consumer. Clients present localized labels for these
+ * codes and must not invent a parallel vocabulary.
  */
-export const JOB_STATUSES = [
-  'NEW',
-  'SCHEDULED',
-  'IN_PROGRESS',
-  'PENDING_REVIEW',
-  'COMPLETED',
-  'CANCELED',
-] as const;
-export type JobStatus = (typeof JOB_STATUSES)[number];
-
-/** The assignment role codes a technician can hold on a Visit (`BR-068`). */
-export const ASSIGNMENT_ROLE_CODES = ['LEAD', 'TECHNICIAN'] as const;
-export type AssignmentRoleCode = (typeof ASSIGNMENT_ROLE_CODES)[number];
+export { ASSIGNMENT_ROLE_CODES, JOB_STATUSES };
+export type { AssignmentRoleCode, JobStatus };
 
 /**
  * A customer's detail: its header with the derived counts the sections render, its required subtype
@@ -62,12 +64,7 @@ export interface CustomerPropertySummary {
 }
 
 /** A technician currently assigned to a Visit, as the Job row renders it (`BR-068`, `BR-081`). */
-export interface CustomerJobTechnician {
-  readonly membershipId: string;
-  /** Resolved from the member's profile; `null` when the member has no profile yet. */
-  readonly name: string | null;
-  readonly roleCode: AssignmentRoleCode;
-}
+export type CustomerJobTechnician = AssignedTechnician;
 
 /** One of the customer's Jobs with the selected Visit's derived values (`BR-081`). */
 export interface CustomerJobSummary {
@@ -94,6 +91,13 @@ export interface CustomerPropertyDto {
   province: string;
   postalCode: string;
   country: string;
+  /**
+   * The Property's lifecycle state (`BR-082`).
+   *
+   * The default projection is `ACTIVE` (`BR-081`); the state is carried so an explicit archived
+   * request can be presented with the lifecycle it actually has.
+   */
+  status: PropertyStatus;
   jobCount: number;
   lastServiceAt: string | null;
 }
@@ -104,15 +108,14 @@ export interface CustomerPropertyDto {
  * The snapshot is stored as JSON, so each field is taken only when it really is a string; an
  * unreadable snapshot is reported as no address rather than as a partly invented one.
  */
-export interface CustomerJobAddressDto {
-  propertyName: string | null;
-  addressLine1: string | null;
-  addressLine2: string | null;
-  city: string | null;
-  province: string | null;
-  postalCode: string | null;
-  country: string | null;
-}
+/**
+ * A Job's preserved address snapshot (`BR-056`).
+ *
+ * The shape and the reading of a stored snapshot are defined once, in
+ * `address/address-snapshot.ts`, because the Job row and the manager-home Visit row both project it
+ * (`BR-041`).
+ */
+export type CustomerJobAddressDto = AddressSnapshot;
 
 export interface CustomerJobTechnicianDto {
   membershipId: string;
@@ -164,6 +167,7 @@ export function toCustomerPropertyDto(
     province: property.province,
     postalCode: property.postalCode,
     country: property.country,
+    status: property.status as PropertyStatus,
     jobCount: summary.jobCount,
     lastServiceAt: summary.lastServiceAt?.toISOString() ?? null,
   };
@@ -179,7 +183,7 @@ export function toCustomerJobDto(summary: CustomerJobSummary): CustomerJobDto {
     typeCode: job.typeCode,
     status: job.status as JobStatus,
     propertyId: job.propertyId,
-    propertyAddress: toCustomerJobAddressDto(job.propertyAddressSnapshot),
+    propertyAddress: readAddressSnapshot(job.propertyAddressSnapshot),
     scheduledStart: summary.selectedVisit?.scheduledStart.toISOString() ?? null,
     technicians: summary.technicians.map((technician) => ({
       membershipId: technician.membershipId,
@@ -187,26 +191,4 @@ export function toCustomerJobDto(summary: CustomerJobSummary): CustomerJobDto {
       roleCode: technician.roleCode,
     })),
   };
-}
-
-function toCustomerJobAddressDto(
-  snapshot: unknown,
-): CustomerJobAddressDto | null {
-  if (typeof snapshot !== 'object' || snapshot === null) {
-    return null;
-  }
-  const source = snapshot as Record<string, unknown>;
-  return {
-    propertyName: textValue(source.propertyName),
-    addressLine1: textValue(source.addressLine1),
-    addressLine2: textValue(source.addressLine2),
-    city: textValue(source.city),
-    province: textValue(source.province),
-    postalCode: textValue(source.postalCode),
-    country: textValue(source.country),
-  };
-}
-
-function textValue(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
 }

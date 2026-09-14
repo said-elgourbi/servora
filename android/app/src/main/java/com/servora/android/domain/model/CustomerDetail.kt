@@ -28,6 +28,8 @@ data class CustomerProperty(
     val jobCount: Int,
     /** ISO-8601 UTC instant of the newest completed Visit; `null` when never serviced. */
     val lastServiceAt: String?,
+    /** The Property's lifecycle state (`BR-082`); the default projection is `ACTIVE`. */
+    val status: PropertyStatus = PropertyStatus.ACTIVE,
 )
 
 /** One technician assigned to a Visit (`BR-068`). [name] is absent without a member profile. */
@@ -68,7 +70,24 @@ data class CustomerJobAddress(
  */
 data class CustomerDetail(
     val customer: Customer,
+    /**
+     * The customer's subtype record (`BR-023`).
+     *
+     * Exactly one is present in a backend read: [individual] for a `INDIVIDUAL` customer and
+     * [company] for a `COMPANY` one. The Edit Customer form reads it to pre-populate the fields of
+     * the customer's current type; the detail screen itself does not need it.
+     */
+    val individual: CustomerIndividual? = null,
+    val company: CustomerCompany? = null,
     val contacts: List<CustomerContact>,
     val properties: List<CustomerProperty>,
     val jobs: List<CustomerJob>,
+    /**
+     * The customer's archived Properties (`BR-082`).
+     *
+     * The default projection excludes them (`BR-081`), so they are read explicitly and presented
+     * separately: an archived Property is not active work, but it stays a retrievable record and
+     * must remain reachable so it can be restored.
+     */
+    val archivedProperties: List<CustomerProperty> = emptyList(),
 )

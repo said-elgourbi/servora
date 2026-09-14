@@ -3,6 +3,9 @@ package com.servora.android.di
 import com.servora.android.BuildConfig
 import com.servora.android.data.auth.AuthApi
 import com.servora.android.data.customers.CustomersApi
+import com.servora.android.data.customers.PropertiesApi
+import com.servora.android.data.home.ManagerHomeApi
+import com.servora.android.data.jobs.JobDetailsApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -56,4 +59,19 @@ object NetworkModule {
     @Singleton
     fun provideCustomersApi(retrofit: Retrofit): CustomersApi =
         retrofit.create(CustomersApi::class.java)
+
+    @Provides
+    @Singleton
+    fun providePropertiesApi(retrofit: Retrofit): PropertiesApi =
+        retrofit.create(PropertiesApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideManagerHomeApi(retrofit: Retrofit): ManagerHomeApi =
+        retrofit.create(ManagerHomeApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideJobDetailsApi(retrofit: Retrofit): JobDetailsApi =
+        retrofit.create(JobDetailsApi::class.java)
 }

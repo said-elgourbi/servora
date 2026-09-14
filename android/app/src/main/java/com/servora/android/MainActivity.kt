@@ -19,8 +19,14 @@ import com.servora.android.ui.appearance.AppAppearance
 import com.servora.android.ui.appearance.LocalAppAppearance
 import com.servora.android.ui.auth.AuthFlowScreen
 import com.servora.android.ui.auth.SessionViewModel
+import com.servora.android.ui.customers.AddCustomerViewModel
 import com.servora.android.ui.customers.AddPropertyViewModel
 import com.servora.android.ui.customers.CustomersViewModel
+import com.servora.android.ui.customers.EditCustomerViewModel
+import com.servora.android.ui.customers.EditPropertyViewModel
+import com.servora.android.ui.customers.PropertyDetailViewModel
+import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.passwordreset.PasswordResetViewModel
 import com.servora.android.ui.signin.SignInViewModel
 import com.servora.android.ui.sms.SmsSignInViewModel
@@ -49,7 +55,13 @@ class MainActivity : AppCompatActivity() {
     private val passwordResetViewModel: PasswordResetViewModel by viewModels()
     private val smsSignInViewModel: SmsSignInViewModel by viewModels()
     private val customersViewModel: CustomersViewModel by viewModels()
+    private val addCustomerViewModel: AddCustomerViewModel by viewModels()
+    private val editCustomerViewModel: EditCustomerViewModel by viewModels()
     private val addPropertyViewModel: AddPropertyViewModel by viewModels()
+    private val propertyDetailViewModel: PropertyDetailViewModel by viewModels()
+    private val editPropertyViewModel: EditPropertyViewModel by viewModels()
+    private val managerHomeViewModel: ManagerHomeViewModel by viewModels()
+    private val jobDetailsViewModel: JobDetailsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,11 +78,34 @@ class MainActivity : AppCompatActivity() {
                             passwordResetViewModel = passwordResetViewModel,
                             smsSignInViewModel = smsSignInViewModel,
                             customersViewModel = customersViewModel,
+                            addCustomerViewModel = addCustomerViewModel,
+                            editCustomerViewModel = editCustomerViewModel,
                             addPropertyViewModel = addPropertyViewModel,
+                            propertyDetailViewModel = propertyDetailViewModel,
+                            editPropertyViewModel = editPropertyViewModel,
+                            managerHomeViewModel = managerHomeViewModel,
+                            jobDetailsViewModel = jobDetailsViewModel,
                             // Ending a session must also drop the session-scoped UI state: the
                             // customer list belongs to the session that read it (`BR-001`).
                             onSignOut = {
                                 customersViewModel.reset()
+                                // The New Customer form may hold a half-typed customer that belongs
+                                // to the ending session, so it is released with it (`BR-001`).
+                                addCustomerViewModel.reset()
+                                // The Edit Customer form holds a customer read with the ending
+                                // session, so it is released with it (`BR-001`).
+                                editCustomerViewModel.reset()
+                                // The Property screens hold business data read with the ending
+                                // session, so it is released with it (`BR-001`).
+                                addPropertyViewModel.reset()
+                                editPropertyViewModel.reset()
+                                propertyDetailViewModel.reset()
+                                // The manager home holds the operation the ending session read, so
+                                // it is released with it (`BR-001`).
+                                managerHomeViewModel.reset()
+                                // The Job Details screen holds a Job read with the ending session,
+                                // so it is released with it (`BR-001`).
+                                jobDetailsViewModel.reset()
                                 sessionViewModel.signOut()
                             },
                         )

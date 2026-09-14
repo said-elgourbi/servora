@@ -1,11 +1,17 @@
 package com.servora.android.ui.customers
 
+import com.servora.android.data.customers.ContactCreateResult
+import com.servora.android.data.customers.CreateCustomerContactRequest
+import com.servora.android.data.customers.CreateCustomerRequest
 import com.servora.android.data.customers.CreatePropertyRequest
+import com.servora.android.data.customers.CustomerCreateResult
 import com.servora.android.data.customers.CustomerDetailResult
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
+import com.servora.android.data.customers.CustomerUpdateResult
 import com.servora.android.data.customers.PropertyCreateResult
+import com.servora.android.data.customers.UpdateCustomerRequest
 import com.servora.android.domain.model.Customer
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerFilters
@@ -95,6 +101,29 @@ class CustomersViewModelTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.customers.single().isCompany)
+    }
+
+    @Test
+    fun `re-reads the list when a confirmed mutation changes a derived count`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            result = CustomersResult.Success(listOf(customer(id = "c1", propertyCount = 3))),
+        )
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.load()
+        advanceUntilIdle()
+        assertEquals(1, repository.reads)
+        assertEquals(3, viewModel.uiState.value.customers.single().propertyCount)
+
+        // A Property was archived on the backend while the detail was open, so the list is re-read
+        // rather than left describing the earlier count (`BR-001`).
+        repository.result =
+            CustomersResult.Success(listOf(customer(id = "c1", propertyCount = 2)))
+        viewModel.reload()
+        advanceUntilIdle()
+
+        assertEquals(2, repository.reads)
+        assertEquals(2, viewModel.uiState.value.customers.single().propertyCount)
     }
 
     @Test
@@ -454,14 +483,19 @@ private class RecordingCustomersRepository(
         CustomerDetailResult.Failure(CustomersFailureReason.UNEXPECTED),
     var createResult: PropertyCreateResult =
         PropertyCreateResult.Failure(CustomersFailureReason.UNEXPECTED),
+    var updateResult: CustomerUpdateResult =
+        CustomerUpdateResult.Failure(CustomersFailureReason.UNEXPECTED),
 ) : CustomersRepository {
 
     var reads: Int = 0
     var detailReads: Int = 0
     var propertyCreates: Int = 0
+    var updates: Int = 0
     var lastFilters: CustomerFilters? = null
     var lastDetailCustomerId: String? = null
     var lastCreateRequest: CreatePropertyRequest? = null
+    var lastUpdateCustomerId: String? = null
+    var lastUpdateRequest: UpdateCustomerRequest? = null
 
     override suspend fun listCustomers(filters: CustomerFilters): CustomersResult {
         reads += 1
@@ -483,5 +517,23 @@ private class RecordingCustomersRepository(
         lastDetailCustomerId = customerId
         lastCreateRequest = request
         return createResult
+    }
+
+    override suspend fun createCustomer(request: CreateCustomerRequest): CustomerCreateResult =
+        CustomerCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun createContact(
+        customerId: String,
+        request: CreateCustomerContactRequest,
+    ): ContactCreateResult = ContactCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun updateCustomer(
+        customerId: String,
+        request: UpdateCustomerRequest,
+    ): CustomerUpdateResult {
+        updates += 1
+        lastUpdateCustomerId = customerId
+        lastUpdateRequest = request
+        return updateResult
     }
 }

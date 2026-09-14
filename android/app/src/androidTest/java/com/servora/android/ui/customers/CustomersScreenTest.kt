@@ -2,7 +2,7 @@ package com.servora.android.ui.customers
 
 import android.content.Context
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.getBoundsInRoot
@@ -27,7 +27,8 @@ import org.junit.runner.RunWith
 
 /**
  * What the customers list renders: the floating New Customer action, the email stacked under the
- * phone number, the two tappable contact links and the derived property/job counts.
+ * phone number, the contact values (display-only, so a tap on one opens the customer) and the
+ * derived property/job counts.
  *
  * Business behaviour is covered by `CustomersViewModelTest`; these tests cover rendering, the
  * `customers.create` gate and the callback wiring only.
@@ -92,15 +93,32 @@ class CustomersScreenTest {
     }
 
     @Test
-    fun contactLinksAreTappable() {
+    fun contactValuesAreNotTapTargetsOfTheirOwn() {
         render(canCreateCustomer = true)
 
         composeTestRule
             .onNodeWithTag(customerPhoneTag("c1"), useUnmergedTree = true)
-            .assertHasClickAction()
+            .assertHasNoClickAction()
         composeTestRule
             .onNodeWithTag(customerEmailTag("c1"), useUnmergedTree = true)
-            .assertHasClickAction()
+            .assertHasNoClickAction()
+    }
+
+    @Test
+    fun tappingAContactValueOpensTheCustomerLikeTheRestOfTheRow() {
+        var opened: String? = null
+        render(canCreateCustomer = true, onOpenCustomer = { opened = it })
+
+        composeTestRule
+            .onNodeWithTag(customerPhoneTag("c1"), useUnmergedTree = true)
+            .performClick()
+        assertEquals("the phone number should open the customer", "c1", opened)
+
+        opened = null
+        composeTestRule
+            .onNodeWithTag(customerEmailTag("c1"), useUnmergedTree = true)
+            .performClick()
+        assertEquals("the email should open the customer", "c1", opened)
     }
 
     @Test

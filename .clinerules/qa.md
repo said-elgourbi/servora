@@ -77,6 +77,8 @@ The agent must use the repository's current commands rather than assuming these 
 
 If a required command does not exist, the agent must report that rather than silently substituting an unrelated command.
 
+**One category of verification is not the agent's to run.** Commands that talk to an Android device or emulator — `adb` itself, and Gradle tasks that drive a device through it (for example `connectedDebugAndroidTest`) — are the product owner's, because the product owner is the Android QA tester. The agent compiles device-test sources (`assembleDebugAndroidTest`) so they are known to build, and reports any test that would need a device as `NOT RUN — device QA is the product owner's`. See §7.3.
+
 ---
 
 # 4. API / Backend Testing
@@ -295,6 +297,25 @@ Expected:
 
 ---
 
+## 7.3 The agent never runs `adb` or any device command
+
+**The agent must never run `adb`.** No `adb` subcommand, for any reason: not to list devices, install or launch a build, forward a port, read `logcat`, take a screenshot or a UI dump, or to run instrumented tests.
+
+This also covers anything that drives a device through `adb` on the agent's behalf, including Gradle tasks that require a connected device or emulator (`connectedDebugAndroidTest`, `installDebug`, and the like).
+
+The reason is not only caution: the product owner is the Android QA tester and the phone is theirs, so a device command can install over, restart, interrupt or reconfigure the very build under test.
+
+What the agent does instead:
+
+* Compile the device-test sources (`./gradlew assembleDebugAndroidTest`) so they are known to build.
+* Run the device-free Android verification: JVM unit tests (`make android-test`), lint (`make android-lint`) and the debug build (`make android-build`).
+* Report every test that needs a device as `NOT RUN — device QA is the product owner's`, with the exact command the product owner would run.
+* Hand the product owner the build and the manual runbook described in §7.2, including the `adb` steps the product owner may choose to run themselves.
+
+If a task appears to require device interaction, the agent stops at that boundary and asks the product owner rather than working around it.
+
+---
+
 # 8. Offline & Synchronization Testing
 
 Offline behavior is a critical Servora capability.
@@ -495,6 +516,7 @@ A task may be reported as **Done** only when all applicable items have been veri
 * [ ] Android automated tests pass.
 * [ ] Android lint passes.
 * [ ] Android build succeeds.
+* [ ] The agent ran no `adb` and no device/emulator command (§7.3), and compiled any device-test sources instead.
 * [ ] Physical-device QA is either completed by the product owner or explicitly marked **Awaiting Physical QA**.
 * [ ] The agent does not claim physical-device acceptance.
 

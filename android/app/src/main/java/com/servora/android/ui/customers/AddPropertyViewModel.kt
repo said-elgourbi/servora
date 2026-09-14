@@ -31,17 +31,26 @@ class AddPropertyViewModel @Inject constructor(
     val uiState: StateFlow<AddPropertyUiState> = _uiState.asStateFlow()
 
     /**
-     * Scopes the form to [customerId].
+     * The form session [uiState] currently belongs to, or `null` before one has started.
      *
-     * A form already open for the same customer is left untouched, so a recomposition does not erase
-     * what the user typed. After a successful save the form is reset, so opening Add Property again
-     * for that customer starts empty instead of immediately re-reporting the previous save.
+     * It is bookkeeping for telling one session from another, not something the screen draws, so it
+     * deliberately does not live in [AddPropertyUiState].
      */
-    fun start(customerId: String) {
-        val current = _uiState.value
-        if (current.customerId == customerId && !current.isSaved) {
+    private var sessionId: String? = null
+
+    /**
+     * Begins the form session [sessionId], scoped to [customerId].
+     *
+     * A session is one destination instance. Re-entering the same [sessionId] — the screen being
+     * composed again after a configuration change — keeps what the user typed and any message the
+     * screen is showing. A different [sessionId] is a new form session, so the form starts empty and
+     * no validation or submission error from the previous session can appear (`BR-042`).
+     */
+    fun start(customerId: String, sessionId: String) {
+        if (sessionId == this.sessionId) {
             return
         }
+        this.sessionId = sessionId
         _uiState.value = AddPropertyUiState(customerId = customerId)
     }
 
@@ -71,18 +80,23 @@ class AddPropertyViewModel @Inject constructor(
             return
         }
         if (!state.canSave) {
-            _uiState.update { it.copy(saveAttempted = true) }
+            // A new attempt must not leave the previous attempt's answer on screen.
+            _uiState.update { it.copy(saveAttempted = true, failureReason = null) }
             return
         }
 
         _uiState.update {
             it.copy(isSaving = true, saveAttempted = true, failureReason = null)
         }
+        // A reply that arrives after the user has left this form session must not be folded into
+        // the next one (`BR-042`).
+        val startedSession = sessionId
         viewModelScope.launch {
             val result = customersRepository.createProperty(
                 customerId = state.customerId,
                 request = state.toRequest(),
             )
+            if (startedSession != sessionId) return@launch
             _uiState.update { current ->
                 when (result) {
                     is PropertyCreateResult.Success ->
@@ -97,6 +111,12 @@ class AddPropertyViewModel @Inject constructor(
 
     private fun edit(transform: (AddPropertyUiState) -> AddPropertyUiState) {
         _uiState.update { state -> transform(state).copy(failureReason = null) }
+    }
+
+    /** Releases the form's values when the app session ends (`BR-001`). */
+    fun reset() {
+        sessionId = null
+        _uiState.value = AddPropertyUiState()
     }
 }
 

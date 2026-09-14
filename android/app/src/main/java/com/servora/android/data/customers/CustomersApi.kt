@@ -3,6 +3,7 @@ package com.servora.android.data.customers
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -39,13 +40,18 @@ interface CustomersApi {
     ): CustomerDetailDto
 
     /**
-     * `GET /customers/{id}/properties` — the customer's active Properties with their derived row
-     * values (`BR-081`).
+     * `GET /customers/{id}/properties` — the customer's Properties with their derived row values
+     * (`BR-081`).
+     *
+     * [status] selects the lifecycle projection: the backend defaults to `ACTIVE` and an archived
+     * Property must be asked for explicitly (`BR-082`, `BR-083`), so a `null` omits the parameter.
+     * The value is a stable code the API validates (`BR-041`).
      */
     @GET("customers/{id}/properties")
     suspend fun properties(
         @Header("Authorization") authorization: String,
         @Path("id") id: String,
+        @Query("status") status: String? = null,
     ): List<CustomerPropertyDto>
 
     /**
@@ -68,4 +74,52 @@ interface CustomersApi {
         @Path("id") id: String,
         @Body request: CreatePropertyRequest,
     ): CustomerPropertyDto
+
+    /**
+     * `POST /customers` — creates an organization-owned customer (`BR-023`).
+     *
+     * The backend authorizes the write and owns the tenant scope, so the request never names an
+     * organization (`BR-001`, `BR-007`). The two methods exist because the create is discriminated:
+     * one request shape carries the `individual` payload, the other the `company` payload.
+     */
+    @POST("customers")
+    suspend fun createIndividualCustomer(
+        @Header("Authorization") authorization: String,
+        @Body request: CreateIndividualCustomerRequest,
+    ): CreatedCustomerDto
+
+    /** `POST /customers` — creates an organization-owned company customer (`BR-023`). */
+    @POST("customers")
+    suspend fun createCompanyCustomer(
+        @Header("Authorization") authorization: String,
+        @Body request: CreateCompanyCustomerRequest,
+    ): CreatedCustomerDto
+
+    /**
+     * `POST /customers/{id}/contacts` — records a contact on an existing customer (`BR-023`).
+     *
+     * The route requires `customers.edit`; the backend decides, and a customer the caller's
+     * organization does not own is reported as not found (`BR-001`).
+     */
+    @POST("customers/{id}/contacts")
+    suspend fun createContact(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: String,
+        @Body request: CreateCustomerContactRequest,
+    ): CustomerContactDto
+
+    /**
+     * `PATCH /customers/{id}` — edits an organization-owned customer (`BR-023`).
+     *
+     * The edit states the customer's kind, so the same call converts a customer between individual
+     * and company when the stated type differs from the stored one; the backend replaces the subtype
+     * record and records the conversion (`BR-087`). The backend authorizes the write with
+     * `customers.edit` and owns the tenant scope (`BR-001`, `BR-007`).
+     */
+    @PATCH("customers/{id}")
+    suspend fun updateCustomer(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: String,
+        @Body request: UpdateCustomerRequest,
+    ): CreatedCustomerDto
 }

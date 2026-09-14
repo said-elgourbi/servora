@@ -23,6 +23,7 @@ import com.servora.android.domain.model.CustomerProperty
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.PropertyStatus
 import com.servora.android.ui.theme.ServoraTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -174,6 +175,52 @@ class CustomerDetailScreenTest {
     }
 
     @Test
+    fun keepsArchivedPropertiesBehindAnExplicitDisclosure() {
+        render(state = loaded(archivedProperties = listOf(property(id = ARCHIVED_PROPERTY_ID, archived = true))))
+
+        scrollTo(CustomerDetailPropertiesTag)
+
+        // The section shows the active projection (`BR-081`), so the disclosure is the only thing
+        // that reveals an archived Property exists — and the only way to reach its Restore action.
+        composeTestRule.onNodeWithTag(CustomerDetailArchivedPropertiesTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(quantityString(R.plurals.customers_detail_archived_properties, 1))
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(customerDetailPropertyTag(ARCHIVED_PROPERTY_ID))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun revealsAnArchivedPropertyAndOpensIt() {
+        var opened: String? = null
+        render(
+            state = loaded(archivedProperties = listOf(property(id = ARCHIVED_PROPERTY_ID, archived = true))),
+            onOpenProperty = { opened = it },
+        )
+
+        scrollTo(CustomerDetailPropertiesTag)
+        composeTestRule.onNodeWithTag(CustomerDetailArchivedPropertiesTag).performClick()
+        scrollTo(customerDetailPropertyTag(ARCHIVED_PROPERTY_ID))
+
+        composeTestRule
+            .onNodeWithTag(customerDetailPropertyTag(ARCHIVED_PROPERTY_ID), useUnmergedTree = true)
+            .assertIsDisplayed()
+            .performClick()
+
+        assertEquals(ARCHIVED_PROPERTY_ID, opened)
+    }
+
+    @Test
+    fun hidesTheArchivedDisclosureWhenTheCustomerHasNone() {
+        render(state = loaded())
+
+        scrollTo(CustomerDetailPropertiesTag)
+
+        composeTestRule.onNodeWithTag(CustomerDetailArchivedPropertiesTag).assertDoesNotExist()
+    }
+
+    @Test
     fun reportsAFailedReadAndOffersToRetry() {
         var retried = 0
         render(
@@ -207,6 +254,7 @@ class CustomerDetailScreenTest {
         onAddProperty: () -> Unit = {},
         onRetry: () -> Unit = {},
         onSeeAllJobs: () -> Unit = {},
+        onOpenProperty: (String) -> Unit = {},
     ) {
         composeTestRule.setContent {
             ServoraTheme {
@@ -217,6 +265,7 @@ class CustomerDetailScreenTest {
                     onAddProperty = onAddProperty,
                     onSeeAllJobs = onSeeAllJobs,
                     onRetry = onRetry,
+                    onOpenProperty = onOpenProperty,
                     modifier = Modifier,
                 )
             }
@@ -225,6 +274,7 @@ class CustomerDetailScreenTest {
 
     private fun loaded(
         properties: List<CustomerProperty> = listOf(property()),
+        archivedProperties: List<CustomerProperty> = emptyList(),
         jobs: List<CustomerJob> = listOf(job()),
     ) = CustomerDetailUiState(
         customerId = CUSTOMER_ID,
@@ -248,6 +298,7 @@ class CustomerDetailScreenTest {
             ),
             properties = properties,
             jobs = jobs,
+            archivedProperties = archivedProperties,
         ),
     )
 
@@ -268,8 +319,12 @@ class CustomerDetailScreenTest {
         jobCount = 1,
     )
 
-    private fun property(lastServiceAt: String? = "2026-08-28T13:00:00Z") = CustomerProperty(
-        id = PROPERTY_ID,
+    private fun property(
+        id: String = PROPERTY_ID,
+        lastServiceAt: String? = "2026-08-28T13:00:00Z",
+        archived: Boolean = false,
+    ) = CustomerProperty(
+        id = id,
         name = "Cedar Lane Building",
         addressLine1 = "987 Cedar Lane",
         addressLine2 = null,
@@ -279,6 +334,7 @@ class CustomerDetailScreenTest {
         country = "Canada",
         jobCount = 4,
         lastServiceAt = lastServiceAt,
+        status = if (archived) PropertyStatus.ARCHIVED else PropertyStatus.ACTIVE,
     )
 
     private fun job(
@@ -320,6 +376,7 @@ class CustomerDetailScreenTest {
     private companion object {
         const val CUSTOMER_ID = "customer-1"
         const val PROPERTY_ID = "property-1"
+        const val ARCHIVED_PROPERTY_ID = "property-2"
         const val JOB_ID = "job-1"
         const val JOB_NUMBER = 1042
         const val CONTACT_NAME = "John Smith"

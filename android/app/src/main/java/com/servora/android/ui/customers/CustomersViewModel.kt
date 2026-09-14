@@ -49,6 +49,19 @@ class CustomersViewModel @Inject constructor(
     }
 
     /**
+     * Re-reads the list from the backend even when it is already loaded.
+     *
+     * Called when a confirmed mutation can change a derived value the list shows — a customer's
+     * Property count after a Property is created, archived or deleted, for example — so the list is
+     * not left describing an earlier read (`BR-001`). The backend remains the authority for the
+     * values the rows show.
+     */
+    fun reload() {
+        loadRequested = true
+        refresh()
+    }
+
+    /**
      * Forgets the loaded list and allows it to load again.
      *
      * Called when the session ends, so a user who signs in next does not see the previous user's

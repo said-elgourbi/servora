@@ -228,6 +228,60 @@ and, where the user's permissions allow, one contextual action
 The bar leaves `TopAppBarDefaults.windowInsets` in place, so it applies the status-bar inset itself
 and content begins directly below it. No status-bar height is hard-coded.
 
+## Management action row (Job Details)
+## Job Details — hierarchy and contextual actions
+
+The Manager Job Details screen reads top to bottom as the manager's question: what the job is, the
+visit that represents it, the technicians on that visit, and then the job's activity
+(`docs/tracker/019-android-job-details-hierarchy.md`). Each action is drawn with the record it affects
+rather than in one global action row, because a global row made every action look equally relevant to
+the whole screen and separated each one from the data it changes (`BR-066`). An action is drawn only
+when the session holds the capability the API enforces, and it is enabled from the backend's own answer
+rather than from a rule re-implemented in the client (`BR-006`, `BR-007`, `BR-041`). The Job's status
+control carries that rule one step further
+(`docs/tracker/020-android-job-details-status-control.md`): the chip that presents the status **is** the
+control that changes it, so the state a user wants to change is the thing they tap and no separate
+action is drawn beside it.
+
+Because a Job and its Visit are two state machines (`BR-059`), each status is named for what it belongs
+to: the header's status is labelled **Job status**, and the Visit card labels its row for the Visit's
+date rather than with a word that reads as a status, so the card's own badge is the only status a Visit
+appears to have (`docs/tracker/021-android-job-details-status-polish.md`).
+
+| Part | Token |
+| --- | --- |
+| Job identity | the Job number, `labelMedium` on `onSurfaceVariant`; then the title, `headlineSmall` bold on `onSurface`; then the description, `bodyMedium` on `onSurfaceVariant`. The number is stated once and is never repeated inside the title (`BR-052`). The three stay one group: the status is not drawn above them, so nothing separates the Job's number from what the Job is |
+| Job status | the identity's own labelled control: a `SectionLabel` reading **Job status**, then the status control below it, so the status is read as the Job's rather than as the header's decoration or the Visit's (`BR-028`, `BR-059`) |
+| Contextual action | `TextButton`, `labelLarge`, `heightIn(min = 48.dp)`; disabled with the platform's own dimming |
+| Status control | a Material 3 clickable `Surface` shaped as the shared status chip (`JobStatusPill`): the current status's own container and content colours, its 1 dp `content@25%` border, an 8 dp dot in the chip's own content colour that marks it as a status, the chip's localized label, and a 16 dp `ic_chevron_down` in the same content colour saying it opens something. Tapping it opens the control's own compact menu — one fixed 216 dp column anchored at the chip — made of an `outlineVariant` divider under a non-acting row stating the status the Job is in now (its own dot, its localized label, `bodyMedium` semibold and a 16 dp `ic_check_circle` in its accent colour, with the "Current status" content description), then one `DropdownMenuItem` per transition the API permits (`BR-058`), each a `bodyMedium` label with a dot in that status's accent colour rather than a second row of chips. Without the capability, or with no permitted transition, the status is drawn as the same dot-led chip and does not act (`BR-006`, `BR-007`); the two states differ only by the affordance the control adds, because the clickable `Surface` keeps the chip's own size, reserves the platform's touch target around it and confines the ripple to the chip |
+| Visit card row | the represented Visit's date is labelled **Visit date** (`labelMedium` on `onSurfaceVariant`, as every information row is) rather than with a word that reads as a status, and the Visit's status badge stays at the end of that row. The date row and the badge therefore state the Visit's date and its status, never the same thing twice (`BR-074`) |
+| Visit card action | at the foot of the visit card behind an `outlineVariant` divider: **Reschedule**, disabled when the API says the visit is not reschedulable (`BR-073`) |
+| Technicians section action | at the foot of the crew card behind the same divider: **Manage technicians**, which states the whole crew — adding a technician, removing one and naming the Lead (`BR-068`, `BR-069`) |
+| Action report | a Material 3 `SnackbarHost` at the bottom of the screen. What an action did is transient: `secondaryContainer` on `onSecondaryContainer`, `SnackbarDuration.Short`. A refusal waits for the user: `errorContainer` on `onErrorContainer`, `SnackbarDuration.Indefinite`, with a **Dismiss** text button |
+| Tappable information row | unchanged: no fill of its own; the row's whole width is the control, so the row's own tokens do not change. A row that opens the Job's address in the device's map application ends in the design's 18 dp `ic_navigation` glyph on `primary` (`Figma/src/screens/JobDetails.tsx`); the glyph also names that action for a screen reader, because the row's own text states the address and not what opening it does (`BR-028`). A Job with no address has nothing to navigate to, so that row is neither tappable nor marked (`BR-056`) |
+| Assignment sheet | a Material 3 `ModalBottomSheet`: one row per technician with a `Checkbox` and a Lead choice, and one primary button; a crew that is not exactly one Lead cannot be confirmed |
+| Reschedule dialog | an `AlertDialog` whose date and time fields open the platform pickers, plus length choices |
+| Conflict confirmation | an `AlertDialog` listing each overlapping technician, job number and window, with **Schedule anyway** as its confirming action (`BR-070`) |
+
+The action surfaces are localized in both languages and are the same rows the customer screens use for
+their own lifecycle actions, so the two features do not drift apart.
+
+**Why the report is transient.** A completed action needs no standing banner: the Job the API answered
+with already presents the change, so the report says the same thing twice and holds space the record
+needs (`BR-001`). A refusal is the opposite case — nothing on screen reflects a change that did not
+happen — so it stays until the user dismisses it.
+
+**Job Activity is a unified timeline** (`BR-080`, `docs/tracker/022-android-job-activity-timeline.md`).
+Below the technicians, the section reads one chronological, newest-first column over the Job's own
+events and every Visit's events. Each entry is a marker on a connecting vertical line — an initials
+avatar for a note, a quiet dot for a system event — followed by the action as the primary text, and
+`Visit N · member · time` (or `member · time` for a Job-level event) as secondary metadata. A Visit-level
+entry states its Visit as the derived `Visit N` sequence, never a database id. The section keeps an
+empty state, a loading state, and a failure state with retry, and the page reserves bottom clearance for
+the floating Add update action so the last entry is never covered. Notes as a write source (and the Add
+update action itself) are still undecided (`docs/tracker/022-android-job-activity-timeline.md`, open
+questions).
+
 ## Appearance controls (sign-in top bar)
 
 The sign-in screen's top bar carries the two app-level appearance controls — the language pill and
@@ -261,4 +315,40 @@ labelled by its own full name — "English" / "Français" for languages, "Light 
 ("Thème clair" / "Thème sombre") for appearance — and the visible two-letter language abbreviations
 are marked `clearAndSetSemantics {}` so TalkBack does not spell them out. The selected segment
 carries elevation as well as colour, so selection is never signalled by colour alone.
+
+## Keyboard (IME) inset (signed-in screens)
+
+The signed-in shell applies the keyboard inset once, on the `Scaffold` itself
+(`ServoraHomeScreen` → `Modifier.fillMaxSize().imePadding()`), so the keyboard shortens the whole
+shell — top bar, destination content and bottom navigation — instead of covering its lower part.
+
+Why the shell and not each form: applying the inset there shrinks the height every destination's
+scrollable content is measured against. That is the resize Compose reacts to by bringing a focused
+text field back into view, so the last field of a form (and the save/cancel row beneath it) stays
+visible while it is typed in. Insetting only the form's own content would instead leave a
+bottom-bar-sized gap between the form and the keyboard. Like the status-bar handling above, no
+keyboard height is hard-coded: where the platform already resizes the window for the IME, the
+reported inset is zero and nothing is applied twice.
+
+## Collapsible section headings (disclosure)
+
+A section whose own rows can grow long enough to push the rest of the screen out of sight puts its
+heading behind a disclosure, so the user folds the section away rather than losing the information:
+the heading stays, and it keeps the section's count. The manager home's **Needs attention** section
+is the first adopter (`docs/tracker/016-android-manager-home.md`); the customer detail's
+archived-Property disclosure uses the same chevron and rotation inside a section rather than as a
+heading.
+
+| Part | Token |
+| --- | --- |
+| Heading label | `colorScheme.onSurfaceVariant`, `labelSmall`, bold, from `section_count_format` (`"Label · n"`) — the same string the always-open sections' labels use |
+| Chevron | `colorScheme.onSurfaceVariant`, `ic_chevron_right`, 18 dp, rotated 90° while the rows are shown |
+| Touch target | the whole heading row, `≥ 48 dp` (`Modifier.heightIn(min = 48.dp)`) |
+| Ripple | clipped to `shapes.medium`, so the feedback stays inside the row |
+| Chevron content description | the action, not the state: "Show the items that need attention" / "Hide the items that need attention", localized (`BR-028`) |
+
+Only the section's own rows are hidden. Its heading, its count and the sections around it stay
+exactly where they were, and a section with nothing to show carries no chevron and no click.
+Whether a section starts expanded or collapsed is presentation, and belongs to the screen that owns
+the section (`BR-042`).
 

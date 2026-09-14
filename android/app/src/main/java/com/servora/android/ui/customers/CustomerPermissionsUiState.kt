@@ -12,6 +12,16 @@ data class CustomerPermissionsUiState(
     val canArchiveCustomer: Boolean,
     val canViewProperties: Boolean,
     val canCreateProperty: Boolean,
+    // The Property lifecycle capabilities default to denied, because a caller that does not name
+    // one has not been granted it (`BR-007`, `BR-085`).
+    val canEditProperty: Boolean = false,
+    val canArchiveProperty: Boolean = false,
+    val canDeleteProperty: Boolean = false,
+    // The Job and Visit capabilities the Job Details screen draws its management actions from
+    // (`BR-066`). They are denied unless the session names them, and they gate the UI only: the API
+    // authorizes every action it receives (`BR-007`).
+    val canUpdateJob: Boolean = false,
+    val canViewTechnicians: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -26,4 +36,9 @@ fun customerPermissionsUiState(
         // permissions and never inferred from the customer ones.
         canViewProperties = permissionChecker.has(Permission.PROPERTIES_VIEW),
         canCreateProperty = permissionChecker.has(Permission.PROPERTIES_CREATE),
+        canEditProperty = permissionChecker.has(Permission.PROPERTIES_EDIT),
+        canArchiveProperty = permissionChecker.has(Permission.PROPERTIES_ARCHIVE),
+        canDeleteProperty = permissionChecker.has(Permission.PROPERTIES_DELETE),
+        canUpdateJob = permissionChecker.has(Permission.JOB_UPDATE),
+        canViewTechnicians = permissionChecker.has(Permission.TECHNICIAN_VIEW),
     )

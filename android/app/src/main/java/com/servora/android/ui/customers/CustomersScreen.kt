@@ -12,13 +12,13 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,8 +31,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,7 +40,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
@@ -60,7 +57,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -80,6 +76,11 @@ import com.servora.android.domain.model.CustomerStatusFilter
 import com.servora.android.R
 import com.servora.android.ui.components.ServoraTopBar
 import com.servora.android.ui.components.ServoraTopBarState
+import com.servora.android.ui.components.initials
+import com.servora.android.ui.home.ManagerHomeScreen
+import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.ui.home.managerHomeHeader
+import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.navigation.ServoraNavHost
 import com.servora.android.ui.navigation.ServoraRoutes
 import com.servora.android.ui.navigation.servoraTopBarState
@@ -98,7 +99,7 @@ const val SettingsSignOutTag = "settings-sign-out"
 
 fun customerRowTag(customerId: String): String = "customer-row-$customerId"
 
-/** Tags for the two contact links the row makes tappable. */
+/** Tags for the row's two contact values. The row displays them; it does not dial or compose. */
 fun customerPhoneTag(customerId: String): String = "customer-phone-$customerId"
 fun customerEmailTag(customerId: String): String = "customer-email-$customerId"
 
@@ -155,11 +156,18 @@ private enum class DashboardTab { HOME, SCHEDULE, CUSTOMERS, SETTINGS }
 fun ServoraHomeScreen(
     permissions: CustomerPermissionsUiState,
     customersViewModel: CustomersViewModel,
+    addCustomerViewModel: AddCustomerViewModel,
+    editCustomerViewModel: EditCustomerViewModel,
     addPropertyViewModel: AddPropertyViewModel,
+    propertyDetailViewModel: PropertyDetailViewModel,
+    editPropertyViewModel: EditPropertyViewModel,
+    managerHomeViewModel: ManagerHomeViewModel,
+    jobDetailsViewModel: JobDetailsViewModel,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val customers by customersViewModel.uiState.collectAsState()
+    val managerHome by managerHomeViewModel.uiState.collectAsState()
     // The list is read once the user is allowed to see customers (`BR-007`); the backend still
     // decides whether the read succeeds.
     LaunchedEffect(permissions.canOpenCustomers) {
@@ -173,18 +181,36 @@ fun ServoraHomeScreen(
     val selectedTab = DashboardTab.valueOf(selected)
     val navController = rememberNavController()
 
+    // The home asks the backend for today's operation in the device's own zone, so the day the
+    // backend resolves is the day the manager is working in (`BR-001`).
+    val timeZoneId = remember { ZoneId.systemDefault().id }
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == DashboardTab.HOME) {
+            managerHomeViewModel.load(timeZoneId)
+        }
+    }
+
     // The one contextual top bar. A root destination shows the title of the tab the user is on and
     // no back control; a pushed screen replaces this with its own title, a back control and its
     // contextual actions (`docs/decisions/011-android-contextual-top-bar.md`).
+    //
+    // Home is the exception the design calls for: the manager's home opens with a greeting and the
+    // current date rather than the tab's name. It is the same one top bar, so the home still does
+    // not stack a second header above its content.
+    val homeHeader = managerHomeHeader(managerHome.home?.displayName)
     val rootTitle = when (selectedTab) {
-        DashboardTab.HOME -> stringResource(R.string.nav_home)
+        DashboardTab.HOME -> homeHeader.title
         DashboardTab.SCHEDULE -> stringResource(R.string.nav_schedule)
         DashboardTab.CUSTOMERS -> stringResource(R.string.nav_customers)
         DashboardTab.SETTINGS -> stringResource(R.string.nav_settings)
     }
     val topBarState = servoraTopBarState(
         navController = navController,
-        rootState = ServoraTopBarState(title = rootTitle, isRoot = true),
+        rootState = ServoraTopBarState(
+            title = rootTitle,
+            isRoot = true,
+            subtitle = if (selectedTab == DashboardTab.HOME) homeHeader.subtitle else null,
+        ),
         permissions = permissions,
         // The customer a destination belongs to, for the destinations that show it as context. The
         // detail is read by the destination itself, so this lookup answers as soon as it has.
@@ -198,7 +224,16 @@ fun ServoraHomeScreen(
     )
 
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        // The window draws edge-to-edge (enforced from Android 15 for this target SDK), so the
+        // keyboard is an inset the app has to apply rather than a window resize. Without it the
+        // soft keyboard simply covers the bottom of the shell, which leaves a form's last field
+        // and its actions underneath the keyboard while it is being typed in.
+        //
+        // The inset belongs to the shell rather than to each form: insetting here shrinks what the
+        // destination's scrollable content is measured against, which is the resize Compose answers
+        // by bringing a focused field back into view, and it lifts the bottom navigation with the
+        // content instead of leaving a bottom-bar-sized gap above the keyboard.
+        modifier = modifier.fillMaxSize().imePadding(),
         topBar = { ServoraTopBar(state = topBarState) },
         bottomBar = {
             DashboardNavigation(
@@ -217,7 +252,12 @@ fun ServoraHomeScreen(
         ServoraNavHost(
             navController = navController,
             customersViewModel = customersViewModel,
+            addCustomerViewModel = addCustomerViewModel,
+            editCustomerViewModel = editCustomerViewModel,
             addPropertyViewModel = addPropertyViewModel,
+            propertyDetailViewModel = propertyDetailViewModel,
+            editPropertyViewModel = editPropertyViewModel,
+            jobDetailsViewModel = jobDetailsViewModel,
             permissions = permissions,
             // The bottom-navigation area is the graph's root destination; the drill-down screens are
             // pushed on top of it.
@@ -241,7 +281,19 @@ fun ServoraHomeScreen(
                         )
 
                     DashboardTab.HOME ->
-                        DashboardHomeTab(modifier = Modifier)
+                        ManagerHomeScreen(
+                            state = managerHome,
+                            // A condition or a schedule row opens the Job it is about: the Job
+                            // Details destination is where the manager acts on it (`BR-012`).
+                            onOpenJob = { jobId ->
+                                navController.navigate(ServoraRoutes.jobDetail(jobId))
+                            },
+                            // "See all" and the tab are the same destination: the schedule area is
+                            // where today can be worked on, and it already exists in the bottom
+                            // navigation.
+                            onOpenSchedule = { selected = DashboardTab.SCHEDULE.name },
+                            onRetry = { managerHomeViewModel.retry(timeZoneId) },
+                        )
 
                     DashboardTab.SCHEDULE ->
                         PlaceholderTab(
@@ -1051,16 +1103,15 @@ private fun jobFilterLabel(filter: CustomerJobFilter): String =
 
 @Composable
 private fun CustomerRow(customer: CustomerListItem, onClick: () -> Unit) {
-    val context = LocalContext.current
     val since = remember(customer.createdAt) { customerSince(customer.createdAt) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(customerRowTag(customer.id))
             // The whole row opens Customer Details, so it carries Material's standard pressed
-            // feedback (the ripple); the shape clip bounds it to the row. The phone and email
-            // links are nested clickables with their own feedback, so pressing one dials or
-            // composes without also opening the customer.
+            // feedback (the ripple); the shape clip bounds it to the row. The phone and email are
+            // drawn as ordinary row content rather than nested links, so a tap that lands on one
+            // opens the customer instead of dialling or composing.
             .clip(MaterialTheme.shapes.large)
             .clickable(onClick = onClick)
             .padding(horizontal = CustomerRowGutter, vertical = 14.dp),
@@ -1111,24 +1162,24 @@ private fun CustomerRow(customer: CustomerListItem, onClick: () -> Unit) {
                     )
                 }
             }
-            // Phone then email, each on its own line under the name with a deliberate gap. Both
-            // are links: the phone dials and the email composes, as the design wires them.
+            // Phone then email, each on its own line under the name with a deliberate gap. They are
+            // values, not links: the row's only action is opening the customer, so a tap that lands
+            // on a contact value opens the customer rather than dialling or composing. Customer
+            // Details keeps both as `tel:`/`mailto:` links.
             customer.phone?.let { phone ->
                 Spacer(Modifier.height(4.dp))
-                CustomerLinkLine(
+                CustomerContactLine(
                     modifier = Modifier.testTag(customerPhoneTag(customer.id)),
                     text = phone,
                     glyph = R.drawable.ic_phone,
-                    onClick = { context.startContactIntent(dialIntent(phone)) },
                 )
             }
             customer.email?.let { email ->
                 Spacer(Modifier.height(2.dp))
-                CustomerLinkLine(
+                CustomerContactLine(
                     modifier = Modifier.testTag(customerEmailTag(customer.id)),
                     text = email,
                     glyph = R.drawable.ic_mail,
-                    onClick = { context.startContactIntent(mailIntent(email)) },
                 )
             }
 
@@ -1151,19 +1202,29 @@ private fun CustomerRow(customer: CustomerListItem, onClick: () -> Unit) {
     }
 }
 
-/** A tappable contact line. The phone dials; the email composes a message. */
+/**
+ * One contact line under a customer's name: the leading glyph and the value.
+ *
+ * The line is a link only when [onClick] is supplied — Customer Details passes the `tel:`/`mailto:`
+ * action for the phone and the email, while the customers list passes none so that a tap on a
+ * contact value opens the customer rather than dialling or composing
+ * (`docs/tracker/007-android-customers-list.md`).
+ */
 @Composable
-internal fun CustomerLinkLine(
+internal fun CustomerContactLine(
     text: String,
     glyph: Int,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
 ) {
+    val shape = MaterialTheme.shapes.small
+    val lineModifier = if (onClick == null) {
+        modifier.clip(shape)
+    } else {
+        modifier.clip(shape).clickable(onClick = onClick)
+    }
     Row(
-        modifier = modifier
-            .clip(MaterialTheme.shapes.small)
-            .clickable(onClick = onClick)
-            .padding(vertical = 2.dp),
+        modifier = lineModifier.padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -1246,9 +1307,9 @@ internal fun mailIntent(email: String): Intent =
 /**
  * Starts an outbound contact intent.
  *
- * A device with no dialer or email client keeps the value visible in the row instead of crashing
- * the list. The failure is logged rather than rethrown because nothing in the app can recover from
- * a missing platform app; the contact value itself is never logged.
+ * A device with no dialer or email client keeps the value visible instead of crashing the screen.
+ * The failure is logged rather than rethrown because nothing in the app can recover from a missing
+ * platform app; the contact value itself is never logged.
  */
 internal fun Context.startContactIntent(intent: Intent) {
     try {
@@ -1297,13 +1358,6 @@ internal fun CustomerAvatar(
     }
 }
 
-internal fun initials(name: String): String =
-    name.split(" ")
-        .filter { it.isNotBlank() }
-        .take(2)
-        .joinToString("") { it.first().uppercaseChar().toString() }
-        .ifBlank { "?" }
-
 /**
  * Formats the customer's created timestamp as the row's "since" date in the device locale.
  *
@@ -1346,80 +1400,6 @@ internal fun StatusPill(status: CustomerStatus, modifier: Modifier = Modifier) {
             fontWeight = FontWeight.Bold,
             color = if (active) colors.success else MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-/**
- * The create/edit customer form. It is still a stub — the customer write path does not exist yet — so
- * it draws its field and its save action and leaves them inert.
- *
- * It draws content only: this destination's title and back control belong to the app shell's one
- * contextual top bar.
- */
-@Composable
-internal fun CustomerFormScreen(
-    title: String,
-    action: String,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = "",
-            onValueChange = {},
-            label = { Text(title) },
-            shape = MaterialTheme.shapes.large,
-        )
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = {}, shape = MaterialTheme.shapes.large) {
-            Text(action)
-        }
-    }
-}
-
-@Composable
-private fun DashboardHomeTab(modifier: Modifier) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        item {
-            SectionLabel(label = stringResource(R.string.home_attention_title), count = null)
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                shape = MaterialTheme.shapes.large,
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text(
-                        text = stringResource(R.string.home_attention_sample_title),
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = stringResource(R.string.home_attention_sample_detail),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-        item {
-            SectionLabel(label = stringResource(R.string.home_today_title), count = null)
-            InfoCard {
-                Text(
-                    text = stringResource(R.string.home_today_jobs_sample),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = stringResource(R.string.home_today_detail_sample),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 
@@ -1583,33 +1563,6 @@ internal fun CustomersError(onRetry: () -> Unit) {
         Button(onClick = onRetry, shape = MaterialTheme.shapes.medium) {
             Text(stringResource(R.string.customers_retry))
         }
-    }
-}
-
-@Composable
-internal fun SectionLabel(label: String, count: Int?) {
-    Text(
-        text = if (count == null) label else stringResource(R.string.section_count_format, label, count),
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Spacer(Modifier.height(8.dp))
-}
-
-@Composable
-internal fun InfoCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape = MaterialTheme.shapes.large,
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            content = content,
-        )
     }
 }
 

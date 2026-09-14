@@ -1,11 +1,17 @@
 package com.servora.android.ui.customers
 
+import com.servora.android.data.customers.ContactCreateResult
+import com.servora.android.data.customers.CreateCustomerContactRequest
+import com.servora.android.data.customers.CreateCustomerRequest
 import com.servora.android.data.customers.CreatePropertyRequest
+import com.servora.android.data.customers.CustomerCreateResult
 import com.servora.android.data.customers.CustomerDetailResult
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
+import com.servora.android.data.customers.CustomerUpdateResult
 import com.servora.android.data.customers.PropertyCreateResult
+import com.servora.android.data.customers.UpdateCustomerRequest
 import com.servora.android.domain.model.CustomerFilters
 import com.servora.android.domain.model.CustomerProperty
 import com.servora.android.domain.model.PropertyProvince
@@ -49,7 +55,7 @@ class AddPropertyViewModelTest {
     fun `starts empty and writes nothing until asked`() {
         val repository = RecordingRepository()
         val viewModel = AddPropertyViewModel(repository)
-        viewModel.start("c1")
+        viewModel.start("c1", "session-1")
 
         val state = viewModel.uiState.value
         assertEquals("c1", state.customerId)
@@ -63,7 +69,7 @@ class AddPropertyViewModelTest {
     fun `does not send an incomplete form and marks what is missing`() = runTest(dispatcher) {
         val repository = RecordingRepository()
         val viewModel = AddPropertyViewModel(repository)
-        viewModel.start("c1")
+        viewModel.start("c1", "session-1")
 
         viewModel.save()
         advanceUntilIdle()
@@ -75,10 +81,82 @@ class AddPropertyViewModelTest {
     }
 
     @Test
+    fun `does not carry a validation message into a new form session`() {
+        val viewModel = AddPropertyViewModel(RecordingRepository())
+        viewModel.start("c1", "session-1")
+        viewModel.save()
+        assertTrue(viewModel.uiState.value.showsValidationError)
+
+        // Leaving the form and opening it again is a new destination instance, so the previous
+        // attempt's message must not appear again.
+        viewModel.start("c1", "session-2")
+
+        assertFalse(viewModel.uiState.value.showsValidationError)
+    }
+
+    @Test
+    fun `does not carry a refused save into a new form session`() = runTest(dispatcher) {
+        val repository = RecordingRepository(
+            createResult = PropertyCreateResult.Failure(CustomersFailureReason.VALIDATION),
+        )
+        val viewModel = AddPropertyViewModel(repository)
+        viewModel.start("c1", "session-1")
+        fillValid(viewModel)
+        viewModel.save()
+        advanceUntilIdle()
+        assertEquals(CustomersFailureReason.VALIDATION, viewModel.uiState.value.failureReason)
+
+        viewModel.start("c1", "session-2")
+
+        assertNull(viewModel.uiState.value.failureReason)
+        assertFalse(viewModel.uiState.value.showsValidationError)
+        assertEquals("", viewModel.uiState.value.addressLine1)
+    }
+
+    @Test
+    fun `clears the validation message once the missing fields are filled`() {
+        val viewModel = AddPropertyViewModel(RecordingRepository())
+        viewModel.start("c1", "session-1")
+        viewModel.save()
+        assertTrue(viewModel.uiState.value.showsValidationError)
+
+        fillValid(viewModel)
+
+        assertFalse(viewModel.uiState.value.showsValidationError)
+    }
+
+    @Test
+    fun `clears the previous submission error when the next save starts`() = runTest(dispatcher) {
+        val repository = RecordingRepository(
+            createResult = PropertyCreateResult.Failure(CustomersFailureReason.VALIDATION),
+        )
+        val viewModel = AddPropertyViewModel(repository)
+        viewModel.start("c1", "session-1")
+        fillValid(viewModel)
+        viewModel.save()
+        advanceUntilIdle()
+        assertEquals(CustomersFailureReason.VALIDATION, viewModel.uiState.value.failureReason)
+
+        // The next attempt is answered differently and left in flight, so the state can be read
+        // while it is being made.
+        repository.createResult = PropertyCreateResult.Success(property())
+        repository.gate = CompletableDeferred()
+        viewModel.save()
+        advanceUntilIdle()
+
+        assertNull(viewModel.uiState.value.failureReason)
+        assertTrue(viewModel.uiState.value.isSaving)
+
+        repository.gate?.complete(Unit)
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.isSaved)
+    }
+
+    @Test
     fun `sends every field the model has and leaves blank optionals absent`() = runTest(dispatcher) {
         val repository = RecordingRepository()
         val viewModel = AddPropertyViewModel(repository)
-        viewModel.start("c1")
+        viewModel.start("c1", "session-1")
         viewModel.onStreetAddressChange("  987 Cedar Lane ")
         viewModel.onCityChange(" Montreal ")
         viewModel.onProvinceChange(PropertyProvince.QC)
@@ -103,7 +181,7 @@ class AddPropertyViewModelTest {
     fun `carries the optional fields when they are filled in`() = runTest(dispatcher) {
         val repository = RecordingRepository()
         val viewModel = AddPropertyViewModel(repository)
-        viewModel.start("c1")
+        viewModel.start("c1", "session-1")
         fillValid(viewModel)
         viewModel.onNameChange("Cedar Lane Building")
         viewModel.onUnitChange("Suite 200")
@@ -124,7 +202,7 @@ class AddPropertyViewModelTest {
             createResult = PropertyCreateResult.Success(property()),
         )
         val viewModel = AddPropertyViewModel(repository)
-        viewModel.start("c1")
+        viewModel.start("c1", "session-1")
         fillValid(viewModel)
 
         viewModel.save()
@@ -142,7 +220,7 @@ class AddPropertyViewModelTest {
             createResult = PropertyCreateResult.Failure(CustomersFailureReason.VALIDATION),
         )
         val viewModel = AddPropertyViewModel(repository)
-        viewModel.start("c1")
+        viewModel.start("c1", "session-1")
         fillValid(viewModel)
 
         viewModel.save()
@@ -158,7 +236,7 @@ class AddPropertyViewModelTest {
     fun `ignores a second save while the first is still in flight`() = runTest(dispatcher) {
         val repository = RecordingRepository().apply { gate = CompletableDeferred() }
         val viewModel = AddPropertyViewModel(repository)
-        viewModel.start("c1")
+        viewModel.start("c1", "session-1")
         fillValid(viewModel)
 
         viewModel.save()
@@ -175,36 +253,46 @@ class AddPropertyViewModelTest {
     }
 
     @Test
-    fun `keeps a form already open for the same customer and resets it for another`() {
+    fun `keeps an in-progress form within a session and starts empty for a new one`() {
         val viewModel = AddPropertyViewModel(RecordingRepository())
-        viewModel.start("c1")
+        viewModel.start("c1", "session-1")
         viewModel.onStreetAddressChange("1 Main Street")
 
-        viewModel.start("c1")
+        // Recomposing the same destination instance is the same session, so the form is kept.
+        viewModel.start("c1", "session-1")
         assertEquals("1 Main Street", viewModel.uiState.value.addressLine1)
 
-        viewModel.start("c2")
+        // A new destination instance is a new session, even for the same customer.
+        viewModel.start("c1", "session-2")
+        assertEquals("c1", viewModel.uiState.value.customerId)
+        assertEquals("", viewModel.uiState.value.addressLine1)
+
+        // A session opened for another customer is scoped to that customer.
+        viewModel.start("c2", "session-3")
         assertEquals("c2", viewModel.uiState.value.customerId)
         assertEquals("", viewModel.uiState.value.addressLine1)
     }
 
     @Test
-    fun `starts a fresh form for a customer whose property was just created`() = runTest(dispatcher) {
-        val repository = RecordingRepository(
-            createResult = PropertyCreateResult.Success(property()),
-        )
-        val viewModel = AddPropertyViewModel(repository)
-        viewModel.start("c1")
-        fillValid(viewModel)
-        viewModel.save()
-        advanceUntilIdle()
-        assertTrue(viewModel.uiState.value.isSaved)
+    fun `starts a fresh form after a save when the destination is opened again`() =
+        runTest(dispatcher) {
+            val repository = RecordingRepository(
+                createResult = PropertyCreateResult.Success(property()),
+            )
+            val viewModel = AddPropertyViewModel(repository)
+            viewModel.start("c1", "session-1")
+            fillValid(viewModel)
+            viewModel.save()
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.isSaved)
 
-        viewModel.start("c1")
+            // Opening Add Property again is a new destination instance, so the form starts empty
+            // instead of immediately re-reporting the previous save.
+            viewModel.start("c1", "session-2")
 
-        assertFalse(viewModel.uiState.value.isSaved)
-        assertEquals("", viewModel.uiState.value.addressLine1)
-    }
+            assertFalse(viewModel.uiState.value.isSaved)
+            assertEquals("", viewModel.uiState.value.addressLine1)
+        }
 
     private fun fillValid(viewModel: AddPropertyViewModel) {
         viewModel.onStreetAddressChange("987 Cedar Lane")
@@ -268,4 +356,18 @@ private class RecordingRepository(
         gate?.await()
         return createResult
     }
+
+    override suspend fun createCustomer(request: CreateCustomerRequest): CustomerCreateResult =
+        CustomerCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun updateCustomer(
+        customerId: String,
+        request: UpdateCustomerRequest,
+    ): CustomerUpdateResult =
+        CustomerUpdateResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun createContact(
+        customerId: String,
+        request: CreateCustomerContactRequest,
+    ): ContactCreateResult = ContactCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
 }

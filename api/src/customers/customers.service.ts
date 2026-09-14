@@ -7,8 +7,6 @@ import {
   exists,
   getTableColumns,
   inArray,
-  isNotNull,
-  ne,
   notExists,
   sql,
 } from 'drizzle-orm';
@@ -19,16 +17,19 @@ import {
   customerCompanies,
   customerContacts,
   customerIndividuals,
+  customerLifecycleHistory,
   customers,
   jobs,
-  organizationMembers,
   properties,
   propertyCustomerRelationships,
-  userProfiles,
-  visitTechnicians,
   visits,
 } from '../database/schema.js';
+import { DomainValidationError } from '../validation/domain-validation.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
+import {
+  readAssignedTechnicians,
+  selectVisitsForJobs,
+} from '../jobs/visit-assignment.js';
 import {
   DEFAULT_CUSTOMER_LIST_FILTERS,
   type CustomerJobFilter,
@@ -36,12 +37,15 @@ import {
 } from './customer-list-filter.dto.js';
 import type { CreateCustomerAddressDto } from './customer-address.dto.js';
 import type { CreateCustomerContactDto } from './customer-contact.dto.js';
-import { PROPERTY_COUNTRY, type CreatePropertyDto } from './property.dto.js';
+import {
+  DEFAULT_PROPERTY_LIST_FILTERS,
+  PROPERTY_COUNTRY,
+  type CreatePropertyDto,
+  type PropertyListFilters,
+} from './property.dto.js';
 import type {
-  AssignmentRoleCode,
   CustomerDetail,
   CustomerJobSummary,
-  CustomerJobTechnician,
   CustomerPropertySummary,
 } from './customer-detail.dto.js';
 import type {
@@ -384,16 +388,29 @@ export class CustomersService {
     );
   }
 
-  /** Updates customer-level data while preserving the customer's existing subtype. */
+  /**
+   * Updates a customer's own data, converting it between individual and company when the edit
+   * states the other type (`BR-087`).
+   *
+   * A conversion changes `customers.type`, removes the previous subtype record and writes the new
+   * matching one in the same transaction, so the customer's type and its subtype record can never
+   * disagree; the conversion is recorded in append-only lifecycle history. No value is carried
+   * between the two subtype concepts — the edit supplies the new type's fields.
+   */
   async updateCustomer(
-    scope: OrganizationScope,
+    scope: OrganizationScope & { readonly membershipId: string },
     customerId: string,
     input: UpdateCustomerDto,
   ): Promise<IndividualCustomer | CompanyCustomer> {
     const existing = await this.requireCustomerInScope(scope, customerId);
+    const convertedType =
+      input.type !== undefined && input.type !== existing.type
+        ? input.type
+        : null;
 
     await this.db.transaction(async (tx) => {
       const header = {
+        ...(input.type === undefined ? {} : { type: input.type }),
         ...(input.displayName === undefined
           ? {}
           : { displayName: input.displayName }),
@@ -425,7 +442,63 @@ export class CustomersService {
           );
       }
 
-      if (existing.type === 'INDIVIDUAL' && input.individual !== undefined) {
+      if (convertedType !== null) {
+        // The previous subtype record is the other table's row, so it is removed here and the new
+        // type's record is written in its place — in this transaction, never in a second one.
+        if (convertedType === 'INDIVIDUAL') {
+          const individual = input.individual;
+          if (
+            individual?.firstName === undefined ||
+            individual.lastName === undefined
+          ) {
+            throw new DomainValidationError([
+              'individual.firstName and individual.lastName are required to convert to an individual',
+            ]);
+          }
+          await tx
+            .delete(customerCompanies)
+            .where(eq(customerCompanies.customerId, customerId));
+          await tx.insert(customerIndividuals).values({
+            customerId,
+            firstName: individual.firstName,
+            lastName: individual.lastName,
+            dateOfBirth: individual.dateOfBirth ?? null,
+          });
+        } else {
+          const company = input.company;
+          if (company?.legalName === undefined) {
+            throw new DomainValidationError([
+              'company.legalName is required to convert to a company',
+            ]);
+          }
+          await tx
+            .delete(customerIndividuals)
+            .where(eq(customerIndividuals.customerId, customerId));
+          await tx.insert(customerCompanies).values({
+            customerId,
+            legalName: company.legalName,
+            businessName: company.businessName ?? null,
+            taxNumber: company.taxNumber ?? null,
+          });
+        }
+
+        await tx.insert(customerLifecycleHistory).values({
+          organizationId: scope.organizationId,
+          customerId,
+          action: 'TYPE_CONVERTED',
+          fromType: existing.type,
+          toType: convertedType,
+          actorMembershipId: scope.membershipId,
+        });
+        return;
+      }
+
+      if (input.individual !== undefined) {
+        if (existing.type !== 'INDIVIDUAL') {
+          throw new DomainValidationError([
+            'individual must not be supplied for a COMPANY customer',
+          ]);
+        }
         const individual = {
           ...(input.individual.firstName === undefined
             ? {}
@@ -445,7 +518,12 @@ export class CustomersService {
         }
       }
 
-      if (existing.type === 'COMPANY' && input.company !== undefined) {
+      if (input.company !== undefined) {
+        if (existing.type !== 'COMPANY') {
+          throw new DomainValidationError([
+            'company must not be supplied for an INDIVIDUAL customer',
+          ]);
+        }
         const company = {
           ...(input.company.legalName === undefined
             ? {}
@@ -691,19 +769,21 @@ export class CustomersService {
   }
 
   /**
-   * Lists the `ACTIVE` Properties the customer is currently related to, each with the values its
-   * row renders (`BR-050`, `BR-081`, `BR-082`).
+   * Lists the Properties the customer is related to, each with the values its row renders
+   * (`BR-050`, `BR-081`, `BR-082`).
    *
    * `jobCount` counts every Job the Property is associated with, whatever its status.
    * `lastServiceAt` is the scheduled start of the most recent `COMPLETED` Visit across those Jobs,
    * or `null` when there is none. Both are derived; neither is stored (`BR-081`).
    *
-   * An `ARCHIVED` Property is still one of the customer's relationships but is not part of the
-   * default projection; it is reached through the explicit archived views.
+   * The default filter is `ACTIVE`, because archiving is how a Property leaves active use
+   * (`BR-083`); an archived Property is still one of the customer's relationships and is requested
+   * explicitly with `status=ARCHIVED` or `status=ALL`.
    */
   async findCustomerPropertiesInOrganization(
     scope: OrganizationScope,
     customerId: string,
+    filters: PropertyListFilters = DEFAULT_PROPERTY_LIST_FILTERS,
   ): Promise<CustomerPropertySummary[]> {
     await this.requireCustomerInScope(scope, customerId);
 
@@ -744,7 +824,9 @@ export class CustomersService {
           ),
           eq(propertyCustomerRelationships.customerId, customerId),
           sql`${propertyCustomerRelationships.endedAt} is null`,
-          eq(properties.status, ACTIVE_PROPERTY_STATUS),
+          filters.status === 'ALL'
+            ? undefined
+            : eq(properties.status, filters.status),
         ),
       )
       .groupBy(properties.id)
@@ -820,6 +902,10 @@ export class CustomersService {
   /**
    * Lists the customer's Jobs, most recently created first, each with its selected Visit's schedule
    * and technicians (`BR-048`, `BR-081`).
+   *
+   * The selected Visit and its crew are resolved by `jobs/visit-assignment.ts`, which the Job Details
+   * read shares: the customer's Job row and the Job's own screen must never disagree about which Visit
+   * represents a Job or who is assigned to it (`BR-041`).
    */
   async findCustomerJobsInOrganization(
     scope: OrganizationScope,
@@ -841,11 +927,13 @@ export class CustomersService {
       return [];
     }
 
-    const selectedVisits = await this.selectedVisitsForJobs(
+    const selectedVisits = await selectVisitsForJobs(
+      this.db,
       scope,
       rows.map((job) => job.id),
     );
-    const technicians = await this.techniciansForVisits(
+    const technicians = await readAssignedTechnicians(
+      this.db,
       scope,
       [...selectedVisits.values()].map((visit) => visit.visitId),
     );
@@ -864,125 +952,6 @@ export class CustomersService {
             : (technicians.get(selected.visitId) ?? []),
       };
     });
-  }
-
-  /**
-   * Chooses each Job's single **selected Visit** (`BR-081`).
-   *
-   * The selected Visit is the Job's earliest upcoming non-canceled Visit by scheduled start,
-   * falling back to the most recent past Visit by scheduled start. A Visit with no scheduled start
-   * is never selected: the schedule is exactly what the Visit would have to supply.
-   *
-   * Upcoming and past are settled with `DISTINCT ON` so the choice is made in the database and the
-   * result stays one row per Job.
-   */
-  private async selectedVisitsForJobs(
-    scope: OrganizationScope,
-    jobIds: string[],
-  ): Promise<Map<string, { visitId: string; scheduledStart: Date }>> {
-    const selection = {
-      jobId: visits.jobId,
-      visitId: visits.id,
-      scheduledStart: visits.scheduledStart,
-    };
-    const scoped = and(
-      eq(visits.organizationId, scope.organizationId),
-      inArray(visits.jobId, jobIds),
-      isNotNull(visits.scheduledStart),
-    );
-
-    const [upcoming, past] = await Promise.all([
-      this.db
-        .selectDistinctOn([visits.jobId], selection)
-        .from(visits)
-        .where(
-          and(
-            scoped,
-            sql`${visits.scheduledStart} >= now()`,
-            ne(visits.status, 'CANCELED'),
-          ),
-        )
-        .orderBy(visits.jobId, asc(visits.scheduledStart)),
-      this.db
-        .selectDistinctOn([visits.jobId], selection)
-        .from(visits)
-        .where(and(scoped, sql`${visits.scheduledStart} < now()`))
-        .orderBy(visits.jobId, desc(visits.scheduledStart)),
-    ]);
-
-    const selected = new Map<
-      string,
-      { visitId: string; scheduledStart: Date }
-    >();
-    // The past Visit is the fallback, so it is written first and an upcoming Visit overrides it.
-    for (const row of [...past, ...upcoming]) {
-      selected.set(row.jobId, {
-        visitId: row.visitId,
-        scheduledStart: row.scheduledStart as Date,
-      });
-    }
-    return selected;
-  }
-
-  /** The technicians currently assigned to each Visit, Lead first (`BR-068`, `BR-081`). */
-  private async techniciansForVisits(
-    scope: OrganizationScope,
-    visitIds: string[],
-  ): Promise<Map<string, CustomerJobTechnician[]>> {
-    if (visitIds.length === 0) {
-      return new Map();
-    }
-
-    const rows = await this.db
-      .select({
-        visitId: visitTechnicians.visitId,
-        membershipId: visitTechnicians.technicianMembershipId,
-        roleCode: visitTechnicians.roleCode,
-        displayName: userProfiles.displayName,
-        firstName: userProfiles.firstName,
-        lastName: userProfiles.lastName,
-      })
-      .from(visitTechnicians)
-      .innerJoin(
-        organizationMembers,
-        eq(
-          organizationMembers.id,
-          visitTechnicians.technicianMembershipId,
-        ),
-      )
-      .leftJoin(
-        userProfiles,
-        eq(userProfiles.userId, organizationMembers.userId),
-      )
-      .where(
-        and(
-          eq(visitTechnicians.organizationId, scope.organizationId),
-          inArray(visitTechnicians.visitId, visitIds),
-        ),
-      )
-      .orderBy(
-        sql`case when ${visitTechnicians.roleCode} = 'LEAD' then 0 else 1 end`,
-        asc(visitTechnicians.createdAt),
-      );
-
-    const byVisit = new Map<string, CustomerJobTechnician[]>();
-    for (const row of rows) {
-      const name =
-        row.displayName ??
-        ([row.firstName, row.lastName]
-          .filter((part): part is string => part !== null)
-          .join(' ')
-          .trim() ||
-          null);
-      const assigned = byVisit.get(row.visitId) ?? [];
-      assigned.push({
-        membershipId: row.membershipId,
-        name,
-        roleCode: row.roleCode as AssignmentRoleCode,
-      });
-      byVisit.set(row.visitId, assigned);
-    }
-    return byVisit;
   }
 
   /** Resolves a customer within the tenant boundary or fails closed. */
@@ -1024,7 +993,7 @@ export class CustomersService {
  * text depending on how the driver types it. Both shapes describe the same instant, so both are
  * accepted here rather than trusted to be one.
  */
-function asDate(value: Date | string | null): Date | null {
+export function asDate(value: Date | string | null): Date | null {
   if (value === null) {
     return null;
   }

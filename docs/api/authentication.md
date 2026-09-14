@@ -284,6 +284,7 @@ Customer resource endpoints are the first permission-protected HTTP resource in 
 | `GET /customers`         | `customers.view`    |
 | `GET /customers/:id`     | `customers.view`    |
 | `POST /customers`        | `customers.create`  |
+| `POST /customers/:id/contacts` | `customers.edit` |
 | `PATCH /customers/:id`   | `customers.edit`    |
 | `PUT /customers/:id`     | `customers.edit`    |
 | `POST /customers/:id/archive` | `customers.archive` |

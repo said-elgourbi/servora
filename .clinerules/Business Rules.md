@@ -792,7 +792,7 @@ Android, Angular, API, Database
 **Expected behavior:**
 Jobs support the core Servora workflow across management and field applications.
 
-The job lifecycle, scheduling semantics, completion rules and business constraints are defined by BR-047 – BR-080.
+The job lifecycle, scheduling semantics, completion rules, follow-up Visit request workflow and business constraints are defined by BR-047 – BR-080 and BR-FV-001 – BR-FV-013.
 
 **Exceptions:**
 None.
@@ -1250,10 +1250,16 @@ Android, Angular, API, Database
 A Job may enter `PENDING_REVIEW` only when:
 
 1. No Visit remains active or scheduled.
-2. The latest completed Visit outcome indicates that the Job may be resolved (BR-078).
+2. The latest completed Visit outcome indicates that the Job may be resolved (`RESOLVED`), or an
+   authorized office decision has resolved the follow-up requirement by determining that no further
+   Visit is necessary (BR-078, BR-FV-007).
 
 - If another Visit remains scheduled or active, the Job remains `IN_PROGRESS` even after a `RESOLVED` outcome.
 - Outcomes such as `NEEDS_PARTS`, `NEEDS_FOLLOWUP` and `UNABLE_TO_COMPLETE` keep the Job in `IN_PROGRESS`.
+- If a follow-up request exists for the latest completed Visit, the Job remains open while that
+  request is pending or awaiting clarification. If an authorized office user rejects the request
+  because no further Visit is required, that decision resolves the follow-up requirement for the
+  purpose of review entry (BR-FV-004, BR-FV-007).
 - `PENDING_REVIEW` is a review state and does not itself complete the Job (BR-062).
 
 **Exceptions:**
@@ -1401,6 +1407,7 @@ Android, Angular, API
 - Authorization is enforced by the API; UI restrictions are convenience only (BR-007).
 - Technicians can operate the field execution lifecycle of their assigned Visits: `SCHEDULED → EN_ROUTE → ON_SITE → IN_PROGRESS → COMPLETED` (BR-074).
 - Technicians cannot perform Job-level or dispatch-management actions, including: cancel a Job, cancel a Visit, mark `NO_SHOW`, reopen a Job, change Job status, assign or remove technicians, or change a Job's Property.
+- The exception is an explicit direct scheduling permission: a technician granted that permission may schedule a follow-up Visit directly under BR-FV-011. The permission is granted through the normal permission model and is not implied by the default Technician role.
 - Managers/authorized users perform those actions according to their permissions (BR-006).
 - The implementation must support custom roles and direct member permissions rather than hard-coding these actions to the Manager system role alone (BR-004).
 
@@ -1617,6 +1624,61 @@ None.
 **Status:**
 **CONFIRMED** — audit expectations, offline-capable archive/restore, online-only permanent deletion, API authority
 **OPEN QUESTION** — the per-operation offline conflict strategy (BR-032)
+
+---
+
+## BR-087 — A Customer can be converted between individual and company
+
+**Description:**
+An authorized user may change an existing Customer from an individual to a company, or from a
+company to an individual, as an explicit edit of that Customer. The Customer keeps its identity: it
+is the same Customer, with the same Jobs, Properties, contacts, addresses and history.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- A Customer is converted by changing its `type` (`INDIVIDUAL` ⇄ `COMPANY`) (`BR-023`). There is no
+  separate "convert" operation and no new Customer is created.
+- The conversion is an explicit edit performed by an authorized user (`BR-067`); it is never a side
+  effect of any other action.
+- The edit must supply **the required fields of the new type**: an individual Customer's first and
+  last name, or a company Customer's legal name. A conversion that omits them is rejected.
+- **No field is mapped between the two subtype concepts.** An individual's name is never turned into
+  a company's legal name and a company's name is never split into an individual's names. The
+  converting user states the new type's values.
+- The conversion is atomic: the Customer's `type` is changed, the previous subtype record is
+  removed and the new matching subtype record is written in **one transaction**. There is no state in
+  which a Customer's `type` and its subtype record disagree.
+- The resulting invariant is unchanged: **exactly one subtype record exists and it matches
+  `customers.type`** (`BR-023`).
+- The conversion is recorded in Customer lifecycle/audit history (`BR-033`), carrying:
+  the Customer, the previous type, the new type, the member who performed it, and the timestamp.
+  The previous subtype's personal/business values are **not** copied into that record.
+- The Customer's own data is otherwise unaffected: its identity, `displayName`, contact and billing
+  fields, notes, preferred contact method, language and status are only changed if the same edit
+  changes them. Its Jobs, Properties, Property relationships, contacts and addresses are untouched,
+  and preserved address snapshots (`BR-056`, `BR-057`) are never rewritten.
+- The backend authorizes the conversion with `customers.edit` and applies it; clients never decide
+  it (`BR-001`, `BR-007`).
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- The conversion's own history is the confirmation required by `BR-067`; the lifecycle record is
+  append-only and never rewritten.
+- Field-level audit of the previous subtype values is not modelled. If a compliance or reporting
+  requirement needs it, it is a later decision rather than something an implementation adds now
+  (`BR-033`, `BR-042`).
+- Removing the previous subtype record is the consequence of the type change, not a deletion of the
+  Customer's business history: the subtype table holds the current type-specific values only, and the
+  Customer's identity and relationships are preserved.
+
+**Status:**
+**CONFIRMED**
 
 ---
 
@@ -2125,6 +2187,268 @@ The technician self-edit time window/policy is not defined. It is independent of
 **Status:**
 **CONFIRMED** — recorded corrections and immutability after Job completion
 **OPEN QUESTION** — the technician self-edit window/policy
+
+---
+
+# 12A. Follow-Up Visit Requests
+
+## BR-FV-001 — Technician may request a follow-up visit
+
+**Description:**
+A technician assigned to a Visit may indicate that additional on-site work is required and submit a request for a follow-up Visit.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The request is associated with the Job.
+- The request identifies the source Visit that caused the need for additional work (BR-FV-008).
+- The request is an operational decision record; it is not itself a Visit (BR-FV-002).
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-002 — Follow-up request is not a scheduled Visit
+
+**Description:**
+Submitting a follow-up request does not automatically create or schedule a new Visit.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- A request remains pending until reviewed by an authorized office user, unless the technician has explicit scheduling permission (BR-FV-011).
+- A pending request does not count as an active or scheduled Visit for scheduling, conflict detection, or the derived "Needs Scheduling / No Active Visit" condition (BR-060).
+- The Job may remain open because of the request, but no Visit exists until approval creates one (BR-FV-005).
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-003 — Technician provides proposed scheduling information
+
+**Description:**
+When requesting a follow-up Visit, the technician may provide proposed scheduling information.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+The request may include:
+
+- reason for the follow-up;
+- preferred or customer-agreed date/time;
+- expected duration;
+- relevant notes;
+- whether the same technician is preferred.
+
+The proposed date/time is informational until approved. It is not the Visit's authoritative schedule (BR-072).
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-004 — Office controls final scheduling
+
+**Description:**
+An authorized office user reviews and decides follow-up requests.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+A Manager, Dispatcher, Scheduler, or another member with the appropriate permission may:
+
+- accept the proposed schedule;
+- change the date/time;
+- assign different technician(s);
+- return the request for clarification;
+- reject the request if no additional Visit is required.
+
+Authorization is permission-based and must not depend on role display names (BR-004, BR-006).
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-005 — Approval creates the Visit
+
+**Description:**
+A new Visit is created only when an authorized user approves and schedules the follow-up request.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Approval creates a new Visit on the same Job.
+- The created Visit follows the normal Visit scheduling and assignment rules (BR-068, BR-070, BR-072).
+- Approval records the created Visit so the request and resulting Visit remain traceable.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-006 — Technician may continue without knowing the final schedule
+
+**Description:**
+The technician may complete the current Visit after submitting a follow-up request.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The current Visit can be completed according to the normal Visit completion rules (BR-077, BR-078).
+- The follow-up request remains associated with the Job for office review.
+- The technician does not need to know the final follow-up schedule in order to complete the current Visit.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-007 — Job remains open when additional work is required
+
+**Description:**
+If a completed Visit indicates that additional work is required, the Job must not be considered completed solely because the Visit was completed.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The Job remains open until the required follow-up work is resolved or an authorized user determines that no further Visit is necessary.
+- A pending follow-up request prevents the Job from being treated as ready for completion.
+- Rejecting a follow-up request because no additional Visit is required is an explicit office decision and must be recorded.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-008 — Follow-up request retains its source Visit
+
+**Description:**
+Every follow-up request must reference the Visit that caused the request.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The request stores the source Visit identifier.
+- The source Visit must belong to the same Job and organization as the request.
+- The source reference is preserved so the business can trace why additional work was requested.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-009 — Multiple follow-up requests are allowed
+
+**Description:**
+A Job may require multiple Visits.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Each completed Visit may independently result in another follow-up request.
+- Multiple requests may exist for the same Job over time.
+- Each request carries its own source Visit, status, decision and audit information.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-010 — Customer agreement does not bypass office approval
+
+**Description:**
+A technician may agree on a preferred return time with the customer, but that agreement is not a confirmed Servora appointment.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Customer-agreed timing is stored as proposed scheduling information (BR-FV-003).
+- The appointment is not confirmed until an authorized user approves and schedules it, unless the technician has explicit scheduling permission (BR-FV-011).
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-011 — Authorized technicians may schedule directly
+
+**Description:**
+A company may grant selected technicians explicit scheduling permission.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- A technician with explicit scheduling permission may schedule a follow-up Visit directly instead of submitting it for office approval.
+- Without that permission, technicians may only request follow-up Visits.
+- Direct scheduling still follows the normal Visit scheduling, assignment, conflict and audit rules (BR-067, BR-068, BR-070, BR-072).
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-012 — Follow-up request status must be explicit
+
+**Description:**
+A follow-up request must have an explicit lifecycle.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The request lifecycle uses stable status codes.
+- The minimum lifecycle is `PENDING → APPROVED | REJECTED`.
+- A request returned for clarification remains unresolved until it is later approved or rejected.
+- If the office modifies the technician's proposed schedule before approval, the request is still considered approved once the resulting Visit is created.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-FV-013 — Follow-up decision must be auditable
+
+**Description:**
+Follow-up request decisions are business decisions and must be traceable.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Servora retains who requested the follow-up and when.
+- Servora retains who approved, rejected, or returned the request for clarification and when.
+- Approval records the resulting Visit.
+- Rejection records that no further Visit is required or why the request was refused.
+
+**Status:**
+**CONFIRMED**
 
 ---
 

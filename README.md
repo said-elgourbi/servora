@@ -5,7 +5,9 @@ Field-service management platform.
 Servora is a monorepo built feature by feature as controlled vertical slices.
 
 - **API** — NestJS (TypeScript ESM) + PostgreSQL (Drizzle ORM). The backend is the authoritative system of record (BR-001).
-- **Android** — Kotlin / Jetpack Compose native field application (offline-first). Implemented for authentication, appearance controls, customers and the customer Property surface.
+- **Android** — Kotlin / Jetpack Compose native field application (offline-first). Implemented for
+  authentication, appearance controls, the Manager Home, the Manager Job Details screen (read and
+  management actions), customers and the customer Property surface.
 - **Angular** — management/office client. *Not yet implemented.*
 
 Initial supported languages are **English** and **French**. Development rules live in
@@ -24,14 +26,23 @@ Initial supported languages are **English** and **French**. Development rules li
 >
 > Job, Property and Visit business rules are defined in `Business Rules.md` (§8, §11, §12 and §13;
 > BR-047 – BR-086). The **Property** part of the Job & Visit data model is migrated
-> (`0007_property_lifecycle_and_permissions`); the Job and Visit tables are designed but not
-> migrated yet.
+> (`0007_property_lifecycle_and_permissions`), and the **Job and Visit** tables are migrated by
+> `0003`; their first read is `GET /jobs/:id`.
 >
 > Customer, Property-permission and Property-lifecycle work is tracked in
-> `docs/tracker/006-customers-feature-permissions.md` … `docs/tracker/012-property-permissions-and-lifecycle-schema.md`.
+> `docs/tracker/006-customers-feature-permissions.md` … `docs/tracker/013-property-lifecycle.md`.
 > The Property permission set and the lifecycle decisions are recorded in
 > `docs/decisions/012-property-lifecycle-and-permissions.md`, and the offline/outbox standard the
 > Property lifecycle follows is `docs/architecture/offline-first-architecture.md`.
+>
+> Add Customer is `docs/tracker/014-android-add-customer.md`; Edit Customer, including converting a
+> customer between individual and company (`BR-087`), is `docs/tracker/015-android-edit-customer.md`.
+>
+> The Android Manager Home and the operational read behind it (`GET /home/manager`) are
+> `docs/tracker/016-android-manager-home.md`; the wire contract is `docs/api/manager-home.md`.
+>
+> The Android Manager Job Details screen and the job read behind it (`GET /jobs/:id`) are
+> `docs/tracker/017-android-job-details.md`; the wire contract is `docs/api/job-details.md`.
 
 ## Layout
 
@@ -123,6 +134,20 @@ make android-build       # Android debug APK (requires Android SDK)
 - Property permissions, the archived projection and the Property lifecycle schema:
   `docs/tracker/012-property-permissions-and-lifecycle-schema.md`
   (decision: `docs/decisions/012-property-lifecycle-and-permissions.md`).
+- Property lifecycle (edit, archive, restore, permanent delete) across the API and Android:
+  `docs/tracker/013-property-lifecycle.md`.
+- Add Customer: `docs/tracker/014-android-add-customer.md`.
+- Edit Customer and customer type conversion (individual ⇄ company, `BR-087`):
+  `docs/tracker/015-android-edit-customer.md`.
+- Android Manager Home and its operational read: `docs/tracker/016-android-manager-home.md`
+  (wire contract: `docs/api/manager-home.md`).
+- Android Manager Job Details and its Job read: `docs/tracker/017-android-job-details.md`
+  (wire contract: `docs/api/job-details.md`); its management actions:
+  `docs/tracker/018-android-job-actions.md` (wire contract: `docs/api/job-actions.md`).
+- Manager Job Details hierarchy and contextual actions: `docs/tracker/019-android-job-details-hierarchy.md`.
+- The Job's status chip as the status control, and the address row's map glyph:
+  `docs/tracker/020-android-job-details-status-control.md`.
+- Job Details status polish — the labelled **Job status** control, its compact menu and the Visit date
+  label: `docs/tracker/021-android-job-details-status-polish.md`.
 - Offline/outbox standard for Android: `docs/architecture/offline-first-architecture.md`.
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.
-

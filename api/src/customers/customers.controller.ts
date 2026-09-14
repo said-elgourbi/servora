@@ -14,7 +14,10 @@ import {
 } from '@nestjs/common';
 import { AuthApiError } from '../auth/auth-error.js';
 import { AuthGuard } from '../auth/auth.guard.js';
-import { CUSTOMER_PERMISSIONS, PROPERTY_PERMISSIONS } from '../auth/permissions.js';
+import {
+  CUSTOMER_PERMISSIONS,
+  PROPERTY_PERMISSIONS,
+} from '../auth/permissions.js';
 import { RequirePermissions } from '../auth/permissions.decorator.js';
 import { PermissionsGuard } from '../auth/permissions.guard.js';
 import type { PermissionedRequest } from '../auth/permissions.guard.js';
@@ -38,8 +41,16 @@ import type {
   CustomerJobDto,
   CustomerPropertyDto,
 } from './customer-detail.dto.js';
+import {
+  parseCreateCustomerContactDto,
+  toCustomerContactDto,
+} from './customer-contact.dto.js';
+import type { CustomerContactDto } from './customer-contact.dto.js';
 import { parseCustomerListFilters } from './customer-list-filter.dto.js';
-import { parseCreatePropertyDto } from './property.dto.js';
+import {
+  parseCreatePropertyDto,
+  parsePropertyListFilters,
+} from './property.dto.js';
 import {
   CustomerNotFoundError,
   CustomersService,
@@ -87,11 +98,19 @@ export class CustomersController {
   async properties(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
+    @Query() query: unknown,
   ): Promise<CustomerPropertyDto[]> {
     const scope = requireAuthorization(request);
+    // Archived Properties are excluded by default; a client asks for them explicitly with
+    // `?status=ARCHIVED` or `?status=ALL` (`BR-082`, `BR-083`).
+    const filters = parseInput(() => parsePropertyListFilters(query));
     try {
       const summaries =
-        await this.customers.findCustomerPropertiesInOrganization(scope, id);
+        await this.customers.findCustomerPropertiesInOrganization(
+          scope,
+          id,
+          filters,
+        );
       return summaries.map(toCustomerPropertyDto);
     } catch (error) {
       if (error instanceof CustomerNotFoundError) {
@@ -205,6 +224,39 @@ export class CustomersController {
     }
   }
 
+  /**
+   * Adds a contact to a customer the caller's organization owns (`BR-023`).
+   *
+   * Authorization is `customers.edit`. Maintaining an existing customer's own records is what that
+   * capability governs, and the interim Property-create decision used the same capability before the
+   * Property catalogue existed (`ADR-012` D1). Whether contacts warrant their own capability set, as
+   * Properties received in `BR-085`, is an **OPEN QUESTION** for product ownership; until it is
+   * decided this route never grants more than `customers.edit` already does.
+   *
+   * A customer the caller's organization does not own is `404 CUSTOMER_NOT_FOUND`, never `403`
+   * (`BR-001`).
+   */
+  @Post(':id/contacts')
+  @RequirePermissions(CUSTOMER_PERMISSIONS.EDIT)
+  async addContact(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<CustomerContactDto> {
+    const scope = requireAuthorization(request);
+    const input = parseInput(() => parseCreateCustomerContactDto(body));
+    try {
+      return toCustomerContactDto(
+        await this.customers.addContact(scope, id, input),
+      );
+    } catch (error) {
+      if (error instanceof CustomerNotFoundError) {
+        throw notFound();
+      }
+      throw error;
+    }
+  }
+
   private async update(
     request: PermissionedRequest,
     id: string,
@@ -219,6 +271,11 @@ export class CustomersController {
     } catch (error) {
       if (error instanceof CustomerNotFoundError) {
         throw notFound();
+      }
+      // The service rejects an edit the request shape alone cannot judge — a subtype payload that
+      // contradicts the customer's stored type (`BR-042`, `BR-087`) — as a domain validation failure.
+      if (error instanceof DomainValidationError) {
+        throw AuthApiError.validationFailed(error.issues.join('; '));
       }
       throw error;
     }

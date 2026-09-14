@@ -109,6 +109,23 @@ lives in one subtype table, joined **1–0..1** by `customer_id`:
 the service layer (`api/src/customers/customer-subtype.ts`), not by a database trigger, and is
 covered by unit tests (`customer-subtype.spec.ts`) and integration tests.
 
+### 7.1 Converting a customer between individual and company (`BR-087`)
+
+A customer's `type` may be changed by an authorized edit: the edit states the other type and the
+fields that type requires, and the previous subtype record is replaced by the new one. No value is
+carried between the two subtype concepts — an individual's names never become a company's legal name,
+and a company's legal name is never split into a person's names.
+
+The three writes happen in **one transaction** — `customers.type`, the removal of the previous
+subtype row and the insertion of the new one — so no state exists in which the type and the subtype
+record disagree, and `BR-023`'s invariant holds before and after. The conversion also appends one row
+to `customer_lifecycle_history` (`TYPE_CONVERTED`, `from_type`, `to_type`, `actor_membership_id`,
+`recorded_at`). The replaced subtype's own values are deliberately **not** copied into that row.
+
+The customer's identity, its other header values, its contacts, its addresses, its Jobs, its
+Properties and Property relationships and every preserved address snapshot are untouched by a
+conversion.
+
 Subtype rows share the customer's lifetime. A customer is soft-deleted through `customers.deleted_at`
 rather than physically deleted during normal business operations.
 
@@ -146,6 +163,7 @@ All controlled values are stored as **stable, machine-readable VARCHAR codes** g
 | `customers.status`                   | `ACTIVE`, `INACTIVE`                                |
 | `customers.preferred_contact_method` | `EMAIL`, `PHONE`, `SMS`, `NONE`                     |
 | `customers.language`                 | `en-CA`, `fr-CA`                                    |
+| `customer_lifecycle_history.action`  | `TYPE_CONVERTED`                                    |
 | `customer_addresses.type`            | `SERVICE`, `BILLING`, `OTHER`                       |
 
 Localized labels (English/French) are resolved from these codes at presentation time; the
@@ -204,13 +222,14 @@ Legend: 1──* one-to-many · 1──0..1 one-to-zero-or-one (subtype) · *─
 | Concern                             | Location                                                                                                    |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Tables + relations (Drizzle)        | `api/src/database/schema.ts`                                                                                |
-| Migrations                          | `api/drizzle/migrations/0000_foundation_domain_model.sql`, `api/drizzle/migrations/0004_woozy_spitfire.sql` |
+| Migrations                          | `api/drizzle/migrations/0000_foundation_domain_model.sql`, `api/drizzle/migrations/0004_woozy_spitfire.sql`, `api/drizzle/migrations/0008_customer_lifecycle_history.sql` |
 | Domain types + status codes         | `api/src/{organizations,users,members,customers}/*.types.ts`                                                |
 | DTOs + parsers (no `password_hash`) | `api/src/{organizations,users,members,customers}/*.dto.ts`                                                  |
 | Shared validation helpers           | `api/src/validation/domain-validation.ts`                                                                   |
 | Argon2id hashing                    | `api/src/users/password-hasher.ts`                                                                          |
 | Tenant scope type                   | `api/src/tenancy/tenant-scope.ts`                                                                           |
 | Customer subtype invariant          | `api/src/customers/customer-subtype.ts`                                                                     |
+| Customer type conversion            | `api/src/customers/customers.service.ts` (`updateCustomer`)                                                 |
 | Tenant-scoped customer persistence  | `api/src/customers/customers.service.ts`                                                                    |
 | Customer API authorization          | `api/src/auth/permissions.guard.ts`, `api/src/customers/customers.controller.ts`                             |
 | Android models (Kotlin)             | `android/app/src/main/java/com/servora/android/domain/model/`                                               |

@@ -29,8 +29,19 @@ data class AddPropertyUiState(
     val saveAttempted: Boolean = false,
     val isSaved: Boolean = false,
     val failureReason: CustomersFailureReason? = null,
+    /**
+     * The Property the form edits, or `null` while it creates one.
+     *
+     * Add Property and Edit Property share this form and its validation; only the destination, the
+     * action label and whether a version is carried back differ.
+     */
+    val propertyId: String? = null,
+    /** Whether the form is still reading the Property it edits. */
+    val isLoading: Boolean = false,
+    /** The version the backend last reported for the Property being edited (`BR-086`). */
+    val version: Int? = null,
 ) {
-    /** The minimum the API requires to create a Property (`BR-049`). */
+    /** The minimum the API requires to create or edit a Property (`BR-049`, `BR-084`). */
     val canSave: Boolean
         get() = addressLine1.isNotBlank() &&
             city.isNotBlank() &&

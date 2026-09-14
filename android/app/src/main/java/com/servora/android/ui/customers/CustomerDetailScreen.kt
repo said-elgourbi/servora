@@ -24,10 +24,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -42,11 +47,15 @@ import com.servora.android.R
 import com.servora.android.domain.model.Customer
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerJob
-import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.CustomerJobTechnician
 import com.servora.android.domain.model.CustomerProperty
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.PropertyStatus
+import com.servora.android.ui.components.InfoCard
+import com.servora.android.ui.components.JobStatusPill
+import com.servora.android.ui.components.SectionLabel
+import com.servora.android.ui.components.addressLine
 import com.servora.android.ui.theme.stateColors
 
 const val CustomerDetailTag = "customer-detail"
@@ -57,6 +66,9 @@ const val CustomerDetailPropertiesTag = "customer-detail-properties"
 const val CustomerDetailJobsTag = "customer-detail-jobs"
 const val CustomerDetailSeeAllJobsTag = "customer-detail-see-all-jobs"
 const val CustomerDetailAddPropertyTag = "customer-detail-add-property"
+
+/** The disclosure that keeps the customer's archived Properties reachable (`BR-082`). */
+const val CustomerDetailArchivedPropertiesTag = "customer-detail-archived-properties"
 
 fun customerDetailPropertyTag(propertyId: String): String =
     "customer-detail-property-$propertyId"
@@ -85,6 +97,7 @@ fun CustomerDetailScreen(
     onAddProperty: () -> Unit,
     onSeeAllJobs: () -> Unit,
     onRetry: () -> Unit,
+    onOpenProperty: (propertyId: String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val detail = state.detail
@@ -101,6 +114,7 @@ fun CustomerDetailScreen(
                     canAddProperty = canAddProperty,
                     onAddProperty = onAddProperty,
                     onSeeAllJobs = onSeeAllJobs,
+                    onOpenProperty = onOpenProperty,
                 )
 
             state.failureReason != null -> CustomersError(onRetry = onRetry)
@@ -139,6 +153,7 @@ private fun CustomerDetailContent(
     canAddProperty: Boolean,
     onAddProperty: () -> Unit,
     onSeeAllJobs: () -> Unit,
+    onOpenProperty: (propertyId: String) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag(CustomerDetailContentTag),
@@ -154,8 +169,10 @@ private fun CustomerDetailContent(
             item {
                 CustomerPropertiesSection(
                     properties = detail.properties,
+                    archivedProperties = detail.archivedProperties,
                     canAddProperty = canAddProperty,
                     onAddProperty = onAddProperty,
+                    onOpenProperty = onOpenProperty,
                 )
             }
         }
@@ -236,7 +253,7 @@ private fun CustomerDetailContactCard(customer: Customer) {
             )
         }
         customer.phone?.let { phone ->
-            CustomerLinkLine(
+            CustomerContactLine(
                 text = phone,
                 glyph = R.drawable.ic_phone,
                 onClick = { context.startContactIntent(dialIntent(phone)) },
@@ -246,7 +263,7 @@ private fun CustomerDetailContactCard(customer: Customer) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
         customer.email?.let { email ->
-            CustomerLinkLine(
+            CustomerContactLine(
                 text = email,
                 glyph = R.drawable.ic_mail,
                 onClick = { context.startContactIntent(mailIntent(email)) },
@@ -276,16 +293,24 @@ private fun CustomerNotesCard(notes: String) {
  * The customer's Properties, each with the backend's derived job count and last service date
  * (`BR-081`).
  *
- * All Properties are listed: the design truncates the section and continues to a Property list,
- * which this app does not have yet. Showing everything keeps a Property the backend returned from
- * being unreachable.
+ * Every active Property is listed: the design truncates the section and continues to a Property
+ * list, which this app does not have yet. Showing everything keeps a Property the backend returned
+ * from being unreachable.
+ *
+ * The customer's archived Properties are excluded from the active projection (`BR-081`), so they sit
+ * behind the [ArchivedPropertiesDisclosure] rather than being listed as active work. Without that
+ * disclosure an archived Property would be unreachable from Android and could never be restored
+ * (`BR-082`).
  */
 @Composable
 private fun CustomerPropertiesSection(
     properties: List<CustomerProperty>,
+    archivedProperties: List<CustomerProperty>,
     canAddProperty: Boolean,
     onAddProperty: () -> Unit,
+    onOpenProperty: (propertyId: String) -> Unit,
 ) {
+    val hasArchived = archivedProperties.isNotEmpty()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -296,7 +321,9 @@ private fun CustomerPropertiesSection(
             count = properties.size,
         )
         InfoCard {
-            if (properties.isEmpty()) {
+            // The empty state belongs only to a customer with no Property at all: telling a user
+            // with archived Properties that none were added would contradict the rows below it.
+            if (properties.isEmpty() && !hasArchived) {
                 Text(
                     text = stringResource(R.string.customers_detail_no_properties_title),
                     style = MaterialTheme.typography.bodyMedium,
@@ -312,16 +339,92 @@ private fun CustomerPropertiesSection(
                     if (index > 0) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
-                    CustomerPropertyRow(property)
+                    CustomerPropertyRow(
+                        property = property,
+                        onClick = { onOpenProperty(property.id) },
+                    )
                 }
+            }
+            if (hasArchived) {
+                if (properties.isNotEmpty()) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+                ArchivedPropertiesDisclosure(
+                    properties = archivedProperties,
+                    onOpenProperty = onOpenProperty,
+                )
             }
             // Adding a Property is part of managing the customer, so the affordance lives with the
             // Properties it adds to and is drawn only when the user may write (`BR-007`, `BR-011`).
             if (canAddProperty) {
-                if (properties.isNotEmpty()) {
+                if (properties.isNotEmpty() || hasArchived) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
                 AddPropertyAction(onClick = onAddProperty)
+            }
+        }
+    }
+}
+
+/**
+ * The customer's archived Properties, behind an explicit disclosure.
+ *
+ * The default section stays the active projection (`BR-081`) while an archived Property — which the
+ * backend keeps as a real record (`BR-082`) — remains reachable and therefore restorable. The rows
+ * open the same Property Detail screen as an active one, where the Restore action lives.
+ */
+@Composable
+private fun ArchivedPropertiesDisclosure(
+    properties: List<CustomerProperty>,
+    onOpenProperty: (propertyId: String) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(CustomerDetailArchivedPropertiesTag),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .clickable { expanded = !expanded }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                modifier = Modifier.weight(1f),
+                text = pluralStringResource(
+                    R.plurals.customers_detail_archived_properties,
+                    properties.size,
+                    properties.size,
+                ),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Icon(
+                painter = painterResource(R.drawable.ic_chevron_right),
+                contentDescription = stringResource(
+                    if (expanded) {
+                        R.string.customers_detail_archived_properties_hide
+                    } else {
+                        R.string.customers_detail_archived_properties_show
+                    },
+                ),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(18.dp)
+                    .rotate(if (expanded) 90f else 0f),
+            )
+        }
+        if (expanded) {
+            properties.forEach { property ->
+                CustomerPropertyRow(
+                    property = property,
+                    onClick = { onOpenProperty(property.id) },
+                )
             }
         }
     }
@@ -356,11 +459,13 @@ private fun AddPropertyAction(onClick: () -> Unit) {
 }
 
 @Composable
-private fun CustomerPropertyRow(property: CustomerProperty) {
+private fun CustomerPropertyRow(property: CustomerProperty, onClick: () -> Unit) {
     val separator = stringResource(R.string.customers_counts_separator)
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
             .padding(vertical = 4.dp)
             .testTag(customerDetailPropertyTag(property.id)),
     ) {
@@ -403,6 +508,10 @@ private fun CustomerPropertyRow(property: CustomerProperty) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (property.status == PropertyStatus.ARCHIVED) {
+            Spacer(Modifier.height(4.dp))
+            ArchivedPropertyBadge()
+        }
         Spacer(Modifier.height(4.dp))
         Text(
             text = listOf(
@@ -421,8 +530,32 @@ private fun CustomerPropertyRow(property: CustomerProperty) {
     }
 }
 
+/**
+ * The badge an archived Property carries wherever it is listed, so its lifecycle state is visible
+ * (`BR-082`). It is the same state the Property Detail screen shows.
+ */
 @Composable
-private fun lastServiceLabel(lastServiceAt: String?): String {
+private fun ArchivedPropertyBadge() {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.secondary,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+        ),
+    ) {
+        Text(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            text = stringResource(R.string.property_status_archived),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+internal fun lastServiceLabel(lastServiceAt: String?): String {
     val date = lastServiceAt?.let { customerSince(it) }
     return if (date == null) {
         stringResource(R.string.customers_detail_never_serviced)
@@ -481,7 +614,7 @@ private fun CustomerJobsSection(jobs: List<CustomerJob>, onSeeAllJobs: () -> Uni
 private fun CustomerJobRow(job: CustomerJob) {
     val separator = stringResource(R.string.customers_counts_separator)
     val meta = listOfNotNull(
-        job.address?.let { jobAddressLine(it) }?.takeIf { it.isNotBlank() },
+        job.address?.let { addressLine(it) }?.takeIf { it.isNotBlank() },
         job.scheduledStart?.let { customerSince(it) },
         techniciansLabel(job.technicians),
     )
@@ -517,54 +650,6 @@ private fun CustomerJobRow(job: CustomerJob) {
         }
         Spacer(Modifier.width(8.dp))
         JobStatusPill(job.status)
-    }
-}
-
-@Composable
-private fun JobStatusPill(status: JobStatus) {
-    val colors = MaterialTheme.stateColors
-    val scheme = MaterialTheme.colorScheme
-    val container: Color
-    val content: Color
-    when (status) {
-        JobStatus.COMPLETED -> {
-            container = colors.successContainer.copy(alpha = 0.28f)
-            content = colors.success
-        }
-
-        JobStatus.CANCELED -> {
-            container = scheme.errorContainer.copy(alpha = 0.4f)
-            content = scheme.error
-        }
-
-        JobStatus.IN_PROGRESS -> {
-            container = scheme.primaryContainer
-            content = scheme.onPrimaryContainer
-        }
-
-        JobStatus.PENDING_REVIEW -> {
-            container = scheme.tertiaryContainer
-            content = scheme.onTertiaryContainer
-        }
-
-        JobStatus.NEW, JobStatus.SCHEDULED -> {
-            container = scheme.secondary
-            content = scheme.onSurfaceVariant
-        }
-    }
-
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = container,
-        contentColor = content,
-        border = BorderStroke(1.dp, content.copy(alpha = 0.25f)),
-    ) {
-        Text(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            text = stringResource(jobStatusLabel(status)),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-        )
     }
 }
 
@@ -635,32 +720,6 @@ private fun CustomerJobHistoryList(jobs: List<CustomerJob>) {
             }
         }
     }
-}
-
-private fun jobStatusLabel(status: JobStatus): Int =
-    when (status) {
-        JobStatus.NEW -> R.string.customers_job_status_new
-        JobStatus.SCHEDULED -> R.string.customers_job_status_scheduled
-        JobStatus.IN_PROGRESS -> R.string.customers_job_status_in_progress
-        JobStatus.PENDING_REVIEW -> R.string.customers_job_status_pending_review
-        JobStatus.COMPLETED -> R.string.customers_job_status_completed
-        JobStatus.CANCELED -> R.string.customers_job_status_canceled
-    }
-
-/** The Job's preserved address snapshot as one line (`BR-056`). */
-private fun jobAddressLine(address: CustomerJobAddress): String {
-    val locality = listOfNotNull(
-        address.city?.takeIf { it.isNotBlank() },
-        listOfNotNull(
-            address.province?.takeIf { it.isNotBlank() },
-            address.postalCode?.takeIf { it.isNotBlank() },
-        ).joinToString(" ").takeIf { it.isNotBlank() },
-    ).joinToString(", ")
-    return listOfNotNull(
-        address.addressLine1?.takeIf { it.isNotBlank() },
-        address.addressLine2?.takeIf { it.isNotBlank() },
-        locality.takeIf { it.isNotBlank() },
-    ).joinToString(", ")
 }
 
 /** The selected Visit's technicians, or the localized "unassigned" state (`BR-081`). */

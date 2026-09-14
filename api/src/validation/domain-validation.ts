@@ -125,3 +125,64 @@ export function optionalDate(value: unknown, field: string): string | null {
   }
   return text;
 }
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Accepts an optional UUID in canonical `8-4-4-4-12` form.
+ *
+ * Used for client-generated identifiers such as an offline operation's idempotency key (`BR-031`),
+ * which the API stores as a `uuid` column: validating here keeps an unparseable key from reaching
+ * the database as a 500.
+ */
+export function optionalUuid(value: unknown, field: string): string | null {
+  const text = optionalText(value, field, 36);
+  if (text === null) {
+    return null;
+  }
+  if (!UUID_PATTERN.test(text)) {
+    fail(field, 'must be a UUID');
+  }
+  return text;
+}
+
+// ISO-8601 permits fractional seconds of any precision, and a device clock reports more than
+// milliseconds: Kotlin's `Instant.toString()` emits 0, 3, 6 or 9 digits depending on the clock's
+// resolution, and Android reports microseconds. A 1-3 digit pattern therefore rejected a valid
+// device time. Up to a nanosecond is accepted — the finest any supported client emits — while the
+// stored column keeps microseconds.
+const INSTANT_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Accepts an optional ISO-8601 instant (`Project.md` §15).
+ *
+ * A device-recorded time travels as an instant with an explicit zone or `Z`, so a client cannot
+ * send a local wall-clock string that the backend would have to guess at. Fractional seconds are
+ * accepted at the precision the device clock reports, not only milliseconds.
+ */
+export function optionalInstant(value: unknown, field: string): string | null {
+  const text = optionalText(value, field, 40);
+  if (text === null) {
+    return null;
+  }
+  if (!INSTANT_PATTERN.test(text)) {
+    fail(field, 'must be an ISO-8601 instant');
+  }
+  return text;
+}
+
+/** Accepts an optional integer greater than zero. */
+export function optionalPositiveInteger(
+  value: unknown,
+  field: string,
+): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    fail(field, 'must be a positive integer');
+  }
+  return value;
+}
