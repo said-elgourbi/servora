@@ -112,12 +112,61 @@
     -->
     <string name="nav_back">Back</string>
     <string name="settings_sign_out">Sign out</string>
+
+    <!--
+      Manager home. The greeting, today's summary, the schedule and the conditions that need the
+      manager. Every code the screen presents a label for is a stable value the API exchanged
+      (`BR-028`, `BR-041`).
+    -->
+    <string name="home_greeting_morning">Good morning</string>
+    <string name="home_greeting_morning_named">Good morning, %1$s</string>
+    <string name="home_greeting_afternoon">Good afternoon</string>
+    <string name="home_greeting_afternoon_named">Good afternoon, %1$s</string>
+    <string name="home_greeting_evening">Good evening</string>
+    <string name="home_greeting_evening_named">Good evening, %1$s</string>
     <string name="home_attention_title">Needs attention</string>
-    <string name="home_attention_sample_title">2 jobs need a technician</string>
-    <string name="home_attention_sample_detail">Today · 10:30 AM · 11:00 AM</string>
+    <string name="home_attention_all_clear_title">You\'re all caught up</string>
+    <string name="home_attention_all_clear_detail">Nothing needs your attention right now.</string>
+    <string name="home_attention_overdue_title">Job #%1$d is overdue</string>
+    <string name="home_attention_review_title">Job #%1$d is waiting for review</string>
+    <string name="home_attention_scheduling_title">Job #%1$d needs scheduling</string>
+    <string name="home_attention_detail_format">%1$s · %2$s</string>
+    <string name="home_attention_scheduled">Scheduled %1$s</string>
+    <string name="home_attention_open">Open the customer</string>
+    <string name="home_attention_expand">Show the items that need attention</string>
+    <string name="home_attention_collapse">Hide the items that need attention</string>
     <string name="home_today_title">Today</string>
-    <string name="home_today_jobs_sample">8 jobs</string>
-    <string name="home_today_detail_sample">3 completed · 5 remaining</string>
+    <plurals name="home_today_visits">
+        <item quantity="one">%1$d visit today</item>
+        <item quantity="other">%1$d visits today</item>
+    </plurals>
+    <string name="home_today_completed">Completed</string>
+    <string name="home_today_in_progress">In progress</string>
+    <string name="home_today_upcoming">Upcoming</string>
+    <string name="home_schedule_title">Today\'s schedule</string>
+    <string name="home_schedule_see_all">See all</string>
+    <string name="home_schedule_empty_title">Nothing scheduled today</string>
+    <string name="home_schedule_empty_detail">Today\'s schedule is clear.</string>
+    <string name="home_schedule_time_unknown">Time unavailable</string>
+    <plurals name="home_schedule_technicians">
+        <item quantity="one">%1$d technician</item>
+        <item quantity="other">%1$d technicians</item>
+    </plurals>
+    <string name="visit_status_draft">Draft</string>
+    <string name="visit_status_scheduled">Scheduled</string>
+    <string name="visit_status_en_route">En route</string>
+    <string name="visit_status_on_site">On site</string>
+    <string name="visit_status_in_progress">In progress</string>
+    <string name="visit_status_completed">Completed</string>
+    <string name="visit_status_canceled">Canceled</string>
+    <string name="visit_status_no_show">No show</string>
+    <string name="home_visit_status_overdue">Overdue</string>
+    <string name="home_loading">Loading today…</string>
+    <string name="home_error_title">Couldn\'t load today</string>
+    <string name="home_error_message">Check your connection and try again.</string>
+    <string name="home_retry">Try again</string>
+    <string name="home_refreshing">Updating…</string>
+    <string name="home_unrefreshed_notice">Couldn\'t refresh. Showing the last update.</string>
     <string name="customers_title">Customers</string>
     <string name="customers_subtitle">Manage customers and their service properties</string>
     <string name="customers_search_placeholder">Name, phone, address…</string>
@@ -153,6 +202,47 @@
     <string name="customers_edit_title">Edit Customer</string>
     <string name="customers_save">Save Changes</string>
     <string name="customers_create_action">Create Customer</string>
+
+    <!--
+      The Edit Customer form (`Figma/src/screens/Customers.tsx`, `EditCustomerView`). The form states
+      the customer's type, so the same edit converts the customer between individual and company
+      (`BR-087`); the notice states what a conversion replaces before it is applied (`BR-067`).
+    -->
+    <string name="customers_edit_section_status">Customer status</string>
+    <string name="customers_edit_properties_hint">Properties are managed from the customer detail screen.</string>
+    <string name="customers_edit_incomplete">Please fill in the required fields.</string>
+    <string name="customers_edit_conversion_notice">Changing the customer type replaces the details of the previous type. Nothing is carried over, and the customer keeps its jobs, properties and history.</string>
+
+    <!--
+      The New Customer form (`Figma/src/screens/Customers.tsx`, `NewCustomerView`). The customer's
+      phone and email are marked optional because `BR-023` makes them optional; the form never
+      requires a value the model allows to be absent.
+    -->
+    <string name="customers_create_section_type">Customer type</string>
+    <string name="customers_create_type_individual">Individual</string>
+    <string name="customers_create_type_business">Business</string>
+    <string name="customers_create_section_info">Customer information</string>
+    <string name="customers_create_company_label">Company name</string>
+    <string name="customers_create_company_placeholder">ABC Property Management</string>
+    <string name="customers_create_contact_label">Primary contact</string>
+    <string name="customers_create_first_name_label">First name</string>
+    <string name="customers_create_first_name_placeholder">John</string>
+    <string name="customers_create_last_name_label">Last name</string>
+    <string name="customers_create_last_name_placeholder">Smith</string>
+    <string name="customers_create_phone_label">Phone</string>
+    <string name="customers_create_phone_placeholder">555-123-4567</string>
+    <string name="customers_create_email_label">Email</string>
+    <string name="customers_create_email_placeholder">john@example.com</string>
+    <string name="customers_create_notes_label">Notes</string>
+    <string name="customers_create_notes_placeholder">Any relevant notes…</string>
+    <string name="customers_create_section_property">First service property</string>
+    <string name="customers_create_property_optional">(optional)</string>
+    <string name="customers_create_property_hint">Service location — not the customer\'s billing address.</string>
+    <string name="customers_create_incomplete">Please fill in the required fields.</string>
+    <string name="customers_create_created_title">Customer created</string>
+    <string name="customers_create_property_unfinished">The first service property could not be added. You can add it from the customer\'s page.</string>
+    <string name="customers_create_contact_unfinished">The primary contact could not be saved. You can add it from the customer\'s page.</string>
+    <string name="customers_create_open_action">Open customer</string>
     <string name="customers_status_active">Active</string>
     <string name="customers_status_inactive">Inactive</string>
     <string name="customers_since_format">Since %1$s</string>
@@ -307,4 +397,140 @@
     <string name="property_province_qc">Quebec</string>
     <string name="property_province_sk">Saskatchewan</string>
     <string name="property_province_yt">Yukon</string>
+
+    <!--
+      Assignment roles (`BR-068`). A Visit that has technicians has exactly one Lead; every other
+      assigned technician simply holds the `TECHNICIAN` role, so only the Lead is marked.
+    -->
+    <string name="assignment_role_lead">Lead</string>
+    <string name="assignment_role_technician">Technician</string>
+
+    <!--
+      Job Details (`BR-021`, `BR-058`, `BR-068`, `BR-081`).
+
+      The screen presents one Job with the Visit that represents it and every technician assigned to
+      that Visit. "Unassigned" is the absence of a technician assignment, never a Job or Visit status,
+      and the Job's own status (`BR-058`) and the represented Visit's (`BR-074`) are presented as the
+      two separate state machines they are (`BR-059`).
+
+      The page reads as the Job's identity, then the visit that represents it, then the technicians on
+      that visit. The Job number is stated once, on the line above the title, so the title never
+      repeats it (`BR-052`). The Job's own status is labelled as the Job's, and the Visit card labels
+      its date rather than a word that reads as a status, so neither state is read as the other
+      (`BR-028`, `BR-059`).
+    -->
+    <string name="job_details_title">Job Details</string>
+    <string name="job_details_job_number_format">Job #%1$d</string>
+    <string name="job_details_job_status_label">Job status</string>
+    <string name="job_details_status_current">Current status</string>
+    <string name="job_details_visit_label">Visit</string>
+    <string name="job_details_visit_date_label">Visit date</string>
+    <string name="job_details_not_scheduled">Not scheduled</string>
+    <string name="job_details_time_unknown">Time unavailable</string>
+    <string name="job_details_date_time_format">%1$s · %2$s</string>
+    <string name="job_details_address_label">Address</string>
+    <string name="job_details_no_address">No address yet</string>
+    <string name="job_details_open_in_maps">Open in maps</string>
+    <string name="job_details_customer_label">Customer</string>
+    <string name="job_details_technicians_label">Technicians</string>
+    <string name="job_details_technician_name_unknown">Name unavailable</string>
+    <string name="job_details_unassigned_detail">No technician is assigned to this visit yet.</string>
+    <string name="job_details_loading">Loading job…</string>
+    <string name="job_details_error_title">Couldn\'t load this job</string>
+    <string name="job_details_error_message">Check your connection and try again.</string>
+    <string name="job_details_retry">Try again</string>
+
+    <!--
+      Job Activity (`BR-080`): the Job's unified, chronological timeline, newest first. A Job-level
+      event carries no Visit; a Visit-level event carries the Visit's human-readable sequence
+      (`Visit 1`, `Visit 2`, …), never a database id. Status, outcome and role values are the API's
+      stable codes; the screen resolves a localized label for one (`BR-028`, `BR-041`).
+    -->
+    <string name="job_activity_label">Job Activity</string>
+    <string name="job_activity_visit_format">Visit %1$d</string>
+    <string name="job_activity_empty_title">No activity yet</string>
+    <string name="job_activity_empty_message">Updates from the team will appear here.</string>
+    <string name="job_activity_error_message">Couldn\'t load activity.</string>
+    <string name="job_activity_add_update">Add update</string>
+    <string name="job_activity_text_label">Update</string>
+    <string name="job_activity_text_placeholder">Type a text update…</string>
+    <string name="job_activity_save_update">Save update</string>
+    <string name="job_activity_cancel_update">Cancel</string>
+    <string name="job_activity_job_status_changed">Updated job status to %1$s</string>
+    <string name="job_activity_job_status_changed_generic">Updated job status</string>
+    <string name="job_activity_visit_status_changed">Updated visit status to %1$s</string>
+    <string name="job_activity_visit_status_changed_generic">Updated visit status</string>
+    <string name="job_activity_property_changed">Changed the job\'s location</string>
+    <string name="job_activity_customer_changed">Changed the job\'s customer</string>
+    <string name="job_activity_visit_scheduled">Scheduled the visit</string>
+    <string name="job_activity_visit_rescheduled">Rescheduled the visit</string>
+    <string name="job_activity_technician_assigned">Assigned %1$s as %2$s</string>
+    <string name="job_activity_technician_removed">Removed %1$s</string>
+    <string name="job_activity_technician_role_changed">Changed %1$s role from %2$s to %3$s</string>
+    <string name="job_activity_outcome_recorded">Recorded outcome: %1$s</string>
+    <string name="job_activity_outcome_recorded_generic">Recorded an outcome</string>
+    <string name="job_activity_outcome_resolved">Resolved</string>
+    <string name="job_activity_outcome_needs_parts">Needs parts</string>
+    <string name="job_activity_outcome_needs_followup">Needs follow-up</string>
+    <string name="job_activity_outcome_needs_quote_approval">Needs quote approval</string>
+    <string name="job_activity_outcome_unable_to_complete">Unable to complete</string>
+
+    <!--
+      Job management actions (`BR-058`, `BR-066`, `BR-068`, `BR-070`, `BR-073`).
+
+      Every action is the user's explicit decision, and what each one may do is the backend's answer.
+      Each action is drawn with the data it affects rather than in one global action row: the Job's
+      status action beside the Job's status, the reschedule beside the visit's schedule, and the crew's
+      management beside the technicians. The crew is stated as a whole, so its action manages the
+      assignment — adding a technician, removing one and naming the Lead — rather than being a bare
+      "reassign" (`BR-068`, `BR-069`). A refusal is reported with what the API said rather than a
+      generic failure, because the user has to know whether the visit moved on, whether the crew cannot
+      be assigned, or whether the action is simply not available yet.
+    -->
+    <string name="job_action_change_status">Change status</string>
+    <string name="job_action_reschedule">Reschedule</string>
+    <string name="job_action_manage_technicians">Manage technicians</string>
+    <string name="job_action_ok">OK</string>
+    <string name="job_action_cancel">Cancel</string>
+    <string name="job_action_dismiss">Dismiss</string>
+    <string name="job_action_retry">Try again</string>
+    <string name="job_action_done_status">Job status updated successfully</string>
+    <string name="job_action_done_reschedule">Visit rescheduled successfully</string>
+    <string name="job_action_done_assignment">Visit crew updated successfully</string>
+    <string name="job_action_done_activity_text">Update added successfully</string>
+    <string name="job_action_error_unauthenticated">Your session has ended. Sign in again.</string>
+    <string name="job_action_error_forbidden">You do not have permission to change jobs.</string>
+    <string name="job_action_error_not_found">This job or visit is no longer available.</string>
+    <string name="job_action_error_validation">The change was refused. Check the values and try again.</string>
+    <string name="job_action_error_version_conflict">The job changed since you opened it. Reopen it and try again.</string>
+    <string name="job_action_error_transition">The job cannot move to that status from where it is.</string>
+    <string name="job_action_error_review_condition">The job cannot await review yet: work is still open or the last visit did not resolve it.</string>
+    <string name="job_action_error_cancellation_unavailable">Cancelling a job is not available yet.</string>
+    <string name="job_action_error_visit_not_reschedulable">Only a scheduled visit can be rescheduled.</string>
+    <string name="job_action_error_technicians_not_assignable">One or more technicians cannot be assigned.</string>
+    <string name="job_action_error_network">Check your connection and try again.</string>
+    <string name="job_action_error_server">The service could not complete the change. Try again.</string>
+    <string name="job_action_error_unexpected">The change could not be completed.</string>
+
+    <!-- Rescheduling a visit (`BR-073`). -->
+    <string name="job_reschedule_title">Reschedule visit</string>
+    <string name="job_reschedule_message">This edits the scheduled visit. The visit’s crew and status are unchanged.</string>
+    <string name="job_reschedule_date_label">Date</string>
+    <string name="job_reschedule_time_label">Start time</string>
+    <string name="job_reschedule_duration_label">Length</string>
+    <string name="job_reschedule_duration_hours">%1$dh</string>
+    <string name="job_reschedule_confirm">Reschedule</string>
+
+    <!-- Stating a visit's crew (`BR-068`, `BR-069`). -->
+    <string name="job_assign_title">Assign technicians</string>
+    <string name="job_assign_message">Choose the technicians for this visit, then choose which one leads it.</string>
+    <string name="job_assign_make_lead">Make lead</string>
+    <string name="job_assign_confirm">Save crew</string>
+    <string name="job_assign_loading">Loading technicians…</string>
+    <string name="job_assign_empty">No technician is available to assign.</string>
+
+    <!-- The availability conflict the user decides about (`BR-070`). -->
+    <string name="job_conflict_title">This time overlaps another visit</string>
+    <string name="job_conflict_message">The same technician is already booked. You can still schedule this visit.</string>
+    <string name="job_conflict_confirm">Schedule anyway</string>
 </resources>

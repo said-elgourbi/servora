@@ -97,11 +97,54 @@
     <string name="nav_back">Retour</string>
     <string name="settings_sign_out">Se déconnecter</string>
     <string name="home_attention_title">À traiter</string>
-    <string name="home_attention_sample_title">2 interventions ont besoin d\'un technicien</string>
-    <string name="home_attention_sample_detail">Aujourd\'hui · 10 h 30 · 11 h 00</string>
+    <string name="home_attention_all_clear_title">Vous êtes à jour</string>
+    <string name="home_attention_all_clear_detail">Rien ne requiert votre attention pour le moment.</string>
+    <string name="home_attention_overdue_title">L\'intervention n° %1$d est en retard</string>
+    <string name="home_attention_review_title">L\'intervention n° %1$d attend une révision</string>
+    <string name="home_attention_scheduling_title">L\'intervention n° %1$d doit être planifiée</string>
+    <string name="home_attention_detail_format">%1$s · %2$s</string>
+    <string name="home_attention_scheduled">Prévue %1$s</string>
+    <string name="home_attention_open">Ouvrir le client</string>
+    <string name="home_attention_expand">Afficher les éléments à traiter</string>
+    <string name="home_attention_collapse">Masquer les éléments à traiter</string>
+    <string name="home_greeting_morning">Bonjour</string>
+    <string name="home_greeting_morning_named">Bonjour, %1$s</string>
+    <string name="home_greeting_afternoon">Bon après-midi</string>
+    <string name="home_greeting_afternoon_named">Bon après-midi, %1$s</string>
+    <string name="home_greeting_evening">Bonsoir</string>
+    <string name="home_greeting_evening_named">Bonsoir, %1$s</string>
     <string name="home_today_title">Aujourd\'hui</string>
-    <string name="home_today_jobs_sample">8 interventions</string>
-    <string name="home_today_detail_sample">3 terminées · 5 restantes</string>
+    <plurals name="home_today_visits">
+        <item quantity="one">%1$d visite aujourd\'hui</item>
+        <item quantity="other">%1$d visites aujourd\'hui</item>
+    </plurals>
+    <string name="home_today_completed">Terminées</string>
+    <string name="home_today_in_progress">En cours</string>
+    <string name="home_today_upcoming">À venir</string>
+    <string name="home_schedule_title">Horaire du jour</string>
+    <string name="home_schedule_see_all">Tout voir</string>
+    <string name="home_schedule_empty_title">Rien de prévu aujourd\'hui</string>
+    <string name="home_schedule_empty_detail">L\'horaire du jour est libre.</string>
+    <string name="home_schedule_time_unknown">Heure indisponible</string>
+    <plurals name="home_schedule_technicians">
+        <item quantity="one">%1$d technicien</item>
+        <item quantity="other">%1$d techniciens</item>
+    </plurals>
+    <string name="visit_status_draft">Brouillon</string>
+    <string name="visit_status_scheduled">Prévue</string>
+    <string name="visit_status_en_route">En route</string>
+    <string name="visit_status_on_site">Sur place</string>
+    <string name="visit_status_in_progress">En cours</string>
+    <string name="visit_status_completed">Terminée</string>
+    <string name="visit_status_canceled">Annulée</string>
+    <string name="visit_status_no_show">Absence</string>
+    <string name="home_visit_status_overdue">En retard</string>
+    <string name="home_loading">Chargement de la journée…</string>
+    <string name="home_error_title">Impossible de charger la journée</string>
+    <string name="home_error_message">Vérifiez votre connexion et réessayez.</string>
+    <string name="home_retry">Réessayer</string>
+    <string name="home_refreshing">Mise à jour…</string>
+    <string name="home_unrefreshed_notice">Actualisation impossible. Dernière mise à jour affichée.</string>
     <string name="customers_title">Clients</string>
     <string name="customers_subtitle">Gérer les clients et leurs propriétés de service</string>
     <string name="customers_search_placeholder">Nom, téléphone, adresse…</string>
@@ -137,6 +180,39 @@
     <string name="customers_edit_title">Modifier le client</string>
     <string name="customers_save">Enregistrer</string>
     <string name="customers_create_action">Créer le client</string>
+
+    <!-- Libellés du formulaire « Modifier le client » (voir la version anglaise pour la note sur BR-087). -->
+    <string name="customers_edit_section_status">Statut du client</string>
+    <string name="customers_edit_properties_hint">Les propriétés se gèrent depuis la fiche client.</string>
+    <string name="customers_edit_incomplete">Veuillez remplir les champs obligatoires.</string>
+    <string name="customers_edit_conversion_notice">Changer le type de client remplace les détails du type précédent. Aucun détail précédent ne subsiste et le client conserve ses interventions, ses propriétés et son historique.</string>
+
+    <!-- Libellés du formulaire « Nouveau client » (voir la version anglaise pour la note sur BR-023). -->
+    <string name="customers_create_section_type">Type de client</string>
+    <string name="customers_create_type_individual">Particulier</string>
+    <string name="customers_create_type_business">Entreprise</string>
+    <string name="customers_create_section_info">Informations sur le client</string>
+    <string name="customers_create_company_label">Nom de l\'entreprise</string>
+    <string name="customers_create_company_placeholder">Gestion immobilière ABC</string>
+    <string name="customers_create_contact_label">Contact principal</string>
+    <string name="customers_create_first_name_label">Prénom</string>
+    <string name="customers_create_first_name_placeholder">Jean</string>
+    <string name="customers_create_last_name_label">Nom</string>
+    <string name="customers_create_last_name_placeholder">Tremblay</string>
+    <string name="customers_create_phone_label">Téléphone</string>
+    <string name="customers_create_phone_placeholder">555-123-4567</string>
+    <string name="customers_create_email_label">Courriel</string>
+    <string name="customers_create_email_placeholder">jean@exemple.com</string>
+    <string name="customers_create_notes_label">Notes</string>
+    <string name="customers_create_notes_placeholder">Toute note pertinente…</string>
+    <string name="customers_create_section_property">Première propriété desservie</string>
+    <string name="customers_create_property_optional">(facultatif)</string>
+    <string name="customers_create_property_hint">Lieu d\'intervention — il ne s\'agit pas de l\'adresse de facturation du client.</string>
+    <string name="customers_create_incomplete">Veuillez remplir les champs obligatoires.</string>
+    <string name="customers_create_created_title">Client créé</string>
+    <string name="customers_create_property_unfinished">La première propriété desservie n\'a pas pu être ajoutée. Vous pouvez l\'ajouter depuis la fiche du client.</string>
+    <string name="customers_create_contact_unfinished">Le contact principal n\'a pas pu être enregistré. Vous pouvez l\'ajouter depuis la fiche du client.</string>
+    <string name="customers_create_open_action">Ouvrir le client</string>
     <string name="customers_status_active">Actif</string>
     <string name="customers_status_inactive">Inactif</string>
     <string name="customers_since_format">Depuis %1$s</string>
@@ -278,4 +354,125 @@
     <string name="property_province_qc">Québec</string>
     <string name="property_province_sk">Saskatchewan</string>
     <string name="property_province_yt">Yukon</string>
+
+    <!-- Rôles d\'assignation (`BR-068`). Une visite avec des techniciens a exactement un responsable. -->
+    <string name="assignment_role_lead">Responsable</string>
+    <string name="assignment_role_technician">Technicien</string>
+
+    <!--
+      Détails de l\'intervention (`BR-021`, `BR-058`, `BR-068`, `BR-081`).
+
+      L\'écran présente une intervention avec la visite qui la représente et tous les techniciens
+      assignés à cette visite. « Non assigné » est l\'absence d\'assignation, jamais un statut, et le
+      statut de l\'intervention (`BR-058`) et celui de la visite (`BR-074`) sont présentés séparément,
+      car ce sont deux machines à états distinctes (`BR-059`).
+
+      Le statut de l\'intervention est étiqueté comme celui de l\'intervention, et la fiche de la visite
+      étiquette sa date plutôt qu\'un mot qui se lit comme un statut : aucun des deux états n\'est lu
+      comme l\'autre (`BR-028`, `BR-059`).
+    -->
+    <string name="job_details_title">Détails de l\'intervention</string>
+    <string name="job_details_job_number_format">Intervention n° %1$d</string>
+    <string name="job_details_job_status_label">Statut de l\'intervention</string>
+    <string name="job_details_status_current">Statut actuel</string>
+    <string name="job_details_visit_label">Visite</string>
+    <string name="job_details_visit_date_label">Date de la visite</string>
+    <string name="job_details_not_scheduled">Non planifiée</string>
+    <string name="job_details_time_unknown">Heure indisponible</string>
+    <string name="job_details_date_time_format">%1$s · %2$s</string>
+    <string name="job_details_address_label">Adresse</string>
+    <string name="job_details_no_address">Aucune adresse pour l\'instant</string>
+    <string name="job_details_open_in_maps">Ouvrir dans la carte</string>
+    <string name="job_details_customer_label">Client</string>
+    <string name="job_details_technicians_label">Techniciens</string>
+    <string name="job_details_technician_name_unknown">Nom indisponible</string>
+    <string name="job_details_unassigned_detail">Aucun technicien n\'est encore assigné à cette visite.</string>
+    <string name="job_details_loading">Chargement de l\'intervention…</string>
+    <string name="job_details_error_title">Impossible de charger cette intervention</string>
+    <string name="job_details_error_message">Vérifiez votre réseau et réessayez.</string>
+    <string name="job_details_retry">Réessayer</string>
+
+    <!--
+      Activité de l'intervention (`BR-080`) : la chronologie unifiée de l'intervention, la plus
+      récente en premier. Un événement de niveau intervention n'a pas de visite; un événement de
+      niveau visite porte la séquence lisible de la visite (`Visite 1`, `Visite 2`, …), jamais un
+      identifiant de base de données. Les statuts, résultats et rôles sont les codes stables de
+      l'API; l'écran résout une étiquette localisée pour chacun (`BR-028`, `BR-041`).
+    -->
+    <string name="job_activity_label">Activité de l\'intervention</string>
+    <string name="job_activity_visit_format">Visite %1$d</string>
+    <string name="job_activity_empty_title">Aucune activité pour l\'instant</string>
+    <string name="job_activity_empty_message">Les mises à jour de l\'équipe apparaîtront ici.</string>
+    <string name="job_activity_error_message">Impossible de charger l\'activité.</string>
+    <string name="job_activity_add_update">Ajouter une mise à jour</string>
+    <string name="job_activity_text_label">Mise à jour</string>
+    <string name="job_activity_text_placeholder">Saisir une mise à jour texte…</string>
+    <string name="job_activity_save_update">Enregistrer</string>
+    <string name="job_activity_cancel_update">Annuler</string>
+    <string name="job_activity_job_status_changed">Statut de l\'intervention changé pour %1$s</string>
+    <string name="job_activity_job_status_changed_generic">Statut de l\'intervention mis à jour</string>
+    <string name="job_activity_visit_status_changed">Statut de la visite changé pour %1$s</string>
+    <string name="job_activity_visit_status_changed_generic">Statut de la visite mis à jour</string>
+    <string name="job_activity_property_changed">Lieu de l\'intervention modifié</string>
+    <string name="job_activity_customer_changed">Client de l\'intervention modifié</string>
+    <string name="job_activity_visit_scheduled">Visite planifiée</string>
+    <string name="job_activity_visit_rescheduled">Visite replanifiée</string>
+    <string name="job_activity_technician_assigned">Assignation : %1$s (%2$s)</string>
+    <string name="job_activity_technician_removed">Retrait : %1$s</string>
+    <string name="job_activity_technician_role_changed">Changement de rôle de %1$s : %2$s → %3$s</string>
+    <string name="job_activity_outcome_recorded">Résultat consigné : %1$s</string>
+    <string name="job_activity_outcome_recorded_generic">Résultat consigné</string>
+    <string name="job_activity_outcome_resolved">Résolu</string>
+    <string name="job_activity_outcome_needs_parts">Pièces requises</string>
+    <string name="job_activity_outcome_needs_followup">Suivi requis</string>
+    <string name="job_activity_outcome_needs_quote_approval">Approbation de soumission requise</string>
+    <string name="job_activity_outcome_unable_to_complete">Impossible de terminer</string>
+
+    <!-- Actions sur l'intervention (`BR-058`, `BR-066`, `BR-068`, `BR-070`, `BR-073`). -->
+    <string name="job_action_change_status">Changer le statut</string>
+    <string name="job_action_reschedule">Replanifier</string>
+    <string name="job_action_manage_technicians">Gérer les techniciens</string>
+    <string name="job_action_ok">OK</string>
+    <string name="job_action_cancel">Annuler</string>
+    <string name="job_action_dismiss">Fermer</string>
+    <string name="job_action_retry">Réessayer</string>
+    <string name="job_action_done_status">Statut de l’intervention mis à jour</string>
+    <string name="job_action_done_reschedule">Visite replanifiée avec succès</string>
+    <string name="job_action_done_assignment">Équipe de la visite mise à jour</string>
+    <string name="job_action_done_activity_text">Mise à jour ajoutée</string>
+    <string name="job_action_error_unauthenticated">Votre session est terminée. Reconnectez-vous.</string>
+    <string name="job_action_error_forbidden">Vous n’avez pas la permission de modifier les interventions.</string>
+    <string name="job_action_error_not_found">Cette intervention ou cette visite n’est plus disponible.</string>
+    <string name="job_action_error_validation">Le changement a été refusé. Vérifiez les valeurs et réessayez.</string>
+    <string name="job_action_error_version_conflict">L’intervention a changé depuis son ouverture. Rouvrez-la et réessayez.</string>
+    <string name="job_action_error_transition">L’intervention ne peut pas passer à ce statut depuis le statut actuel.</string>
+    <string name="job_action_error_review_condition">L’intervention ne peut pas encore être en révision : du travail est toujours ouvert ou la dernière visite ne l’a pas résolue.</string>
+    <string name="job_action_error_cancellation_unavailable">L’annulation d’une intervention n’est pas encore disponible.</string>
+    <string name="job_action_error_visit_not_reschedulable">Seule une visite planifiée peut être replanifiée.</string>
+    <string name="job_action_error_technicians_not_assignable">Un ou plusieurs techniciens ne peuvent pas être assignés.</string>
+    <string name="job_action_error_network">Vérifiez votre réseau et réessayez.</string>
+    <string name="job_action_error_server">Le service n’a pas pu terminer le changement. Réessayez.</string>
+    <string name="job_action_error_unexpected">Le changement n’a pas pu être effectué.</string>
+
+    <!-- Replanification d’une visite (`BR-073`). -->
+    <string name="job_reschedule_title">Replanifier la visite</string>
+    <string name="job_reschedule_message">Cette action modifie la visite planifiée. L’équipe et le statut de la visite ne changent pas.</string>
+    <string name="job_reschedule_date_label">Date</string>
+    <string name="job_reschedule_time_label">Heure de début</string>
+    <string name="job_reschedule_duration_label">Durée</string>
+    <string name="job_reschedule_duration_hours">%1$dh</string>
+    <string name="job_reschedule_confirm">Replanifier</string>
+
+    <!-- Composition de l’équipe d’une visite (`BR-068`, `BR-069`). -->
+    <string name="job_assign_title">Assigner des techniciens</string>
+    <string name="job_assign_message">Choisissez les techniciens de cette visite, puis celui qui la dirige.</string>
+    <string name="job_assign_make_lead">Désigner responsable</string>
+    <string name="job_assign_confirm">Enregistrer l’équipe</string>
+    <string name="job_assign_loading">Chargement des techniciens…</string>
+    <string name="job_assign_empty">Aucun technicien n’est disponible pour une assignation.</string>
+
+    <!-- Le conflit d’horaire que l’utilisateur tranche (`BR-070`). -->
+    <string name="job_conflict_title">Cette plage horaire chevauche une autre visite</string>
+    <string name="job_conflict_message">Le même technicien est déjà occupé. Vous pouvez tout de même planifier cette visite.</string>
+    <string name="job_conflict_confirm">Planifier quand même</string>
 </resources>

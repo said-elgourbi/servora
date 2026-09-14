@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import com.servora.android.R
 import com.servora.android.domain.model.PropertyDetail
 import com.servora.android.domain.model.PropertyStatus
+import com.servora.android.ui.components.InfoCard
+import com.servora.android.ui.components.SectionLabel
 
 const val PropertyDetailTag = "property-detail"
 const val PropertyDetailContentTag = "property-detail-content"

@@ -32,6 +32,45 @@ sealed interface PropertyCreateResult {
 }
 
 /**
+ * Outcome of a customer create.
+ *
+ * Only the created customer's id is carried forward: the form continues with the optional Property
+ * and contact writes, both of which address the customer by id, and the screens that follow re-read
+ * the customer from the backend rather than trusting a locally assembled copy (`BR-001`).
+ */
+sealed interface CustomerCreateResult {
+    /** The backend created the customer. */
+    data class Success(val customerId: String) : CustomerCreateResult
+
+    /** The create failed; [reason] decides what the form reports. */
+    data class Failure(val reason: CustomersFailureReason) : CustomerCreateResult
+}
+
+/** Outcome of recording a customer contact. */
+sealed interface ContactCreateResult {
+    /** The backend created the contact. */
+    data object Success : ContactCreateResult
+
+    /** The create failed; [reason] decides what the form reports. */
+    data class Failure(val reason: CustomersFailureReason) : ContactCreateResult
+}
+
+/**
+ * Outcome of a customer edit (`BR-023`, `BR-087`).
+ *
+ * Nothing is carried back from the reply: the screens that follow re-read the customer from the
+ * backend rather than trusting a locally assembled copy, so a conversion's replacement subtype is
+ * never presented from the request's own values (`BR-001`).
+ */
+sealed interface CustomerUpdateResult {
+    /** The backend applied the edit. */
+    data object Success : CustomerUpdateResult
+
+    /** The edit failed; [reason] decides what the form reports. */
+    data class Failure(val reason: CustomersFailureReason) : CustomerUpdateResult
+}
+
+/**
  * Stable reasons a customer read can fail, classified from the HTTP answer (`dev.md` §7).
  *
  * `401` and `403` are the authorization outcomes the customer endpoints document; a rejected payload

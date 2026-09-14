@@ -3,9 +3,11 @@ package com.servora.android.data.customers
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.Customer
+import com.servora.android.domain.model.CustomerCompany
 import com.servora.android.domain.model.CustomerContact
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerFilters
+import com.servora.android.domain.model.CustomerIndividual
 import com.servora.android.domain.model.CustomerJob
 import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.CustomerJobTechnician
@@ -48,6 +50,39 @@ interface CustomersRepository {
         customerId: String,
         request: CreatePropertyRequest,
     ): PropertyCreateResult
+
+    /**
+     * Creates an organization-owned customer (`BR-023`) and reports the created customer's id.
+     *
+     * The backend authorizes the write and owns the tenant scope, so this call never names an
+     * organization (`BR-001`, `BR-007`).
+     */
+    suspend fun createCustomer(request: CreateCustomerRequest): CustomerCreateResult
+
+    /**
+     * Records a contact on [customerId] (`BR-023`).
+     *
+     * The backend authorizes the write (`customers.edit`) and resolves the customer inside the
+     * caller's organization, so a customer the organization does not own is reported as not found
+     * (`BR-001`).
+     */
+    suspend fun createContact(
+        customerId: String,
+        request: CreateCustomerContactRequest,
+    ): ContactCreateResult
+
+    /**
+     * Applies an edit to [customerId] (`BR-023`), converting it between individual and company when
+     * [request] states another type (`BR-087`), or reports why it could not be applied.
+     *
+     * The backend authorizes the write with `customers.edit`, resolves the customer inside the
+     * caller's organization and owns the conversion, so this call never names an organization and
+     * never decides which subtype record is stored (`BR-001`, `BR-007`).
+     */
+    suspend fun updateCustomer(
+        customerId: String,
+        request: UpdateCustomerRequest,
+    ): CustomerUpdateResult
 }
 
 /**
@@ -99,6 +134,226 @@ class DefaultCustomersRepository @Inject constructor(
             request = request,
         )
     }
+
+    override suspend fun createCustomer(
+        request: CreateCustomerRequest,
+    ): CustomerCreateResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return CustomerCreateResult.Failure(
+                CustomersFailureReason.UNAUTHENTICATED,
+            )
+
+        return createCustomer(
+            accessToken,
+            allowRenewal = true,
+            request = request,
+        )
+    }
+
+    override suspend fun createContact(
+        customerId: String,
+        request: CreateCustomerContactRequest,
+    ): ContactCreateResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return ContactCreateResult.Failure(
+                CustomersFailureReason.UNAUTHENTICATED,
+            )
+
+        return createContact(
+            accessToken,
+            allowRenewal = true,
+            customerId = customerId,
+            request = request,
+        )
+    }
+
+    override suspend fun updateCustomer(
+        customerId: String,
+        request: UpdateCustomerRequest,
+    ): CustomerUpdateResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return CustomerUpdateResult.Failure(
+                CustomersFailureReason.UNAUTHENTICATED,
+            )
+
+        return updateCustomer(
+            accessToken,
+            allowRenewal = true,
+            customerId = customerId,
+            request = request,
+        )
+    }
+
+    /**
+     * Applies the edit once, renewing the session and retrying when the backend refuses the access
+     * token.
+     *
+     * The retry carries the same body. A renewal happens before the payload is sent, so an edit the
+     * backend already applied is never applied a second time (`BR-001`).
+     */
+    private suspend fun updateCustomer(
+        accessToken: String,
+        allowRenewal: Boolean,
+        customerId: String,
+        request: UpdateCustomerRequest,
+    ): CustomerUpdateResult =
+        try {
+            api.updateCustomer(
+                authorization = "Bearer $accessToken",
+                id = customerId,
+                request = request,
+            )
+            CustomerUpdateResult.Success
+        } catch (failure: HttpException) {
+            if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+                renewAndRetryUpdateCustomer(accessToken, customerId, request)
+            } else {
+                CustomerUpdateResult.Failure(failure.toFailureReason())
+            }
+        } catch (failure: IOException) {
+            CustomerUpdateResult.Failure(CustomersFailureReason.NETWORK)
+        } catch (failure: SerializationException) {
+            CustomerUpdateResult.Failure(CustomersFailureReason.UNEXPECTED)
+        }
+
+    /** Retries the edit once with a renewed session, or reports why it could not renew. */
+    private suspend fun renewAndRetryUpdateCustomer(
+        rejectedToken: String,
+        customerId: String,
+        request: UpdateCustomerRequest,
+    ): CustomerUpdateResult =
+        when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
+            is SessionRenewal.Renewed ->
+                updateCustomer(
+                    renewal.accessToken,
+                    allowRenewal = false,
+                    customerId = customerId,
+                    request = request,
+                )
+
+            SessionRenewal.Rejected ->
+                CustomerUpdateResult.Failure(
+                    CustomersFailureReason.UNAUTHENTICATED,
+                )
+
+            SessionRenewal.Unavailable ->
+                CustomerUpdateResult.Failure(CustomersFailureReason.NETWORK)
+        }
+
+    /**
+     * Writes the customer once, renewing the session and retrying when the backend refuses the
+     * access token.
+     *
+     * The retry carries the same body. A customer create carries no client mutation identifier, so a
+     * renewal happens before a second payload is sent; the form's own step tracking is what keeps a
+     * confirmed create from being repeated (`BR-001`).
+     */
+    private suspend fun createCustomer(
+        accessToken: String,
+        allowRenewal: Boolean,
+        request: CreateCustomerRequest,
+    ): CustomerCreateResult =
+        try {
+            val created = when (request) {
+                is CreateCustomerRequest.Individual ->
+                    api.createIndividualCustomer(
+                        authorization = "Bearer $accessToken",
+                        request = request.request,
+                    )
+
+                is CreateCustomerRequest.Company ->
+                    api.createCompanyCustomer(
+                        authorization = "Bearer $accessToken",
+                        request = request.request,
+                    )
+            }
+            CustomerCreateResult.Success(created.customer.id)
+        } catch (failure: HttpException) {
+            if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+                renewAndRetryCreateCustomer(accessToken, request)
+            } else {
+                CustomerCreateResult.Failure(failure.toFailureReason())
+            }
+        } catch (failure: IOException) {
+            CustomerCreateResult.Failure(CustomersFailureReason.NETWORK)
+        } catch (failure: SerializationException) {
+            CustomerCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
+        }
+
+    /** Retries the customer create once with a renewed session, or reports why it could not renew. */
+    private suspend fun renewAndRetryCreateCustomer(
+        rejectedToken: String,
+        request: CreateCustomerRequest,
+    ): CustomerCreateResult =
+        when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
+            is SessionRenewal.Renewed ->
+                createCustomer(
+                    renewal.accessToken,
+                    allowRenewal = false,
+                    request = request,
+                )
+
+            SessionRenewal.Rejected ->
+                CustomerCreateResult.Failure(
+                    CustomersFailureReason.UNAUTHENTICATED,
+                )
+
+            SessionRenewal.Unavailable ->
+                CustomerCreateResult.Failure(CustomersFailureReason.NETWORK)
+        }
+
+    /**
+     * Writes the contact once, renewing the session and retrying when the backend refuses the access
+     * token.
+     */
+    private suspend fun createContact(
+        accessToken: String,
+        allowRenewal: Boolean,
+        customerId: String,
+        request: CreateCustomerContactRequest,
+    ): ContactCreateResult =
+        try {
+            api.createContact(
+                authorization = "Bearer $accessToken",
+                id = customerId,
+                request = request,
+            )
+            ContactCreateResult.Success
+        } catch (failure: HttpException) {
+            if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+                renewAndRetryCreateContact(accessToken, customerId, request)
+            } else {
+                ContactCreateResult.Failure(failure.toFailureReason())
+            }
+        } catch (failure: IOException) {
+            ContactCreateResult.Failure(CustomersFailureReason.NETWORK)
+        } catch (failure: SerializationException) {
+            ContactCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
+        }
+
+    /** Retries the contact create once with a renewed session, or reports why it could not renew. */
+    private suspend fun renewAndRetryCreateContact(
+        rejectedToken: String,
+        customerId: String,
+        request: CreateCustomerContactRequest,
+    ): ContactCreateResult =
+        when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
+            is SessionRenewal.Renewed ->
+                createContact(
+                    renewal.accessToken,
+                    allowRenewal = false,
+                    customerId = customerId,
+                    request = request,
+                )
+
+            SessionRenewal.Rejected ->
+                ContactCreateResult.Failure(
+                    CustomersFailureReason.UNAUTHENTICATED,
+                )
+
+            SessionRenewal.Unavailable ->
+                ContactCreateResult.Failure(CustomersFailureReason.NETWORK)
+        }
 
     /**
      * Writes the Property once, renewing the session and retrying when the backend refuses the
@@ -375,12 +630,30 @@ private fun CustomerDetailDto.toDetail(
     val domainArchivedProperties = archivedProperties.map { it.toProperty() ?: return null }
     return CustomerDetail(
         customer = domainCustomer,
+        individual = individual?.toIndividual(),
+        company = company?.toCompany(),
         contacts = contacts.map { it.toContact() },
         properties = domainProperties,
         jobs = domainJobs,
         archivedProperties = domainArchivedProperties,
     )
 }
+
+private fun CustomerIndividualDto.toIndividual(): CustomerIndividual =
+    CustomerIndividual(
+        customerId = customerId,
+        firstName = firstName,
+        lastName = lastName,
+        dateOfBirth = dateOfBirth,
+    )
+
+private fun CustomerCompanyDto.toCompany(): CustomerCompany =
+    CustomerCompany(
+        customerId = customerId,
+        legalName = legalName,
+        businessName = businessName,
+        taxNumber = taxNumber,
+    )
 
 private fun CustomerContactDto.toContact(): CustomerContact =
     CustomerContact(

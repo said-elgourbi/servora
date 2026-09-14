@@ -73,16 +73,16 @@ const val AddPropertyProvinceSheetTag = "add-property-province-sheet"
 fun addPropertyProvinceOptionTag(code: String): String = "add-property-province-$code"
 
 /** The design system's control height, shared with the customer screens' fields. */
-private val PropertyFieldHeight = 52.dp
+internal val PropertyFieldHeight = 52.dp
 
 /** The design gives the notes control two rows plus its padding. */
 private val PropertyNotesHeight = 104.dp
 
 private val PropertyFieldLabelSpacing = 6.dp
-private val PropertyFormSectionSpacing = 24.dp
-private val PropertyFormFieldSpacing = 12.dp
-private val PropertyFormGutter = 16.dp
-private val PropertyFormVerticalPadding = 20.dp
+internal val PropertyFormSectionSpacing = 24.dp
+internal val PropertyFormFieldSpacing = 12.dp
+internal val PropertyFormGutter = 16.dp
+internal val PropertyFormVerticalPadding = 20.dp
 private val PropertyFieldHorizontalPadding = 14.dp
 private val PropertySectionIconSize = 12.dp
 private val PropertyProvinceChevronSize = 16.dp
@@ -257,7 +257,7 @@ fun AddPropertyScreen(
  * fields, as the design draws it.
  */
 @Composable
-private fun PropertyFormSection(
+internal fun PropertyFormSection(
     labelRes: Int,
     iconRes: Int,
     content: @Composable ColumnScope.() -> Unit,
@@ -320,7 +320,7 @@ private fun PropertyFieldLabel(labelRes: Int, optional: Boolean) {
 
 /** One single-line field: the design's quiet fill, outline and 52 dp control height. */
 @Composable
-private fun PropertyField(
+internal fun PropertyField(
     labelRes: Int,
     value: String,
     onValueChange: (String) -> Unit,
@@ -379,15 +379,20 @@ private fun PropertyField(
  * The optional notes field.
  *
  * It is the same quiet fill as the other fields but taller and multi-line, as the design draws the
- * notes control.
+ * notes control. The label, placeholder and test tag default to the Add Property form's and are
+ * overridden by a form that needs its own copy — the New Customer form's customer notes, for
+ * example.
  */
 @Composable
-private fun PropertyNotesField(
+internal fun PropertyNotesField(
     value: String,
     onValueChange: (String) -> Unit,
+    labelRes: Int = R.string.property_notes_label,
+    placeholderRes: Int = R.string.property_notes_placeholder,
+    testTag: String = AddPropertyNotesTag,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        PropertyFieldLabel(labelRes = R.string.property_notes_label, optional = true)
+        PropertyFieldLabel(labelRes = labelRes, optional = true)
         Spacer(Modifier.height(PropertyFieldLabelSpacing))
         Surface(
             modifier = Modifier.fillMaxWidth().height(PropertyNotesHeight),
@@ -404,7 +409,7 @@ private fun PropertyNotesField(
                 BasicTextField(
                     value = value,
                     onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth().testTag(AddPropertyNotesTag),
+                    modifier = Modifier.fillMaxWidth().testTag(testTag),
                     textStyle = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onSurface,
                     ),
@@ -418,7 +423,7 @@ private fun PropertyNotesField(
                         Box(contentAlignment = Alignment.TopStart) {
                             if (value.isEmpty()) {
                                 Text(
-                                    text = stringResource(R.string.property_notes_placeholder),
+                                    text = stringResource(placeholderRes),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -440,7 +445,7 @@ private fun PropertyNotesField(
  * fields beside it.
  */
 @Composable
-private fun ProvinceField(
+internal fun ProvinceField(
     province: PropertyProvince?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -504,7 +509,7 @@ private fun ProvinceField(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProvincePickerSheet(
+internal fun ProvincePickerSheet(
     selected: PropertyProvince?,
     onSelect: (PropertyProvince) -> Unit,
     onDismiss: () -> Unit,
@@ -604,13 +609,20 @@ private fun ProvinceOption(
     }
 }
 
-/** The form's two actions: the design's outlined Cancel and the brand-filled save. */
+/**
+ * The form's two actions: the design's outlined Cancel and the brand-filled save.
+ *
+ * A form with its own test tags — Edit Customer, for instance — passes them, so each screen's
+ * actions can be asserted separately.
+ */
 @Composable
-private fun PropertyFormActions(
+internal fun PropertyFormActions(
     isSaving: Boolean,
     onCancel: () -> Unit,
     onSave: () -> Unit,
     saveLabelRes: Int,
+    saveTag: String = AddPropertySaveTag,
+    cancelTag: String = AddPropertyCancelTag,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -625,7 +637,7 @@ private fun PropertyFormActions(
                 modifier = Modifier
                     .weight(1f)
                     .height(PropertyFieldHeight)
-                    .testTag(AddPropertyCancelTag),
+                    .testTag(cancelTag),
                 shape = MaterialTheme.shapes.large,
             ) {
                 Text(stringResource(R.string.property_cancel))
@@ -636,7 +648,7 @@ private fun PropertyFormActions(
                 modifier = Modifier
                     .weight(1f)
                     .height(PropertyFieldHeight)
-                    .testTag(AddPropertySaveTag),
+                    .testTag(saveTag),
                 shape = MaterialTheme.shapes.large,
             ) {
                 if (isSaving) {
@@ -655,9 +667,12 @@ private fun PropertyFormActions(
 
 /** A form-level message: what is missing, or why the backend did not accept the Property. */
 @Composable
-private fun FormAttention(message: String) {
+internal fun FormAttention(
+    message: String,
+    testTag: String = AddPropertyMessageTag,
+) {
     Surface(
-        modifier = Modifier.fillMaxWidth().testTag(AddPropertyMessageTag),
+        modifier = Modifier.fillMaxWidth().testTag(testTag),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,

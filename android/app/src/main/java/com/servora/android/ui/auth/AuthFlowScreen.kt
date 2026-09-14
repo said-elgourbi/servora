@@ -14,12 +14,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.servora.android.data.session.AuthState
 import com.servora.android.domain.auth.asPermissionChecker
+import com.servora.android.ui.customers.AddCustomerViewModel
 import com.servora.android.ui.customers.AddPropertyViewModel
 import com.servora.android.ui.customers.CustomersViewModel
+import com.servora.android.ui.customers.EditCustomerViewModel
 import com.servora.android.ui.customers.EditPropertyViewModel
 import com.servora.android.ui.customers.PropertyDetailViewModel
 import com.servora.android.ui.customers.ServoraHomeScreen
 import com.servora.android.ui.customers.customerPermissionsUiState
+import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.passwordreset.PasswordResetScreen
 import com.servora.android.ui.passwordreset.PasswordResetViewModel
 import com.servora.android.ui.signin.SignInScreen
@@ -65,9 +69,13 @@ fun AuthFlowScreen(
     passwordResetViewModel: PasswordResetViewModel,
     smsSignInViewModel: SmsSignInViewModel,
     customersViewModel: CustomersViewModel,
+    addCustomerViewModel: AddCustomerViewModel,
+    editCustomerViewModel: EditCustomerViewModel,
     addPropertyViewModel: AddPropertyViewModel,
     propertyDetailViewModel: PropertyDetailViewModel,
     editPropertyViewModel: EditPropertyViewModel,
+    managerHomeViewModel: ManagerHomeViewModel,
+    jobDetailsViewModel: JobDetailsViewModel,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -88,9 +96,13 @@ fun AuthFlowScreen(
             ServoraHomeScreen(
                 permissions = customerPermissionsUiState(state.permissions.asPermissionChecker()),
                 customersViewModel = customersViewModel,
+                addCustomerViewModel = addCustomerViewModel,
+                editCustomerViewModel = editCustomerViewModel,
                 addPropertyViewModel = addPropertyViewModel,
                 propertyDetailViewModel = propertyDetailViewModel,
                 editPropertyViewModel = editPropertyViewModel,
+                managerHomeViewModel = managerHomeViewModel,
+                jobDetailsViewModel = jobDetailsViewModel,
                 onSignOut = onSignOut,
                 modifier = modifier,
             )

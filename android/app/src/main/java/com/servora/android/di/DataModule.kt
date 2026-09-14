@@ -8,6 +8,10 @@ import com.servora.android.data.customers.DefaultPropertyRepository
 import com.servora.android.data.customers.PropertyRepository
 import com.servora.android.data.device.DeviceIdentity
 import com.servora.android.data.device.DeviceIdentityProvider
+import com.servora.android.data.home.DefaultManagerHomeRepository
+import com.servora.android.data.home.ManagerHomeRepository
+import com.servora.android.data.jobs.DefaultJobDetailsRepository
+import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.session.DefaultSessionAuthenticator
 import com.servora.android.data.session.DefaultSessionManager
 import com.servora.android.data.session.EncryptedSessionStorage
@@ -57,6 +61,18 @@ abstract class DataModule {
     abstract fun bindPropertyRepository(
         implementation: DefaultPropertyRepository,
     ): PropertyRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindManagerHomeRepository(
+        implementation: DefaultManagerHomeRepository,
+    ): ManagerHomeRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindJobDetailsRepository(
+        implementation: DefaultJobDetailsRepository,
+    ): JobDetailsRepository
 
     companion object {
         /** Exposes the installation identity as a plain value for injection. */

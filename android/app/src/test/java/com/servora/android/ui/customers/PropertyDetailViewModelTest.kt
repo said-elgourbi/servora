@@ -57,7 +57,7 @@ class PropertyDetailViewModelTest {
         )
         val viewModel = PropertyDetailViewModel(repository, clock)
 
-        viewModel.start(CUSTOMER_ID, PROPERTY_ID)
+        viewModel.start(CUSTOMER_ID, PROPERTY_ID, SESSION_ID)
         assertTrue(viewModel.uiState.value.isLoading)
 
         advanceUntilIdle()
@@ -79,7 +79,7 @@ class PropertyDetailViewModelTest {
                 ),
             )
             val viewModel = PropertyDetailViewModel(repository, clock)
-            viewModel.start(CUSTOMER_ID, PROPERTY_ID)
+            viewModel.start(CUSTOMER_ID, PROPERTY_ID, SESSION_ID)
             advanceUntilIdle()
 
             viewModel.archive()
@@ -109,7 +109,7 @@ class PropertyDetailViewModelTest {
             lifecycleResult = PropertyResult.Success(property(status = PropertyStatus.ACTIVE)),
         )
         val viewModel = PropertyDetailViewModel(repository, clock)
-        viewModel.start(CUSTOMER_ID, PROPERTY_ID)
+        viewModel.start(CUSTOMER_ID, PROPERTY_ID, SESSION_ID)
         advanceUntilIdle()
 
         viewModel.restore()
@@ -126,7 +126,7 @@ class PropertyDetailViewModelTest {
             lifecycleResult = PropertyResult.Failure(CustomersFailureReason.VERSION_CONFLICT),
         )
         val viewModel = PropertyDetailViewModel(repository, clock)
-        viewModel.start(CUSTOMER_ID, PROPERTY_ID)
+        viewModel.start(CUSTOMER_ID, PROPERTY_ID, SESSION_ID)
         advanceUntilIdle()
 
         viewModel.archive()
@@ -138,6 +138,32 @@ class PropertyDetailViewModelTest {
         assertEquals(PropertyStatus.ACTIVE, state.detail?.status)
         assertEquals(CustomersFailureReason.VERSION_CONFLICT, state.actionFailure)
         assertFalse(state.lifecycleChanged)
+    }
+
+    @Test
+    fun `does not carry a failed action into a new session`() = runTest(dispatcher) {
+        val repository = RecordingPropertyRepository(
+            loadResult = PropertyResult.Success(property(status = PropertyStatus.ACTIVE)),
+            lifecycleResult = PropertyResult.Failure(CustomersFailureReason.VERSION_CONFLICT),
+        )
+        val viewModel = PropertyDetailViewModel(repository, clock)
+        viewModel.start(CUSTOMER_ID, PROPERTY_ID, SESSION_ID)
+        advanceUntilIdle()
+        viewModel.archive()
+        advanceUntilIdle()
+        assertEquals(
+            CustomersFailureReason.VERSION_CONFLICT,
+            viewModel.uiState.value.actionFailure,
+        )
+
+        // Leaving the screen and opening it again is a new destination instance, so the previous
+        // instance's failure must not be shown again.
+        viewModel.start(CUSTOMER_ID, PROPERTY_ID, "session-2")
+
+        assertNull(viewModel.uiState.value.actionFailure)
+        // The Property it already read is reused rather than re-fetched (`BR-001`).
+        assertNotNull(viewModel.uiState.value.detail)
+        assertEquals(PropertyStatus.ACTIVE, viewModel.uiState.value.detail?.status)
     }
 
     private fun property(
@@ -165,6 +191,7 @@ class PropertyDetailViewModelTest {
     private companion object {
         const val CUSTOMER_ID = "c1"
         const val PROPERTY_ID = "p1"
+        const val SESSION_ID = "session-1"
         const val CAPTURED_AT = "2026-09-13T14:39:21.123456Z"
     }
 }

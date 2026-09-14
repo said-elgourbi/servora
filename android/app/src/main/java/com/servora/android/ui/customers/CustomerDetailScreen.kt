@@ -47,12 +47,15 @@ import com.servora.android.R
 import com.servora.android.domain.model.Customer
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerJob
-import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.CustomerJobTechnician
 import com.servora.android.domain.model.CustomerProperty
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PropertyStatus
+import com.servora.android.ui.components.InfoCard
+import com.servora.android.ui.components.JobStatusPill
+import com.servora.android.ui.components.SectionLabel
+import com.servora.android.ui.components.addressLine
 import com.servora.android.ui.theme.stateColors
 
 const val CustomerDetailTag = "customer-detail"
@@ -250,7 +253,7 @@ private fun CustomerDetailContactCard(customer: Customer) {
             )
         }
         customer.phone?.let { phone ->
-            CustomerLinkLine(
+            CustomerContactLine(
                 text = phone,
                 glyph = R.drawable.ic_phone,
                 onClick = { context.startContactIntent(dialIntent(phone)) },
@@ -260,7 +263,7 @@ private fun CustomerDetailContactCard(customer: Customer) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
         customer.email?.let { email ->
-            CustomerLinkLine(
+            CustomerContactLine(
                 text = email,
                 glyph = R.drawable.ic_mail,
                 onClick = { context.startContactIntent(mailIntent(email)) },
@@ -611,7 +614,7 @@ private fun CustomerJobsSection(jobs: List<CustomerJob>, onSeeAllJobs: () -> Uni
 private fun CustomerJobRow(job: CustomerJob) {
     val separator = stringResource(R.string.customers_counts_separator)
     val meta = listOfNotNull(
-        job.address?.let { jobAddressLine(it) }?.takeIf { it.isNotBlank() },
+        job.address?.let { addressLine(it) }?.takeIf { it.isNotBlank() },
         job.scheduledStart?.let { customerSince(it) },
         techniciansLabel(job.technicians),
     )
@@ -647,54 +650,6 @@ private fun CustomerJobRow(job: CustomerJob) {
         }
         Spacer(Modifier.width(8.dp))
         JobStatusPill(job.status)
-    }
-}
-
-@Composable
-private fun JobStatusPill(status: JobStatus) {
-    val colors = MaterialTheme.stateColors
-    val scheme = MaterialTheme.colorScheme
-    val container: Color
-    val content: Color
-    when (status) {
-        JobStatus.COMPLETED -> {
-            container = colors.successContainer.copy(alpha = 0.28f)
-            content = colors.success
-        }
-
-        JobStatus.CANCELED -> {
-            container = scheme.errorContainer.copy(alpha = 0.4f)
-            content = scheme.error
-        }
-
-        JobStatus.IN_PROGRESS -> {
-            container = scheme.primaryContainer
-            content = scheme.onPrimaryContainer
-        }
-
-        JobStatus.PENDING_REVIEW -> {
-            container = scheme.tertiaryContainer
-            content = scheme.onTertiaryContainer
-        }
-
-        JobStatus.NEW, JobStatus.SCHEDULED -> {
-            container = scheme.secondary
-            content = scheme.onSurfaceVariant
-        }
-    }
-
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = container,
-        contentColor = content,
-        border = BorderStroke(1.dp, content.copy(alpha = 0.25f)),
-    ) {
-        Text(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            text = stringResource(jobStatusLabel(status)),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-        )
     }
 }
 
@@ -765,32 +720,6 @@ private fun CustomerJobHistoryList(jobs: List<CustomerJob>) {
             }
         }
     }
-}
-
-private fun jobStatusLabel(status: JobStatus): Int =
-    when (status) {
-        JobStatus.NEW -> R.string.customers_job_status_new
-        JobStatus.SCHEDULED -> R.string.customers_job_status_scheduled
-        JobStatus.IN_PROGRESS -> R.string.customers_job_status_in_progress
-        JobStatus.PENDING_REVIEW -> R.string.customers_job_status_pending_review
-        JobStatus.COMPLETED -> R.string.customers_job_status_completed
-        JobStatus.CANCELED -> R.string.customers_job_status_canceled
-    }
-
-/** The Job's preserved address snapshot as one line (`BR-056`). */
-private fun jobAddressLine(address: CustomerJobAddress): String {
-    val locality = listOfNotNull(
-        address.city?.takeIf { it.isNotBlank() },
-        listOfNotNull(
-            address.province?.takeIf { it.isNotBlank() },
-            address.postalCode?.takeIf { it.isNotBlank() },
-        ).joinToString(" ").takeIf { it.isNotBlank() },
-    ).joinToString(", ")
-    return listOfNotNull(
-        address.addressLine1?.takeIf { it.isNotBlank() },
-        address.addressLine2?.takeIf { it.isNotBlank() },
-        locality.takeIf { it.isNotBlank() },
-    ).joinToString(", ")
 }
 
 /** The selected Visit's technicians, or the localized "unassigned" state (`BR-081`). */

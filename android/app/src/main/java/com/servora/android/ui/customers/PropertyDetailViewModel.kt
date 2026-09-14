@@ -36,12 +36,28 @@ class PropertyDetailViewModel @Inject constructor(
     val uiState: StateFlow<PropertyDetailUiState> = _uiState.asStateFlow()
 
     /**
+     * The destination session [uiState] currently belongs to, or `null` before one has started.
+     *
+     * It is bookkeeping for telling one destination instance from another, not something the screen
+     * draws, so it deliberately does not live in [PropertyDetailUiState].
+     */
+    private var sessionId: String? = null
+
+    /**
      * Opens [propertyId] of [customerId], reading it unless the same Property is already settled.
      *
-     * The screen drives this from its destination's arguments, so a recomposition must not start a
-     * second read of the same Property (`BR-001`).
+     * The screen drives this from its destination's arguments, so recomposing the destination must
+     * not start a second read of the same Property (`BR-001`). A new destination instance, however,
+     * is a new session: it starts without the previous one's action outcome, so an archive, restore
+     * or delete failure the user already left behind cannot be shown again. The Property already read
+     * is still reused rather than re-fetched.
      */
-    fun start(customerId: String, propertyId: String) {
+    fun start(customerId: String, propertyId: String, sessionId: String) {
+        val newSession = sessionId != this.sessionId
+        this.sessionId = sessionId
+        if (newSession) {
+            _uiState.update { it.copy(actionFailure = null) }
+        }
         val current = _uiState.value
         if (current.customerId == customerId && current.propertyId == propertyId) {
             val settled = current.detail != null && current.failureReason == null
@@ -68,11 +84,12 @@ class PropertyDetailViewModel @Inject constructor(
     /**
      * Releases the Property the screen held.
      *
-     * Called when the session ends, so a user who signs in next does not see the previous user's
+     * Called when the app session ends, so a user who signs in next does not see the previous user's
      * record. The data is scoped to a session by the backend (`BR-001`), so it must not outlive that
      * session in the UI either.
      */
     fun reset() {
+        sessionId = null
         _uiState.value = PropertyDetailUiState()
     }
 
@@ -164,9 +181,13 @@ class PropertyDetailViewModel @Inject constructor(
             capturedAt = clock.instant().toString(),
             expectedVersion = state.detail?.version,
         )
+        // A reply that arrives after the user has left this destination must not be reported by the
+        // next session (`BR-042`).
+        val startedSession = sessionId
         _uiState.update { it.copy(isWorking = true, actionFailure = null) }
         viewModelScope.launch {
             val result = call(state.customerId, state.propertyId, request)
+            if (startedSession != sessionId) return@launch
             _uiState.update { current ->
                 when (result) {
                     is PropertyResult.Success ->

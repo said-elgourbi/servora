@@ -15,6 +15,8 @@ import kotlinx.serialization.SerializationException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import retrofit2.HttpException
 import retrofit2.Response
@@ -493,6 +495,212 @@ class CustomersRepositoryTest {
         company = CustomerCompanyDto(customerId = "c1", legalName = "ABC Property Management Ltd."),
     )
 
+    @Test
+    fun `creates an individual customer and reports the created id`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            createCustomerAnswer = { createdCustomerDto(id = "created-1") },
+        )
+        val repository =
+            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.createCustomer(
+            CreateCustomerRequest.Individual(
+                CreateIndividualCustomerRequest(
+                    type = "INDIVIDUAL",
+                    displayName = "John Smith",
+                    individual = IndividualCustomerPayload(
+                        firstName = "John",
+                        lastName = "Smith",
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(CustomerCreateResult.Success("created-1"), result)
+        assertEquals("Bearer access-token", api.lastAuthorization)
+    }
+
+    @Test
+    fun `creates a company customer and leaves its optional fields absent`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            createCustomerAnswer = { createdCustomerDto(id = "created-2") },
+        )
+        val repository =
+            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+
+        repository.createCustomer(
+            CreateCustomerRequest.Company(
+                CreateCompanyCustomerRequest(
+                    type = "COMPANY",
+                    displayName = "ABC Property Management",
+                    company = CompanyCustomerPayload(legalName = "ABC Property Management"),
+                ),
+            ),
+        )
+
+        val request = requireNotNull(api.lastCustomerRequest)
+        assertTrue(request is CreateCustomerRequest.Company)
+        val company = request as CreateCustomerRequest.Company
+        assertNull(company.request.email)
+        assertNull(company.request.notes)
+    }
+
+    @Test
+    fun `renews the session once when the customer create is refused and retries it`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            createCustomerAnswer = { createdCustomerDto(id = "created-1") },
+        )
+        api.failures += httpFailure(401)
+        val authenticator = authenticator(
+            accessToken = "expired-token",
+            renewal = SessionRenewal.Renewed(accessToken = "fresh-token"),
+        )
+
+        val result = DefaultCustomersRepository(api, authenticator).createCustomer(
+            CreateCustomerRequest.Individual(
+                CreateIndividualCustomerRequest(
+                    type = "INDIVIDUAL",
+                    displayName = "John Smith",
+                    individual = IndividualCustomerPayload(
+                        firstName = "John",
+                        lastName = "Smith",
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(CustomerCreateResult.Success("created-1"), result)
+        assertEquals(1, authenticator.renewals)
+        assertEquals("Bearer fresh-token", api.lastAuthorization)
+    }
+
+    @Test
+    fun `creates a contact on the customer and reports success`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            createContactAnswer = { contactDto() },
+        )
+        val repository =
+            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.createContact(
+            customerId = "c1",
+            request = CreateCustomerContactRequest(
+                firstName = "John",
+                lastName = "Smith",
+                isPrimary = true,
+            ),
+        )
+
+        assertEquals(ContactCreateResult.Success, result)
+        assertEquals("c1", api.lastContactId)
+        assertTrue(api.lastContactRequest?.isPrimary == true)
+    }
+
+    @Test
+    fun `classifies a rejected contact payload as validation`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() })
+        api.failures += httpFailure(400)
+        val repository =
+            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.createContact(
+            customerId = "c1",
+            request = CreateCustomerContactRequest(firstName = "John", lastName = "Smith"),
+        )
+
+        assertEquals(ContactCreateResult.Failure(CustomersFailureReason.VALIDATION), result)
+    }
+
+    @Test
+    fun `sends the edit with the session token and reports success`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            updateCustomerAnswer = { createdCustomerDto(id = "c1") },
+        )
+        val repository =
+            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.updateCustomer(
+            customerId = "c1",
+            request = UpdateCustomerRequest(
+                type = "COMPANY",
+                displayName = "Cedar Property Management",
+                company = CompanyCustomerPayload(legalName = "Cedar Property Management Ltd."),
+                status = "ACTIVE",
+            ),
+        )
+
+        assertEquals(CustomerUpdateResult.Success, result)
+        assertEquals("c1", api.lastUpdateId)
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals("COMPANY", api.lastUpdateRequest?.type)
+        assertEquals(
+            "Cedar Property Management Ltd.",
+            api.lastUpdateRequest?.company?.legalName,
+        )
+        // A conversion states one kind, so the other subtype payload is never sent alongside it.
+        assertNull(api.lastUpdateRequest?.individual)
+    }
+
+    @Test
+    fun `classifies a rejected edit payload as validation`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() })
+        api.failures += httpFailure(400)
+        val repository =
+            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.updateCustomer(
+            customerId = "c1",
+            request = UpdateCustomerRequest(type = "COMPANY", displayName = "Cedar"),
+        )
+
+        assertEquals(CustomerUpdateResult.Failure(CustomersFailureReason.VALIDATION), result)
+    }
+
+    @Test
+    fun `renews the session once when the edit is refused and retries it`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            updateCustomerAnswer = { createdCustomerDto(id = "c1") },
+        )
+        api.failures += httpFailure(401)
+        val authenticator = authenticator(
+            accessToken = "access-token",
+            renewal = SessionRenewal.Renewed(accessToken = "fresh-token"),
+        )
+        val repository = DefaultCustomersRepository(api, authenticator)
+
+        val result = repository.updateCustomer(
+            customerId = "c1",
+            request = UpdateCustomerRequest(type = "INDIVIDUAL", displayName = "John Smith"),
+        )
+
+        assertEquals(CustomerUpdateResult.Success, result)
+        assertEquals(1, authenticator.renewals)
+        assertEquals("Bearer fresh-token", api.lastAuthorization)
+    }
+
+    @Test
+    fun `fails the edit without a session and never calls the backend`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() })
+        val repository = DefaultCustomersRepository(api, authenticator(accessToken = null))
+
+        val result = repository.updateCustomer(
+            customerId = "c1",
+            request = UpdateCustomerRequest(type = "INDIVIDUAL", displayName = "John Smith"),
+        )
+
+        assertEquals(
+            CustomerUpdateResult.Failure(CustomersFailureReason.UNAUTHENTICATED),
+            result,
+        )
+        assertEquals(0, api.calls)
+    }
+
     private fun propertyDto(
         id: String = "p1",
         status: String = "ACTIVE",
@@ -584,6 +792,20 @@ class CustomersRepositoryTest {
         createdAt = "2026-01-01T00:00:00Z",
         updatedAt = "2026-01-01T00:00:00Z",
     )
+
+    private fun createdCustomerDto(id: String) = CreatedCustomerDto(
+        customer = customerDto(id = id),
+    )
+
+    private fun contactDto() = CustomerContactDto(
+        id = "ct1",
+        customerId = "c1",
+        firstName = "John",
+        lastName = "Smith",
+        isPrimary = true,
+        createdAt = "2026-01-01T00:00:00Z",
+        updatedAt = "2026-01-01T00:00:00Z",
+    )
 }
 
 /** API double standing in for the generated Retrofit implementation. */
@@ -598,6 +820,15 @@ private class FakeCustomersApi(
     private val createPropertyAnswer: suspend () -> CustomerPropertyDto = {
         error("the property create was not scripted for this test")
     },
+    private val createCustomerAnswer: suspend () -> CreatedCustomerDto = {
+        error("the customer create was not scripted for this test")
+    },
+    private val createContactAnswer: suspend () -> CustomerContactDto = {
+        error("the contact create was not scripted for this test")
+    },
+    private val updateCustomerAnswer: suspend () -> CreatedCustomerDto = {
+        error("the customer edit was not scripted for this test")
+    },
 ) : CustomersApi {
 
     var lastAuthorization: String? = null
@@ -605,6 +836,11 @@ private class FakeCustomersApi(
     var lastJobs: String? = null
     var lastDetailId: String? = null
     var lastCreateRequest: CreatePropertyRequest? = null
+    var lastCustomerRequest: CreateCustomerRequest? = null
+    var lastContactRequest: CreateCustomerContactRequest? = null
+    var lastContactId: String? = null
+    var lastUpdateId: String? = null
+    var lastUpdateRequest: UpdateCustomerRequest? = null
     var calls: Int = 0
 
     /** The lifecycle projection each Property read asked for, in call order. */
@@ -685,6 +921,54 @@ private class FakeCustomersApi(
         lastCreateRequest = request
         failures.removeFirstOrNull()?.let { throw it }
         return createPropertyAnswer()
+    }
+
+    override suspend fun createIndividualCustomer(
+        authorization: String,
+        request: CreateIndividualCustomerRequest,
+    ): CreatedCustomerDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastCustomerRequest = CreateCustomerRequest.Individual(request)
+        failures.removeFirstOrNull()?.let { throw it }
+        return createCustomerAnswer()
+    }
+
+    override suspend fun createCompanyCustomer(
+        authorization: String,
+        request: CreateCompanyCustomerRequest,
+    ): CreatedCustomerDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastCustomerRequest = CreateCustomerRequest.Company(request)
+        failures.removeFirstOrNull()?.let { throw it }
+        return createCustomerAnswer()
+    }
+
+    override suspend fun createContact(
+        authorization: String,
+        id: String,
+        request: CreateCustomerContactRequest,
+    ): CustomerContactDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastContactId = id
+        lastContactRequest = request
+        failures.removeFirstOrNull()?.let { throw it }
+        return createContactAnswer()
+    }
+
+    override suspend fun updateCustomer(
+        authorization: String,
+        id: String,
+        request: UpdateCustomerRequest,
+    ): CreatedCustomerDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastUpdateId = id
+        lastUpdateRequest = request
+        failures.removeFirstOrNull()?.let { throw it }
+        return updateCustomerAnswer()
     }
 }
 

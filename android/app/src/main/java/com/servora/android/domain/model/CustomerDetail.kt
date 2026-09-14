@@ -70,6 +70,15 @@ data class CustomerJobAddress(
  */
 data class CustomerDetail(
     val customer: Customer,
+    /**
+     * The customer's subtype record (`BR-023`).
+     *
+     * Exactly one is present in a backend read: [individual] for a `INDIVIDUAL` customer and
+     * [company] for a `COMPANY` one. The Edit Customer form reads it to pre-populate the fields of
+     * the customer's current type; the detail screen itself does not need it.
+     */
+    val individual: CustomerIndividual? = null,
+    val company: CustomerCompany? = null,
     val contacts: List<CustomerContact>,
     val properties: List<CustomerProperty>,
     val jobs: List<CustomerJob>,

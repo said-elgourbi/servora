@@ -12,6 +12,12 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     PROPERTIES_EDIT("properties.edit"),
     PROPERTIES_ARCHIVE("properties.archive"),
     PROPERTIES_DELETE("properties.delete"),
+    // The Job and Visit management capabilities (`BR-008`, `BR-066`). The codes the API enforces
+    // today are the foundation catalogue's, and the aliases let the same capability be recognised
+    // under the `resource.action` spelling the Jobs feature may define later (`BR-006`, `BR-041`).
+    // A capability named here is a UI gate only: the backend remains the authority (`BR-007`).
+    JOB_UPDATE("JOB_UPDATE", aliases = setOf("jobs.update", "update.jobs")),
+    TECHNICIAN_VIEW("TECHNICIAN_VIEW", aliases = setOf("technicians.view", "view.technicians")),
 }
 
 class PermissionChecker(granted: Set<String>) {
