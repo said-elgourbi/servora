@@ -1,7 +1,9 @@
 # Servora foundation local development stack.
 #
-# The API + PostgreSQL are the long-lived system of record (BR-001).
-# This compose file provides the two foundational services; Android and
+# The API + PostgreSQL are the long-lived system of record (BR-001); MinIO provides local
+# object storage for development behind the S3 contract (ADR-013), so a deployment replaces it
+# with an S3-compatible provider by configuration and never by code.
+# This compose file provides the foundational services; Android and
 # Angular development happen on the host against these services.
 #
 # Configuration comes from `.env` at the repository root (see .env.example).
@@ -61,5 +63,51 @@ services:
       postgres:
         condition: service_healthy
 
+  # Local object storage for development evidence (BR-015, BR-027). The application contract is
+  # S3, so this service is a development stand-in for the provider a deployment uses.
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # `--console-address` is required: without it the Console binds a random port and the
+    # published MINIO_CONSOLE_PORT mapping would never reach it.
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-servora}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-servora-minio}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # MinIO's own readiness probe; the `mc` client ships inside this image.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  # One-shot bucket bootstrap. Idempotent (`--ignore-existing`), so a fresh clone and an
+  # already-running stack converge on the same state on every `make up`. This is stack setup
+  # rather than application behaviour: a deployment provisions its bucket out of band, so the
+  # API must never assume it may create one.
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z-cpuv1
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-servora}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-servora-minio}
+      S3_BUCKET: ${S3_BUCKET:-servora-dev}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mc alias set servora http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "servora/$$S3_BUCKET"
+        mc anonymous set none "servora/$$S3_BUCKET"
+    restart: "no"
+
 volumes:
   postgres-data:
+  minio-data:

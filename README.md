@@ -43,6 +43,10 @@ Initial supported languages are **English** and **French**. Development rules li
 >
 > The Android Manager Job Details screen and the job read behind it (`GET /jobs/:id`) are
 > `docs/tracker/017-android-job-details.md`; the wire contract is `docs/api/job-details.md`.
+>
+> Local object storage — MinIO behind an S3-only application contract, so production can use a
+> third-party S3-compatible provider — is `docs/tracker/023-object-storage-minio.md`
+> (decision: `docs/decisions/013-object-storage-minio-and-s3.md`).
 
 ## Layout
 
@@ -54,7 +58,7 @@ docs/
   architecture/  Architecture standards
   tracker/       Feature milestone tracker
   domain/        Domain model documentation
-docker-compose.yml   Foundation local stack (PostgreSQL + API)
+docker-compose.yml   Foundation local stack (PostgreSQL + API + MinIO)
 Makefile             Local development orchestration
 ```
 
@@ -68,8 +72,8 @@ Makefile             Local development orchestration
 ## Quick start
 
 ```bash
-cp .env.example .env        # then adjust local values if ports 5432/3000 are taken
-make up                     # build + start PostgreSQL and the API
+cp .env.example .env        # then adjust local values if ports 5432/3000/9000/9001 are taken
+make up                     # build + start PostgreSQL, the API and MinIO
 curl http://localhost:3000/health
 ```
 
@@ -110,6 +114,12 @@ make android-build       # Android debug APK (requires Android SDK)
 - When a non-default `DATABASE_URL`/`POSTGRES_PORT` is required on a machine where the
   default ports are taken, set them in the local `.env` — never commit machine-specific
   values (`.env` is git-ignored).
+- `MINIO_PORT` / `MINIO_CONSOLE_PORT` select the host ports published for object storage
+  (defaults 9000/9001), and `S3_BUCKET` names the bucket `make up` provisions. The
+  application contract is S3 — `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
+  `S3_FORCE_PATH_STYLE` and `S3_PUBLIC_ENDPOINT` are documented in `.env.example` and become
+  active when the storage adapter lands. See `docs/development/setup.md` §7 and
+  `docs/decisions/013-object-storage-minio-and-s3.md`.
 
 - Authentication token lifetimes are configurable per environment: `ACCESS_TOKEN_LIFETIME`
   (default `15m`), `SESSION_LIFETIME` (default `30d`) and `PASSWORD_RESET_TOKEN_LIFETIME`
@@ -150,4 +160,7 @@ make android-build       # Android debug APK (requires Android SDK)
 - Job Details status polish — the labelled **Job status** control, its compact menu and the Visit date
   label: `docs/tracker/021-android-job-details-status-polish.md`.
 - Offline/outbox standard for Android: `docs/architecture/offline-first-architecture.md`.
+- Object storage and the S3 contract (MinIO locally, a third-party S3-compatible provider in
+  production): `docs/tracker/023-object-storage-minio.md`
+  (decision: `docs/decisions/013-object-storage-minio-and-s3.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.

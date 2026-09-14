@@ -15,13 +15,13 @@ help: ## Show this overview of available targets
 # ---------------------------------------------------------------- foundation
 
 .PHONY: up down down-v restart logs ps
-up: ## Build and start the full foundation (PostgreSQL + API) in the background
+up: ## Build and start the full foundation (PostgreSQL + API + MinIO) in the background
 	$(COMPOSE) up -d --build
 
 down: ## Stop and remove foundation containers and networks (database data is kept)
 	$(COMPOSE) down
 
-down-v: ## Stop foundation AND delete the PostgreSQL data volume (destructive)
+down-v: ## Stop foundation AND delete the PostgreSQL and MinIO data volumes (destructive)
 	$(COMPOSE) down -v
 
 restart: ## Restart all foundation services
@@ -48,6 +48,23 @@ migration: api-build ## Generate a new migration, e.g. `make migration NAME=add_
 
 seed: api-build ## Seed the local development database with the two foundation QA accounts
 	cd $(API_DIR) && npm run db:seed
+
+# ------------------------------------------------------------ object storage
+
+.PHONY: minio-console minio-shell minio-ls
+minio-console: ## Print the local object-storage Console URL and how to sign in
+	@echo "MinIO Console: http://localhost:$${MINIO_CONSOLE_PORT:-9001}"
+	@echo "Credentials:   MINIO_ROOT_USER / MINIO_ROOT_PASSWORD from the repository-root .env"
+	@echo "Bucket:        S3_BUCKET from the repository-root .env (default: servora-dev)"
+
+minio-shell: ## Open a shell inside the MinIO container with an authenticated `mc` alias
+	$(COMPOSE) exec minio /bin/sh -c 'mc alias set local http://127.0.0.1:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; exec /bin/sh'
+
+# The image ships an unauthenticated `local` alias, so every operator command sets its own alias.
+# The credentials and the bucket come from the service's own environment, which is the same source
+# `minio` and `minio-init` use, so they cannot drift from the running stack.
+minio-ls: ## List the objects in the local Servora bucket
+	$(COMPOSE) run --rm --no-deps minio-init 'mc alias set servora http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null && mc ls "servora/$$S3_BUCKET"'
 
 # ---------------------------------------------------------------------- API
 
