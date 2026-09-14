@@ -2,8 +2,10 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { loadConfig } from '../config/configuration.js';
+import type { SystemRoleCode } from '../members/organization-member.types.js';
 import { hashPassword } from '../users/password-hasher.js';
 import {
+  generateSeedPassword,
   resolveDevelopmentSeed,
   type DevelopmentSeed,
   type SeedAccount,
@@ -14,6 +16,7 @@ import {
   customerContacts,
   customerIndividuals,
   customers,
+  jobStatusHistory,
   jobs,
   organizationJobNumberCounters,
   organizationRoles,
@@ -26,6 +29,7 @@ import {
   userProfiles,
   users,
   visitNotes,
+  visitStatusHistory,
   visits,
   visitTechnicianHistory,
   visitTechnicians,
@@ -103,7 +107,8 @@ const PERMISSION_TEMPLATES = [
     code: 'properties.delete',
     nameEn: 'Delete properties',
     nameFr: 'Supprimer des proprietes',
-    descriptionEn: 'Permanently delete a Property that has never been referenced.',
+    descriptionEn:
+      'Permanently delete a Property that has never been referenced.',
     descriptionFr: 'Supprimer definitivement une propriete jamais referencee.',
   },
   {
@@ -537,6 +542,95 @@ const VISIT_STATUS_SEQUENCE = [
   'NO_SHOW',
 ] as const;
 
+/**
+ * Extra technicians the operational demo data assigns work to.
+ *
+ * Servora records assignment on the **Visit** and a Visit may carry several technicians with exactly
+ * one Lead (`BR-068`), so a demo that only ever assigned the single seeded technician account could
+ * not show a crew. These members exist to be that crew: they are ordinary `ACTIVE` members holding
+ * the organization's Technician role. They are not sign-in accounts — the two documented QA
+ * credentials remain the only seeded logins — so no password is reported for them.
+ */
+const TECHNICIAN_MEMBER_TEMPLATES = [
+  {
+    email: 'sarah.moreau@servora.test',
+    firstName: 'Sarah',
+    lastName: 'Moreau',
+  },
+  {
+    email: 'john.tremblay@servora.test',
+    firstName: 'John',
+    lastName: 'Tremblay',
+  },
+  { email: 'priya.raman@servora.test', firstName: 'Priya', lastName: 'Raman' },
+  {
+    email: 'luc.gagnon@servora.test',
+    firstName: 'Luc',
+    lastName: 'Gagnon',
+  },
+] as const;
+
+/** One technician a seeded Visit can be assigned to: their membership and their real name. */
+interface SeedTechnician {
+  readonly membershipId: string;
+  readonly name: string;
+}
+
+/** The seeded people the operational demo data assigns work to. */
+interface SeedCrew {
+  readonly manager: string;
+  readonly technicians: readonly SeedTechnician[];
+}
+
+/**
+ * How a Job reached the status it is seeded with, following `BR-058`'s permitted transitions.
+ *
+ * The demo data records the path rather than inventing a history: a Job's status history is what the
+ * Activity read will project (`BR-080`), so it has to be a path the lifecycle actually permits.
+ */
+const JOB_STATUS_PATHS: Record<string, readonly string[]> = {
+  NEW: [],
+  SCHEDULED: ['NEW', 'SCHEDULED'],
+  IN_PROGRESS: ['NEW', 'SCHEDULED', 'IN_PROGRESS'],
+  PENDING_REVIEW: ['NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW'],
+  COMPLETED: ['NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED'],
+  CANCELED: ['NEW', 'CANCELED'],
+};
+
+/**
+ * How a Visit reached the status it is seeded with, following `BR-074`'s lifecycle.
+ *
+ * A `CANCELED` Visit carries a structured reason from the shared vocabulary (`BR-076`); `OTHER` is
+ * avoided because it requires an explanation the demo data does not have to invent.
+ */
+const VISIT_STATUS_PATHS: Record<
+  string,
+  { readonly path: readonly string[]; readonly reasonCode?: string }
+> = {
+  DRAFT: { path: [] },
+  SCHEDULED: { path: ['DRAFT', 'SCHEDULED'] },
+  EN_ROUTE: { path: ['DRAFT', 'SCHEDULED', 'EN_ROUTE'] },
+  ON_SITE: { path: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE'] },
+  IN_PROGRESS: {
+    path: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'],
+  },
+  COMPLETED: {
+    path: [
+      'DRAFT',
+      'SCHEDULED',
+      'EN_ROUTE',
+      'ON_SITE',
+      'IN_PROGRESS',
+      'COMPLETED',
+    ],
+  },
+  CANCELED: {
+    path: ['SCHEDULED', 'CANCELED'],
+    reasonCode: 'CUSTOMER_RESCHEDULED',
+  },
+  NO_SHOW: { path: ['SCHEDULED', 'NO_SHOW'] },
+};
+
 async function main(): Promise<void> {
   const { databaseUrl, nodeEnv } = loadConfig();
   if (nodeEnv === 'production') {
@@ -559,12 +653,12 @@ async function main(): Promise<void> {
     for (const account of seed.accounts) {
       await upsertAccount(db, organizationId, roleIds[account.role], account);
     }
-    const membershipIds = await getSeedMembershipIds(
-      db,
-      organizationId,
-      roleIds,
-    );
-    await seedOperationalDemoData(db, organizationId, membershipIds);
+    const membershipIds = await getSeedMembershipIds(db, organizationId, seed);
+    const crew = await seedCrew(db, organizationId, roleIds, {
+      manager: membershipIds.MANAGER,
+      technician: membershipIds.TECHNICIAN,
+    });
+    await seedOperationalDemoData(db, organizationId, crew);
 
     report(seed);
   } finally {
@@ -668,43 +762,161 @@ async function ensureDefaultRoles(
   return roleIds;
 }
 
+/**
+ * Resolves the seeded accounts' own memberships.
+ *
+ * The accounts are addressed by the credential the seed just upserted, not by role: an organization
+ * now has many members holding the Technician role (`BR-024`), so resolving "the technician" by role
+ * would be ambiguous and could hand back a different member than the documented QA account — which
+ * would then be seeded twice into a crew. Addressing the account by its email is exact.
+ */
 async function getSeedMembershipIds(
   db: SeedDatabase,
   organizationId: string,
-  roleIds: Record<keyof typeof ROLE_TEMPLATES, string>,
-): Promise<{ manager: string; technician: string }> {
-  const [manager] = await db
-    .select({ id: organizationMembers.id })
-    .from(organizationMembers)
-    .where(
-      and(
-        eq(organizationMembers.organizationId, organizationId),
-        eq(organizationMembers.roleId, roleIds.MANAGER),
-      ),
-    )
-    .limit(1);
-  const [technician] = await db
-    .select({ id: organizationMembers.id })
-    .from(organizationMembers)
-    .where(
-      and(
-        eq(organizationMembers.organizationId, organizationId),
-        eq(organizationMembers.roleId, roleIds.TECHNICIAN),
-      ),
-    )
-    .limit(1);
+  seed: DevelopmentSeed,
+): Promise<Record<SystemRoleCode, string>> {
+  const ids = {} as Record<SystemRoleCode, string>;
 
-  if (!manager || !technician) {
-    throw new Error(
-      'Failed to resolve seeded manager and technician memberships.',
-    );
+  for (const account of seed.accounts) {
+    const [membership] = await db
+      .select({ id: organizationMembers.id })
+      .from(organizationMembers)
+      .innerJoin(users, eq(users.id, organizationMembers.userId))
+      .where(
+        and(
+          eq(organizationMembers.organizationId, organizationId),
+          eq(users.email, account.email),
+        ),
+      )
+      .limit(1);
+    if (!membership) {
+      throw new Error(
+        `Failed to resolve the membership of the seeded ${account.role} account.`,
+      );
+    }
+    ids[account.role] = membership.id;
   }
 
-  return { manager: manager.id, technician: technician.id };
+  return ids;
 }
 
 function addHours(value: Date, hours: number): Date {
   return new Date(value.getTime() + hours * 60 * 60 * 1000);
+}
+
+/**
+ * The people the operational demo data assigns work to: the manager and the technicians.
+ *
+ * Servora assigns technicians to a **Visit** (`BR-068`), so a demo with one technician could not show
+ * the assignment model the Job Details screen presents. The two documented QA accounts keep their
+ * credentials; the extra technicians are members only, created so a Visit can carry a real crew with
+ * one Lead and several technicians.
+ */
+async function seedCrew(
+  db: SeedDatabase,
+  organizationId: string,
+  roleIds: Record<keyof typeof ROLE_TEMPLATES, string>,
+  membershipIds: { manager: string; technician: string },
+): Promise<SeedCrew> {
+  return {
+    manager: membershipIds.manager,
+    technicians: await ensureTechnicianMembers(
+      db,
+      organizationId,
+      roleIds.TECHNICIAN,
+      membershipIds,
+    ),
+  };
+}
+
+async function ensureTechnicianMembers(
+  db: SeedDatabase,
+  organizationId: string,
+  technicianRoleId: string,
+  membershipIds: { manager: string; technician: string },
+): Promise<readonly SeedTechnician[]> {
+  const [seededTechnician] = await db
+    .select({ displayName: userProfiles.displayName })
+    .from(organizationMembers)
+    .leftJoin(userProfiles, eq(userProfiles.userId, organizationMembers.userId))
+    .where(eq(organizationMembers.id, membershipIds.technician))
+    .limit(1);
+
+  const technicians: SeedTechnician[] = [
+    {
+      membershipId: membershipIds.technician,
+      name: seededTechnician?.displayName ?? 'Dev Technician',
+    },
+  ];
+
+  for (const template of TECHNICIAN_MEMBER_TEMPLATES) {
+    const passwordHash = await hashPassword(generateSeedPassword());
+    await db
+      .insert(users)
+      .values({ email: template.email, passwordHash })
+      .onConflictDoUpdate({
+        target: users.email,
+        set: { passwordHash, status: 'ACTIVE' },
+      });
+    const [user] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, template.email))
+      .limit(1);
+    if (!user) {
+      throw new Error(`Failed to seed technician "${template.email}".`);
+    }
+
+    const displayName = `${template.firstName} ${template.lastName}`;
+    await db
+      .insert(userProfiles)
+      .values({
+        userId: user.id,
+        firstName: template.firstName,
+        lastName: template.lastName,
+        displayName,
+      })
+      .onConflictDoUpdate({
+        target: userProfiles.userId,
+        set: {
+          firstName: template.firstName,
+          lastName: template.lastName,
+          displayName,
+        },
+      });
+
+    const [member] = await db
+      .insert(organizationMembers)
+      .values({
+        organizationId,
+        userId: user.id,
+        roleId: technicianRoleId,
+        status: 'ACTIVE',
+      })
+      .onConflictDoUpdate({
+        target: [
+          organizationMembers.organizationId,
+          organizationMembers.userId,
+        ],
+        set: { roleId: technicianRoleId, status: 'ACTIVE' },
+      })
+      .returning({ id: organizationMembers.id });
+    if (!member) {
+      throw new Error(`Failed to seed technician member "${displayName}".`);
+    }
+
+    technicians.push({ membershipId: member.id, name: displayName });
+  }
+
+  // A member is seeded once into the crew even if a template resolves to a membership that is
+  // already part of it, because assigning the same technician twice to one Visit is not a state the
+  // assignment model has (`BR-068`).
+  return technicians.filter(
+    (technician, position) =>
+      technicians.findIndex(
+        (other) => other.membershipId === technician.membershipId,
+      ) === position,
+  );
 }
 
 function propertySnapshot(property: {
@@ -775,7 +987,7 @@ async function resetOperationalDemoData(
 async function seedOperationalDemoData(
   db: SeedDatabase,
   organizationId: string,
-  membershipIds: { manager: string; technician: string },
+  crew: SeedCrew,
 ): Promise<void> {
   await resetOperationalDemoData(db, organizationId);
 
@@ -889,7 +1101,7 @@ async function seedOperationalDemoData(
         organizationId,
         propertyId: property.id,
         customerId: customer.id,
-        actorMembershipId: membershipIds.manager,
+        actorMembershipId: crew.manager,
       });
     }
 
@@ -921,13 +1133,22 @@ async function seedOperationalDemoData(
             (customerIndex + localJobIndex) % 4
           ],
           status,
-          ownerMembershipId: membershipIds.manager,
+          ownerMembershipId: crew.manager,
           finalOutcomeCode: status === 'COMPLETED' ? 'RESOLVED' : null,
         })
         .returning({ id: jobs.id });
       if (!job) {
         throw new Error(`Failed to seed job ${jobNumber}.`);
       }
+
+      await seedJobStatusHistory(db, {
+        organizationId,
+        jobId: job.id,
+        status,
+        seedIndex: customerIndex * 3 + localJobIndex,
+        actorMembershipId: crew.manager,
+        scheduledStart: baseSchedule,
+      });
 
       await seedVisitsForJob(db, {
         organizationId,
@@ -936,7 +1157,7 @@ async function seedOperationalDemoData(
         snapshot,
         jobStatus: status,
         seedIndex: customerIndex * 3 + localJobIndex,
-        membershipIds,
+        crew,
         baseSchedule,
       });
     }
@@ -973,7 +1194,7 @@ async function seedVisitsForJob(
     snapshot: Record<string, string | null> | null;
     jobStatus: (typeof JOB_STATUS_SEQUENCE)[number];
     seedIndex: number;
-    membershipIds: { manager: string; technician: string };
+    crew: SeedCrew;
     baseSchedule: Date;
   },
 ): Promise<void> {
@@ -1017,7 +1238,7 @@ async function seedVisitsForJob(
           : null,
         outcomeRecordedAt: isCompleted ? scheduledEnd : null,
         outcomeRecordedByMembershipId: isCompleted
-          ? input.membershipIds.technician
+          ? input.crew.technicians[0]?.membershipId
           : null,
       })
       .returning({ id: visits.id });
@@ -1025,28 +1246,27 @@ async function seedVisitsForJob(
       throw new Error('Failed to seed visit.');
     }
 
-    await db.insert(visitTechnicians).values({
+    await seedVisitCrew(db, {
       organizationId: input.organizationId,
       visitId: visit.id,
-      technicianMembershipId: input.membershipIds.technician,
-      roleCode: 'LEAD',
+      crew: input.crew,
+      seedIndex: input.seedIndex,
+      index,
+      scheduledStart,
     });
-    await db.insert(visitTechnicianHistory).values({
+    await seedVisitStatusHistory(db, {
       organizationId: input.organizationId,
       visitId: visit.id,
-      technicianMembershipId: input.membershipIds.technician,
-      event: 'ASSIGNED',
-      roleCode: 'LEAD',
-      actorMembershipId: input.membershipIds.manager,
+      status: visitStatus,
+      scheduledStart,
+      actorMembershipId: input.crew.manager,
     });
-    await db.insert(visitNotes).values({
+    await seedVisitNotes(db, {
       organizationId: input.organizationId,
       visitId: visit.id,
-      authorMembershipId:
-        index % 2 === 0
-          ? input.membershipIds.manager
-          : input.membershipIds.technician,
-      body: `${OPERATIONAL_SEED_TAG} ${visitStatus.toLowerCase()} visit note for filtering.`,
+      status: visitStatus,
+      crew: input.crew,
+      recordAt: scheduledStart,
     });
   }
 }
@@ -1148,6 +1368,199 @@ function report(seed: DevelopmentSeed): void {
     `  operational demo: ${CUSTOMER_TEMPLATES.length} customers, properties, jobs, visits and assignments refreshed`,
   );
   console.log('These accounts sign in through POST /auth/sign-in.');
+}
+
+/**
+ * Assigns a crew to the seeded Visit (`BR-068`, `BR-069`).
+ *
+ * Every Visit carries at least two technicians with exactly one Lead, so the Job Details screen has a
+ * real crew to present. Some Visits also carry the shape `BR-069` describes: the Lead was first
+ * assigned as an ordinary technician and promoted later, and a technician who had been on the Visit
+ * was removed again. Those are recorded as history — the current assignment holds only who is on the
+ * Visit now — because assignment history is append-only and never rewritten.
+ */
+async function seedVisitCrew(
+  db: SeedDatabase,
+  input: {
+    organizationId: string;
+    visitId: string;
+    crew: SeedCrew;
+    seedIndex: number;
+    index: number;
+    scheduledStart: Date;
+  },
+): Promise<void> {
+  const crewSize = 2 + ((input.seedIndex + input.index) % 2);
+  // The crew rotates so different technicians lead different Visits instead of one technician
+  // leading every seeded Visit.
+  const offset =
+    (input.seedIndex + input.index) % input.crew.technicians.length;
+  const rotated = [
+    ...input.crew.technicians.slice(offset),
+    ...input.crew.technicians.slice(0, offset),
+  ];
+  const crewed = rotated.slice(0, crewSize);
+  const lead = crewed[0];
+  if (lead === undefined) {
+    return;
+  }
+  const assignedAt = addHours(input.scheduledStart, -24);
+
+  // A technician who has since been removed from the Visit, recorded first because it happened
+  // first. They are chosen outside the current crew, so history and the current assignment agree.
+  const removed =
+    (input.seedIndex + input.index) % 3 === 0 ? rotated[crewSize] : undefined;
+  if (removed !== undefined) {
+    await db.insert(visitTechnicianHistory).values({
+      organizationId: input.organizationId,
+      visitId: input.visitId,
+      technicianMembershipId: removed.membershipId,
+      event: 'REMOVED',
+      roleCode: null,
+      previousRoleCode: 'TECHNICIAN',
+      actorMembershipId: input.crew.manager,
+      recordedAt: assignedAt,
+    });
+  }
+
+  for (const [position, technician] of crewed.entries()) {
+    const isLead = position === 0;
+    await db.insert(visitTechnicians).values({
+      organizationId: input.organizationId,
+      visitId: input.visitId,
+      technicianMembershipId: technician.membershipId,
+      roleCode: isLead ? 'LEAD' : 'TECHNICIAN',
+    });
+    // The Lead joined as a technician and was promoted later, which is the change `BR-069`
+    // illustrates: two recorded facts with the same actor, never a rewritten assignment.
+    await db.insert(visitTechnicianHistory).values({
+      organizationId: input.organizationId,
+      visitId: input.visitId,
+      technicianMembershipId: technician.membershipId,
+      event: 'ASSIGNED',
+      roleCode: 'TECHNICIAN',
+      previousRoleCode: null,
+      actorMembershipId: input.crew.manager,
+      recordedAt: addHours(assignedAt, position + 1),
+    });
+    if (isLead) {
+      await db.insert(visitTechnicianHistory).values({
+        organizationId: input.organizationId,
+        visitId: input.visitId,
+        technicianMembershipId: technician.membershipId,
+        event: 'ROLE_CHANGED',
+        roleCode: 'LEAD',
+        previousRoleCode: 'TECHNICIAN',
+        actorMembershipId: input.crew.manager,
+        recordedAt: addHours(input.scheduledStart, -12),
+      });
+    }
+  }
+}
+
+/**
+ * Records how the seeded Visit reached its status (`BR-074`).
+ *
+ * The path is walked one permitted transition at a time, so the seeded history is a history the
+ * lifecycle could actually have produced rather than a single invented row. A canceled Visit carries
+ * a structured reason from the shared vocabulary (`BR-076`).
+ */
+async function seedVisitStatusHistory(
+  db: SeedDatabase,
+  input: {
+    organizationId: string;
+    visitId: string;
+    status: string;
+    scheduledStart: Date;
+    actorMembershipId: string;
+  },
+): Promise<void> {
+  const transition = VISIT_STATUS_PATHS[input.status] ?? { path: [] };
+  let previous: string | null = null;
+  for (const [step, next] of transition.path.entries()) {
+    const isCancellation = next === 'CANCELED';
+    await db.insert(visitStatusHistory).values({
+      organizationId: input.organizationId,
+      visitId: input.visitId,
+      fromStatus: previous,
+      toStatus: next,
+      cancellationSource: isCancellation ? 'MANUAL' : null,
+      reasonCode: isCancellation ? (transition.reasonCode ?? null) : null,
+      note: isCancellation ? 'Customer asked for a different time.' : null,
+      actorMembershipId: input.actorMembershipId,
+      recordedAt: addHours(input.scheduledStart, -24 + step),
+    });
+    previous = next;
+  }
+}
+
+/** Several notes on the seeded Visit, written by the manager and by the crew (`BR-027`). */
+async function seedVisitNotes(
+  db: SeedDatabase,
+  input: {
+    organizationId: string;
+    visitId: string;
+    status: string;
+    crew: SeedCrew;
+    recordAt: Date;
+  },
+): Promise<void> {
+  const technician =
+    input.crew.technicians[0]?.membershipId ?? input.crew.manager;
+  const notes = [
+    {
+      authorMembershipId: input.crew.manager,
+      body: `${OPERATIONAL_SEED_TAG} Dispatcher note: customer confirmed access for the ${input.status.toLowerCase()} visit.`,
+      at: -20,
+    },
+    {
+      authorMembershipId: technician,
+      body: `${OPERATIONAL_SEED_TAG} Technician note: arrived, reviewed the reported fault and checked the equipment.`,
+      at: -2,
+    },
+    {
+      authorMembershipId: technician,
+      body: `${OPERATIONAL_SEED_TAG} Technician note: parts and readings recorded for follow-up.`,
+      at: 1,
+    },
+  ];
+
+  for (const note of notes) {
+    await db.insert(visitNotes).values({
+      organizationId: input.organizationId,
+      visitId: input.visitId,
+      authorMembershipId: note.authorMembershipId,
+      body: note.body,
+      recordedAt: addHours(input.recordAt, note.at),
+    });
+  }
+}
+
+/** Records how the seeded Job reached its status, one permitted transition at a time (`BR-058`). */
+async function seedJobStatusHistory(
+  db: SeedDatabase,
+  input: {
+    organizationId: string;
+    jobId: string;
+    status: string;
+    seedIndex: number;
+    actorMembershipId: string;
+    scheduledStart: Date;
+  },
+): Promise<void> {
+  const path = JOB_STATUS_PATHS[input.status] ?? [];
+  let previous: string | null = null;
+  for (const [step, next] of path.entries()) {
+    await db.insert(jobStatusHistory).values({
+      organizationId: input.organizationId,
+      jobId: input.jobId,
+      fromStatus: previous,
+      toStatus: next,
+      actorMembershipId: input.actorMembershipId,
+      recordedAt: addHours(input.scheduledStart, -48 + step + input.seedIndex),
+    });
+    previous = next;
+  }
 }
 
 main().catch((error: unknown) => {

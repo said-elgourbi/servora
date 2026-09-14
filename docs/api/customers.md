@@ -2,7 +2,8 @@
 
 **Status: IMPLEMENTED** for `GET /customers`, `GET /customers/:id`, `GET /customers/:id/properties`,
 `GET /customers/:id/properties/:propertyId`, `GET /customers/:id/jobs`, `POST /customers`,
-`POST /customers/:id/properties`, `PATCH|PUT /customers/:id/properties/:propertyId`,
+`POST /customers/:id/contacts`, `POST /customers/:id/properties`,
+`PATCH|PUT /customers/:id/properties/:propertyId`,
 `POST /customers/:id/properties/:propertyId/archive`,
 `POST /customers/:id/properties/:propertyId/restore`,
 `DELETE /customers/:id/properties/:propertyId`, `PATCH|PUT /customers/:id` and
@@ -13,10 +14,10 @@ This document records the wire contract; the derivation itself is specified in
 `Business Rules.md` (`BR-081`) and `docs/domain/job-visit-domain-model.md` §8.4.
 
 References: `BR-001`, `BR-007`, `BR-023`, `BR-048`, `BR-050`, `BR-056`, `BR-058`, `BR-068`,
-`BR-081`, `BR-082`, `BR-083`, `BR-084`, `BR-085`, `BR-086`, `dev.md` §7, `dev.md` §8,
+`BR-081`, `BR-082`, `BR-083`, `BR-084`, `BR-085`, `BR-086`, **`BR-087`**, `dev.md` §7, `dev.md` §8,
 `docs/decisions/012-property-lifecycle-and-permissions.md`,
 `docs/tracker/010-customer-detail.md`, `docs/tracker/012-property-permissions-and-lifecycle-schema.md`,
-`docs/tracker/013-property-lifecycle.md`.
+`docs/tracker/013-property-lifecycle.md`, `docs/tracker/015-android-edit-customer.md`.
 
 ## 1. Conventions
 
@@ -37,7 +38,7 @@ Property capabilities are independent of the customer capabilities and are never
 | --------------------- | ------------------------------------------------------------------------------------------ |
 | `customers.view`      | `GET /customers`, `GET /customers/:id`, `…/jobs`                                           |
 | `customers.create`    | `POST /customers`                                                                          |
-| `customers.edit`      | `PATCH /customers/:id`, `PUT /customers/:id`                                               |
+| `customers.edit`      | `PATCH /customers/:id`, `PUT /customers/:id`, `POST /customers/:id/contacts`               |
 | `customers.archive`   | `POST /customers/:id/archive`                                                              |
 | `properties.view`     | `GET /customers/:id/properties`, `GET /customers/:id/properties/:propertyId`               |
 | `properties.create`   | `POST /customers/:id/properties`                                                           |
@@ -351,4 +352,157 @@ them.
 | `404`  | `PROPERTY_NOT_FOUND`        | Unknown, or outside the organization/Customer scope   |
 | `409`  | `PROPERTY_VERSION_CONFLICT` | The mutation named a version the Property left behind |
 | `409`  | `PROPERTY_HAS_REFERENCES`   | Permanent deletion is prohibited while references exist |
+
+## 5. Customer mutations
+
+### 5.1 `POST /customers` — create a customer (`BR-023`)
+
+Creates an organization-owned customer and its required subtype record atomically. It requires
+`customers.create`.
+
+The body is discriminated by `type`, and exactly one matching subtype payload is required:
+
+```json
+{
+  "type": "INDIVIDUAL",
+  "displayName": "John Smith",
+  "email": "john@example.com",
+  "phone": "+15551234567",
+  "notes": "Prefers morning appointments.",
+  "individual": { "firstName": "John", "lastName": "Smith" }
+}
+```
+
+```json
+{
+  "type": "COMPANY",
+  "displayName": "ABC Property Management",
+  "company": { "legalName": "ABC Property Management Ltd." }
+}
+```
+
+- `displayName` is required and is what the list and detail show. The client derives it — the
+  individual's first and last name, or the company's name — and the API never invents it from the
+  subtype.
+- `email`, `phone`, `billingEmail`, `billingPhone` and `notes` are optional (`BR-023`); an absent
+  member is stored as `null`. `preferredContactMethod` and `language` are optional stable codes that
+  fall back to the model's defaults when absent.
+- A created customer is `ACTIVE`, with no Property, no contact and no Job. It is never physically
+  deleted: archiving is a customer's removal (`BR-023`).
+- Success is `201` with the created header plus its subtype record:
+
+```json
+{
+  "customer": { "id": "…", "type": "COMPANY", "displayName": "ABC Property Management", "status": "ACTIVE" },
+  "individual": null,
+  "company": { "customerId": "…", "legalName": "ABC Property Management Ltd.", "businessName": null, "taxNumber": null }
+}
+```
+
+- A rejected payload is `400 VALIDATION_FAILED`; a caller without `customers.create` is
+  `403 FORBIDDEN` (`dev.md` §7).
+
+### 5.2 `POST /customers/:id/contacts` — add a contact (`BR-023`)
+
+Records a contact against a customer the caller's organization owns. It requires `customers.edit`.
+
+```json
+{
+  "firstName": "John",
+  "lastName": "Smith",
+  "email": "john@example.com",
+  "phone": "+15551234567",
+  "role": "Site manager",
+  "isPrimary": true,
+  "isBillingContact": false,
+  "isJobContact": false
+}
+```
+
+- `firstName` and `lastName` are required; every other member is optional and defaults to
+  `null`/`false`.
+- Success is `201` with the created contact in the shape the detail's `contacts` array uses (`id`,
+  `customerId`, the two names, `email`, `phone`, `role`, `isPrimary`, `isBillingContact`,
+  `isJobContact`, `createdAt`, `updatedAt`).
+- An id the caller's organization does not own is `404 CUSTOMER_NOT_FOUND`, never `403` (`BR-001`).
+- **Authorization note.** Contacts have no capability of their own. Maintaining a customer's records
+  is what `customers.edit` governs, which is the interim authorization the Property create used
+  before the Property catalogue existed (`ADR-012` D1). Whether contacts warrant their own
+  capability set, as Properties received in `BR-085`, is an **OPEN QUESTION** for product ownership;
+  until it is decided, this route never grants more than `customers.edit` already does.
+- A contact has no update or delete route yet. What a customer's primary contact means when it
+  changes, and how a contact is edited, are not defined by any rule and are **OPEN QUESTION**s.
+
+### 5.3 `PATCH` / `PUT /customers/:id` — edit a customer (`BR-023`, `BR-087`)
+
+Edits a customer the caller's organization owns. It requires `customers.edit`. The same handler
+serves both methods; the body is the same for either.
+
+The edit is **partial**: a member that is absent is left as it is. Stating `type` is the one
+exception — it says which kind of customer this is, so the same request must also state everything
+that kind needs.
+
+```json
+{
+  "type": "COMPANY",
+  "displayName": "Cedar Property Management",
+  "email": "hello@cedar.example",
+  "phone": "+15551234567",
+  "notes": "Prefers morning appointments.",
+  "status": "ACTIVE",
+  "company": { "legalName": "Cedar Property Management Ltd.", "taxNumber": "123456789" }
+}
+```
+
+```json
+{
+  "displayName": "Renamed Customer",
+  "status": "INACTIVE"
+}
+```
+
+- `type` is one of `INDIVIDUAL`, `COMPANY` (`BR-023`). When it is supplied:
+  - `displayName` is **required**. It is what the list and detail show and the API never derives it
+    from the subtype, exactly as on a create.
+  - the subrecord of the stated type is **required**, with its required fields: `individual.firstName`
+    and `individual.lastName`, or `company.legalName`.
+  - the **other** subrecord must not be supplied. A body that states one type and carries the other
+    fails as `400 VALIDATION_FAILED` rather than having a payload silently dropped (`BR-042`).
+- **Stating the customer's current type is not a conversion**: it is an ordinary edit of that type's
+  values, and it writes no lifecycle event.
+- **Stating the other type converts the customer** (`BR-087`). In one transaction the API:
+  1. changes `customers.type`;
+  2. removes the previous subtype record;
+  3. writes the new matching subtype record;
+  4. appends one `customer_lifecycle_history` row (`TYPE_CONVERTED`, the previous type, the new type,
+     the acting membership and the database timestamp).
+
+  No value is carried between the two subtype concepts: an individual's names never become a
+  company's legal name, and a company's legal name is never split into a person's names. The resulting
+  invariant is unchanged — **exactly one subtype record exists and it matches `customers.type`**.
+- The conversion leaves the rest of the customer alone: its identity, its other header values (only
+  those the same edit changes), its Jobs, its Properties and Property relationships, its contacts, its
+  addresses and every preserved address snapshot are untouched (`BR-048`, `BR-056`, `BR-057`).
+- A subrecord supplied **without** `type` is applied only when it matches the customer's stored type.
+  A payload that contradicts the stored type is `400 VALIDATION_FAILED`, not a silent no-op.
+- `status` is `ACTIVE` or `INACTIVE`. Archiving is a separate route with its own capability; this
+  route does not archive or restore a customer (`BR-023`).
+- `individual.dateOfBirth` and `company.businessName`/`taxNumber` are optional and may be `null`.
+  Sending an explicit `null` clears the value; omitting the member leaves it as it is.
+- Success is `200` with the customer's header plus the subtype record it now has:
+
+```json
+{
+  "customer": { "id": "…", "type": "COMPANY", "displayName": "Cedar Property Management", "status": "ACTIVE" },
+  "individual": null,
+  "company": { "customerId": "…", "legalName": "Cedar Property Management Ltd.", "businessName": null, "taxNumber": null }
+}
+```
+
+- Errors: `400 VALIDATION_FAILED` (an incomplete or contradictory edit),
+  `403 FORBIDDEN` (no `customers.edit`), and `404 CUSTOMER_NOT_FOUND` for an id the caller's
+  organization does not own — never `403` (`BR-001`).
+- **One-way by design.** No API operation reverses a conversion or restores the replaced subtype's
+  values. The lifecycle row records that a conversion happened, not what was replaced (`BR-087`).
+
 

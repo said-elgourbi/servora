@@ -4,14 +4,19 @@ import {
   customerCompanies,
   customerContacts,
   customerIndividuals,
+  customerLifecycleHistory,
   customers,
-  jobs,
   properties,
 } from '../database/schema.js';
 
 // Stable, machine-readable codes. Never persist localized display labels.
 export const CUSTOMER_TYPES = ['INDIVIDUAL', 'COMPANY'] as const;
 export type CustomerType = (typeof CUSTOMER_TYPES)[number];
+
+/** The Customer lifecycle events the backend records (`BR-087`). */
+export const CUSTOMER_LIFECYCLE_ACTIONS = ['TYPE_CONVERTED'] as const;
+export type CustomerLifecycleAction =
+  (typeof CUSTOMER_LIFECYCLE_ACTIONS)[number];
 
 export const CUSTOMER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type CustomerStatus = (typeof CUSTOMER_STATUSES)[number];
@@ -53,6 +58,14 @@ export type NewCustomerContact = InferInsertModel<typeof customerContacts>;
 export type CustomerAddress = InferSelectModel<typeof customerAddresses>;
 export type NewCustomerAddress = InferInsertModel<typeof customerAddresses>;
 
+/** One append-only Customer lifecycle event (`BR-087`). */
+export type CustomerLifecycleEvent = InferSelectModel<
+  typeof customerLifecycleHistory
+>;
+export type NewCustomerLifecycleEvent = InferInsertModel<
+  typeof customerLifecycleHistory
+>;
+
 /** A customer (type `INDIVIDUAL`) together with its individual subtype record. */
 export interface IndividualCustomer {
   readonly customer: Customer;
@@ -68,8 +81,9 @@ export interface CompanyCustomer {
 /**
  * The Property and Job rows the customer detail projections read (`BR-081`).
  *
- * The Job & Visit domain owns these entities; there is no Jobs/Properties module yet, so the
- * customer module reads them here rather than duplicating a second set of row types.
+ * The Job & Visit domain owns these entities. `Job` is declared by `jobs/job.types.ts` and re-exported
+ * here so the customer projections keep one definition of a Job row; there is no Properties module
+ * yet, so `Property` is still declared here.
  */
 export type Property = InferSelectModel<typeof properties>;
-export type Job = InferSelectModel<typeof jobs>;
+export type { Job } from '../jobs/job.types.js';

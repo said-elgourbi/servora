@@ -5,6 +5,7 @@ import {
   requireEnum,
   requireText,
 } from '../validation/domain-validation.js';
+import { DomainValidationError } from '../validation/domain-validation.js';
 import {
   CUSTOMER_TYPES,
   type CompanyCustomer,
@@ -108,6 +109,11 @@ export type CreateCustomerDto =
   CreateIndividualCustomerDto | CreateCompanyCustomerDto;
 
 export interface UpdateCustomerDto {
+  /**
+   * The customer's type. Supplying it states the customer's kind, so it is only accepted together
+   * with the display name and the required fields of that kind (`BR-087`).
+   */
+  type?: CustomerType;
   displayName?: string;
   email?: string | null;
   phone?: string | null;
@@ -274,12 +280,24 @@ export function parseCreateCustomerDto(input: unknown): CreateCustomerDto {
   };
 }
 
-/** Validates untrusted input into a partial customer edit. */
+/**
+ * Validates untrusted input into a partial customer edit, including a type conversion.
+ *
+ * An edit is partial: a member that is absent is left as it is. Supplying `type` is the one
+ * exception — it states which kind of customer this is, so the edit must also state everything that
+ * kind requires: the `displayName` the list and detail show, and the new subtype's required fields
+ * (`BR-087`). The API never derives the display name from the subtype, exactly as on a create.
+ */
 export function parseUpdateCustomerDto(input: unknown): UpdateCustomerDto {
   const source = (input ?? {}) as Record<string, unknown>;
   const output: UpdateCustomerDto = {};
 
-  if (source.displayName !== undefined) {
+  if (source.type !== undefined) {
+    output.type = requireEnum(source.type, CUSTOMER_TYPES, 'type');
+  }
+  const statesType = output.type !== undefined;
+
+  if (source.displayName !== undefined || statesType) {
     output.displayName = requireText(source.displayName, 'displayName', 255);
   }
   if (source.email !== undefined) {
@@ -317,6 +335,46 @@ export function parseUpdateCustomerDto(input: unknown): UpdateCustomerDto {
       ['ACTIVE', 'INACTIVE'] as const,
       'status',
     );
+  }
+
+  if (statesType) {
+    // A conversion must not carry the subtype it is leaving: rejecting a contradictory body is how
+    // it fails loudly instead of having a payload silently dropped (`BR-042`, `BR-087`).
+    const leaving = output.type === 'INDIVIDUAL' ? 'company' : 'individual';
+    if (source[leaving] !== undefined) {
+      throw new DomainValidationError([
+        `${leaving} must not be supplied for a ${output.type} customer`,
+      ]);
+    }
+
+    if (output.type === 'INDIVIDUAL') {
+      const individual = (source.individual ?? {}) as Record<string, unknown>;
+      output.individual = {
+        firstName: requireText(
+          individual.firstName,
+          'individual.firstName',
+          100,
+        ),
+        lastName: requireText(individual.lastName, 'individual.lastName', 100),
+        dateOfBirth: optionalDate(
+          individual.dateOfBirth,
+          'individual.dateOfBirth',
+        ),
+      };
+    } else {
+      const company = (source.company ?? {}) as Record<string, unknown>;
+      output.company = {
+        legalName: requireText(company.legalName, 'company.legalName', 255),
+        businessName: optionalText(
+          company.businessName,
+          'company.businessName',
+          255,
+        ),
+        taxNumber: optionalText(company.taxNumber, 'company.taxNumber', 100),
+      };
+    }
+
+    return output;
   }
 
   if (source.individual !== undefined) {

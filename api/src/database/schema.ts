@@ -444,6 +444,57 @@ export const customerAddresses = pgTable(
   ],
 );
 
+// ------------------------------------------- customer_lifecycle_history
+
+/**
+ * Append-only Customer lifecycle events (`BR-033`, `BR-087`).
+ *
+ * The only event a Customer has today is a type conversion (`BR-087`), so the previous and the new
+ * type are always known and both are `NOT NULL`. The `action` discriminator names the event kind, as
+ * `property_lifecycle_history.action` does, and its `CHECK` keeps the vocabulary closed (`BR-041`).
+ *
+ * The previous subtype's own values are deliberately **not** stored: converting replaces the
+ * subtype record, and duplicating the replaced values here would create a second copy of personal
+ * or business data that no rule asks the API to keep (`BR-042`, `BR-087`).
+ */
+export const customerLifecycleHistory = pgTable(
+  'customer_lifecycle_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    customerId: uuid('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    action: varchar('action', { length: 32 }).notNull(),
+    fromType: varchar('from_type', { length: 20 }).notNull(),
+    toType: varchar('to_type', { length: 20 }).notNull(),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'customer_lifecycle_history_action_check',
+      sql`${table.action} in ('TYPE_CONVERTED')`,
+    ),
+    check(
+      'customer_lifecycle_history_types_check',
+      sql`${table.fromType} in ('INDIVIDUAL', 'COMPANY') and ${table.toType} in ('INDIVIDUAL', 'COMPANY') and ${table.fromType} <> ${table.toType}`,
+    ),
+    index('customer_lifecycle_history_organization_customer_idx').on(
+      table.organizationId,
+      table.customerId,
+      table.recordedAt,
+    ),
+  ],
+);
+
 // --------------------------------------------------------------- properties
 
 export const properties = pgTable(
