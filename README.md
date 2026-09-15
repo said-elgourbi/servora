@@ -54,9 +54,14 @@ Initial supported languages are **English** and **French**. Development rules li
 > The photo-evidence work that follows — the capability set, a photo picker, a viewer, offline evidence
 > and the lifecycle questions — is planned in `docs/tracker/029-photo-evidence-phases.md`. **Its Phase 1,
 > the evidence capability set (`evidence.view`/`evidence.photo.add`), Phase 2, the content-type-aware
-> capture pipeline, and Phase 3, the two photo sources (camera and the system photo picker) with the
-> client permission gate, are implemented**, with the capability decision in
-> `docs/decisions/015-evidence-capabilities.md`; Phase 4 is next and waits on decision D4.
+> capture pipeline, Phase 3, the two photo sources (camera and the system photo picker) with the client
+> permission gate, and Phase 4, the full-size viewer, are implemented**, with the capability decision in
+> `docs/decisions/015-evidence-capabilities.md`. **Phase 0's remaining questions were decided on
+> 2026-09-15**: the image stack is Coil 3 behind the existing `JobPhotoImages` port (D4b,
+> `docs/decisions/016-android-image-stack-and-viewer-zoom.md`), the viewer gains pinch-zoom and pan (D9,
+> Telephoto), evidence is Job-level (D2), a re-encoded photo is stored upright (D7b), a refused photo
+> becomes discardable (D6c), and the device's media library is not read (D10). **Phases 4b, 4c and 4d are
+> next; Phase 5 stays blocked because D5 was deferred.**
 
 ## Layout
 
@@ -181,7 +186,13 @@ make android-build       # Android debug APK (requires Android SDK)
   evidence and the lifecycle questions. **Phases 1 (the evidence capability set), 2 (the
   content-type-aware capture pipeline), 3 (the camera and system photo picker behind the update
   action, and the client's evidence gate) and 4 (the full-size viewer a photo opens into) have
-  landed; Phase 5 (offline evidence) is next and waits on D5.**
+  landed; a reported portrait-orientation display defect was fixed on 2026-09-15 (a decode now applies
+  the photo's own EXIF orientation). Phase 0's remaining questions were decided on 2026-09-15: evidence is
+  Job-level (D2), the image stack is Coil 3 behind the existing port (D4b) with pinch-zoom and pan in the
+  viewer (D9), a re-encoded photo is stored upright (D7b), a refused photo becomes discardable (D6c), the
+  device's media library is not read (D10), and D5 was deferred. Phases 4b, 4c and 4d are next; Phase 5
+  (offline evidence) stays blocked on the deferred D5.**
   `docs/tracker/029-photo-evidence-phases.md`
-  (decision: `docs/decisions/015-evidence-capabilities.md`).
+  (decisions: `docs/decisions/015-evidence-capabilities.md`,
+  `docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.

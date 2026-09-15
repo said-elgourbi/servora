@@ -466,8 +466,12 @@ Constraints and indexes:
   address snapshot (`BR-056`, §6.3).
 - **No customer duplication.** The Job references `customers.id`; it does not copy customer name,
   phone or email. Customer data is read through the Customer.
-- Evidence (photos, audio, files) is attached to Visits and is out of scope for this slice
-  (`BR-027`, `BR-077`, §18).
+- **Evidence is Job-level.** Photos are recorded against the **Job** (`job_photos.job_id`), not a Visit: a
+  Job may carry evidence with no Visit at all (`BR-051`), a technician records a before/during/after photo
+  without a Visit having to exist, and the Activity projection reports each one as a Job-level event
+  (`JOB_PHOTO_ADDED`, `BR-080`). An optional link from evidence to a Visit is available later if a
+  requirement names one. Decided by product ownership on 2026-09-15 (`docs/tracker/029-photo-evidence-phases.md` D2).
+- Audio and files do not exist yet and remain out of scope (`BR-027`, `D8`).
 
 ### 6.3 Property on the Job and the address snapshot
 

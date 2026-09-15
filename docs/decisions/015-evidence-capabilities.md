@@ -99,7 +99,12 @@ are still guarded by `customers.view` and the Job and Visit actions by `JOB_UPDA
 Recorded rather than guessed (`BR-042`); tracker 029 carries them with the phases that depend on them.
 
 1. Audio and file evidence, and the model behind them (D8).
-2. Evidence scope — Job versus Visit (D2).
-3. A viewer, and any thumbnail or derived-object strategy (D4).
-4. Offline visibility of accepted evidence (D5).
-5. Retention, deletion and lifecycle of evidence (D6), which `BR-027` and `BR-033` leave open.
+2. Evidence scope — Job versus Visit (D2). **Decided 2026-09-15: Job-level; the domain document is corrected
+   with it** (`docs/tracker/029-photo-evidence-phases.md` D2).
+3. A viewer, and any thumbnail or derived-object strategy (D4). **Partly decided:** the viewer landed in
+   tracker 029 Phase 4, the preview/caching strategy is `docs/decisions/016-android-image-stack-and-viewer-zoom.md`
+   (D4b ✓, Coil 3), and server-derived thumbnails stay open there.
+4. Offline visibility of accepted evidence (D5). **Deferred 2026-09-15** — still open, and Phase 5 with it.
+5. Retention, deletion and lifecycle of evidence (D6), which `BR-027` and `BR-033` leave open. **Partly
+   decided:** a refused photo may be explicitly discarded (`D6c` ✓, tracker 029 Phase 6a); delete/edit,
+   retention and Job-deletion objects stay open.
