@@ -62,11 +62,6 @@ class PropertyOfflineStore @Inject constructor(
     suspend fun reportedDetail(subjectId: String, propertyId: String): PropertyDetail? =
         reportedRow(subjectId, propertyId)?.toPropertyDetail()
 
-    /** Queues one lifecycle action the backend has not accepted yet (`BR-086`). */
-    suspend fun record(operation: OutboxOperation) {
-        outbox.record(operation)
-    }
-
     /**
      * Queues a lifecycle action the API could not be reached for (`BR-086`).
      *

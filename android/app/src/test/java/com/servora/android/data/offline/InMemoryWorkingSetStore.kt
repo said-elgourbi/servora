@@ -27,10 +27,6 @@ class InMemoryWorkingSetStore : WorkingSetStore {
         rows.remove(key(subjectId, entityType, entityId))
     }
 
-    override suspend fun evictType(subjectId: String, entityType: String) {
-        rows.keys.removeAll { it.first == subjectId && it.second == entityType }
-    }
-
     override suspend fun clear(subjectId: String) {
         rows.keys.removeAll { it.first == subjectId }
     }

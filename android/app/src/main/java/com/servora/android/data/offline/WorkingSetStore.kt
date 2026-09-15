@@ -29,9 +29,6 @@ interface WorkingSetStore {
         entityId: String,
     )
 
-    /** Drops every row of one projection type for a subject. */
-    suspend fun evictType(subjectId: String, entityType: String)
-
     /**
      * Drops every row of a subject.
      *
@@ -63,10 +60,6 @@ internal class RoomWorkingSetStore @Inject constructor(
         entityId: String,
     ) {
         dao.evict(subjectId, entityType, entityId)
-    }
-
-    override suspend fun evictType(subjectId: String, entityType: String) {
-        dao.evictType(subjectId, entityType)
     }
 
     override suspend fun clear(subjectId: String) {

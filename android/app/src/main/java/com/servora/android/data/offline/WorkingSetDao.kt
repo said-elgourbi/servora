@@ -33,11 +33,6 @@ internal interface WorkingSetDao {
     )
     suspend fun evict(subjectId: String, entityType: String, entityId: String)
 
-    @Query(
-        "delete from working_set_entries where subjectId = :subjectId and entityType = :entityType",
-    )
-    suspend fun evictType(subjectId: String, entityType: String)
-
     @Query("delete from working_set_entries where subjectId = :subjectId")
     suspend fun clearSubject(subjectId: String)
 }
