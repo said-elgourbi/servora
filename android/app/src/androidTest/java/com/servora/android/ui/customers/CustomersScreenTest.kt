@@ -294,10 +294,28 @@ class CustomersScreenTest {
         assertEquals(CustomerFilters.Unconstrained, applied)
     }
 
+    @Test
+    fun theRowsAreMarkedWhenTheyAreTheLastTheServerReported() {
+        render(canCreateCustomer = true, showingLastReported = true)
+
+        // The list says the rows are not a fresh answer instead of presenting a local copy as
+        // current (`offline-first-architecture.md` §2, §7).
+        composeTestRule.onNodeWithTag(CustomersLastReportedTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.offline_last_reported)).assertIsDisplayed()
+    }
+
+    @Test
+    fun theRowsAreNotMarkedWhenTheBackendAnswered() {
+        render(canCreateCustomer = true)
+
+        composeTestRule.onNodeWithTag(CustomersLastReportedTag).assertDoesNotExist()
+    }
+
     private fun render(
         canCreateCustomer: Boolean,
         customers: List<CustomerListItem> = listOf(customer()),
         filters: CustomerFilters = CustomerFilters(),
+        showingLastReported: Boolean = false,
         onApplyFilters: (CustomerFilters) -> Unit = {},
         onCreate: () -> Unit = {},
         onOpenCustomer: (String) -> Unit = {},
@@ -314,7 +332,11 @@ class CustomersScreenTest {
                             canViewProperties = false,
                             canCreateProperty = false,
                         ),
-                    state = CustomersUiState(customers = customers, filters = filters),
+                    state = CustomersUiState(
+                        customers = customers,
+                        filters = filters,
+                        showingLastReported = showingLastReported,
+                    ),
                     onCreate = onCreate,
                     onOpenCustomer = onOpenCustomer,
                     onRetry = {},

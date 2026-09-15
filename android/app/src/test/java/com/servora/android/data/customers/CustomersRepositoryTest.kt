@@ -2,6 +2,7 @@ package com.servora.android.data.customers
 
 import com.servora.android.data.offline.InMemoryWorkingSetStore
 import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.offline.WorkingSetEntityTypes
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
@@ -537,6 +538,131 @@ class CustomersRepositoryTest {
         assertEquals("Martha Reynolds-Smith", success.detail.customer.displayName)
     }
 
+    @Test
+    fun `stores the rows the backend reported in the working set`() = runTest {
+        val api = FakeCustomersApi(answer = { listOf(customerDto(id = "c1")) })
+        val workingSet = InMemoryWorkingSetStore()
+
+        assertSuccess(
+            repository(api, authenticator(), workingSet = workingSet).listCustomers(),
+        )
+
+        val stored = workingSet.stored.single()
+        assertEquals("user-1", stored.subjectId)
+        assertEquals(WorkingSetEntityTypes.CUSTOMER_LIST, stored.entityType)
+        // The filter is the identity of the answer: a row read under another filter is not this
+        // read's answer (`BR-001`).
+        assertEquals(CustomerFilters().cacheKey(), stored.entityId)
+        assertEquals(
+            listOf("c1"),
+            Json.decodeFromString(CustomerListPayload.serializer(), stored.payload)
+                .rows
+                .map { it.id },
+        )
+    }
+
+    @Test
+    fun `serves the last reported list when the API cannot be reached`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { listOf(customerDto(id = "c1"), customerDto(id = "c2")) },
+        )
+        val repository = repository(api, authenticator())
+        assertSuccess(repository.listCustomers())
+        api.failures += IOException()
+
+        val result = repository.listCustomers()
+
+        val success = result as CustomersResult.Success
+        assertEquals(ReadSource.WORKING_SET, success.source)
+        assertEquals(listOf("c1", "c2"), success.customers.map { it.id })
+    }
+
+    @Test
+    fun `serves the last reported list when the backend fails`() = runTest {
+        val api = FakeCustomersApi(answer = { listOf(customerDto(id = "c1")) })
+        val repository = repository(api, authenticator())
+        assertSuccess(repository.listCustomers())
+        api.failures += httpFailure(503)
+
+        val success = repository.listCustomers() as CustomersResult.Success
+
+        assertEquals(ReadSource.WORKING_SET, success.source)
+        assertEquals(listOf("c1"), success.customers.map { it.id })
+    }
+
+    @Test
+    fun `reports the network failure for the list when nothing was reported yet`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() })
+        api.failures += IOException("offline")
+
+        assertEquals(
+            CustomersFailureReason.NETWORK,
+            assertFailure(repository(api, authenticator()).listCustomers()),
+        )
+    }
+
+    @Test
+    fun `does not serve the local rows when the API refuses the list`() = runTest {
+        val api = FakeCustomersApi(answer = { listOf(customerDto(id = "c1")) })
+        val repository = repository(api, authenticator())
+        assertSuccess(repository.listCustomers())
+        // A refusal is the backend's answer, so the rows held on the device must not be shown in its
+        // place (`BR-007`, `BR-042`).
+        api.failures += httpFailure(403)
+
+        assertEquals(
+            CustomersFailureReason.FORBIDDEN,
+            assertFailure(repository.listCustomers()),
+        )
+    }
+
+    @Test
+    fun `does not serve another subject's rows`() = runTest {
+        val api = FakeCustomersApi(answer = { listOf(customerDto(id = "c1")) })
+        val workingSet = InMemoryWorkingSetStore()
+        assertSuccess(repository(api, authenticator(), workingSet).listCustomers())
+        api.failures += IOException()
+
+        val otherSubject = repository(
+            api,
+            authenticator(),
+            workingSet = workingSet,
+            subjectId = "user-2",
+        )
+
+        assertEquals(CustomersFailureReason.NETWORK, assertFailure(otherSubject.listCustomers()))
+    }
+
+    @Test
+    fun `does not answer one filter with the list the backend reported for another`() = runTest {
+        val api = FakeCustomersApi(answer = { listOf(customerDto(id = "c1")) })
+        val repository = repository(api, authenticator())
+        // The default view is active customers only; the unconstrained list the user clears to is a
+        // different answer (`BR-001`).
+        assertSuccess(repository.listCustomers())
+        api.failures += IOException()
+
+        assertEquals(
+            CustomersFailureReason.NETWORK,
+            assertFailure(repository.listCustomers(CustomerFilters.Unconstrained)),
+        )
+    }
+
+    @Test
+    fun `replaces the local rows with the answer of a later read`() = runTest {
+        val api = FakeCustomersApi(answer = { listOf(customerDto(id = "c1")) })
+        val repository = repository(api, authenticator())
+        assertSuccess(repository.listCustomers())
+        api.answer = { listOf(customerDto(id = "c1"), customerDto(id = "c2")) }
+        assertSuccess(repository.listCustomers())
+        api.failures += IOException()
+
+        val success = repository.listCustomers() as CustomersResult.Success
+
+        assertEquals(ReadSource.WORKING_SET, success.source)
+        assertEquals(listOf("c1", "c2"), success.customers.map { it.id })
+    }
+
     private fun repositoryFailingCreateWith(failure: Throwable) =
         repository(
             FakeCustomersApi(answer = { emptyList() }).apply { failures += failure },
@@ -817,17 +943,28 @@ class CustomersRepositoryTest {
     private fun repository(
         api: CustomersApi,
         authenticator: SessionAuthenticator,
+        workingSet: InMemoryWorkingSetStore = InMemoryWorkingSetStore(),
+        subjectId: String? = "user-1",
     ): DefaultCustomersRepository =
         DefaultCustomersRepository(
             api = api,
             sessionAuthenticator = authenticator,
             cache = CustomerDetailCache(
-                workingSet = InMemoryWorkingSetStore(),
-                json = Json { ignoreUnknownKeys = true },
-                clock = Clock.fixed(Instant.parse("2026-09-14T12:00:00Z"), ZoneOffset.UTC),
+                workingSet = workingSet,
+                json = json(),
+                clock = clock(),
             ),
-            subject = FakeAuthenticatedSubject(),
+            listCache = CustomerListCache(
+                workingSet = workingSet,
+                json = json(),
+                clock = clock(),
+            ),
+            subject = FakeAuthenticatedSubject(subjectId),
         )
+
+    private fun json(): Json = Json { ignoreUnknownKeys = true }
+
+    private fun clock(): Clock = Clock.fixed(Instant.parse("2026-09-14T12:00:00Z"), ZoneOffset.UTC)
 
     private fun repositoryFailingWith(failure: Throwable) =
         repository(
@@ -891,7 +1028,7 @@ class CustomersRepositoryTest {
 
 /** API double standing in for the generated Retrofit implementation. */
 private class FakeCustomersApi(
-    private val answer: suspend () -> List<CustomerDto>,
+    var answer: suspend () -> List<CustomerDto>,
     var detailAnswer: suspend () -> CustomerDetailDto = {
         error("the detail was not scripted for this test")
     },

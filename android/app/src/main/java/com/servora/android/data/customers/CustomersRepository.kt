@@ -28,6 +28,9 @@ interface CustomersRepository {
     /**
      * Returns the signed-in organization's customers narrowed by [filters], or why they could not
      * be read. The default filter is the list's default view: active customers only.
+     *
+     * A list the API cannot be reached for is served from the last answer it reported for the same
+     * filter (`offline-first-architecture.md` §2).
      */
     suspend fun listCustomers(filters: CustomerFilters = CustomerFilters()): CustomersResult
 
@@ -95,6 +98,9 @@ interface CustomersRepository {
  * from the session and the validated query (`BR-001`, `BR-007`). This class therefore never names
  * an organization, so a modified client cannot widen its own scope.
  *
+ * It is also where the customer feature meets the offline standard: the list and the detail are
+ * served from the last answer the backend reported when the API cannot be reached (§2, §10).
+ *
  * An access token is short-lived. When the backend refuses the one a read used (`401`), the read is
  * retried once with a session renewed through [SessionAuthenticator] (`BR-018`); when it cannot be
  * renewed the read reports its outcome rather than pretending to have data.
@@ -103,14 +109,37 @@ class DefaultCustomersRepository @Inject constructor(
     private val api: CustomersApi,
     private val sessionAuthenticator: SessionAuthenticator,
     private val cache: CustomerDetailCache,
+    private val listCache: CustomerListCache,
     private val subject: AuthenticatedSubject,
 ) : CustomersRepository {
 
     override suspend fun listCustomers(filters: CustomerFilters): CustomersResult {
+        // The list is kept per subject like every other working-set read, so a read whose subject
+        // cannot be read is refused rather than answered without local state (`§10`, `BR-001`).
+        val subjectId = subject.current()
+            ?: return CustomersResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         val accessToken = sessionAuthenticator.accessToken()
             ?: return CustomersResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
 
-        return read(accessToken, allowRenewal = true, filters = filters)
+        return when (val read = read(accessToken, allowRenewal = true, filters = filters)) {
+            is ListRead.Answered -> {
+                // A successful read replaces the local copy rather than being merged into it (§10).
+                listCache.remember(subjectId, filters, read.rows)
+                CustomersResult.Success(read.customers)
+            }
+
+            is ListRead.Failed ->
+                // Only a failure that could not reach the backend falls back: a refusal is the
+                // backend's answer, and a copy held on the device must never mask it
+                // (`BR-007`, `BR-042`).
+                if (read.reason.couldNotReachBackend()) {
+                    listCache.reported(subjectId, filters)?.let { reported ->
+                        CustomersResult.Success(reported, ReadSource.WORKING_SET)
+                    } ?: CustomersResult.Failure(read.reason)
+                } else {
+                    CustomersResult.Failure(read.reason)
+                }
+        }
     }
 
     override suspend fun loadCustomerDetail(
@@ -545,30 +574,41 @@ class DefaultCustomersRepository @Inject constructor(
             }
         }
 
-    /** Reads once with [accessToken], renewing the session and retrying when allowed. */
+    /**
+     * Reads the list once with [accessToken], renewing the session and retrying when allowed.
+     *
+     * The wire rows are kept with the mapped customers so a successful read can replace the answer
+     * held in the working set without a second mapping step: the offline read then maps the same rows
+     * with the same function (`BR-041`).
+     */
     private suspend fun read(
         accessToken: String,
         allowRenewal: Boolean,
         filters: CustomerFilters,
-    ): CustomersResult =
+    ): ListRead =
         try {
-            mapRows(
-                api.list(
-                    authorization = "Bearer $accessToken",
-                    status = filters.status.name,
-                    jobs = filters.jobs.name,
-                ),
+            val rows = api.list(
+                authorization = "Bearer $accessToken",
+                status = filters.status.name,
+                jobs = filters.jobs.name,
             )
+            val customers = rows.toCustomers()
+            if (customers == null) {
+                // A row this build cannot represent is a contract mismatch, not a missing value.
+                ListRead.Failed(CustomersFailureReason.UNEXPECTED)
+            } else {
+                ListRead.Answered(rows = rows, customers = customers)
+            }
         } catch (failure: HttpException) {
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
                 renewAndRetry(accessToken, filters)
             } else {
-                CustomersResult.Failure(failure.toFailureReason())
+                ListRead.Failed(failure.toFailureReason())
             }
         } catch (failure: IOException) {
-            CustomersResult.Failure(CustomersFailureReason.NETWORK)
+            ListRead.Failed(CustomersFailureReason.NETWORK)
         } catch (failure: SerializationException) {
-            CustomersResult.Failure(CustomersFailureReason.UNEXPECTED)
+            ListRead.Failed(CustomersFailureReason.UNEXPECTED)
         }
 
     /**
@@ -581,27 +621,17 @@ class DefaultCustomersRepository @Inject constructor(
     private suspend fun renewAndRetry(
         rejectedToken: String,
         filters: CustomerFilters,
-    ): CustomersResult =
+    ): ListRead =
         when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
             is SessionRenewal.Renewed ->
                 read(renewal.accessToken, allowRenewal = false, filters = filters)
 
             SessionRenewal.Rejected ->
-                CustomersResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+                ListRead.Failed(CustomersFailureReason.UNAUTHENTICATED)
 
             SessionRenewal.Unavailable ->
-                CustomersResult.Failure(CustomersFailureReason.NETWORK)
+                ListRead.Failed(CustomersFailureReason.NETWORK)
         }
-
-    private fun mapRows(rows: List<CustomerDto>): CustomersResult {
-        val customers = rows.map { it.toCustomer() }
-        // A row this build cannot represent is a contract mismatch, not a missing value.
-        return if (customers.any { it == null }) {
-            CustomersResult.Failure(CustomersFailureReason.UNEXPECTED)
-        } else {
-            CustomersResult.Success(customers.filterNotNull())
-        }
-    }
 
     private fun HttpException.toFailureReason(): CustomersFailureReason =
         when {
@@ -620,6 +650,19 @@ class DefaultCustomersRepository @Inject constructor(
         const val HTTP_UNPROCESSABLE = 422
         const val HTTP_SERVER_ERROR = 500
     }
+}
+
+/**
+ * Maps the list read's wire rows onto the domain, or `null` when this build cannot represent one of
+ * them.
+ *
+ * A row the build cannot represent fails the whole read rather than being dropped silently, and the
+ * working set holds the same wire rows and maps them with this same function, so an offline read
+ * cannot describe the list differently from an online one (`BR-041`, `BR-042`).
+ */
+internal fun List<CustomerDto>.toCustomers(): List<Customer>? {
+    val customers = map { it.toCustomer() }
+    return if (customers.any { it == null }) null else customers.filterNotNull()
 }
 
 /** Maps a wire row onto the domain customer, or `null` when this build cannot represent it. */
@@ -763,4 +806,21 @@ private sealed interface DetailRead {
 
     /** The read failed; [reason] decides whether the last reported answer may be served instead. */
     data class Failed(val reason: CustomersFailureReason) : DetailRead
+}
+
+/** The outcome of composing the customer list read, before the caller decides what to report. */
+private sealed interface ListRead {
+    /**
+     * The API answered; [rows] are its rows as received, and [customers] is the mapped list.
+     *
+     * Both are kept so the caller can replace the answer held in the working set without mapping it
+     * a second time (`BR-041`).
+     */
+    data class Answered(
+        val rows: List<CustomerDto>,
+        val customers: List<Customer>,
+    ) : ListRead
+
+    /** The read failed; [reason] decides whether the last reported answer may be served instead. */
+    data class Failed(val reason: CustomersFailureReason) : ListRead
 }

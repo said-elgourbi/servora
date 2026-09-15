@@ -28,6 +28,9 @@ data class CustomerListItem(
  * The list is the backend's (`BR-001`): [customers] stays empty until a read succeeds, and
  * [failureReason] reports why the last read did not.
  *
+ * [showingLastReported] says the rows are the last the backend reported rather than a fresh answer,
+ * because the API could not be reached (`offline-first-architecture.md` §2, §7).
+ *
  * [filters] is the filter the backend was last asked to apply, so the screen can tell an empty
  * list apart from an empty *filtered* list (`BR-042`).
  *
@@ -37,6 +40,7 @@ data class CustomerListItem(
 data class CustomersUiState(
     val isLoading: Boolean = false,
     val customers: List<CustomerListItem> = emptyList(),
+    val showingLastReported: Boolean = false,
     val failureReason: CustomersFailureReason? = null,
     val filters: CustomerFilters = CustomerFilters(),
     val customerDetail: CustomerDetailUiState? = null,

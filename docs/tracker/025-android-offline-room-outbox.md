@@ -5,6 +5,7 @@
 Date: 2026-09-14
 Predecessors: `docs/tracker/013-property-lifecycle.md` (the server half of the contract),
 `docs/decisions/012-property-lifecycle-and-permissions.md` (D7, which named the standard)
+Followed by: `docs/tracker/026-android-offline-customers-list.md` (the third adopter: the list read)
 Business rules: `BR-001`, `BR-007`, `BR-013`, `BR-014`, `BR-015`, `BR-031`, `BR-032`, `BR-039`,
 `BR-041`, `BR-082`, `BR-086`
 Standard implemented: `docs/architecture/offline-first-architecture.md` §2–§7, §10

@@ -125,6 +125,10 @@ Still open and deliberately not decided here:
   the device, survives process death, and is applied when the API can be reached.
 - Local state is attributed to a subject and dropped when that session ends, while pending work is
   kept and never replayed for another subject.
+- The per-feature rule that follows from this engine — which store a new read uses, when a mutation may
+  be queued, and what a feature that stays online-only records — is
+  `docs/architecture/offline-first-architecture.md` §13. Nothing else in the app adopts the engine
+  until that section is satisfied.
 - One dependency set is added (Room and its KSP processor, plus `room-testing` for instrumented tests).
 - The tests that exercise SQLite and migrations cannot run on the JVM; they are compiled by the agent
   and run by the product owner on a device (`qa.md` §7.3).

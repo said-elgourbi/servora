@@ -3,6 +3,11 @@ package com.servora.android.data.offline
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -165,6 +170,56 @@ class OutboxReplayEngineTest {
     }
 
     @Test
+    fun `keeps a handler that threw for retry instead of leaving it in flight`() = runTest {
+        outbox.record(operation("first", recordedAt = 1_000L))
+        outbox.record(operation("second", recordedAt = 2_000L))
+        val handler = RecordingHandler("property.archive") {
+            throw IllegalStateException("the handler could not classify the answer")
+        }
+
+        val summary = engine(handler).replay()
+
+        assertEquals(0, summary.applied)
+        assertEquals(2, summary.remaining)
+        // The row the handler was applying is retained and waiting again, not stranded in flight for
+        // the rest of the process (§6, `BR-014`).
+        val retained = outbox.stored.first()
+        assertEquals("first", retained.operationId)
+        assertEquals(OutboxOperationState.FAILED, retained.state)
+        assertEquals(OutboxFailureReason.UNEXPECTED, retained.lastFailure)
+        assertEquals(1, retained.attemptCount)
+        // The run stopped, so the later operation did not overtake the unanswered one (§4).
+        assertEquals(listOf("first"), handler.replayed)
+    }
+
+    @Test
+    fun `returns a cancelled replay to the queue and rethrows the cancellation`() = runTest {
+        outbox.record(operation("archive"))
+        val entered = CompletableDeferred<Unit>()
+        val engine = engine(SuspendingHandler("property.archive", entered))
+        var rethrown: Throwable? = null
+        val run = launch {
+            try {
+                engine.replay()
+            } catch (cancellation: CancellationException) {
+                rethrown = cancellation
+                throw cancellation
+            }
+        }
+
+        entered.await()
+        // The row is being applied while the handler is suspended.
+        assertEquals(OutboxOperationState.IN_FLIGHT, outbox.stored.single().state)
+
+        run.cancelAndJoin()
+
+        assertTrue(rethrown is CancellationException)
+        // The row was never answered, so it waits for the next trigger rather than staying in flight
+        // for the rest of the process (§6, `BR-014`).
+        assertEquals(OutboxOperationState.PENDING, outbox.stored.single().state)
+    }
+
+    @Test
     fun `reports nothing when no session is held`() = runTest {
         outbox.record(operation("archive"))
         subject.setSubject(null)
@@ -233,5 +288,22 @@ private class RecordingHandler(
         replayed += operation.operationId
         operations += operation
         return outcome(operation)
+    }
+}
+
+/**
+ * An [OfflineOperationHandler] that reports the row it was given and then stays suspended until the
+ * replay is cancelled.
+ */
+private class SuspendingHandler(
+    operationType: String,
+    private val entered: CompletableDeferred<Unit>,
+) : OfflineOperationHandler {
+
+    override val operationTypes = setOf(operationType)
+
+    override suspend fun replay(operation: OutboxOperation): ReplayOutcome {
+        entered.complete(Unit)
+        return awaitCancellation()
     }
 }

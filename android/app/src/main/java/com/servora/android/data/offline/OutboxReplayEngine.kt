@@ -4,11 +4,14 @@ import com.servora.android.data.session.AuthenticatedSubject
 import java.time.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** What one replay run did, so a caller can report it without inspecting the store. */
 data class ReplaySummary(
@@ -31,8 +34,8 @@ data class ReplaySummary(
  * (`docs/architecture/offline-first-architecture.md` §4–§6).
  *
  * The engine owns ordering, retention and retry, and nothing else: which operations exist is the
- * feature's business, and how each one is applied is its handler's (`Project.md` §12). Two rules it
- * is deliberately strict about:
+ * feature's business, and how each one is applied is its handler's (`Project.md` §12). Three rules
+ * it is deliberately strict about:
  *
  * - Operations are replayed in `recordedAt` order, one at a time, and a run stops at the first
  *   operation that may still succeed. A later operation therefore never overtakes an earlier one
@@ -40,6 +43,9 @@ data class ReplaySummary(
  *   made them.
  * - Nothing is deleted because a request failed. A row is removed only when the backend accepted it,
  *   and a refusal is kept so the user can be shown it (`BR-014`, `BR-032`).
+ * - An interruption this process survives never strands a row in flight: a handler that throws and a
+ *   run that is cancelled both leave the row waiting for the next trigger rather than in flight until
+ *   the app restarts (§4–§6, `BR-014`).
  */
 @Singleton
 class OutboxReplayEngine @Inject constructor(
@@ -75,48 +81,74 @@ class OutboxReplayEngine @Inject constructor(
 
         var applied = 0
         var rejected = 0
-        while (true) {
-            val operation = outbox.head(subjectId) ?: break
-            if (!isDue(operation)) {
-                // The earliest operation is still backing off. Later operations wait for it rather
-                // than being applied out of order (§4).
-                break
-            }
-            val handler = handlerFor(operation) ?: break
-            outbox.markInFlight(operation.operationId)
-            when (val outcome = handler.replay(operation)) {
-                ReplayOutcome.Applied -> {
-                    outbox.markApplied(operation.operationId)
-                    applied++
+        try {
+            while (true) {
+                val operation = outbox.head(subjectId) ?: break
+                if (!isDue(operation)) {
+                    // The earliest operation is still backing off. Later operations wait for it
+                    // rather than being applied out of order (§4).
+                    break
                 }
-
-                is ReplayOutcome.Rejected -> {
-                    outbox.markRejected(
-                        operationId = operation.operationId,
-                        reason = outcome.reason,
-                        at = clock.millis(),
-                    )
-                    rejected++
-                }
-
-                is ReplayOutcome.Retryable -> {
+                val handler = handlerFor(operation) ?: break
+                outbox.markInFlight(operation.operationId)
+                val outcome = try {
+                    handler.replay(operation)
+                } catch (cancellation: CancellationException) {
+                    // Cancellation is not an answer, so it is left to the run's own handler below
+                    // rather than being recorded as a failed attempt (§6).
+                    throw cancellation
+                } catch (unexpected: Exception) {
+                    // A handler that threw answered nothing: the row is kept for retry instead of
+                    // being left in flight, and the run stops so a later operation cannot overtake
+                    // this one (§4, §6).
                     outbox.markRetryable(
                         operationId = operation.operationId,
-                        reason = outcome.reason,
+                        reason = OutboxFailureReason.UNEXPECTED,
                         at = clock.millis(),
                     )
                     break
                 }
+                when (outcome) {
+                    ReplayOutcome.Applied -> {
+                        outbox.markApplied(operation.operationId)
+                        applied++
+                    }
 
-                ReplayOutcome.Unauthenticated -> {
-                    outbox.markRetryable(
-                        operationId = operation.operationId,
-                        reason = OutboxFailureReason.UNAUTHENTICATED,
-                        at = clock.millis(),
-                    )
-                    break
+                    is ReplayOutcome.Rejected -> {
+                        outbox.markRejected(
+                            operationId = operation.operationId,
+                            reason = outcome.reason,
+                            at = clock.millis(),
+                        )
+                        rejected++
+                    }
+
+                    is ReplayOutcome.Retryable -> {
+                        outbox.markRetryable(
+                            operationId = operation.operationId,
+                            reason = outcome.reason,
+                            at = clock.millis(),
+                        )
+                        break
+                    }
+
+                    ReplayOutcome.Unauthenticated -> {
+                        outbox.markRetryable(
+                            operationId = operation.operationId,
+                            reason = OutboxFailureReason.UNAUTHENTICATED,
+                            at = clock.millis(),
+                        )
+                        break
+                    }
                 }
             }
+        } catch (cancellation: CancellationException) {
+            // This process survived the interruption, so the row that was being applied goes back to
+            // waiting here rather than staying in flight until the app restarts (§6, `BR-014`). The
+            // write has to outlive the cancellation that caused it; runs are serialized by `run`, so
+            // the only operation in flight is the one this run was applying.
+            withContext(NonCancellable) { outbox.recoverInFlight() }
+            throw cancellation
         }
 
         if (applied > 0) {

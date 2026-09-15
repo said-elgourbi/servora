@@ -7,8 +7,16 @@ import com.servora.android.domain.model.CustomerProperty
 
 /** Outcome of a customer read. */
 sealed interface CustomersResult {
-    /** The backend returned the organization's customers. */
-    data class Success(val customers: List<Customer>) : CustomersResult
+    /**
+     * The backend returned the organization's customers.
+     *
+     * [source] says whether the backend answered or the last answer it reported is being shown
+     * (`offline-first-architecture.md` §2).
+     */
+    data class Success(
+        val customers: List<Customer>,
+        val source: ReadSource = ReadSource.BACKEND,
+    ) : CustomersResult
 
     /** The read failed; [reason] decides what the UI reports. */
     data class Failure(val reason: CustomersFailureReason) : CustomersResult

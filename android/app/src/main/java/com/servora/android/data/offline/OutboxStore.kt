@@ -42,7 +42,10 @@ interface OutboxStore {
         at: Long,
     )
 
-    /** Returns every replay process death interrupted to waiting, once per app start (§6). */
+    /**
+     * Returns every replay an interruption left in flight to waiting (§6): process death at app
+     * start, and a cancellation the engine survived.
+     */
     suspend fun recoverInFlight()
 
     /** How many operations are still waiting for the backend. */

@@ -561,6 +561,13 @@ Adding a new language should primarily require translation/catalog work rather t
 
 Android is an offline-first client.
 
+The approved standard is `docs/architecture/offline-first-architecture.md`, implemented by
+`docs/decisions/014-android-offline-engine.md`. Its **§13** is the rule a new Android read or mutation
+is checked against before it is written: a read that must survive lost connectivity uses the existing
+Room working set, an offline-capable mutation uses the existing outbox and replay engine, a mutation
+is queued only when its API contract has an idempotency key and a decided conflict policy, and a
+feature that stays online-only records why.
+
 Any feature that creates, modifies, deletes, or synchronizes data must explicitly consider offline behavior.
 
 At minimum, determine:

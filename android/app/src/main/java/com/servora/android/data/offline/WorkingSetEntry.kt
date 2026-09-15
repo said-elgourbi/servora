@@ -35,6 +35,16 @@ data class WorkingSetEntry(
  * more than one projection type. The payload of each entry stays the owning feature's contract.
  */
 object WorkingSetEntityTypes {
+    /**
+     * The customer list as the backend reported it for the filter it was asked to apply.
+     *
+     * Unlike the two projections below, this one keeps **more than one row per entity type**: the
+     * answer depends on the filter, so the filter is part of the row's [WorkingSetEntry.entityId]
+     * rather than a parameter of the read. A row read under another filter is not this read's answer
+     * and must never be served for it (`BR-001`).
+     */
+    const val CUSTOMER_LIST = "customer.list"
+
     /** A customer detail read, including its Properties and Jobs projections. */
     const val CUSTOMER_DETAIL = "customer.detail"
 

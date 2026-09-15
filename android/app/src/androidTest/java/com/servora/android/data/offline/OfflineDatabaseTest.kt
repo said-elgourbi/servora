@@ -145,6 +145,25 @@ class OfflineDatabaseTest {
     }
 
     @Test
+    fun keepsOneReportedAnswerPerFilterOfTheSameProjection() = runTest {
+        // The customer list is the projection that holds more than one row per entity type: the
+        // backend's answer depends on the filter, so the filter is part of the row's key and a row is
+        // only ever served for the filter it was read under.
+        workingSet.put(listEntry(filterKey = "ACTIVE:ALL", payload = "{\"count\":1}"))
+        workingSet.put(listEntry(filterKey = "ALL:ALL", payload = "{\"count\":9}"))
+
+        assertEquals(
+            "{\"count\":1}",
+            workingSet.get(SUBJECT, WorkingSetEntityTypes.CUSTOMER_LIST, "ACTIVE:ALL")?.payload,
+        )
+        assertEquals(
+            "{\"count\":9}",
+            workingSet.get(SUBJECT, WorkingSetEntityTypes.CUSTOMER_LIST, "ALL:ALL")?.payload,
+        )
+        assertNull(workingSet.get(SUBJECT, WorkingSetEntityTypes.CUSTOMER_LIST, "INACTIVE:ALL"))
+    }
+
+    @Test
     fun clearsEveryEntryOfOneSubjectOnly() = runTest {
         workingSet.put(entry(entityId = "property-1"))
         workingSet.put(entry(entityId = "property-2"))
@@ -197,6 +216,17 @@ class OfflineDatabaseTest {
         entityId = entityId,
         scopeId = "customer-1",
         version = 1,
+        payload = payload,
+        reportedAt = 1_000L,
+    )
+
+    /** A working-set row of the customer-list projection, keyed by the filter it was read under. */
+    private fun listEntry(filterKey: String, payload: String): WorkingSetEntry = WorkingSetEntry(
+        subjectId = SUBJECT,
+        entityType = WorkingSetEntityTypes.CUSTOMER_LIST,
+        entityId = filterKey,
+        scopeId = null,
+        version = null,
         payload = payload,
         reportedAt = 1_000L,
     )
