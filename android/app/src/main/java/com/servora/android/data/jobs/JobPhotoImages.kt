@@ -2,11 +2,14 @@ package com.servora.android.data.jobs
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
+import java.io.ByteArrayInputStream
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,6 +31,13 @@ import retrofit2.HttpException
  * A photo that cannot be decoded is reported as `null` rather than as a wrong image: the tile then
  * presents its phase, note and synchronization state without a preview, and the viewer says the photo
  * could not be shown (`BR-042`).
+ *
+ * Every preview is drawn the way the photo's own bytes say it should be presented: the file's EXIF
+ * orientation is applied to the decode, because `BitmapFactory` does not apply it and a camera's
+ * portrait capture is stored as landscape pixels plus that tag (`JobPhotoOrientation`). This leaf
+ * layer is the one place it has to happen, so the review preview, the tray, the gallery tiles and the
+ * viewer all turn a photo the same way. The bytes themselves are never rewritten: the stored evidence
+ * stays exactly what the camera wrote.
  */
 interface JobPhotoImages {
     /** A thumbnail of a photo whose bytes are still on this device (`§9`). */
@@ -192,17 +202,69 @@ private fun viewerPhoto(bytes: ByteArray): Bitmap? =
         jobPhotoFittingSampleSize(bounds.outWidth, bounds.outHeight, VIEWER_MAX_EDGE_PX)
     }
 
-/** Reads the image's own bounds, then decodes it with the sample size [sampleSizeFor] decides. */
+/**
+ * Reads the image's own bounds, then decodes it with the sample size [sampleSizeFor] decides, and
+ * presents it the way the photo's own EXIF orientation says it should be.
+ *
+ * The sample size is chosen from the stored bounds, which is unchanged by the orientation: a turn
+ * never changes which edge is the longest, so the ceiling [sampleSizeFor] enforces still holds after
+ * it.
+ */
 private fun decodeImage(bytes: ByteArray, sampleSizeFor: (BitmapFactory.Options) -> Int): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
         return null
     }
-    return BitmapFactory.decodeByteArray(
+    val decoded = BitmapFactory.decodeByteArray(
         bytes,
         0,
         bytes.size,
         BitmapFactory.Options().apply { inSampleSize = sampleSizeFor(bounds) },
-    )
+    ) ?: return null
+    return decoded.oriented(jobPhotoExifOrientation(bytes))
+}
+
+/**
+ * The orientation the photo's own bytes declare, or `Normal` when the file states none.
+ *
+ * `BitmapFactory` does not read EXIF at all, which is why a portrait capture has to be turned here.
+ * A file that carries no readable tag — a photo that was stripped of its metadata, a format the
+ * device cannot parse EXIF from, or bytes that are not an image — answers `Normal`: the photo is drawn
+ * as stored rather than guessed into a rotation (`BR-042`). The read is wrapped because a malformed
+ * tag is a property of the file, not a failure of the screen: a photo whose metadata cannot be read is
+ * still a photo.
+ */
+private fun jobPhotoExifOrientation(bytes: ByteArray): JobPhotoOrientation {
+    val code = runCatching {
+        ExifInterface(ByteArrayInputStream(bytes))
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    return JobPhotoOrientation.of(code)
+}
+
+/**
+ * The photo turned so it is presented upright, or `null` when it cannot be turned.
+ *
+ * It copies nothing when the photo is already upright, which is what an ordinary photo is. The turned
+ * copy is what the caller keeps: the unturned original is released here so a photo is never held
+ * twice. A turn the device cannot perform is answered `null` — the same answer as a photo that cannot
+ * be decoded — because presenting the unturned pixels instead would be exactly the wrong image the
+ * caller must not draw (`BR-042`).
+ */
+private fun Bitmap.oriented(orientation: JobPhotoOrientation): Bitmap? {
+    if (orientation.isIdentity) {
+        return this
+    }
+    return runCatching {
+        val matrix = Matrix().apply {
+            postRotate(orientation.rotationDegrees.toFloat())
+            if (orientation.mirror) {
+                postScale(-1f, 1f)
+            }
+        }
+        val turned = Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
+        recycle()
+        turned
+    }.getOrNull()
 }
