@@ -179,8 +179,9 @@ make android-build       # Android debug APK (requires Android SDK)
   `docs/tracker/027-android-job-photo-updates.md` (wire contract: `docs/api/job-photos.md`).
 - Photo evidence after 028 — the phased plan for the capability set, a gallery picker, a viewer, offline
   evidence and the lifecycle questions. **Phases 1 (the evidence capability set), 2 (the
-  content-type-aware capture pipeline) and 3 (the camera and system photo picker behind the update
-  action, and the client's evidence gate) have landed; Phase 4 (the viewer) is next and waits on D4.**
+  content-type-aware capture pipeline), 3 (the camera and system photo picker behind the update
+  action, and the client's evidence gate) and 4 (the full-size viewer a photo opens into) have
+  landed; Phase 5 (offline evidence) is next and waits on D5.**
   `docs/tracker/029-photo-evidence-phases.md`
   (decision: `docs/decisions/015-evidence-capabilities.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.

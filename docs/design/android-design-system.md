@@ -263,6 +263,7 @@ appears to have (`docs/tracker/021-android-job-details-status-polish.md`).
 | Reschedule dialog | an `AlertDialog` whose date and time fields open the platform pickers, plus length choices |
 | Conflict confirmation | an `AlertDialog` listing each overlapping technician, job number and window, with **Schedule anyway** as its confirming action (`BR-070`) |
 | Job update action and sheet | one floating **Add update** action at the bottom of the screen — an `ExtendedFloatingActionButton` in `primary` on `onPrimary` with the 18 dp `ic_add` — opening a Material 3 `ModalBottomSheet` titled *Add update*. The sheet states the **kind** of update as one row of large targets at the height of the photo slice's phase buttons (`jobPhotoPhaseButtonHeight`, 56 dp): **Write note** (`ic_file_text`), filled `primary`/`onPrimary` while it is the kind in effect, and **Add photo** (`ic_camera`) in `surfaceVariant`/`onSurfaceVariant`. Tapping *Write note* puts the cursor in the note's `OutlinedTextField` (4 lines, `outline` label and placeholder) below it, with a `TextButton` **Cancel** and a `Button` **Save update** in `shapes.medium`, exactly as the photo review panel's foot is drawn. Tapping *Add photo* makes the photo the kind in effect and draws its **two sources** as a second row of the same height — **Take photo** (`ic_camera`) and **Choose photos** (`ic_photo_library`, lucide `Images`) — because a photo now comes from the device's camera or from the device's own photo picker (`D3`); each source closes the sheet and hands over to the flow the photo slice owns (capture or pick, then the review panel, then the tray). Three targets are deliberately not drawn in one row: a localized label does not fit at that height. The kind row is drawn on the capability the API enforces for each kind — the note on the Job update capability **and** a represented Visit, the photo sources on `evidence.photo.add` — so a default Technician reaches the camera and the picker without being given a Manager capability (`BR-006`, `BR-007`, `BR-009`, `BR-011`), and the action itself is drawn when the session may do either (`BR-015`, `BR-051`); the tray takes the bottom of the screen while it holds photos, as it already did. Audio is not drawn until it exists (`BR-042`, `docs/tracker/028-android-unified-job-update.md`, `docs/tracker/029-photo-evidence-phases.md` Phase 3) |
+| Photo viewer | a full-screen `Dialog` (`usePlatformDefaultWidth = false`) drawn on the theme's own `surface` on `onSurface`, so it adds no colour token. The photo is the content, drawn `ContentScale.Fit` with the screen's remaining height; a top row carries the photo's phase badge (the same badge the tile draws) and a 48 dp close target (`ic_close`, localized content description); the technician's whole note — not the tile's snippet — is stated under the photo. It opens from a tap on a gallery tile or on a tray tile, and closes on its own action or the platform's back gesture. Zoom, swiping between photos and a gallery-wide pager are deliberately not drawn (`D4`, `docs/tracker/029-photo-evidence-phases.md` Phase 4) |
 
 The action surfaces are localized in both languages and are the same rows the customer screens use for
 their own lifecycle actions, so the two features do not drift apart.
@@ -286,6 +287,15 @@ the floating Add update action so the last entry is never covered.
 **Add photo** action used to sit beside it, and two entry points for one write made the technician choose
 a place before choosing what they were recording. The floating action opens the sheet that states the
 kind, and the accepted photos it produces are drawn in the gallery above the timeline.
+
+**A photo tile is a control, and it opens the photo** (`D4`, `docs/tracker/029-photo-evidence-phases.md`
+Phase 4). Each tile in the gallery — and each tile in the tray — is a tap target whose whole column
+carries the tap, so the target is larger than the picture and the note under it opens the photo too
+(`BR-012`). The tap opens the **viewer** row above: the photo itself rather than the tile's 512 px
+preview, with the phase it was recorded in and the technician's whole note. The action is named for a
+screen reader by a localized `onClickLabel`, because the photo's own content description says what it is
+and not what tapping it does (`BR-028`). A photo that cannot be read is reported in the viewer instead of
+being replaced by another picture (`BR-042`).
 
 ## Appearance controls (sign-in top bar)
 

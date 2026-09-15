@@ -91,6 +91,7 @@ private val ActivityRowSpacing = 20.dp
 internal fun JobActivitySection(
     state: JobDetailsUiState,
     onRetry: () -> Unit,
+    onOpenPhoto: (String) -> Unit,
     photoImages: JobPhotoImages = JobPhotoImages.None,
     modifier: Modifier = Modifier,
 ) {
@@ -118,6 +119,7 @@ internal fun JobActivitySection(
                             photos = photos,
                             jobId = state.jobId,
                             photoImages = photoImages,
+                            onOpenPhoto = onOpenPhoto,
                         )
                     }
                     ActivityTimeline(state.activity)

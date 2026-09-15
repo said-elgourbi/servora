@@ -2,6 +2,7 @@ package com.servora.android.ui.jobs
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -197,13 +198,16 @@ private const val JobPhotoNoteLength = 60
  *
  * It is a projection of the timeline, never a second list: the photos it draws are exactly the
  * `JOB_PHOTO_ADDED` entries the API returned, so no client can disagree with the backend about which
- * evidence exists (`BR-001`).
+ * evidence exists (`BR-001`). A tile is a preview that opens the photo full size when it is tapped
+ * (`D4`), which is where the design puts an attachment's viewer (`Figma/…/servora-job-details-spec.md`
+ * §11).
  */
 @Composable
 internal fun JobPhotoGallery(
     photos: List<JobActivityEvent>,
     jobId: String,
     photoImages: JobPhotoImages,
+    onOpenPhoto: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyRow(
@@ -211,7 +215,12 @@ internal fun JobPhotoGallery(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(items = photos, key = { event -> event.id }) { event ->
-            JobPhotoGalleryTile(event = event, jobId = jobId, photoImages = photoImages)
+            JobPhotoGalleryTile(
+                event = event,
+                jobId = jobId,
+                photoImages = photoImages,
+                onOpen = onOpenPhoto,
+            )
         }
     }
 }
@@ -221,12 +230,20 @@ private fun JobPhotoGalleryTile(
     event: JobActivityEvent,
     jobId: String,
     photoImages: JobPhotoImages,
+    onOpen: (String) -> Unit,
 ) {
     val photoId = event.photoId ?: event.id
     Column(
         modifier = Modifier
             .width(JobPhotoTileSize)
-            .testTag(jobPhotoGalleryTileTag(photoId)),
+            .testTag(jobPhotoGalleryTileTag(photoId))
+            // The tile's whole column is the control, so the note under it opens the photo too and the
+            // target is bigger than the picture (`BR-012`). The label names the action for a screen
+            // reader, because the photo's own description says what it is, not what tapping it does
+            // (`BR-028`).
+            .clickable(onClickLabel = stringResource(R.string.job_photo_viewer_open)) {
+                onOpen(photoId)
+            },
         verticalArrangement = Arrangement.spacedBy(JobPhotoBadgeSpacing),
     ) {
         Box {

@@ -501,6 +501,9 @@
     <string name="job_photo_review_discard">Discard</string>
     <string name="job_photo_remove">Remove photo</string>
     <string name="job_photo_image_description">Job photo</string>
+    <string name="job_photo_viewer_open">View photo</string>
+    <string name="job_photo_viewer_close">Close photo</string>
+    <string name="job_photo_viewer_unavailable">This photo could not be shown.</string>
     <string name="job_photo_tray_title">Photos to save</string>
     <string name="job_photo_tray_unsaved">%1$d not saved</string>
     <string name="job_photo_tray_capture">Take another</string>

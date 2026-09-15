@@ -457,6 +457,9 @@
     <string name="job_photo_review_discard">Supprimer</string>
     <string name="job_photo_remove">Retirer la photo</string>
     <string name="job_photo_image_description">Photo de l’intervention</string>
+    <string name="job_photo_viewer_open">Voir la photo</string>
+    <string name="job_photo_viewer_close">Fermer la photo</string>
+    <string name="job_photo_viewer_unavailable">Cette photo n’a pas pu être affichée.</string>
     <string name="job_photo_tray_title">Photos à enregistrer</string>
     <string name="job_photo_tray_unsaved">%1$d non enregistrée(s)</string>
     <string name="job_photo_tray_capture">Prendre une autre</string>

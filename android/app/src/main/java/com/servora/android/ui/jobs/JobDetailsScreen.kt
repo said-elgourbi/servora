@@ -182,6 +182,20 @@ fun JobDetailsScreen(
     var showReschedule by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAssign by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAddActivity by rememberSaveable(state.jobId) { mutableStateOf(false) }
+
+    // The photo the viewer is showing, if any. Only its identity is held: the phase, the note and the
+    // bytes are resolved from the records that already state them, so the viewer is never a second
+    // copy of the evidence (`BR-001`), and a photo neither the device nor the Activity holds any more
+    // closes the viewer rather than letting it show something else (`BR-042`).
+    var viewedPhotoId by rememberSaveable(state.jobId) { mutableStateOf<String?>(null) }
+    val viewedPhoto = viewedPhotoId?.let { photoId ->
+        viewedJobPhoto(
+            jobId = state.jobId,
+            photoId = photoId,
+            pendingPhotos = state.pendingPhotos,
+            activity = state.activity,
+        )
+    }
     val snackbarHostState = remember { SnackbarHostState() }
 
     val actionFailure = state.actionFailure
@@ -254,6 +268,7 @@ fun JobDetailsScreen(
                     onOpenReschedule = { showReschedule = true },
                     onChangeJobStatus = onChangeJobStatus,
                     onRetryActivity = onRetryActivity,
+                    onOpenPhoto = { photoId -> viewedPhotoId = photoId },
                     photoImages = photoImages,
                 )
 
@@ -319,6 +334,7 @@ fun JobDetailsScreen(
                 onCapture = onCapturePhoto,
                 onSubmit = onSubmitPendingPhotos,
                 onRemove = onRemovePendingPhoto,
+                onOpen = { photoId -> viewedPhotoId = photoId },
                 photoImages = photoImages,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
@@ -407,6 +423,17 @@ fun JobDetailsScreen(
             onDismiss = onDismissPendingAction,
         )
     }
+
+    // A photo the technician taps opens full size, whether the backend already holds it or the device
+    // still does (`D4`). The viewer is drawn over everything else, and closing it only forgets which
+    // photo it was: nothing about the photo changes (`BR-001`, `BR-067`).
+    viewedPhoto?.let { photo ->
+        JobPhotoViewer(
+            photo = photo,
+            photoImages = photoImages,
+            onDismiss = { viewedPhotoId = null },
+        )
+    }
 }
 
 /** The first read, with nothing on screen yet. */
@@ -481,6 +508,7 @@ private fun JobDetailsContent(
     onOpenReschedule: () -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
     onRetryActivity: () -> Unit,
+    onOpenPhoto: (String) -> Unit,
     photoImages: JobPhotoImages,
 ) {
     Column(
@@ -520,6 +548,7 @@ private fun JobDetailsContent(
         JobActivitySection(
             state = state,
             onRetry = onRetryActivity,
+            onOpenPhoto = onOpenPhoto,
             photoImages = photoImages,
         )
         // Keeps the last timeline entry clear of the floating Add update action the design places

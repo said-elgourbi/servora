@@ -1,6 +1,9 @@
 package com.servora.android.ui.jobs
 
 import android.content.Context
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -242,6 +245,86 @@ class JobDetailsScreenTest {
         composeTestRule.onNodeWithTag(JobPhotoGalleryTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(jobPhotoGalleryTileTag("photo-1")).assertIsDisplayed()
         composeTestRule.onNodeWithText("Panel before the repair").assertIsDisplayed()
+    }
+
+    @Test
+    fun opensATappedAcceptedPhotoFullSizeAndClosesItAgain() {
+        val images = RecordingJobPhotoImages()
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(
+                    activityEvent(
+                        id = "photo-1",
+                        kind = JobActivityKind.JOB_PHOTO_ADDED,
+                        visitSequence = null,
+                        body = "Panel before the repair",
+                        photoId = "photo-1",
+                        photoPhase = "BEFORE_WORK",
+                    ),
+                ),
+            ),
+            photoImages = images,
+        )
+
+        composeTestRule.onNodeWithTag(jobPhotoGalleryTileTag("photo-1")).performClick()
+
+        // The photo itself rather than the tile's preview, with the phase the record states and the
+        // whole note (`D4`).
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Panel before the repair").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Before work").assertIsDisplayed()
+        assertTrue(
+            "The viewer must read the photo the backend holds, not the tile's thumbnail",
+            images.fullSizeReads.contains("photo-1"),
+        )
+
+        composeTestRule.onNodeWithTag(JobPhotoViewerCloseTag).performClick()
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun opensATappedPendingPhotoFromTheBytesTheDeviceStillHolds() {
+        val images = RecordingJobPhotoImages()
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                pendingPhotos = listOf(pendingPhoto()),
+            ),
+            photoImages = images,
+        )
+
+        composeTestRule.onNodeWithTag(jobPhotoPendingTileTag("photo-1")).performClick()
+
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Sawdust on the belt").assertIsDisplayed()
+        assertTrue(
+            "A photo the backend has not accepted must be read from this device (`§9`)",
+            images.localFullSizeReads.contains("app-private/job-photos/user-1/photo-1.jpg"),
+        )
+    }
+
+    @Test
+    fun reportsAPhotoItCannotShowRatherThanDrawingSomethingElse() {
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                pendingPhotos = listOf(pendingPhoto()),
+            ),
+            // No previews can be read, which is what a device that cannot decode the bytes, or a
+            // session the API refuses, produces (`BR-042`).
+            photoImages = JobPhotoImages.None,
+        )
+
+        composeTestRule.onNodeWithTag(jobPhotoPendingTileTag("photo-1")).performClick()
+
+        composeTestRule.onNodeWithTag(JobPhotoViewerUnavailableTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).assertDoesNotExist()
     }
 
     @Test
@@ -959,4 +1042,38 @@ private fun pendingPhoto(
     recordedAt = 1_000L,
     submitted = submitted,
 )
+
+/**
+ * The photo reads the screen asked for (`D4`).
+ *
+ * A tile and the viewer read the same photo at different resolutions, so a test has to be able to say
+ * which one was asked for: the tile draws a preview, and the viewer must read the photo itself — from
+ * the device while it holds it, from the backend otherwise (`§9`, `BR-015`).
+ */
+private class RecordingJobPhotoImages : JobPhotoImages {
+
+    /** The photo ids read as the photo itself, from the evidence the backend holds (`BR-015`). */
+    val fullSizeReads = mutableListOf<String>()
+
+    /** The local paths read as the photo itself, which only a photo still on the device has. */
+    val localFullSizeReads = mutableListOf<String>()
+
+    override suspend fun localThumbnail(path: String): ImageBitmap? = image()
+
+    override suspend fun jobPhotoThumbnail(jobId: String, photoId: String): ImageBitmap? = image()
+
+    override suspend fun localFullSize(path: String): ImageBitmap? {
+        localFullSizeReads += path
+        return image()
+    }
+
+    override suspend fun jobPhotoFullSize(jobId: String, photoId: String): ImageBitmap? {
+        fullSizeReads += photoId
+        return image()
+    }
+
+    /** A real, decodable photo, so the viewer draws an image rather than reporting one it lacks. */
+    private fun image(): ImageBitmap =
+        Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).asImageBitmap()
+}
 

@@ -1,6 +1,7 @@
 package com.servora.android.ui.jobs
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -78,7 +79,13 @@ internal const val JobPhotoNoteMaxLines = 3
 
 private val JobPhotoTrayTileSize = 108.dp
 
-/** The tray: what the technician captured and the backend has not accepted yet (`§9`). */
+/**
+ * The tray: what the technician captured and the backend has not accepted yet (`§9`).
+ *
+ * A tile opens its photo full size when it is tapped, exactly as an accepted photo's tile does
+ * (`D4`): what the technician recorded is still theirs to inspect while it waits, and every tile in
+ * the tray is a photo whose bytes are still on this device.
+ */
 @Composable
 internal fun JobPhotoTray(
     photos: List<PendingJobPhoto>,
@@ -87,6 +94,7 @@ internal fun JobPhotoTray(
     onCapture: () -> Unit,
     onSubmit: () -> Unit,
     onRemove: (String) -> Unit,
+    onOpen: (String) -> Unit,
     photoImages: JobPhotoImages,
     modifier: Modifier = Modifier,
 ) {
@@ -126,6 +134,7 @@ internal fun JobPhotoTray(
                         state = uploads[photo.photoId],
                         photoImages = photoImages,
                         onRemove = { onRemove(photo.photoId) },
+                        onOpen = { onOpen(photo.photoId) },
                     )
                 }
             }
@@ -191,11 +200,16 @@ private fun JobPhotoPendingTile(
     state: JobPhotoSyncState?,
     photoImages: JobPhotoImages,
     onRemove: () -> Unit,
+    onOpen: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .width(JobPhotoTrayTileSize)
-            .testTag(jobPhotoPendingTileTag(photo.photoId)),
+            .testTag(jobPhotoPendingTileTag(photo.photoId))
+            // The whole tile opens the photo full size, which is the design's rule for an attachment
+            // (`D4`). The X that removes a photo before it is submitted is its own control and takes
+            // its own taps.
+            .clickable(onClickLabel = stringResource(R.string.job_photo_viewer_open), onClick = onOpen),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Box {

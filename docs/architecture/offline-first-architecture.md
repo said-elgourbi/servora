@@ -249,10 +249,13 @@ These remain **OPEN QUESTION** and must not be invented:
    death, which is neither a working-set answer nor a queued mutation — and that table holds paths and
    metadata, never image bytes (§9). Recorded in `docs/tracker/027-android-job-photo-updates.md`.
 
-What is still **online-only** on Android: Manager Home, Job Details and Job Activity reads, technician
-assignment, scheduling and rescheduling, Job and Visit status actions, notes, Customer and Property
-writes, and every form. Their routes accept no idempotency key yet, or their mutation conflict policy
-is undecided (§8, §11.1), so they must not be queued or invented.
+What is still **online-only** on Android: Manager Home, Job Details and Job Activity reads, the Job photo
+reads (the Activity gallery's previews, the tray's previews and the full-size viewer, all through
+`GET /jobs/:id/photos/:photoId/content`), technician assignment, scheduling and rescheduling, Job and
+Visit status actions, notes, Customer and Property writes, and every form. Their routes accept no
+idempotency key yet, or their mutation conflict policy is undecided (§8, §11.1), so they must not be
+queued or invented; whether accepted evidence must also be readable without connectivity is the open
+`D5` question (`docs/tracker/029-photo-evidence-phases.md`).
 
 ---
 
