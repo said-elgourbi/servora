@@ -159,7 +159,9 @@ make android-build       # Android debug APK (requires Android SDK)
   `docs/tracker/020-android-job-details-status-control.md`.
 - Job Details status polish — the labelled **Job status** control, its compact menu and the Visit date
   label: `docs/tracker/021-android-job-details-status-polish.md`.
-- Offline/outbox standard for Android: `docs/architecture/offline-first-architecture.md`.
+- Offline/outbox standard for Android, including the rule a new read or mutation follows (§13):
+  `docs/architecture/offline-first-architecture.md`
+  (decision: `docs/decisions/014-android-offline-engine.md`).
 - Object storage and the S3 contract (MinIO locally, a third-party S3-compatible provider in
   production): `docs/tracker/023-object-storage-minio.md`
   (decision: `docs/decisions/013-object-storage-minio-and-s3.md`).

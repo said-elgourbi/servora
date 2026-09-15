@@ -2,6 +2,7 @@ package com.servora.android.ui.customers
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.customers.PropertyRepository
 import com.servora.android.data.customers.PropertyResult
 import com.servora.android.data.customers.UpdatePropertyRequest
@@ -77,6 +78,14 @@ class EditPropertyViewModel @Inject constructor(
                         version = result.property.version,
                     )
 
+                    // An edit is never queued (`§5`), so this outcome does not arise for the form: a
+                    // value that reached the form from a queued archive or restore is still a whole
+                    // Property, which is handled above.
+                    is PropertyResult.Queued -> state.copy(
+                        isLoading = false,
+                        failureReason = CustomersFailureReason.NETWORK,
+                    )
+
                     is PropertyResult.Failure -> state.copy(
                         isLoading = false,
                         failureReason = result.reason,
@@ -139,6 +148,13 @@ class EditPropertyViewModel @Inject constructor(
                         isSaved = true,
                         failureReason = null,
                         version = result.property.version,
+                    )
+
+                    // An edit is online-only: the API accepts no idempotency key for it, so the
+                    // repository reports the network failure rather than queueing it (`§5`).
+                    is PropertyResult.Queued -> current.copy(
+                        isSaving = false,
+                        failureReason = CustomersFailureReason.NETWORK,
                     )
 
                     is PropertyResult.Failure -> current.copy(

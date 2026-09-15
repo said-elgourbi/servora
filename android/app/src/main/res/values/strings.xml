@@ -398,6 +398,13 @@
     <string name="property_province_sk">Saskatchewan</string>
     <string name="property_province_yt">Yukon</string>
 
+    <!-- The queued lifecycle action and the last answer the backend reported
+         (`docs/architecture/offline-first-architecture.md` §2, §7). -->
+    <string name="property_sync_queued_archive">Archive saved on this device. It will be applied when the server can be reached.</string>
+    <string name="property_sync_queued_restore">Restore saved on this device. It will be applied when the server can be reached.</string>
+    <string name="property_sync_rejected_archive">The archive was refused: %1$s</string>
+    <string name="property_sync_rejected_restore">The restore was refused: %1$s</string>
+
     <!--
       Assignment roles (`BR-068`). A Visit that has technicians has exactly one Lead; every other
       assigned technician simply holds the `TECHNICIAN` role, so only the Lead is marked.
@@ -533,4 +540,6 @@
     <string name="job_conflict_title">This time overlaps another visit</string>
     <string name="job_conflict_message">The same technician is already booked. You can still schedule this visit.</string>
     <string name="job_conflict_confirm">Schedule anyway</string>
+    <!-- A read served without connectivity (`docs/architecture/offline-first-architecture.md` §2, §7). -->
+    <string name="offline_last_reported">Offline — showing the last update the server reported.</string>
 </resources>

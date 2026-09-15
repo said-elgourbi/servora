@@ -74,6 +74,7 @@ import com.servora.android.domain.model.CustomerJobFilter
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerStatusFilter
 import com.servora.android.R
+import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.ServoraTopBar
 import com.servora.android.ui.components.ServoraTopBarState
 import com.servora.android.ui.components.initials
@@ -96,6 +97,9 @@ const val CustomersNavTag = "customers-nav"
 const val AddCustomerActionTag = "customers-add-action"
 const val EditCustomerActionTag = "customers-edit-action"
 const val SettingsSignOutTag = "settings-sign-out"
+
+/** Identifies the notice that the rows are the last the server reported (`§2`). */
+const val CustomersLastReportedTag = "customers-last-reported"
 
 fun customerRowTag(customerId: String): String = "customer-row-$customerId"
 
@@ -531,6 +535,17 @@ private fun CustomerListScreen(
                     bottom = 96.dp,
                 ),
             ) {
+                if (state.showingLastReported) {
+                    // The rows are the last the server reported rather than a fresh answer, and the
+                    // list says so instead of presenting a local copy as current (`§2`, §7).
+                    item {
+                        OfflineNotice(
+                            message = stringResource(R.string.offline_last_reported),
+                            tag = CustomersLastReportedTag,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
+                    }
+                }
                 when {
                     state.isLoading && state.customers.isEmpty() -> item { CustomersLoading() }
 

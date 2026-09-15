@@ -9,6 +9,7 @@ import com.servora.android.data.customers.CustomerDetailResult
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.data.customers.CustomerUpdateResult
 import com.servora.android.data.customers.PropertyCreateResult
 import com.servora.android.data.customers.UpdateCustomerRequest
@@ -22,6 +23,7 @@ import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerStatusFilter
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -224,6 +226,223 @@ class CustomersViewModelTest {
         }
 
     @Test
+    fun `marks the rows as the last the server reported`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            result = CustomersResult.Success(
+                listOf(customer(id = "c1")),
+                ReadSource.WORKING_SET,
+            ),
+        )
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.load()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.showingLastReported)
+        assertNull(state.failureReason)
+    }
+
+    @Test
+    fun `does not mark the rows when the backend answered`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            result = CustomersResult.Success(listOf(customer(id = "c1"))),
+        )
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.load()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.showingLastReported)
+    }
+
+    @Test
+    fun `clears the mark when a later read is not the last reported answer`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            result = CustomersResult.Success(
+                listOf(customer(id = "c1")),
+                ReadSource.WORKING_SET,
+            ),
+        )
+        val viewModel = CustomersViewModel(repository)
+        viewModel.load()
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.showingLastReported)
+
+        repository.result = CustomersResult.Success(listOf(customer(id = "c1")))
+        viewModel.retry()
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.showingLastReported)
+    }
+
+    @Test
+    fun `clears the mark when the list could not be read at all`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            result = CustomersResult.Success(
+                listOf(customer(id = "c1")),
+                ReadSource.WORKING_SET,
+            ),
+        )
+        val viewModel = CustomersViewModel(repository)
+        viewModel.load()
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.showingLastReported)
+
+        repository.result = CustomersResult.Failure(CustomersFailureReason.NETWORK)
+        viewModel.retry()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.showingLastReported)
+        assertEquals(CustomersFailureReason.NETWORK, state.failureReason)
+    }
+
+    @Test
+    fun `the newest read wins when the one it replaced answers last`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository().apply { holdReads = true }
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.load()
+        advanceUntilIdle()
+        assertEquals(1, repository.pendingReads)
+
+        // The filter changes while the first read is still in flight.
+        viewModel.applyFilters(inactive())
+        advanceUntilIdle()
+        assertEquals(2, repository.pendingReads)
+
+        // The read for the filter now shown answers first.
+        repository.answerRead(
+            1,
+            CustomersResult.Success(listOf(customer(id = "c2")), ReadSource.WORKING_SET),
+        )
+        advanceUntilIdle()
+
+        // The read for the filter the user has left answers last, and must not replace it (`BR-001`).
+        repository.answerRead(0, CustomersResult.Success(listOf(customer(id = "c1"))))
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(inactive(), state.filters)
+        assertEquals(listOf("c2"), state.customers.map { it.id })
+        assertTrue(state.showingLastReported)
+        assertNull(state.failureReason)
+        assertFalse(state.isLoading)
+    }
+
+    @Test
+    fun `an older read cannot mark the newer read's rows as last reported`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository().apply { holdReads = true }
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.load()
+        advanceUntilIdle()
+        viewModel.applyFilters(inactive())
+        advanceUntilIdle()
+
+        repository.answerRead(1, CustomersResult.Success(listOf(customer(id = "c2"))))
+        advanceUntilIdle()
+        assertFalse(viewModel.uiState.value.showingLastReported)
+
+        repository.answerRead(
+            0,
+            CustomersResult.Success(listOf(customer(id = "c1")), ReadSource.WORKING_SET),
+        )
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf("c2"), state.customers.map { it.id })
+        assertFalse(state.showingLastReported)
+    }
+
+    @Test
+    fun `an older read's failure cannot clear the newer read's rows`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository().apply { holdReads = true }
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.load()
+        advanceUntilIdle()
+        viewModel.applyFilters(inactive())
+        advanceUntilIdle()
+
+        repository.answerRead(
+            1,
+            CustomersResult.Success(listOf(customer(id = "c2")), ReadSource.WORKING_SET),
+        )
+        advanceUntilIdle()
+
+        repository.answerRead(0, CustomersResult.Failure(CustomersFailureReason.NETWORK))
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf("c2"), state.customers.map { it.id })
+        assertTrue(state.showingLastReported)
+        assertNull(state.failureReason)
+        assertFalse(state.isLoading)
+    }
+
+    @Test
+    fun `an older read's rows cannot hide the newer read's failure`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository().apply { holdReads = true }
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.load()
+        advanceUntilIdle()
+        viewModel.applyFilters(inactive())
+        advanceUntilIdle()
+
+        repository.answerRead(1, CustomersResult.Failure(CustomersFailureReason.NETWORK))
+        advanceUntilIdle()
+
+        repository.answerRead(
+            0,
+            CustomersResult.Success(listOf(customer(id = "c1")), ReadSource.WORKING_SET),
+        )
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(CustomersFailureReason.NETWORK, state.failureReason)
+        assertTrue(state.customers.isEmpty())
+        assertFalse(state.showingLastReported)
+        assertFalse(state.isLoading)
+    }
+
+    @Test
+    fun `a retry and a reload still apply the answer of the read they asked for`() =
+        runTest(dispatcher) {
+            val repository = RecordingCustomersRepository().apply { holdReads = true }
+            val viewModel = CustomersViewModel(repository)
+
+            viewModel.load()
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.isLoading)
+
+            repository.answerRead(0, CustomersResult.Failure(CustomersFailureReason.NETWORK))
+            advanceUntilIdle()
+            assertEquals(CustomersFailureReason.NETWORK, viewModel.uiState.value.failureReason)
+
+            viewModel.retry()
+            advanceUntilIdle()
+            repository.answerRead(1, CustomersResult.Success(listOf(customer(id = "c1"))))
+            advanceUntilIdle()
+
+            assertNull(viewModel.uiState.value.failureReason)
+            assertEquals(listOf("c1"), viewModel.uiState.value.customers.map { it.id })
+
+            viewModel.reload()
+            advanceUntilIdle()
+            repository.answerRead(
+                2,
+                CustomersResult.Success(listOf(customer(id = "c1"), customer(id = "c2"))),
+            )
+            advanceUntilIdle()
+
+            assertEquals(listOf("c1", "c2"), viewModel.uiState.value.customers.map { it.id })
+            assertEquals(3, repository.reads)
+        }
+
+    @Test
     fun `reads with the list's default active-only filter until one is applied`() =
         runTest(dispatcher) {
             val repository = RecordingCustomersRepository()
@@ -347,6 +566,37 @@ class CustomersViewModelTest {
     }
 
     @Test
+    fun `marks a detail served from the last reported answer`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            detailResult = CustomerDetailResult.Success(
+                detail(),
+                ReadSource.WORKING_SET,
+            ),
+        )
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.openCustomerDetail("c1")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value.customerDetail
+        assertEquals(true, state?.showingLastReported)
+    }
+
+    @Test
+    fun `does not mark a detail the backend answered`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            detailResult = CustomerDetailResult.Success(detail(), ReadSource.BACKEND),
+        )
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.openCustomerDetail("c1")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value.customerDetail
+        assertEquals(false, state?.showingLastReported)
+    }
+
+    @Test
     fun `re-opening the loaded customer does not read again`() = runTest(dispatcher) {
         val repository = RecordingCustomersRepository(
             detailResult = CustomerDetailResult.Success(detail()),
@@ -417,6 +667,12 @@ class CustomersViewModelTest {
         assertNull(viewModel.uiState.value.customerDetail)
     }
 
+    /** A filter that constrains the list, so a read for it is a different request from the default. */
+    private fun inactive() = CustomerFilters(
+        status = CustomerStatusFilter.INACTIVE,
+        jobs = CustomerJobFilter.ALL,
+    )
+
     private fun detail(
         properties: List<CustomerProperty> = listOf(property()),
         jobs: List<CustomerJob> = listOf(job()),
@@ -476,7 +732,13 @@ class CustomersViewModelTest {
     )
 }
 
-/** A [CustomersRepository] that answers with fixed results and counts reads. */
+/**
+ * A [CustomersRepository] that answers with fixed results and counts reads.
+ *
+ * A list read answers immediately unless [holdReads] is set, in which case it waits to be released by
+ * [answerRead]. That is how a test decides the order two overlapping reads complete in, without a
+ * sleep and without telling the ViewModel which read is which.
+ */
 private class RecordingCustomersRepository(
     var result: CustomersResult = CustomersResult.Success(emptyList()),
     var detailResult: CustomerDetailResult =
@@ -497,10 +759,29 @@ private class RecordingCustomersRepository(
     var lastUpdateCustomerId: String? = null
     var lastUpdateRequest: UpdateCustomerRequest? = null
 
+    /** When set, a list read waits for [answerRead] instead of answering with [result]. */
+    var holdReads: Boolean = false
+
+    private val waitingReads = mutableListOf<CompletableDeferred<CustomersResult>>()
+
+    /** How many list reads are waiting to be answered. */
+    val pendingReads: Int
+        get() = waitingReads.size
+
+    /** Answers the [request]th list read that is waiting, in request order. */
+    fun answerRead(request: Int, result: CustomersResult) {
+        waitingReads[request].complete(result)
+    }
+
     override suspend fun listCustomers(filters: CustomerFilters): CustomersResult {
         reads += 1
         lastFilters = filters
-        return result
+        if (!holdReads) {
+            return result
+        }
+        val answer = CompletableDeferred<CustomersResult>()
+        waitingReads += answer
+        return answer.await()
     }
 
     override suspend fun loadCustomerDetail(customerId: String): CustomerDetailResult {

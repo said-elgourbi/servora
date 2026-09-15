@@ -5,6 +5,7 @@ import com.servora.android.data.customers.PropertyDeleteResult
 import com.servora.android.data.customers.PropertyLifecycleRequest
 import com.servora.android.data.customers.PropertyRepository
 import com.servora.android.data.customers.PropertyResult
+import com.servora.android.data.customers.QueuedPropertyOperation
 import com.servora.android.data.customers.UpdatePropertyRequest
 import com.servora.android.domain.model.PropertyArchiveImpact
 import com.servora.android.domain.model.PropertyDetail
@@ -12,6 +13,8 @@ import com.servora.android.domain.model.PropertyProvince
 import com.servora.android.domain.model.PropertyStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -248,6 +251,10 @@ private class RecordingEditPropertyRepository(
         customerId: String,
         propertyId: String,
     ): PropertyDeleteResult = PropertyDeleteResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun queuedOperation(propertyId: String): QueuedPropertyOperation? = null
+
+    override val appliedOperations: Flow<Unit> = emptyFlow()
 }
 
 /** The Property the form reads: the values the backend last reported, at version 7. */

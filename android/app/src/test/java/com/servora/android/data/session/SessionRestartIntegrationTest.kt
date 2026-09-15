@@ -13,6 +13,7 @@ import com.servora.android.data.auth.SignInResult
 import com.servora.android.data.auth.SmsCodeRequestDto
 import com.servora.android.data.auth.SmsCodeVerifyRequestDto
 import com.servora.android.data.device.DeviceIdentity
+import com.servora.android.data.offline.FakeOfflineSessionLifecycle
 import java.io.IOException
 import java.time.Clock
 import java.time.Instant
@@ -111,6 +112,8 @@ class SessionRestartIntegrationTest {
             sessionAuthenticator = DefaultSessionAuthenticator(api, store),
             authApi = api,
             clock = CLOCK,
+            // The offline hooks are exercised by their own tests; this one is about persistence.
+            offline = FakeOfflineSessionLifecycle(),
         )
         val repository = DefaultAuthRepository(api, JSON, DEVICE, store, manager)
     }

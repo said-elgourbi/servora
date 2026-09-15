@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.servora.android.data.customers.CustomerDetailResult
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CustomerFilters
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -152,6 +153,10 @@ class CustomersViewModel @Inject constructor(
                                 customerDetail = current.copy(
                                     isLoading = false,
                                     detail = result.detail,
+                                    // The values may be the last the backend reported rather than a
+                                    // fresh answer, and the screen says so (`§2`, §7).
+                                    showingLastReported =
+                                        result.source == ReadSource.WORKING_SET,
                                     failureReason = null,
                                 ),
                             )
@@ -163,6 +168,7 @@ class CustomersViewModel @Inject constructor(
                                     // A failed read must not leave the previous detail on
                                     // screen: it described different data (`BR-001`).
                                     detail = null,
+                                    showingLastReported = false,
                                     failureReason = result.reason,
                                 ),
                             )
@@ -172,16 +178,40 @@ class CustomersViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Identifies the newest list read.
+     *
+     * A read only writes state while it is still the newest one requested, so an answer that arrives
+     * after a newer read was asked for cannot replace it with rows read for the filter that read was
+     * asked to apply (`BR-001`).
+     */
+    private var listReadGeneration = 0
+
     private fun refresh() {
+        // The filter is captured when the read is requested, because an answer describes the filter
+        // it was asked for rather than whatever the filter is when it arrives.
+        val filters = _uiState.value.filters
+        val readGeneration = ++listReadGeneration
         _uiState.update { it.copy(isLoading = true, failureReason = null) }
         viewModelScope.launch {
-            val filters = _uiState.value.filters
+            // The read happens outside the state mutator: `update` may re-run its lambda on
+            // contention, and a re-run must never issue a second request.
+            val result = customersRepository.listCustomers(filters)
+            if (readGeneration != listReadGeneration) {
+                // A newer read was requested while this one was in flight, so this answer describes a
+                // filter the list no longer shows. Applying it would overwrite the newer read's
+                // state — its rows, its failure or its mark — with an older one's (`BR-001`).
+                return@launch
+            }
             _uiState.update { state ->
-                when (val result = customersRepository.listCustomers(filters)) {
+                when (result) {
                     is CustomersResult.Success ->
                         state.copy(
                             isLoading = false,
                             customers = result.customers.map { it.toListItem() },
+                            // The rows may be the last the backend reported rather than a fresh
+                            // answer, and the screen says so (`§2`, §7).
+                            showingLastReported = result.source == ReadSource.WORKING_SET,
                             failureReason = null,
                         )
 
@@ -192,6 +222,7 @@ class CustomersViewModel @Inject constructor(
                             // read for a different filter, so showing it would present rows the
                             // user's current filter excludes (`BR-001`).
                             customers = emptyList(),
+                            showingLastReported = false,
                             failureReason = result.reason,
                         )
                 }

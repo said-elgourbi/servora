@@ -2,6 +2,8 @@ package com.servora.android.ui.customers
 
 import androidx.compose.runtime.Immutable
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.customers.QueuedPropertyOperation
 import com.servora.android.domain.model.PropertyDetail
 
 /**
@@ -20,6 +22,19 @@ data class PropertyDetailUiState(
     val propertyId: String = "",
     val isLoading: Boolean = false,
     val detail: PropertyDetail? = null,
+    /**
+     * Whether [detail] is a fresh answer or the last one the backend reported (`§2`).
+     *
+     * When it is the working set, the screen says so rather than presenting a local copy as current.
+     */
+    val detailSource: ReadSource = ReadSource.BACKEND,
+    /**
+     * The lifecycle action the backend has not answered yet (`BR-086`, §7).
+     *
+     * Nothing has been applied: the action is waiting for the backend, or it was refused and the user
+     * has to see it. It is never drawn as though the Property had changed (`BR-086`).
+     */
+    val queuedOperation: QueuedPropertyOperation? = null,
     val failureReason: CustomersFailureReason? = null,
     /** Whether an archive, restore or delete is in flight. */
     val isWorking: Boolean = false,
