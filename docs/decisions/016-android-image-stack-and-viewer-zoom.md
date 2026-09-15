@@ -1,7 +1,7 @@
 # ADR-016 — Android image stack: Coil 3 behind the `JobPhotoImages` port, and Telephoto for viewer zoom
 
-**Status:** Accepted (product-owner decision, 2026-09-15; implemented by `docs/tracker/029-photo-evidence-phases.md`
-Phase 4c and Phase 4d)
+**Status:** Accepted (product-owner decision, 2026-09-15; **Phase 4c implemented 2026-09-15**, Phase 4d still to
+come)
 
 Date: 2026-09-15
 Tracker: `docs/tracker/029-photo-evidence-phases.md` (Phase 0 D4b ✓ and D9 ✓; Phase 4c implements the stack,
@@ -96,12 +96,56 @@ strip remains how photos are browsed, and a tap still opens exactly the photo it
   library draws app-private files and the API route, so it needs no media access.
 - **Video, audio and files** (`D8`, still open).
 
+## Implementation record — the image stack (Phase 4c, 2026-09-15)
+
+**The dependency.** `io.coil-kt.coil3:coil-compose:3.6.2`, pinned in `android/gradle/libs.versions.toml` the way
+every other version there is (`dev.md` §4). It is the smallest artifact set that provides what D1 needs —
+the library, its Compose components and its default Android decoders — and it is deliberately **not**
+`coil-network-okhttp`: the API is read through the app's one Retrofit transport, so no second HTTP path and no
+duplicated route string exists. Its transitive OkHttp resolves to the pinned 5.5.0, and 3.6.2 is built against
+Kotlin 2.x and supports `minSdk 21`, so it is compatible with this module's `minSdk 26`, Kotlin 2.3.21 and
+Compose BOM 2026.08.00; the module compiles and its lint passes with the dependency in place (see this ADR's
+tracker entry for the commands and their results).
+
+**The shapes that carry the decision.**
+
+| Piece | What it is |
+| --- | --- |
+| `data/jobs/JobPhotoImage.kt` | What the stack is asked to load: `Local(path)` (the bytes this device still holds, §9) or `Backend(jobId, photoId)` (`BR-015`), plus `jobPhotoImageCacheKey(subjectId, image)` — the session-partitioned key (D2) |
+| `data/jobs/JobPhotoImages.kt` | The port, unchanged in shape and in its four names: each answers the request the stack loads (`ImageRequest?`) at the size that call site asks for — a 512 px tile, or `VIEWER_DECODE_EDGE_PX` for the viewer — and `null` when there is nothing to draw (no session, or the `None` implementation) |
+| `data/jobs/JobPhotoFetcher.kt` | The reader: `Fetcher.Factory<JobPhotoImage>` and the fetcher it builds. A pending photo is read from its app-private file; evidence is read from this session's disk-cache entry, or downloaded through `JobDetailsApi` with the same `401 → renew once` renewal as every other read (D2) and then cached; anything unreadable answers nothing to draw |
+| `data/jobs/JobPhotoImageCacheScope.kt` | The release rule of D2: the caches are released on the first read of a session that is not the one they were cached for |
+| `di/JobsOfflineModule.kt` (`JobPhotoImageModule`) + `ServoraApplication` | One `ImageLoader` with the fetcher and a disk cache in `cacheDir/job-photo-cache`, installed as the singleton the composables draw with |
+
+**How each decision is met.**
+
+- **D1 — one stack behind the port.** The library samples, decodes, applies EXIF and caches; the port decides
+  *what* and *at what size*; the call sites (`JobPhotoThumbnail`, the tray tile, the review preview, the viewer)
+  draw through `SubcomposeAsyncImage` and keep their test tags, their sizes and their "cannot be shown" state.
+- **D2 — the read is unchanged in authority.** The renewal is the port's own, not the library's — the fetcher
+  reads the route through `JobDetailsApi`, so `401 → renew once` behaves exactly as it did. The cache is keyed
+  per session subject, and it is released **on the first read under a session that is not the one it cached**,
+  rather than at the instant of sign-out: the session owner (`SessionManager`) does not depend on this feature's
+  display cache, and the offline layer's own session seam (`OfflineSessionLifecycle`) releases offline state. That
+  is the latest moment at which the previous session's bytes could be served, and the keys alone already make
+  them unreadable by the next session. Recorded as a deviation from "cleared when the session ends" in the
+  letter, kept in its substance.
+- **D3 — the stack is the precondition for 4d.** Zoom is not built here. What 4d needs is a request-driven
+  viewer, and the viewer now draws whatever the stack resolves rather than a bitmap it fetched itself.
+- **D4 — nothing on the API side.** No `Cache-Control`, no second route, no derived object: the client-side
+  cache is the whole change.
+
+**What retired with it.** The hand-rolled decode (`BitmapFactory` + `inSampleSize` + the EXIF turn applied to a
+decode), the 24-entry in-memory `LruCache`, and `jobPhotoFittingSampleSize` with its five JVM cases; the EXIF
+handling for *display* is now the library's. The shared read/turn leaf `JobPhotoExifOrientation` stays — the
+preparation steps still need it (Phase 4b) — and `jobPhotoSampleSize`, the one sampling rule that survives, now
+takes the bounds as plain numbers so that its coverage can live in a JVM test (`qa.md` §6.1).
+
 ## Consequences
 
 - `android/gradle/libs.versions.toml` + `android/app/build.gradle.kts` gain the library (and Telephoto), in the
-  file's "pinned deliberately" convention. Phase 4c/4d resolve the versions and record, in this ADR, the
-  compatibility result against the pinned toolchain (Kotlin, Compose BOM, OkHttp, `minSdk 26`) — the
-  dependency justification `dev.md` §4 requires before the dependency is added.
+  file's "pinned deliberately" convention. **Resolved for Coil by Phase 4c (2026-09-15): 3.6.2**, with its
+  compatibility against the pinned toolchain recorded above; **Telephoto's version is resolved by Phase 4d**.
 - `data/jobs/JobPhotoImages.kt` keeps its interface and both sources; its internals move to the library, and
   the `401 → renew` path is wired into the library's fetch of the content route.
 - The call sites draw with the library's composable instead of a hand-held `ImageBitmap`, keeping their test
@@ -110,8 +154,8 @@ strip remains how photos are browsed, and a tap still opens exactly the photo it
   in-memory `LruCache`. **`JobPhotoOrientation` does not retire**: the preparation pipeline needs exactly that
   rule for `D7b`, so its JVM coverage stays and the tag read is shared rather than written twice. That share
   **exists as of Phase 4b** (landed 2026-09-15): `data/jobs/JobPhotoExifOrientation.kt` holds the platform
-  tag read and the pixel turn for both the display path and the preparation steps, so Phase 4c must keep it
-  for the pipeline even where the library takes over the display decode.
+  tag read and the pixel turn for both the display path and the preparation steps, so Phase 4c keeps it for the
+  pipeline even where the library takes over the display decode (**landed 2026-09-15**).
 - `ui/jobs/JobPhotoViewer.kt` gains the zoom/pan layer; the viewer's resolution logic (`viewedJobPhoto`,
   `JobPhotoViewerTest`) is untouched, because it answers which photo and from where, not how it is drawn.
 - Verification is partly **device-bound**: gesture behaviour and the library's on-device decoding are
@@ -142,4 +186,5 @@ Recorded rather than guessed (`BR-042`); tracker 029 carries them with the phase
 2. `Cache-Control` on the content answer, and any server-side cache policy for evidence.
 3. Offline visibility of accepted evidence (`D5`, deferred) and any retention rule for bytes kept on device
    (`D6d`).
-4. The exact library versions, pinned when Phase 4c/4d add them, with their compatibility check.
+4. The exact library versions, pinned when Phase 4c/4d add them, with their compatibility check. **Coil 3.6.2 is
+   pinned and recorded (Phase 4c, 2026-09-15); Telephoto's version is resolved by Phase 4d.**
