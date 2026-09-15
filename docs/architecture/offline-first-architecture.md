@@ -254,8 +254,12 @@ reads (the Activity gallery's previews, the tray's previews and the full-size vi
 `GET /jobs/:id/photos/:photoId/content`), technician assignment, scheduling and rescheduling, Job and
 Visit status actions, notes, Customer and Property writes, and every form. Their routes accept no
 idempotency key yet, or their mutation conflict policy is undecided (§8, §11.1), so they must not be
-queued or invented; whether accepted evidence must also be readable without connectivity is the open
-`D5` question (`docs/tracker/029-photo-evidence-phases.md`).
+queued or invented; whether accepted evidence must also be readable without connectivity is the `D5`
+question, **deferred by product ownership on 2026-09-15** (`docs/tracker/029-photo-evidence-phases.md`
+D5), so these reads stay online-only for now. The photo evidence that **is** offline-capable is the
+draft: capture, preparation and upload are queued through the outbox (§9), and the pending tray and the
+review preview draw the technician's own app-private bytes, which is why they visibly survive a loss of
+connectivity while the gallery does not.
 
 ---
 
