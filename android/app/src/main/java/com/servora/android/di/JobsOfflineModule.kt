@@ -1,8 +1,12 @@
 package com.servora.android.di
 
+import android.content.Context
+import coil3.ImageLoader
+import coil3.disk.DiskCache
 import com.servora.android.data.jobs.ContentResolverJobPhotoPickedItems
 import com.servora.android.data.jobs.DefaultJobPhotoImages
 import com.servora.android.data.jobs.DefaultJobPhotoProcessing
+import com.servora.android.data.jobs.JobPhotoFetcherFactory
 import com.servora.android.data.jobs.JobPhotoFiles
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.data.jobs.JobPhotoPickedItems
@@ -14,9 +18,11 @@ import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoSet
 import javax.inject.Singleton
+import okio.Path.Companion.toOkioPath
 
 /**
  * The photo-evidence feature's offline and local-storage wiring (`BR-015`, `BR-027`, `BR-086`).
@@ -38,6 +44,48 @@ internal object JobsOfflineModule {
     ): OfflineOperationHandler = handler
 }
 
+/**
+ * The image stack the photo evidence is drawn with (`D4b`, `ADR-016`).
+ *
+ * The stack is built here, with this feature's fetcher, and installed as the app's own stack in
+ * `ServoraApplication`, so every `AsyncImage`/`SubcomposeAsyncImage` in the app draws a photo through
+ * the reader that knows where evidence lives — the device's own file or the API, with the session
+ * renewal it has always had (`BR-007`) — instead of a second stack with caches of its own.
+ */
+@Module
+@InstallIn(SingletonComponent::class)
+internal object JobPhotoImageModule {
+
+    /**
+     * The app's image stack: the library's default caches, plus this feature's reader (`D4b`).
+     *
+     * The reader is what tells the stack where evidence lives, and it releases the stack's own caches
+     * when another session reads — so this provider is what makes that release the app's stack rather
+     * than a second one (`JobPhotoImageCacheScope`).
+     */
+    @Provides
+    @Singleton
+    fun provideJobPhotoImageLoader(
+        @ApplicationContext context: Context,
+        fetcherFactory: JobPhotoFetcherFactory,
+    ): ImageLoader = ImageLoader.Builder(context)
+        .components { add(fetcherFactory) }
+        .diskCache {
+            DiskCache.Builder()
+                .directory(context.cacheDir.resolve(DISK_CACHE_DIRECTORY).toOkioPath())
+                // The share of the cache directory the library keeps for its own disk cache, matching
+                // its default: it is a cache, so the platform may reclaim all of it (`D4b`).
+                .maxSizePercent(DISK_CACHE_PERCENT)
+                .build()
+        }
+        .build()
+
+    /** The feature's own cache directory name, so nothing else in the app writes into it. */
+    private const val DISK_CACHE_DIRECTORY = "job-photo-cache"
+
+    private const val DISK_CACHE_PERCENT = 0.02
+}
+
 /** Binds the photo-evidence feature's local stores to their implementations. */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -48,7 +96,10 @@ internal abstract class JobsOfflineBindingsModule {
     @Singleton
     abstract fun bindJobPhotoFiles(implementation: PrivateJobPhotoFiles): JobPhotoFiles
 
-    /** The thumbnails the tray and the gallery draw (`BR-015`). */
+    /**
+     * What the tray, the gallery, the review preview and the viewer draw a photo with (`D4b`): the
+     * request the image stack loads, with the session's own cache keys.
+     */
     @Binds
     @Singleton
     abstract fun bindJobPhotoImages(implementation: DefaultJobPhotoImages): JobPhotoImages

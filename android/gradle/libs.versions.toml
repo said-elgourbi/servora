@@ -21,6 +21,9 @@ retrofit = "3.0.0"
 okhttp = "5.5.0"
 kotlinxSerialization = "1.11.0"
 coroutines = "1.11.0"
+# The image stack the photo evidence is drawn with (`D4b`, `docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
+# Pinned deliberately, like every other version here (`dev.md` §4).
+coil = "3.6.2"
 junit = "4.13.2"
 androidxTestJunit = "1.3.0"
 espresso = "3.7.0"
@@ -46,6 +49,10 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
+
+# The image stack behind the `JobPhotoImages` port (`D4b`): its memory and disk cache, its sampling
+# and its EXIF handling replace the app's hand-rolled decode and cache.
+coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 retrofit-kotlinx-serialization = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }

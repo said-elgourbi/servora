@@ -76,7 +76,7 @@ internal fun JobPhotoReviewSheet(
             )
 
             JobPhotoThumbnail(
-                load = { photoImages.localThumbnail(photo.localPath) },
+                image = photoImages.localThumbnail(photo.localPath),
                 contentDescription = stringResource(R.string.job_photo_image_description),
                 modifier = Modifier
                     .fillMaxWidth()

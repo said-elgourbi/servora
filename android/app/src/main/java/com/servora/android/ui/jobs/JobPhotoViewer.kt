@@ -1,6 +1,5 @@
 package com.servora.android.ui.jobs
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,14 +16,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -32,6 +25,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.SubcomposeAsyncImageContent
 import com.servora.android.R
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobActivityEvent
@@ -134,25 +129,15 @@ internal fun viewedJobPhoto(
     )
 }
 
-/** What the viewer has for the photo it was opened on. */
-private sealed interface JobPhotoView {
-    /** The photo is being read and decoded. */
-    data object Reading : JobPhotoView
-
-    /** The photo's bytes could not be read or decoded, so nothing can be shown (`BR-042`). */
-    data object Unavailable : JobPhotoView
-
-    /** The photo, ready to be drawn. */
-    data class Ready(val image: ImageBitmap) : JobPhotoView
-}
-
 /**
  * One photo, full size, over the screen that holds it.
  *
- * The viewer reads the photo the same way the tile it was opened from does — the device's own bytes
- * while it still holds them, the backend's evidence otherwise — so a session that may not read the
- * evidence is refused by the API here exactly as it is refused on a tile, and a photo whose bytes
- * cannot be decoded is reported instead of being replaced by another picture (`BR-007`, `BR-042`).
+ * The photo is drawn by the image stack, from the request this feature answers with
+ * ([JobPhotoImages]): the device's own bytes while it still holds them, the backend's evidence
+ * otherwise — so a session that may not read the evidence is refused by the API here exactly as it is
+ * refused on a tile, and a photo that cannot be read or decoded is reported instead of being replaced
+ * by another picture (`BR-007`, `BR-042`). Because the stack keeps what it decoded, opening the same
+ * photo again is drawn from memory rather than read a second time (`D4b`).
  *
  * It is closed by its own action or by the platform's back gesture, and it holds nothing after that:
  * the photo's phase, note and bytes remain the record's and the device's (`BR-001`).
@@ -163,15 +148,9 @@ internal fun JobPhotoViewer(
     photoImages: JobPhotoImages,
     onDismiss: () -> Unit,
 ) {
-    var view by remember(photo) { mutableStateOf<JobPhotoView>(JobPhotoView.Reading) }
-
-    LaunchedEffect(photo) {
-        view = JobPhotoView.Reading
-        val image = when (photo) {
-            is ViewedJobPhoto.Pending -> photoImages.localFullSize(photo.localPath)
-            is ViewedJobPhoto.Stored -> photoImages.jobPhotoFullSize(photo.jobId, photo.photoId)
-        }
-        view = if (image == null) JobPhotoView.Unavailable else JobPhotoView.Ready(image)
+    val image = when (photo) {
+        is ViewedJobPhoto.Pending -> photoImages.localFullSize(photo.localPath)
+        is ViewedJobPhoto.Stored -> photoImages.jobPhotoFullSize(photo.jobId, photo.photoId)
     }
 
     Dialog(
@@ -210,26 +189,30 @@ internal fun JobPhotoViewer(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    when (val current = view) {
-                        JobPhotoView.Reading -> CircularProgressIndicator(
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(32.dp).testTag(JobPhotoViewerLoadingTag),
-                        )
-
-                        JobPhotoView.Unavailable -> Text(
-                            text = stringResource(R.string.job_photo_viewer_unavailable),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .padding(horizontal = 24.dp)
-                                .testTag(JobPhotoViewerUnavailableTag),
-                        )
-
-                        is JobPhotoView.Ready -> Image(
-                            bitmap = current.image,
+                    if (image == null) {
+                        JobPhotoViewerUnavailable()
+                    } else {
+                        SubcomposeAsyncImage(
+                            model = image,
                             contentDescription = stringResource(R.string.job_photo_image_description),
                             contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize().testTag(JobPhotoViewerImageTag),
+                            modifier = Modifier.fillMaxSize(),
+                            loading = {
+                                CircularProgressIndicator(
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag(JobPhotoViewerLoadingTag),
+                                )
+                            },
+                            error = { JobPhotoViewerUnavailable() },
+                            success = {
+                                SubcomposeAsyncImageContent(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .testTag(JobPhotoViewerImageTag),
+                                )
+                            },
                         )
                     }
                 }
@@ -248,5 +231,25 @@ internal fun JobPhotoViewer(
             }
         }
     }
+}
+
+/**
+ * The report that the photo cannot be shown (`BR-042`).
+ *
+ * It is what the viewer draws when the stack was given nothing to load, and what it draws when the
+ * stack's own read failed: a photo that cannot be read or decoded says so rather than showing a
+ * different picture, and it carries the same test tag in both cases because the technician sees the
+ * same thing.
+ */
+@Composable
+private fun JobPhotoViewerUnavailable() {
+    Text(
+        text = stringResource(R.string.job_photo_viewer_unavailable),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .padding(horizontal = 24.dp)
+            .testTag(JobPhotoViewerUnavailableTag),
+    )
 }
 

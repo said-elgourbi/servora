@@ -128,7 +128,9 @@ class DefaultJobPhotoProcessing @Inject constructor() : JobPhotoProcessing {
             bytes,
             0,
             bytes.size,
-            BitmapFactory.Options().apply { inSampleSize = jobPhotoSampleSize(bounds, maxEdgePx) },
+            BitmapFactory.Options().apply {
+                inSampleSize = jobPhotoSampleSize(bounds.outWidth, bounds.outHeight, maxEdgePx)
+            },
         )
     }
 

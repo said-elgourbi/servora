@@ -27,6 +27,7 @@ class PhotoUploadApi : JobDetailsApi {
     }
 
     var addJobPhotoCalls = 0
+    var contentCalls = 0
     var lastAuthorization: String? = null
     var lastJobId: String? = null
     var lastClientOperationId: String? = null
@@ -64,6 +65,7 @@ class PhotoUploadApi : JobDetailsApi {
         jobId: String,
         photoId: String,
     ): ResponseBody {
+        contentCalls += 1
         lastAuthorization = authorization
         lastJobId = jobId
         return contentAnswer()

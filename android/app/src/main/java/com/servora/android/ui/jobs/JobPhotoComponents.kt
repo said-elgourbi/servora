@@ -21,15 +21,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -38,6 +32,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.SubcomposeAsyncImage
+import coil3.request.ImageRequest
 import com.servora.android.R
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobActivityEvent
@@ -128,45 +124,54 @@ internal fun JobPhotoPhaseSelector(
 }
 
 /**
- * One photo, drawn from bytes this device holds.
+ * One photo, drawn by the image stack.
  *
- * The thumbnail is decoded off the main thread and a photo that cannot be decoded draws the camera
- * glyph instead: a tile's phase, note and state are what the technician acts on, and a missing
- * preview must never be presented as a different photo (`BR-042`).
+ * The preview is the stack's own draw of the request this feature answered with
+ * ([JobPhotoImages]): the library decodes it at the size it is drawn, turns it by the photo's own EXIF
+ * orientation and caches the result, so the same photo is neither downloaded nor decoded twice
+ * (`D4b`). Until it is there — and when it cannot be drawn at all — the camera glyph is shown instead:
+ * a tile's phase, note and state are what the technician acts on, and a missing preview must never be
+ * presented as a different photo (`BR-042`).
+ *
+ * [image] is `null` when there is nothing to draw, which is the same state a photo that fails to load
+ * reaches.
  */
 @Composable
 internal fun JobPhotoThumbnail(
-    load: suspend () -> ImageBitmap?,
+    image: ImageRequest?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
 ) {
-    var bitmap by remember(load) { mutableStateOf<ImageBitmap?>(null) }
-
-    LaunchedEffect(load) { bitmap = load() }
-
     Box(
         modifier = modifier
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
-        val image = bitmap
         if (image == null) {
-            Icon(
-                painter = painterResource(R.drawable.ic_camera),
-                contentDescription = contentDescription,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(28.dp),
-            )
+            JobPhotoMissingPreview(contentDescription)
         } else {
-            androidx.compose.foundation.Image(
-                bitmap = image,
+            SubcomposeAsyncImage(
+                model = image,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
+                loading = { JobPhotoMissingPreview(contentDescription) },
+                error = { JobPhotoMissingPreview(contentDescription) },
             )
         }
     }
+}
+
+/** The camera glyph a tile draws while its photo is not there, and when it cannot be drawn. */
+@Composable
+private fun JobPhotoMissingPreview(contentDescription: String?) {
+    Icon(
+        painter = painterResource(R.drawable.ic_camera),
+        contentDescription = contentDescription,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.size(28.dp),
+    )
 }
 
 /** The badge that names the phase a photo was taken in, drawn over the photo. */
@@ -248,7 +253,7 @@ private fun JobPhotoGalleryTile(
     ) {
         Box {
             JobPhotoThumbnail(
-                load = { photoImages.jobPhotoThumbnail(jobId, photoId) },
+                image = photoImages.jobPhotoThumbnail(jobId, photoId),
                 contentDescription = stringResource(R.string.job_photo_image_description),
                 modifier = Modifier
                     .size(JobPhotoTileSize)

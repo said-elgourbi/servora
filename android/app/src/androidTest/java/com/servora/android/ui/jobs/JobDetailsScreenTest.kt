@@ -2,8 +2,8 @@ package com.servora.android.ui.jobs
 
 import android.content.Context
 import android.graphics.Bitmap
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -11,6 +11,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import coil3.request.ImageRequest
 import com.servora.android.R
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
@@ -249,7 +251,7 @@ class JobDetailsScreenTest {
 
     @Test
     fun opensATappedAcceptedPhotoFullSizeAndClosesItAgain() {
-        val images = RecordingJobPhotoImages()
+        val images = RecordingJobPhotoImages(ApplicationProvider.getApplicationContext())
         render(
             state = JobDetailsUiState(
                 jobId = JOB_ID,
@@ -273,6 +275,7 @@ class JobDetailsScreenTest {
         // The photo itself rather than the tile's preview, with the phase the record states and the
         // whole note (`D4`).
         composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertIsDisplayed()
+        awaitPhoto()
         composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).assertIsDisplayed()
         composeTestRule.onNodeWithText("Panel before the repair").assertIsDisplayed()
         composeTestRule.onNodeWithText("Before work").assertIsDisplayed()
@@ -287,7 +290,7 @@ class JobDetailsScreenTest {
 
     @Test
     fun opensATappedPendingPhotoFromTheBytesTheDeviceStillHolds() {
-        val images = RecordingJobPhotoImages()
+        val images = RecordingJobPhotoImages(ApplicationProvider.getApplicationContext())
         render(
             state = JobDetailsUiState(
                 jobId = JOB_ID,
@@ -300,6 +303,7 @@ class JobDetailsScreenTest {
         composeTestRule.onNodeWithTag(jobPhotoPendingTileTag("photo-1")).performClick()
 
         composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertIsDisplayed()
+        awaitPhoto()
         composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).assertIsDisplayed()
         composeTestRule.onNodeWithText("Sawdust on the belt").assertIsDisplayed()
         assertTrue(
@@ -345,6 +349,18 @@ class JobDetailsScreenTest {
         // A hidden action is not authorization, but an action nobody may perform is not offered
         // either (`BR-006`, `BR-007`).
         composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertDoesNotExist()
+    }
+
+    /**
+     * Waits until the image stack has drawn the photo the viewer asked for.
+     *
+     * The stack reads and decodes asynchronously — that is what its cache and its sampling are
+     * (`D4b`) — so the photo is on screen a moment after the tap that opened it, not in the same frame.
+     */
+    private fun awaitPhoto() {
+        composeTestRule.waitUntil(timeoutMillis = PHOTO_LOAD_TIMEOUT) {
+            composeTestRule.onAllNodesWithTag(JobPhotoViewerImageTag).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     private fun render(
@@ -941,6 +957,9 @@ class JobDetailsScreenTest {
 
     private companion object {
         const val JOB_ID = "job-1"
+
+        /** How long the image stack is given to read and decode a photo in a test (`D4b`). */
+        const val PHOTO_LOAD_TIMEOUT = 10_000L
     }
 }
 
@@ -1044,13 +1063,15 @@ private fun pendingPhoto(
 )
 
 /**
- * The photo reads the screen asked for (`D4`).
+ * The photo reads the screen asked for (`D4`, `D4b`).
  *
- * A tile and the viewer read the same photo at different resolutions, so a test has to be able to say
- * which one was asked for: the tile draws a preview, and the viewer must read the photo itself — from
- * the device while it holds it, from the backend otherwise (`§9`, `BR-015`).
+ * A tile and the viewer ask the image stack for the same photo at different sizes, so a test has to be
+ * able to say which one was asked for: the tile asks for a preview, and the viewer must ask for the
+ * photo itself — from the device while it holds it, from the backend otherwise (§9, `BR-015`). Each
+ * answer is a request the stack can really load, so a test asserts what is drawn and not only what was
+ * asked for.
  */
-private class RecordingJobPhotoImages : JobPhotoImages {
+private class RecordingJobPhotoImages(private val context: Context) : JobPhotoImages {
 
     /** The photo ids read as the photo itself, from the evidence the backend holds (`BR-015`). */
     val fullSizeReads = mutableListOf<String>()
@@ -1058,22 +1079,24 @@ private class RecordingJobPhotoImages : JobPhotoImages {
     /** The local paths read as the photo itself, which only a photo still on the device has. */
     val localFullSizeReads = mutableListOf<String>()
 
-    override suspend fun localThumbnail(path: String): ImageBitmap? = image()
+    /** A real, loadable photo, so the viewer draws an image rather than reporting one it lacks. */
+    private val photo: Drawable =
+        BitmapDrawable(context.resources, Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))
 
-    override suspend fun jobPhotoThumbnail(jobId: String, photoId: String): ImageBitmap? = image()
+    override fun localThumbnail(path: String): ImageRequest = request()
 
-    override suspend fun localFullSize(path: String): ImageBitmap? {
+    override fun jobPhotoThumbnail(jobId: String, photoId: String): ImageRequest = request()
+
+    override fun localFullSize(path: String): ImageRequest {
         localFullSizeReads += path
-        return image()
+        return request()
     }
 
-    override suspend fun jobPhotoFullSize(jobId: String, photoId: String): ImageBitmap? {
+    override fun jobPhotoFullSize(jobId: String, photoId: String): ImageRequest {
         fullSizeReads += photoId
-        return image()
+        return request()
     }
 
-    /** A real, decodable photo, so the viewer draws an image rather than reporting one it lacks. */
-    private fun image(): ImageBitmap =
-        Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).asImageBitmap()
+    private fun request(): ImageRequest = ImageRequest.Builder(context).data(photo).build()
 }
 
