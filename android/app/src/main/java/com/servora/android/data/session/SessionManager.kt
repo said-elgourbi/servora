@@ -1,6 +1,7 @@
 package com.servora.android.data.session
 
 import com.servora.android.data.auth.AuthApi
+import com.servora.android.data.offline.OfflineSessionLifecycle
 import com.servora.android.domain.model.IssuedSession
 import java.time.Clock
 import java.time.Instant
@@ -71,6 +72,10 @@ interface SessionManager {
  * through the existing [SessionAuthenticator] before the app opens (`BR-018`). A renewal that the
  * backend refuses ends the session; one that cannot reach the backend does not, because nothing
  * proves the session invalid and the app is offline-first (`BR-013`, `BR-031`).
+ *
+ * A session becoming available is also what lets pending work be replayed, and a session ending is
+ * what releases the local state scoped to it, so those two moments are reported to
+ * [OfflineSessionLifecycle] (`docs/architecture/offline-first-architecture.md` §6, §10).
  */
 @Singleton
 class DefaultSessionManager @Inject constructor(
@@ -78,6 +83,7 @@ class DefaultSessionManager @Inject constructor(
     private val sessionAuthenticator: SessionAuthenticator,
     private val authApi: AuthApi,
     private val clock: Clock,
+    private val offline: OfflineSessionLifecycle,
 ) : SessionManager {
 
     private val _state = MutableStateFlow<AuthState>(AuthState.Checking)
@@ -124,6 +130,9 @@ class DefaultSessionManager @Inject constructor(
 
     override suspend fun signOut() {
         val accessToken = sessionStore.accessToken()
+        // The working set belongs to the session that read it, so it is released while the session
+        // that names its subject is still readable. Pending work is kept (`BR-014`, §10).
+        offline.onSessionEnding()
         // Local sign-out must succeed even offline, so the session is cleared before the
         // best-effort server revocation. The captured token still names the session to revoke.
         sessionStore.clear()
@@ -135,6 +144,11 @@ class DefaultSessionManager @Inject constructor(
 
     private fun showSignedIn(session: IssuedSession?) {
         _state.value = AuthState.SignedIn(session?.permissions.orEmpty())
+        if (session != null) {
+            // A session is available, so queued work may be replayed. The request does not block the
+            // screen the app is about to show (`BR-012`).
+            offline.onSessionAvailable()
+        }
     }
 
     /**

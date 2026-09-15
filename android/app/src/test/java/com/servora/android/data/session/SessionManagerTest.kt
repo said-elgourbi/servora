@@ -10,6 +10,8 @@ import com.servora.android.data.auth.SignInRequestDto
 import com.servora.android.data.auth.SignInResponseDto
 import com.servora.android.data.auth.SmsCodeRequestDto
 import com.servora.android.data.auth.SmsCodeVerifyRequestDto
+import com.servora.android.data.offline.FakeOfflineSessionLifecycle
+import com.servora.android.data.offline.OfflineSessionLifecycle
 import com.servora.android.domain.model.AuthTokens
 import com.servora.android.domain.model.IssuedSession
 import java.io.IOException
@@ -121,6 +123,33 @@ class SessionManagerTest {
     }
 
     @Test
+    fun `reports a restored session as available and a sign-out as ending`() = runTest {
+        val offline = FakeOfflineSessionLifecycle()
+        val store = inMemorySessionStore()
+        store.store(session(expiresAt = "2026-01-01T00:10:00Z"))
+        val manager = manager(store, offline = offline)
+
+        manager.restore()
+
+        assertEquals(1, offline.availableCalls)
+        assertEquals(0, offline.endingCalls)
+
+        manager.signOut()
+
+        assertEquals(1, offline.endingCalls)
+    }
+
+    @Test
+    fun `reports a fresh sign-in as a session becoming available`() = runTest {
+        val offline = FakeOfflineSessionLifecycle()
+        val manager = manager(inMemorySessionStore(), offline = offline)
+
+        manager.onAuthenticated(session(expiresAt = "2026-01-01T00:10:00Z"))
+
+        assertEquals(1, offline.availableCalls)
+    }
+
+    @Test
     fun `sign-out stays signed out when the backend cannot be reached`() = runTest {
         val api = RecordingSignOutAuthApi(signOutFails = true)
         val store = inMemorySessionStore()
@@ -137,8 +166,9 @@ class SessionManagerTest {
         store: SessionStore,
         authenticator: SessionAuthenticator = FakeSessionAuthenticator(),
         authApi: AuthApi = RecordingSignOutAuthApi(),
+        offline: OfflineSessionLifecycle = FakeOfflineSessionLifecycle(),
     ): DefaultSessionManager =
-        DefaultSessionManager(store, authenticator, authApi, CLOCK)
+        DefaultSessionManager(store, authenticator, authApi, CLOCK, offline)
 
     private fun session(
         expiresAt: String,

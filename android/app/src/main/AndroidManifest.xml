@@ -5,6 +5,11 @@
          permissions arrive with the field-work features that use them. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Reads whether a network is available, so a queued operation can be replayed when one comes
+         back (`docs/architecture/offline-first-architecture.md` §6). It is a trigger, not a gate:
+         an operation is queued whenever the API is unreachable. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:name=".ServoraApplication"
         android:allowBackup="false"
