@@ -12,6 +12,8 @@ import com.servora.android.data.home.DefaultManagerHomeRepository
 import com.servora.android.data.home.ManagerHomeRepository
 import com.servora.android.data.jobs.DefaultJobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsRepository
+import com.servora.android.data.session.AccessTokenSubject
+import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.data.session.DefaultSessionAuthenticator
 import com.servora.android.data.session.DefaultSessionManager
 import com.servora.android.data.session.EncryptedSessionStorage
@@ -49,6 +51,13 @@ abstract class DataModule {
     @Binds
     @Singleton
     abstract fun bindSessionManager(implementation: DefaultSessionManager): SessionManager
+
+    /** Names the subject local business state is scoped to (`AuthenticatedSubject`). */
+    @Binds
+    @Singleton
+    abstract fun bindAuthenticatedSubject(
+        implementation: AccessTokenSubject,
+    ): AuthenticatedSubject
 
     @Binds
     @Singleton

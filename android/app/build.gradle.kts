@@ -108,12 +108,27 @@ android {
         abortOnError = true
         checkDependencies = true
     }
+
+    sourceSets {
+        // A migration test compares an older exported schema with the current database, so the
+        // committed schema JSON is an instrumented-test asset as well (`dev.md` §6).
+        getByName("androidTest").assets.directories.add("$projectDir/schemas")
+    }
 }
 
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
     }
+}
+
+/**
+ * Room exports the local store's schema next to the module, so the committed JSON is the migration
+ * baseline: a local schema change migrates the outbox instead of dropping it
+ * (`docs/architecture/offline-first-architecture.md` §3, `BR-014`).
+ */
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -144,6 +159,12 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
 
+    // The offline local store: the working set and the outbox
+    // (`docs/architecture/offline-first-architecture.md` §2–§4).
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 
@@ -151,5 +172,9 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.androidx.room.testing)
+    // The local store's data access is suspending, so the instrumented tests need a coroutine
+    // runner (`qa.md` §9).
+    androidTestImplementation(libs.kotlinx.coroutines.test)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
