@@ -6,6 +6,7 @@ import com.servora.android.data.customers.PropertyDeleteResult
 import com.servora.android.data.customers.PropertyLifecycleRequest
 import com.servora.android.data.customers.PropertyRepository
 import com.servora.android.data.customers.PropertyResult
+import com.servora.android.data.offline.ReadSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Clock
 import java.util.UUID
@@ -34,6 +35,15 @@ class PropertyDetailViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(PropertyDetailUiState())
     val uiState: StateFlow<PropertyDetailUiState> = _uiState.asStateFlow()
+
+    init {
+        // A queued action the backend finally accepted changes what this screen must show, so the
+        // open Property is read again rather than left describing the state before it landed
+        // (`BR-086`, §7, §10).
+        viewModelScope.launch {
+            propertyRepository.appliedOperations.collect { reloadAfterSync() }
+        }
+    }
 
     /**
      * The destination session [uiState] currently belongs to, or `null` before one has started.
@@ -71,6 +81,14 @@ class PropertyDetailViewModel @Inject constructor(
     /** Re-reads the open Property, after an edit or a failure. */
     fun reload(customerId: String, propertyId: String) {
         load(customerId, propertyId)
+    }
+
+    /** Re-reads the open Property once a queued action was accepted by the backend (`§7`). */
+    private fun reloadAfterSync() {
+        val current = _uiState.value
+        if (current.propertyId.isNotEmpty()) {
+            load(current.customerId, current.propertyId)
+        }
     }
 
     /** Re-runs the read after a failure. */
@@ -188,21 +206,41 @@ class PropertyDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val result = call(state.customerId, state.propertyId, request)
             if (startedSession != sessionId) return@launch
+            val queued = propertyRepository.queuedOperation(state.propertyId)
             _uiState.update { current ->
                 when (result) {
                     is PropertyResult.Success ->
                         current.copy(
                             isWorking = false,
                             detail = result.property,
+                            detailSource = result.source,
+                            queuedOperation = queued,
                             actionFailure = null,
                             // The lifecycle moved on the backend, so the projections other screens
                             // hold are stale until they are re-read (`BR-001`).
                             lifecycleChanged = true,
                         )
 
+                    // The API could not be reached, so the action is waiting rather than done: the
+                    // screen keeps the last state the backend reported and shows the pending action
+                    // next to it (`BR-086`, §7).
+                    is PropertyResult.Queued ->
+                        current.copy(
+                            isWorking = false,
+                            detail = result.property ?: current.detail,
+                            detailSource = if (result.property != null) {
+                                ReadSource.WORKING_SET
+                            } else {
+                                current.detailSource
+                            },
+                            queuedOperation = queued,
+                            actionFailure = null,
+                        )
+
                     is PropertyResult.Failure ->
                         current.copy(
                             isWorking = false,
+                            queuedOperation = queued,
                             actionFailure = result.reason,
                         )
                 }
@@ -218,6 +256,7 @@ class PropertyDetailViewModel @Inject constructor(
         )
         viewModelScope.launch {
             val result = propertyRepository.loadProperty(customerId, propertyId)
+            val queued = propertyRepository.queuedOperation(propertyId)
             _uiState.update { current ->
                 if (current.propertyId != propertyId) {
                     // Another Property replaced this one while the read was in flight.
@@ -228,6 +267,20 @@ class PropertyDetailViewModel @Inject constructor(
                             current.copy(
                                 isLoading = false,
                                 detail = result.property,
+                                detailSource = result.source,
+                                queuedOperation = queued,
+                                failureReason = null,
+                            )
+
+                        is PropertyResult.Queued ->
+                            // A read is never queued (only a mutation is), so this outcome cannot come
+                            // from `loadProperty`; it is handled so the screen would still show the
+                            // backend's last reported values rather than nothing if it ever did.
+                            current.copy(
+                                isLoading = false,
+                                detail = result.property,
+                                detailSource = ReadSource.WORKING_SET,
+                                queuedOperation = queued,
                                 failureReason = null,
                             )
 
@@ -237,6 +290,7 @@ class PropertyDetailViewModel @Inject constructor(
                                 // A failed read must not leave the previous Property on screen:
                                 // it described a different record (`BR-001`).
                                 detail = null,
+                                queuedOperation = queued,
                                 failureReason = result.reason,
                             )
                     }

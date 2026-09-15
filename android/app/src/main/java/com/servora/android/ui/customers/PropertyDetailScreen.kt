@@ -38,6 +38,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.data.customers.PropertyLifecycleAction
+import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.customers.QueuedPropertyOperation
 import com.servora.android.domain.model.PropertyDetail
 import com.servora.android.domain.model.PropertyStatus
 import com.servora.android.ui.components.InfoCard
@@ -60,6 +63,12 @@ const val PropertyDetailDeleteConfirmTag = "property-detail-delete-confirm"
 
 /** The app shell's top-bar Edit action on the Property Detail destination. */
 const val EditPropertyActionTag = "property-detail-edit-action"
+
+/** Identifies the notice for a lifecycle action the backend has not answered yet (`§7`). */
+const val PropertyDetailQueuedOperationTag = "property-detail-queued-operation"
+
+/** Identifies the notice that the values shown are the last the backend reported (`§2`). */
+const val PropertyDetailLastReportedTag = "property-detail-last-reported"
 
 /**
  * The Property lifecycle screen (`BR-082` – `BR-086`).
@@ -119,6 +128,8 @@ fun PropertyDetailScreen(
                 detail = detail,
                 isWorking = state.isWorking,
                 actionFailureRes = state.actionFailure?.messageRes(),
+                queuedOperation = state.queuedOperation,
+                showingLastReported = state.detailSource == ReadSource.WORKING_SET,
                 deletionProhibited = state.deletionProhibited,
                 canArchiveProperty = canArchiveProperty,
                 canDeleteProperty = canDeleteProperty,
@@ -171,6 +182,8 @@ private fun PropertyDetailContent(
     detail: PropertyDetail,
     isWorking: Boolean,
     actionFailureRes: Int?,
+    queuedOperation: QueuedPropertyOperation?,
+    showingLastReported: Boolean,
     deletionProhibited: Boolean,
     canArchiveProperty: Boolean,
     canDeleteProperty: Boolean,
@@ -188,6 +201,16 @@ private fun PropertyDetailContent(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         PropertyAddressCard(detail)
+
+        // What the user asked for and the backend has not answered is stated next to the record
+        // rather than drawn as though the Property had changed (`BR-086`, §7).
+        if (queuedOperation != null) {
+            QueuedOperationNotice(queuedOperation)
+        }
+
+        if (showingLastReported) {
+            LastReportedNotice()
+        }
 
         detail.notes
             ?.takeIf { it.isNotBlank() }
@@ -439,6 +462,106 @@ private fun LifecycleAction(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * The lifecycle action the backend has not answered yet (`BR-086`, §7).
+ *
+ * A queued action is presented as waiting, and a refused one names the reason: neither is drawn as
+ * though the Property had changed, because nothing has been applied (`BR-086`).
+ */
+@Composable
+private fun QueuedOperationNotice(operation: QueuedPropertyOperation) {
+    val awaitingSync = operation.isAwaitingSync
+    val message = if (awaitingSync) {
+        stringResource(
+            when (operation.action) {
+                PropertyLifecycleAction.ARCHIVE -> R.string.property_sync_queued_archive
+                PropertyLifecycleAction.RESTORE -> R.string.property_sync_queued_restore
+            },
+        )
+    } else {
+        val reason = stringResource(
+            operation.failure?.messageRes() ?: R.string.property_error_server,
+        )
+        stringResource(
+            when (operation.action) {
+                PropertyLifecycleAction.ARCHIVE ->
+                    R.string.property_sync_rejected_archive
+
+                PropertyLifecycleAction.RESTORE ->
+                    R.string.property_sync_rejected_restore
+            },
+            reason,
+        )
+    }
+
+    OfflineNotice(
+        message = message,
+        isRefusal = !awaitingSync,
+        glyphRes = if (awaitingSync) null else R.drawable.ic_alert_circle,
+        tag = PropertyDetailQueuedOperationTag,
+    )
+}
+
+/** States that the values on screen are the last the backend reported (`§2`, §7). */
+@Composable
+private fun LastReportedNotice() {
+    OfflineNotice(
+        message = stringResource(R.string.property_sync_last_reported),
+        isRefusal = false,
+        glyphRes = null,
+        tag = PropertyDetailLastReportedTag,
+    )
+}
+
+/**
+ * An offline-related notice.
+ *
+ * Waiting uses the quiet secondary container so it never competes with a refusal, and a refusal uses
+ * the error container the screen's other refusals use (`BR-012`, `BR-015`). Only a refusal carries a
+ * glyph, which is the same one the screen's other refusals use.
+ */
+@Composable
+private fun OfflineNotice(
+    message: String,
+    isRefusal: Boolean,
+    glyphRes: Int?,
+    tag: String,
+) {
+    val container = if (isRefusal) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val content = if (isRefusal) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag(tag),
+        shape = MaterialTheme.shapes.large,
+        color = container,
+        contentColor = content,
+        border = BorderStroke(1.dp, content.copy(alpha = 0.25f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (glyphRes != null) {
+                Icon(
+                    painter = painterResource(glyphRes),
+                    contentDescription = null,
+                    tint = content,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            Text(text = message, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

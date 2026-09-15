@@ -5,6 +5,7 @@ import com.servora.android.data.customers.PropertyDeleteResult
 import com.servora.android.data.customers.PropertyLifecycleRequest
 import com.servora.android.data.customers.PropertyRepository
 import com.servora.android.data.customers.PropertyResult
+import com.servora.android.data.customers.QueuedPropertyOperation
 import com.servora.android.data.customers.UpdatePropertyRequest
 import com.servora.android.domain.model.PropertyArchiveImpact
 import com.servora.android.domain.model.PropertyDetail
@@ -13,6 +14,8 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -205,6 +208,17 @@ private class RecordingPropertyRepository(
 ) : PropertyRepository {
 
     var lastLifecycleRequest: PropertyLifecycleRequest? = null
+
+    /** The lifecycle action the screen should report as waiting, if any. */
+    var queuedOperation: QueuedPropertyOperation? = null
+
+    /** Whether a queued operation was accepted by the backend, driven by a test. */
+    val applied = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    override val appliedOperations: Flow<Unit> = applied
+
+    override suspend fun queuedOperation(propertyId: String): QueuedPropertyOperation? =
+        queuedOperation
 
     override suspend fun loadProperty(customerId: String, propertyId: String): PropertyResult =
         loadResult

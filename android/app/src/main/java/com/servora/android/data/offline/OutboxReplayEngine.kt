@@ -4,6 +4,9 @@ import com.servora.android.data.session.AuthenticatedSubject
 import java.time.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -48,6 +51,16 @@ class OutboxReplayEngine @Inject constructor(
 
     private val run = Mutex()
     private var recovered = false
+
+    private val _applied = MutableSharedFlow<Unit>(extraBufferCapacity = APPLIED_EVENT_BUFFER)
+
+    /**
+     * Emits after a run that the backend accepted, so a screen showing that work re-reads it (§7).
+     *
+     * It carries no payload: a screen re-reads the record it is open on from the API, which is what
+     * §10 requires a successful read to do anyway.
+     */
+    val applied: SharedFlow<Unit> = _applied.asSharedFlow()
 
     /**
      * Replays the signed-in subject's queue until it is clean, exhausted or blocked.
@@ -106,6 +119,10 @@ class OutboxReplayEngine @Inject constructor(
             }
         }
 
+        if (applied > 0) {
+            _applied.tryEmit(Unit)
+        }
+
         ReplaySummary(
             applied = applied,
             rejected = rejected,
@@ -144,5 +161,10 @@ class OutboxReplayEngine @Inject constructor(
         }
         recovered = true
         outbox.recoverInFlight()
+    }
+
+    private companion object {
+        /** A refresh signal, not a record: a slow collector may miss one and still be correct. */
+        const val APPLIED_EVENT_BUFFER = 8
     }
 }

@@ -355,6 +355,14 @@
     <string name="property_province_sk">Saskatchewan</string>
     <string name="property_province_yt">Yukon</string>
 
+    <!-- L\'action de cycle de vie en attente et la dernière réponse du serveur
+         (`docs/architecture/offline-first-architecture.md` §2, §7). -->
+    <string name="property_sync_queued_archive">Archivage enregistré sur cet appareil. Il sera appliqué dès que le serveur sera joignable.</string>
+    <string name="property_sync_queued_restore">Restauration enregistrée sur cet appareil. Elle sera appliquée dès que le serveur sera joignable.</string>
+    <string name="property_sync_rejected_archive">L\'archivage a été refusé : %1$s</string>
+    <string name="property_sync_rejected_restore">La restauration a été refusée : %1$s</string>
+    <string name="property_sync_last_reported">Hors ligne — affichage de la dernière mise à jour signalée par le serveur.</string>
+
     <!-- Rôles d\'assignation (`BR-068`). Une visite avec des techniciens a exactement un responsable. -->
     <string name="assignment_role_lead">Responsable</string>
     <string name="assignment_role_technician">Technicien</string>

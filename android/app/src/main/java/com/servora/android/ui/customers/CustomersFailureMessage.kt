@@ -2,6 +2,7 @@ package com.servora.android.ui.customers
 
 import com.servora.android.R
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.data.offline.OutboxFailureReason
 
 /**
  * The message a Property operation failure is reported with.
@@ -20,4 +21,22 @@ internal fun CustomersFailureReason.messageRes(): Int =
         CustomersFailureReason.NETWORK -> R.string.property_error_network
         CustomersFailureReason.SERVER -> R.string.property_error_server
         CustomersFailureReason.UNEXPECTED -> R.string.property_error_server
+    }
+
+/**
+ * The explanation of why a queued operation was refused.
+ *
+ * The codes are the replay engine's (`offline-first-architecture.md` §6). Their explanations reuse
+ * the failure copy above, so the same kind of refusal is never described two ways (`BR-028`).
+ */
+internal fun OutboxFailureReason.messageRes(): Int =
+    when (this) {
+        OutboxFailureReason.UNAUTHENTICATED -> R.string.property_error_unauthenticated
+        OutboxFailureReason.NOT_AUTHORIZED -> R.string.property_error_forbidden
+        OutboxFailureReason.STALE -> R.string.property_error_conflict
+        OutboxFailureReason.INVALID -> R.string.property_error_validation
+        OutboxFailureReason.NOT_FOUND -> R.string.property_error_not_found
+        OutboxFailureReason.SERVER -> R.string.property_error_server
+        OutboxFailureReason.NETWORK -> R.string.property_error_network
+        OutboxFailureReason.UNEXPECTED -> R.string.property_error_server
     }

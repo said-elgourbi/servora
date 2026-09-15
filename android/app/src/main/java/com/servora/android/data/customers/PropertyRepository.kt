@@ -1,5 +1,8 @@
 package com.servora.android.data.customers
 
+import com.servora.android.data.offline.OutboxReplayEngine
+import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.PropertyArchiveImpact
@@ -7,13 +10,26 @@ import com.servora.android.domain.model.PropertyDetail
 import com.servora.android.domain.model.PropertyStatus
 import java.io.IOException
 import javax.inject.Inject
+import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.SerializationException
 import retrofit2.HttpException
 
 /** Outcome of a Property read or mutation. */
 sealed interface PropertyResult {
-    /** The backend answered with the Property's current values. */
-    data class Success(val property: PropertyDetail) : PropertyResult
+    /** The Property's values, from the backend or from the last answer it reported. */
+    data class Success(
+        val property: PropertyDetail,
+        val source: ReadSource = ReadSource.BACKEND,
+    ) : PropertyResult
+
+    /**
+     * The API could not be reached, so the action is queued and will be applied when it can
+     * (`BR-086`).
+     *
+     * [property] is the last state the backend reported, or `null` when none is held: nothing has
+     * been applied, and the screen presents the queued action as pending rather than as done.
+     */
+    data class Queued(val property: PropertyDetail?) : PropertyResult
 
     /** The operation failed; [reason] decides what the screen reports. */
     data class Failure(val reason: CustomersFailureReason) : PropertyResult
@@ -76,6 +92,21 @@ interface PropertyRepository {
         customerId: String,
         propertyId: String,
     ): PropertyDeleteResult
+
+    /**
+     * The lifecycle action the backend has not accepted yet for one Property, or `null` (`§7`).
+     *
+     * A screen shows this next to the Property rather than presenting the queued change as applied
+     * (`BR-086`).
+     */
+    suspend fun queuedOperation(propertyId: String): QueuedPropertyOperation?
+
+    /**
+     * Emits when a queued operation was accepted by the backend, so an open screen re-reads.
+     *
+     * The re-read is what replaces the local view with the state the API now reports (`§7`, §10).
+     */
+    val appliedOperations: Flow<Unit>
 }
 
 /**
@@ -84,19 +115,47 @@ interface PropertyRepository {
  * DefaultPropertyRepository keeps the same session contract as [DefaultCustomersRepository]: the
  * access token is read from [SessionAuthenticator], and a `401` is renewed once and retried before
  * the outcome is reported.
+ *
+ * It is also where the Property feature meets the offline standard: a read the API could not answer
+ * is served from the last answer it reported (`§2`), and an archive or restore the API could not be
+ * reached for is queued and replayed rather than reported as a failure (`BR-086`, §4). An edit is
+ * **online-only**, because the API accepts no idempotency key for it, so §5 forbids queueing it.
  */
 class DefaultPropertyRepository @Inject constructor(
     private val api: PropertiesApi,
     private val sessionAuthenticator: SessionAuthenticator,
+    private val offline: PropertyOfflineStore,
+    private val subject: AuthenticatedSubject,
+    engine: OutboxReplayEngine,
 ) : PropertyRepository {
+
+    override val appliedOperations: Flow<Unit> = engine.applied
 
     override suspend fun loadProperty(
         customerId: String,
         propertyId: String,
     ): PropertyResult {
+        val subjectId = subject.current()
+            ?: return PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         val accessToken = sessionAuthenticator.accessToken()
             ?: return PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
-        return read(accessToken, allowRenewal = true, customerId, propertyId)
+
+        return when (val attempt = read(accessToken, allowRenewal = true, customerId, propertyId)) {
+            is Attempt.Answered -> {
+                // A successful read replaces the local copy rather than being merged into it (§10).
+                offline.remember(subjectId, customerId, attempt.row)
+                answer(attempt.row)
+            }
+
+            Attempt.Undelivered -> reported(subjectId, propertyId)
+            is Attempt.Refused -> PropertyResult.Failure(attempt.reason)
+            Attempt.Unauthenticated -> PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+        }
+    }
+
+    override suspend fun queuedOperation(propertyId: String): QueuedPropertyOperation? {
+        val subjectId = subject.current() ?: return null
+        return offline.queuedAction(subjectId, propertyId)
     }
 
     override suspend fun updateProperty(
@@ -104,10 +163,22 @@ class DefaultPropertyRepository @Inject constructor(
         propertyId: String,
         request: UpdatePropertyRequest,
     ): PropertyResult {
+        val subjectId = subject.current()
+            ?: return PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         val accessToken = sessionAuthenticator.accessToken()
             ?: return PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
-        return mutate(accessToken, allowRenewal = true) { token ->
+        val call: suspend (token: String) -> PropertyDetailDto = { token ->
             api.update(token, customerId, propertyId, request)
+        }
+        return when (val attempt = mutate(accessToken, allowRenewal = true, call)) {
+            is Attempt.Answered -> {
+                offline.remember(subjectId, customerId, attempt.row)
+                answer(attempt.row)
+            }
+
+            is Attempt.Refused -> PropertyResult.Failure(attempt.reason)
+            Attempt.Undelivered -> PropertyResult.Failure(CustomersFailureReason.NETWORK)
+            Attempt.Unauthenticated -> PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         }
     }
 
@@ -115,35 +186,100 @@ class DefaultPropertyRepository @Inject constructor(
         customerId: String,
         propertyId: String,
         request: PropertyLifecycleRequest,
-    ): PropertyResult {
-        val accessToken = sessionAuthenticator.accessToken()
-            ?: return PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
-        return mutate(accessToken, allowRenewal = true) { token ->
-            api.archive(token, customerId, propertyId, request)
-        }
-    }
+    ): PropertyResult = lifecycle(
+        customerId = customerId,
+        propertyId = propertyId,
+        request = request,
+        action = PropertyLifecycleAction.ARCHIVE,
+    ) { token -> api.archive(token, customerId, propertyId, request) }
 
     override suspend fun restoreProperty(
         customerId: String,
         propertyId: String,
         request: PropertyLifecycleRequest,
+    ): PropertyResult = lifecycle(
+        customerId = customerId,
+        propertyId = propertyId,
+        request = request,
+        action = PropertyLifecycleAction.RESTORE,
+    ) { token -> api.restore(token, customerId, propertyId, request) }
+
+    /**
+     * Runs one lifecycle action, queueing it when the API could not be reached (`BR-086`).
+     *
+     * A refusal is reported as a failure rather than queued: the API answered, and its answer is the
+     * one the user has to act on (`BR-032`). A refused session is not queued either, because the
+     * operation would then replay under a session that has already ended.
+     */
+    private suspend fun lifecycle(
+        customerId: String,
+        propertyId: String,
+        request: PropertyLifecycleRequest,
+        action: PropertyLifecycleAction,
+        call: suspend (token: String) -> PropertyDetailDto,
     ): PropertyResult {
+        val subjectId = subject.current()
+            ?: return PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         val accessToken = sessionAuthenticator.accessToken()
             ?: return PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
-        return mutate(accessToken, allowRenewal = true) { token ->
-            api.restore(token, customerId, propertyId, request)
+
+        return when (val attempt = mutate(accessToken, allowRenewal = true, call)) {
+            is Attempt.Answered -> {
+                offline.remember(subjectId, customerId, attempt.row)
+                answer(attempt.row)
+            }
+
+            Attempt.Undelivered -> queue(action, subjectId, customerId, propertyId, request)
+            is Attempt.Refused -> PropertyResult.Failure(attempt.reason)
+            Attempt.Unauthenticated -> PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         }
     }
+
+    /**
+     * Queues the action the API could not be reached for (`§4`).
+     *
+     * A request that carries no idempotency key cannot be replayed at most once, so it is reported as
+     * the network failure it is rather than queued (§5).
+     */
+    private suspend fun queue(
+        action: PropertyLifecycleAction,
+        subjectId: String,
+        customerId: String,
+        propertyId: String,
+        request: PropertyLifecycleRequest,
+    ): PropertyResult {
+        val queued = offline.queueLifecycle(action, subjectId, customerId, propertyId, request)
+        if (!queued) {
+            return PropertyResult.Failure(CustomersFailureReason.NETWORK)
+        }
+        // Nothing has been applied, so a queued action is never presented as done: the screen shows
+        // the last state the backend reported plus the action that is waiting (`BR-086`, §7).
+        return PropertyResult.Queued(offline.reportedDetail(subjectId, propertyId))
+    }
+
+    /** The last answer the backend reported, or the honest failure when none is held (`§2`). */
+    private suspend fun reported(subjectId: String, propertyId: String): PropertyResult =
+        offline.reportedDetail(subjectId, propertyId)?.let { property ->
+            PropertyResult.Success(property, ReadSource.WORKING_SET)
+        } ?: PropertyResult.Failure(CustomersFailureReason.NETWORK)
 
     override suspend fun deleteProperty(
         customerId: String,
         propertyId: String,
     ): PropertyDeleteResult {
+        val subjectId = subject.current() ?: return PropertyDeleteResult.Failure(
+            CustomersFailureReason.UNAUTHENTICATED,
+        )
         val accessToken = sessionAuthenticator.accessToken()
             ?: return PropertyDeleteResult.Failure(
                 CustomersFailureReason.UNAUTHENTICATED,
             )
-        return delete(accessToken, allowRenewal = true, customerId, propertyId)
+        val result = delete(accessToken, allowRenewal = true, customerId, propertyId)
+        if (result is PropertyDeleteResult.Success) {
+            // The Property no longer exists, so the local copy of it must not outlive it (`§2`).
+            offline.forget(subjectId, propertyId)
+        }
+        return result
     }
 
     /** Reads the Property once with [accessToken], renewing the session and retrying when allowed. */
@@ -152,19 +288,19 @@ class DefaultPropertyRepository @Inject constructor(
         allowRenewal: Boolean,
         customerId: String,
         propertyId: String,
-    ): PropertyResult =
+    ): Attempt =
         try {
-            answer(api.detail("Bearer $accessToken", customerId, propertyId))
+            Attempt.Answered(api.detail("Bearer $accessToken", customerId, propertyId))
         } catch (failure: HttpException) {
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
                 renewAndRetryRead(accessToken, customerId, propertyId)
             } else {
-                PropertyResult.Failure(failure.code().toFailureReason())
+                Attempt.Refused(httpFailureReason(failure.code()))
             }
         } catch (failure: IOException) {
-            PropertyResult.Failure(CustomersFailureReason.NETWORK)
+            Attempt.Undelivered
         } catch (failure: SerializationException) {
-            PropertyResult.Failure(CustomersFailureReason.UNEXPECTED)
+            Attempt.Refused(CustomersFailureReason.UNEXPECTED)
         }
 
     /** Retries the read once with a renewed session, or reports why it could not renew. */
@@ -172,7 +308,7 @@ class DefaultPropertyRepository @Inject constructor(
         rejectedToken: String,
         customerId: String,
         propertyId: String,
-    ): PropertyResult =
+    ): Attempt =
         when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
             is SessionRenewal.Renewed ->
                 read(
@@ -182,11 +318,8 @@ class DefaultPropertyRepository @Inject constructor(
                     propertyId,
                 )
 
-            SessionRenewal.Rejected ->
-                PropertyResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
-
-            SessionRenewal.Unavailable ->
-                PropertyResult.Failure(CustomersFailureReason.NETWORK)
+            SessionRenewal.Rejected -> Attempt.Unauthenticated
+            SessionRenewal.Unavailable -> Attempt.Undelivered
         }
 
     /**
@@ -201,30 +334,25 @@ class DefaultPropertyRepository @Inject constructor(
         accessToken: String,
         allowRenewal: Boolean,
         call: suspend (token: String) -> PropertyDetailDto,
-    ): PropertyResult =
+    ): Attempt =
         try {
-            answer(call("Bearer $accessToken"))
+            Attempt.Answered(call("Bearer $accessToken"))
         } catch (failure: HttpException) {
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
                 when (val renewal = sessionAuthenticator.renew(accessToken)) {
                     is SessionRenewal.Renewed ->
                         mutate(renewal.accessToken, allowRenewal = false, call)
 
-                    SessionRenewal.Rejected ->
-                        PropertyResult.Failure(
-                            CustomersFailureReason.UNAUTHENTICATED,
-                        )
-
-                    SessionRenewal.Unavailable ->
-                        PropertyResult.Failure(CustomersFailureReason.NETWORK)
+                    SessionRenewal.Rejected -> Attempt.Unauthenticated
+                    SessionRenewal.Unavailable -> Attempt.Undelivered
                 }
             } else {
-                PropertyResult.Failure(failure.code().toFailureReason())
+                Attempt.Refused(httpFailureReason(failure.code()))
             }
         } catch (failure: IOException) {
-            PropertyResult.Failure(CustomersFailureReason.NETWORK)
+            Attempt.Undelivered
         } catch (failure: SerializationException) {
-            PropertyResult.Failure(CustomersFailureReason.UNEXPECTED)
+            Attempt.Refused(CustomersFailureReason.UNEXPECTED)
         }
 
     /**
@@ -253,7 +381,7 @@ class DefaultPropertyRepository @Inject constructor(
                     renewAndRetryDelete(accessToken, customerId, propertyId)
 
                 else -> PropertyDeleteResult.Failure(
-                    response.code().toFailureReason(),
+                    httpFailureReason(response.code()),
                 )
             }
         } catch (failure: IOException) {
@@ -295,26 +423,11 @@ class DefaultPropertyRepository @Inject constructor(
         }
     }
 
-    private fun Int.toFailureReason(): CustomersFailureReason =
-        when {
-            this == HTTP_UNAUTHORIZED -> CustomersFailureReason.UNAUTHENTICATED
-            this == HTTP_FORBIDDEN -> CustomersFailureReason.FORBIDDEN
-            this == HTTP_NOT_FOUND -> CustomersFailureReason.NOT_FOUND
-            this == HTTP_CONFLICT -> CustomersFailureReason.VERSION_CONFLICT
-            this == HTTP_UNPROCESSABLE -> CustomersFailureReason.VALIDATION
-            this == HTTP_BAD_REQUEST -> CustomersFailureReason.VALIDATION
-            this >= HTTP_SERVER_ERROR -> CustomersFailureReason.SERVER
-            else -> CustomersFailureReason.UNEXPECTED
-        }
-
     private companion object {
-        const val HTTP_BAD_REQUEST = 400
+        /** The delete route's own answers, which are not failures (`BR-082`). */
         const val HTTP_UNAUTHORIZED = 401
-        const val HTTP_FORBIDDEN = 403
         const val HTTP_NOT_FOUND = 404
         const val HTTP_CONFLICT = 409
-        const val HTTP_UNPROCESSABLE = 422
-        const val HTTP_SERVER_ERROR = 500
     }
 }
 
@@ -322,9 +435,11 @@ class DefaultPropertyRepository @Inject constructor(
  * Maps a wire row onto the domain, or `null` when this build cannot represent a value it carries.
  *
  * An unknown lifecycle state fails the read rather than being guessed at, which is the same
- * contract-mismatch rule the customer read follows (`BR-042`).
+ * contract-mismatch rule the customer read follows (`BR-042`). The working set stores this row's
+ * payload and maps it with this same function, so an offline read cannot describe the Property
+ * differently from an online one (`BR-041`).
  */
-private fun PropertyDetailDto.toPropertyDetail(): PropertyDetail? {
+internal fun PropertyDetailDto.toPropertyDetail(): PropertyDetail? {
     val propertyStatus =
         PropertyStatus.entries.firstOrNull { it.name == status } ?: return null
     return PropertyDetail(
