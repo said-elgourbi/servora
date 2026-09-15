@@ -335,15 +335,17 @@ class JobDetailsViewModelTest {
     fun `reads the activity once the Job was read and reports the backend's events`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(
             JobDetailsResult.Success(job()),
-            activityResult = JobActivityResult.Success(
-                listOf(
-                    activityEvent(id = "event-1", visitSequence = 2, body = "Fixed."),
-                    activityEvent(
-                        id = "event-2",
-                        kind = JobActivityKind.JOB_STATUS_CHANGED,
-                        visitSequence = null,
-                        toStatus = "SCHEDULED",
-                        body = null,
+            activityResults = listOf(
+                JobActivityResult.Success(
+                    listOf(
+                        activityEvent(id = "event-1", visitSequence = 2, body = "Fixed."),
+                        activityEvent(
+                            id = "event-2",
+                            kind = JobActivityKind.JOB_STATUS_CHANGED,
+                            visitSequence = null,
+                            toStatus = "SCHEDULED",
+                            body = null,
+                        ),
                     ),
                 ),
             ),
@@ -362,7 +364,9 @@ class JobDetailsViewModelTest {
     fun `reports a failed activity read without leaving a previous activity on screen`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(
             JobDetailsResult.Success(job()),
-            activityResult = JobActivityResult.Failure(CustomersFailureReason.NETWORK),
+            activityResults = listOf(
+                JobActivityResult.Failure(CustomersFailureReason.NETWORK),
+            ),
         )
         val viewModel = JobDetailsViewModel(repository)
         viewModel.start(JOB_ID)
@@ -390,6 +394,102 @@ class JobDetailsViewModelTest {
         assertEquals(listOf("note-1"), viewModel.uiState.value.activity?.map { it.id })
         assertEquals(JobActionKind.ACTIVITY_TEXT, viewModel.uiState.value.completedAction)
         assertFalse(viewModel.uiState.value.isSubmitting)
+    }
+
+    @Test
+    fun `reads the Job Activity again after a crew change so the timeline shows it`() = runTest(dispatcher) {
+        val note = activityEvent(id = "note-1", body = "Replaced the filter.")
+        val assigned = activityEvent(
+            id = "assigned-1",
+            kind = JobActivityKind.VISIT_TECHNICIAN_ASSIGNED,
+            technicianName = "Mike Lead",
+            roleCode = "LEAD",
+            body = null,
+        )
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            actionResults = ArrayDeque(
+                listOf(JobActionResult.Success(job().copy(version = 8))),
+            ),
+            activityResults = listOf(
+                JobActivityResult.Success(listOf(note)),
+                JobActivityResult.Success(listOf(assigned, note)),
+            ),
+        )
+        val viewModel = JobDetailsViewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+        assertEquals(listOf("note-1"), viewModel.uiState.value.activity?.map { it.id })
+
+        viewModel.assignVisitTechnicians(
+            listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+        )
+        advanceUntilIdle()
+
+        // The action answered with the Job, not with the timeline, so the timeline is read again
+        // rather than left showing what the Job looked like before the assignment (`BR-001`,
+        // `BR-080`).
+        assertEquals(listOf(JOB_ID, JOB_ID), repository.requestedActivityJobIds)
+        assertEquals(
+            listOf("assigned-1", "note-1"),
+            viewModel.uiState.value.activity?.map { it.id },
+        )
+        assertNull(viewModel.uiState.value.activityFailure)
+    }
+
+    @Test
+    fun `reads the Job Activity again after a schedule change so the timeline shows it`() =
+        runTest(dispatcher) {
+            val rescheduled = activityEvent(
+                id = "rescheduled-1",
+                kind = JobActivityKind.VISIT_RESCHEDULED,
+                body = null,
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                actionResults = ArrayDeque(
+                    listOf(JobActionResult.Success(job().copy(version = 8))),
+                ),
+                activityResults = listOf(
+                    JobActivityResult.Success(emptyList()),
+                    JobActivityResult.Success(listOf(rescheduled)),
+                ),
+            )
+            val viewModel = JobDetailsViewModel(repository)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.rescheduleVisit(
+                Instant.parse("2026-09-15T13:00:00Z"),
+                Instant.parse("2026-09-15T15:00:00Z"),
+            )
+            advanceUntilIdle()
+
+            assertEquals(listOf(JOB_ID, JOB_ID), repository.requestedActivityJobIds)
+            assertEquals(
+                listOf("rescheduled-1"),
+                viewModel.uiState.value.activity?.map { it.id },
+            )
+        }
+
+    @Test
+    fun `does not read the Job Activity again when the action was refused`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            actionResults = ArrayDeque(
+                listOf(JobActionResult.Failure(JobActionFailure.VERSION_CONFLICT)),
+            ),
+        )
+        val viewModel = JobDetailsViewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.changeJobStatus(JobStatus.IN_PROGRESS)
+        advanceUntilIdle()
+
+        // Nothing changed, so there is nothing new to project (`BR-067`): the timeline is not asked
+        // for again.
+        assertEquals(listOf(JOB_ID), repository.requestedActivityJobIds)
     }
 
 }
@@ -444,6 +544,8 @@ private fun activityEvent(
     recordedAt: String = "2026-09-14T14:14:00.000Z",
     actorName: String? = "John Smith",
     visitSequence: Int? = 2,
+    technicianName: String? = null,
+    roleCode: String? = null,
     toStatus: String? = null,
     body: String? = "Found a damaged capacitor.",
 ) = JobActivityEvent(
@@ -454,8 +556,8 @@ private fun activityEvent(
     visitSequence = visitSequence,
     fromStatus = null,
     toStatus = toStatus,
-    technicianName = null,
-    roleCode = null,
+    technicianName = technicianName,
+    roleCode = roleCode,
     previousRoleCode = null,
     outcomeCode = null,
     outcomeSummary = null,
@@ -467,23 +569,36 @@ private class RecordingJobDetailsRepository(
     private val result: JobDetailsResult,
     actionResults: ArrayDeque<JobActionResult> = ArrayDeque(),
     private val assignable: List<AssignableTechnician>? = null,
-    private val activityResult: JobActivityResult = JobActivityResult.Success(emptyList()),
+    activityResults: List<JobActivityResult> = listOf(JobActivityResult.Success(emptyList())),
     private val noteResult: VisitNoteResult = VisitNoteResult.Success(emptyList()),
 ) : JobDetailsRepository {
 
     val requestedJobIds = mutableListOf<String>()
 
+    /** Every Job whose Activity was asked for, in the order it was asked for. */
+    val requestedActivityJobIds = mutableListOf<String>()
+
     /** Every action this repository was asked to send, as a comparable description. */
     val actions = mutableListOf<String>()
 
     private val queuedActions = actionResults
+    private val queuedActivityResults = ArrayDeque(activityResults)
 
     override suspend fun loadJobDetails(jobId: String): JobDetailsResult {
         requestedJobIds += jobId
         return result
     }
 
-    override suspend fun loadJobActivity(jobId: String): JobActivityResult = activityResult
+    override suspend fun loadJobActivity(jobId: String): JobActivityResult {
+        requestedActivityJobIds += jobId
+        // The last scripted answer repeats, so a test that scripts one answer answers every read, and
+        // a test that scripts a later one can report something different after an action.
+        return if (queuedActivityResults.size > 1) {
+            queuedActivityResults.removeFirst()
+        } else {
+            queuedActivityResults.first()
+        }
+    }
 
     override suspend fun addVisitNote(
         jobId: String,

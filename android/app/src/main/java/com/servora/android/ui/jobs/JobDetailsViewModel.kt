@@ -35,6 +35,12 @@ import kotlinx.coroutines.launch
  * [JobDetailsUiState.pendingConfirmation] so the user can be shown the conflict and the same action
  * can be resent once accepted (`BR-070`).
  *
+ * An action that applies also changes the history Job Activity projects — a status change, a schedule
+ * change or a crew change (`BR-069`, `BR-073`, `BR-074`). The action's own answer is the Job rather
+ * than the timeline, so once an action succeeds the timeline is read again instead of being assembled
+ * from that answer (`BR-001`, `BR-080`). Adding a text update needs no second read: that write answers
+ * with the refreshed timeline itself.
+ *
  * The work is transient: this screen holds no offline working set yet, because the offline
  * architecture's local store (Room) is the single mechanism that will hold business data on the
  * device (`docs/architecture/offline-first-architecture.md`). Until then an action is online-only.
@@ -308,6 +314,12 @@ class JobDetailsViewModel @Inject constructor(
                             actionFailure = result.reason,
                         )
                 }
+            }
+            if (result is JobActionResult.Success) {
+                // The action answered with the Job, not with the timeline, and the history it just
+                // recorded is what Job Activity projects (`BR-080`). The timeline is read again rather
+                // than left showing what the Job looked like before the action (`BR-001`).
+                readActivity(result.details.id)
             }
         }
     }

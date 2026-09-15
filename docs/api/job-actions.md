@@ -20,6 +20,11 @@ Every action answers with **the Job as it now stands** — the same projection `
 (`docs/api/job-details.md` §3) — so a client presents the backend's state instead of patching a local
 copy (`BR-001`).
 
+A client that also presents **Job Activity** (`BR-080`) therefore reads `GET /jobs/:id/activity` again
+once an action has been applied: the action's answer is the Job, not the timeline, and the history these
+actions record (status, schedule, assignment) is what that read projects. The action itself is never
+asked to return the timeline, so the contract here is unchanged.
+
 ## 2. Permissions
 
 | Route                                        | Permission        |

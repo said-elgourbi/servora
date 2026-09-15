@@ -17,6 +17,13 @@ JSON, `camelCase`, UUID identifiers and ISO-8601 UTC timestamps (`Project.md` §
 is presented as `Authorization: Bearer <accessToken>`. Route paths carry no version prefix
 (`docs/versioning.md` §7).
 
+The read is a **projection** of the histories the domain keeps, so a client that presents it reads it
+again after a successful action rather than patching its own copy (`BR-001`, `BR-080`). An action
+answers with the Job (`docs/api/job-actions.md` §1), not with the timeline, so a client that shows both
+asks for the timeline once the action has been applied — a status change, a reschedule and a crew
+change all record history this read projects (`BR-058`, `BR-069`, `BR-073`). Adding a text update is the
+exception: that write answers with the refreshed timeline itself.
+
 ## 2. Permissions
 
 | Route                    | Permission       |
