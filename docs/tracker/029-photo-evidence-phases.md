@@ -1,8 +1,9 @@
 # Tracker 029 — Photo evidence after 028: permissions, picker, viewer, offline and lifecycle
 
-**Status: PHASE 0 — decisions recorded 2026-09-15.** D2, D4b, D9 and D10 answered; D6c and D7b answered
-within D6 and D7; D5 deferred. This task wrote documentation only; **no code was changed and no phase was
-implemented**.
+**Status: PHASE 4b LANDED (2026-09-15) — re-encoded evidence is stored upright (`D7b` ✓).** Phases 1, 2, 3,
+4 and 4b are implemented; **Phase 4c (image stack and preview caching, `D4b` ✓) is next**, then Phase 4d
+(viewer gestures, `D9` ✓). Phase 5 stays blocked because `D5` was **deferred** by product ownership, and
+Phases 6a and 6 wait on `D6c` ✓ (6a) and on `D6`'s remaining sub-questions (6).
 
 Date: 2026-09-15
 Predecessors: `docs/tracker/027-android-job-photo-updates.md` (capture, offline upload, Activity gallery),
@@ -37,7 +38,7 @@ Design reference that is **not** yet implemented: `Figma/src/imports/pasted_text
 
 ## Current phase
 
-**Phase 4b — re-encoded evidence is stored upright (D7b ✓). Then Phase 4c — image stack and preview caching (D4b ✓), then Phase 4d — viewer gestures (D9 ✓). Phase 5 stays blocked on the deferred D5.**
+**Phase 4c — image stack and preview caching (D4b ✓), then Phase 4d — viewer gestures (D9 ✓). Phase 5 stays blocked on the deferred D5.**
 
 - **The decisions this section was waiting on are recorded (2026-09-15).** Product ownership answered
   **D2, D4b, D6c, D7b, D9** and **D10**, and **deferred D5**. Each answer, its consequences and the
@@ -47,10 +48,15 @@ Design reference that is **not** yet implemented: `Figma/src/imports/pasted_text
   **D7b = (a)** makes the preparation steps turn a re-encoded photo's pixels so what Servora **stores** is
   upright. **D10 = (a)** leaves the zero-permission system picker as the only library source, so
   MediaStore is not adopted anywhere.
-- **Phase 4b is first, because it is the only open item currently storing wrong evidence.** A photo the
-  Phase 2 steps re-encoded (the `D3b` conversion or the `D3c` resize) is written with landscape pixels
-  and **no** orientation tag, so the evidence itself is sideways — on the device and in the bucket. The
-  display-path fix landed on 2026-09-15; `D7b` fixes what is stored.
+- **Phase 4b landed (2026-09-15): the preparation steps now store an upright photo.** A photo the Phase 2
+  steps re-encoded (the `D3b` conversion or the `D3c` resize) used to be written with landscape pixels and
+  **no** orientation tag, so the evidence itself was sideways — on the device and in the bucket. Both steps
+  now turn what they decoded by the orientation the **source** bytes declare, before scaling and encoding,
+  through **one** shared read and turn (`JobPhotoOrientation`'s pure rule, `JobPhotoExifOrientation`'s
+  platform read), which is the same leaf the display path uses — so the display fix of 2026-09-15 and the
+  stored fix cannot drift (`D7b` ✓). No API, database, permission, schema or uploaded-byte change: what a
+  re-encoded photo is stored as changes only in orientation, not in longest edge or quality. See the Phase
+  log entry and `## Manual QA runbook — Phase 4b`.
 - **Phase 4c (Coil 3) then Phase 4d (Telephoto) follow, in that order.** Coil is what makes the preview
   and the full-size decode cached and correct rather than hand-rolled; Telephoto is what makes zoom real
   on top of it, so 4d assumes 4c's stack. Both are Android-only, and neither touches the API, the
@@ -68,23 +74,20 @@ Design reference that is **not** yet implemented: `Figma/src/imports/pasted_text
   product ownership **deferred** D5 on 2026-09-15 rather than answering it, so the phase stays blocked,
   accepted evidence stays online-only, and the gap stays recorded in the risk table rather than being
   assumed away.
-- **A display defect was found and fixed on 2026-09-15, outside the phase sequence.** The device's
-  camera writes a portrait capture as the sensor's own landscape pixel data plus an EXIF `Orientation`
-  tag, and every Android decode drew those pixels exactly as stored — so a portrait photo appeared
-  turned on its side in the review preview, the pending tray, the gallery tiles and the Phase 4 viewer.
-  The decode now applies the orientation the file declares (`JobPhotoOrientation`). It is
-  **presentation only**: the stored bytes, the API, the database and the permissions are untouched, and
-  the work uses the platform `android.media.ExifInterface`, so no dependency was added. **One half
-  stays open and is recorded below:** a photo that went through the Phase 2 re-encode (the `D3c` resize
-  or the `D3b` conversion) has no orientation tag at all, because `Bitmap.compress` writes none — its
-  stored pixels are landscape and nothing says otherwise — so correcting that is a decision about the
-  stored evidence, recorded as **D7b** and **answered** on 2026-09-15: the preparation steps turn those
-  pixels (**Phase 4b**), so this half is decided rather than left with `D7`. See the Phase log entry and
-  `## Manual QA runbook — photo orientation fix`.
-- **Phases 1, 2, 3 and 4 are landed** — `EVIDENCE_PERMISSIONS` (`evidence.view`, `evidence.photo.add`),
+- **The portrait-orientation defect is closed on both halves.** The device's camera writes a portrait
+  capture as the sensor's own landscape pixel data plus an EXIF `Orientation` tag, and every Android
+  decode drew those pixels exactly as stored — so a portrait photo appeared turned on its side in the
+  review preview, the pending tray, the gallery tiles and the Phase 4 viewer. The **display** half was
+  fixed on 2026-09-15, outside the phase sequence: the decode applies the orientation the file declares
+  (`JobPhotoOrientation` + the shared read, no dependency added, and **presentation only** — not a byte of
+  stored evidence is rewritten). The **stored** half is Phase 4b above. See
+  `## Manual QA runbook — photo orientation fix` (the display half) and `## Manual QA runbook — Phase 4b`
+  (the stored half).
+- **Phases 1, 2, 3, 4 and 4b are landed** — `EVIDENCE_PERMISSIONS` (`evidence.view`, `evidence.photo.add`),
   migration `0010_evidence_permissions.sql` and `docs/decisions/015-evidence-capabilities.md` (Phase 1);
   the content-type-aware pipeline and its published `FIT_TARGETS` (Phase 2); the two photo sources and
-  the client's evidence gate (Phase 3); the viewer and the full-size read (Phase 4).
+  the client's evidence gate (Phase 3); the viewer and the full-size read (Phase 4); the turnaround of a
+  re-encoded photo's pixels and the shared read/turn leaf (Phase 4b).
 - **Still open after this round:** `D5` (**deferred**) holds Phase 5; the remaining `D6` sub-questions
   (`D6a`, `D6b`, `D6d`, `D6e`) hold the rest of Phase 6, with `D6c` answered and split out as **Phase 6a**;
   `D7`'s remaining sub-questions (tags, phase persistence, EXIF/GPS policy) hold Phase 7's taxonomy; `D8`
@@ -150,7 +153,7 @@ repository**, so there is no web photo surface and no reporting over evidence.
 | Entry point | one floating **Add update** action → sheet → the note kind (Job update capability) or the photo kind → the two sources: **Take photo** (camera) and **Choose photos** (picker) | `android/.../ui/jobs/JobDetailsScreen.kt`, `ui/jobs/JobUpdateSheet.kt`, `ui/navigation/ServoraNavHost.kt` |
 | Client gate | the action and each kind are drawn on the capability the API enforces for it: `evidence.photo.add` for a photo, the Job update capability for a note — so a default Technician reaches the camera and the picker (`BR-009`, `BR-011`) | `android/.../domain/auth/Permission.kt`, `ui/customers/CustomerPermissionsUiState.kt`, `ui/jobs/JobDetailsScreen.kt` |
 | Local bytes | `filesDir/job-photos/<subjectId>/<photoId>.<jpg\|png\|webp>`, partitioned by session subject and named for the type the bytes were **proven** to be; never a blob in the database | `android/.../data/jobs/JobPhotoFiles.kt` |
-| Preparation | both sources go through one pipeline before a draft exists: the bytes are brought to a type Servora accepts (`D3b`, mirrored magic-number sniffer, JPEG conversion when the bytes are neither JPEG nor PNG nor WebP) and under the API's 15 MiB limit (`D3c`, resized/re-compressed as JPEG); a photo either step cannot deliver is refused with **nothing** recorded | `android/.../data/jobs/JobPhotoContentType.kt`, `JobPhotoProcessing.kt`, `JobPhotoSession.kt`, `JobPhotoRecording.kt` |
+| Preparation | both sources go through one pipeline before a draft exists: the bytes are brought to a type Servora accepts (`D3b`, mirrored magic-number sniffer, JPEG conversion when the bytes are neither JPEG nor PNG nor WebP) and under the API's 15 MiB limit (`D3c`, resized/re-compressed as JPEG); a photo either step cannot deliver is refused with **nothing** recorded. **Since Phase 4b** each step also **turns the decoded pixels** by the orientation the source bytes declare, before scaling and encoding, so the JPEG it writes is upright: `Bitmap.compress` writes no orientation tag, and a photo whose pixels were not turned would be stored sideways with nothing to say otherwise (`D7b`) | `android/.../data/jobs/JobPhotoContentType.kt`, `JobPhotoProcessing.kt`, `JobPhotoExifOrientation.kt`, `JobPhotoSession.kt`, `JobPhotoRecording.kt` |
 | Local metadata | Room `pending_job_photos` (draft, survives process death, `submitted` flag) | `android/.../data/jobs/PendingJobPhotoEntity.kt`, `PendingJobPhotoStore.kt`, `data/offline/OfflineMigrations.kt` |
 | Upload | queued through the existing outbox (`job.photo.add`, `operationId` = photo id), replayed by the existing engine; the part declares the recorded type and its own file name; local file and row deleted **only** on `201` | `android/.../data/jobs/JobPhotoSession.kt`, `JobPhotoUploadHandler.kt`, `JobPhotoOperations.kt`, `data/offline/OutboxReplayEngine.kt` |
 | API | `POST /jobs/:id/photos` (`evidence.photo.add`), `GET /jobs/:id/photos/:photoId/content` (`evidence.view`) | `api/src/jobs/jobs.controller.ts`, `job-photos.service.ts`, `job-photo.dto.ts` |
@@ -160,7 +163,7 @@ repository**, so there is no web photo surface and no reporting over evidence.
 | Gallery | a `LazyRow` of thumbnails at the head of Job Activity, phase badge + note snippet; each tile is a tap target that opens its photo in the viewer | `android/.../ui/jobs/JobPhotoComponents.kt` (`JobPhotoGallery`, `JobPhotoGalleryTile`) |
 | Viewer | **exists since Phase 4**: a tap on a gallery tile or on a tray tile opens the photo itself in a full-screen dialog — phase badge, close action, the technician's whole note, and the photo drawn `ContentScale.Fit`; the surface is the theme's own (`surface` / `onSurface`), so no new colour token; a photo that cannot be read says so instead of drawing something else; closed by its action or the platform's back gesture; **no zoom, no gesture and no gallery-wide pager yet** — `D9 = (b)` decides **pinch-zoom and pan** on the one photo (Telephoto) in **Phase 4d**, while swiping between photos and a gallery-wide pager stay undecided (`D4`, `D9`) | `android/.../ui/jobs/JobPhotoViewer.kt`, wired in `ui/jobs/JobDetailsScreen.kt` |
 | Pending tray / review | tray of not-yet-accepted photos with upload state, each tile a tap target that opens the viewer; review panel with preview, note and the three phase buttons, which a captured photo **and** a picked photo are each confirmed in; a pick's items are taken one at a time, and skipped items are reported by their place in the pick | `android/.../ui/jobs/JobPhotoTray.kt`, `JobPhotoReviewSheet.kt`, `ui/jobs/JobDetailsViewModel.kt` |
-| Thumbnails | decoded on device from the stored bytes (`inSampleSize`, 512 px, 24-entry in-memory `LruCache`); the viewer decodes the photo itself at a bounded longest edge (`VIEWER_MAX_EDGE_PX`, 2560 px, uncached) from the same read; **no derived object server-side** (`ADR-013` open question 3, still open); **Coil 3 replaces the hand-rolled decode and cache in Phase 4c** on the **D4b ✓** answer — one memory + disk cache keyed and cleared per session subject, with sampling and EXIF left to the library. Every decode is turned by the photo's own EXIF orientation first (`JobPhotoOrientation`), so a portrait capture is presented upright instead of on its side — the bytes are never rewritten, and the turn is skipped entirely when the file already states the pixels are upright. A photo the Phase 2 steps re-encoded has **no tag at all**, which is why the preparation steps turn its pixels instead (**D7b ✓**, Phase 4b) | `android/.../data/jobs/JobPhotoImages.kt`, `JobPhotoSampling.kt`, `JobPhotoOrientation.kt` |
+| Thumbnails | decoded on device from the stored bytes (`inSampleSize`, 512 px, 24-entry in-memory `LruCache`); the viewer decodes the photo itself at a bounded longest edge (`VIEWER_MAX_EDGE_PX`, 2560 px, uncached) from the same read; **no derived object server-side** (`ADR-013` open question 3, still open); **Coil 3 replaces the hand-rolled decode and cache in Phase 4c** on the **D4b ✓** answer — one memory + disk cache keyed and cleared per session subject, with sampling and EXIF left to the library. Every decode is turned by the photo's own EXIF orientation first, so a portrait capture is presented upright instead of on its side — the bytes are never rewritten, and the turn is skipped entirely when the file already states the pixels are upright. **Since Phase 4b** that read of the tag and that turn are one shared leaf (`JobPhotoExifOrientation`) that the preparation steps call too, so the display path and what is stored cannot drift; a photo the Phase 2 steps re-encoded has **no tag at all**, which is why those steps turn its pixels themselves (`D7b`, Phase 4b) | `android/.../data/jobs/JobPhotoImages.kt`, `JobPhotoSampling.kt`, `JobPhotoOrientation.kt`, `JobPhotoExifOrientation.kt` |
 | Photo picker | **exists since Phase 3**: `PickMultipleVisualMedia` and a `PickVisualMediaRequest(ImageOnly)` launch, with each item's bytes read through `JobPhotoPickedItems`; still no `ACTION_PICK`, `GetContent`, `MediaStore` or CameraX — **`D10 = (a)` keeps the picker the only library source**, so the device's media library is never read and no media permission is requested. **Coil** (D4b) arrives in Phase 4c for **drawing**, not for reading the library | `android/.../ui/jobs/JobPhotoPicker.kt`, `android/.../data/jobs/JobPhotoPickedItems.kt` |
 | Tests | API unit + e2e for the contract; Android JVM tests for the pipeline, the handler, the photo ViewModel (both sources), the viewer's decode bound and the viewer's photo resolution; instrumented Compose cases for tray/gallery, the update sheet's two sources and the viewer (opening, full-size read, reading nothing, closing) | `api/src/jobs/job-photo.dto.spec.ts`, `api/test/job-photos.e2e-spec.ts`, `android/app/src/test/.../JobPhotoContentTypeTest.kt`, `JobPhotoSessionTest.kt`, `JobPhotoUploadHandlerTest.kt`, `JobPhotoSamplingTest.kt`, `ui/jobs/JobPhotoCaptureViewModelTest.kt`, `ui/jobs/JobPhotoViewerTest.kt`, `android/app/src/androidTest/.../ui/jobs/JobDetailsScreenTest.kt` |
 
@@ -173,8 +176,8 @@ repository**, so there is no web photo surface and no reporting over evidence.
 | 2 | Content-type-aware local capture pipeline | **D3 ✓, D3b ✓, D3c ✓** | Android | **Landed (2026-09-15)** |
 | 3 | Photo sources in the Add update sheet (gallery picker, multi-select) | **D3 ✓, D3b ✓, D3c ✓, Phase 1, Phase 2** | Android, localization, docs | **Landed (2026-09-15)** |
 | 4 | Full-size viewer and a thumbnail strategy | **D4 ✓** | Android, docs | **Landed (2026-09-15)** — the viewer; its thumbnail/caching half is now **Phase 4c** on the **D4b ✓** answer |
-| **4b** | **Re-encoded evidence is stored upright** | **D7b ✓** | Android, tests, docs | **Next — startable.** The one open item that currently stores wrong evidence |
-| **4c** | **Image stack and preview caching (Coil 3)** | **D4b ✓** | Android, tests, `docs/decisions/`, docs | Startable; after 4b |
+| **4b** | **Re-encoded evidence is stored upright** | **D7b ✓** | Android, tests, docs | **Landed (2026-09-15)** — the preparation steps turn what they re-encode, through the shared read/turn leaf |
+| **4c** | **Image stack and preview caching (Coil 3)** | **D4b ✓** | Android, tests, `docs/decisions/`, docs | **Next — startable.** Coil replaces the hand-rolled decode and cache behind `JobPhotoImages` |
 | **4d** | **Viewer gestures (pinch-zoom and pan, Telephoto)** | **D9 ✓**, Phase 4c | Android, tests, design docs | Startable; after 4c |
 | 5 | Offline visibility of accepted evidence | D5 — **deferred** | Android, `offline-first-architecture.md` | **Blocked — D5 was deferred 2026-09-15** |
 | **6a** | **Refused photos are explicitly discardable** | **D6c ✓** | Android, tests, docs | Startable as its own slice |
@@ -367,6 +370,11 @@ Consequences recorded with the decision:
   (or EXIF-stripped) uniformly.
 - **D3c was left open by this:** a JPEG re-encode does **not** bound the file size, so a converted 48 MP
   original can still exceed the API's 15 MiB limit. **D3c is answered below.**
+- **Landed (Phase 4b, 2026-09-15).** The conversion turns the pixels it decoded by the orientation the
+  **source** bytes declare, before it encodes, so a converted photo is stored upright (`D7b`). Without it
+  a converted portrait capture — which `Bitmap.compress` writes with no orientation tag — would have been
+  stored sideways with nothing in the file saying otherwise. The conversion still produces a JPEG under
+  the same quality and the same limit.
 
 **Decision (D3c, 2026-09-15, product ownership).** A photo (picked or captured) that is larger than the
 API's limit is **downscaled/re-compressed on device to fit**, so it can be uploaded. The stored evidence
@@ -393,6 +401,12 @@ Consequences recorded with the decision:
   is not decided here.
 - **`BR-038`/D7 (EXIF and location) must consider both lossy steps:** a converted or resized photo loses
   most EXIF while an already-small JPEG pick keeps it.
+- **Landed (Phase 4b, 2026-09-15).** The resize turns the pixels it decoded by the orientation the
+  **source** bytes declare, before it scales and encodes, so a resized photo is stored upright instead of
+  depending on a tag the re-encode discards (`D7b`). The measured target list is unaffected: a turn never
+  changes which edge is the longest, so the rung that produced the bytes still reports the same longest
+  edge and quality — what a resized photo is stored as changed only in orientation. The stored evidence
+  still **is** the resized version, and the original is still not kept.
 
 ### D4 — Viewer and thumbnails
 
@@ -616,6 +630,19 @@ Consequences recorded with the decision:
 - **The rest of D7 is unchanged**: categories/tags versus `phase` only, phase persistence across process
   death, and the EXIF/GPS policy (`BR-038`) remain open.
 
+**Landed (Phase 4b, 2026-09-15).** Both steps of `DefaultJobPhotoProcessing` turn what they decoded by the
+orientation the **source** bytes declare, before scaling and encoding, so the JPEG they write is upright.
+The read of the tag and the turn are **one shared leaf** (`data/jobs/JobPhotoExifOrientation.kt`) that the
+display path (`JobPhotoImages`) calls too — `JobPhotoImages`' own private copy was deleted with it — so the
+2026-09-15 display fix and what is stored cannot drift. It uses the **platform** `android.media.ExifInterface`
+and the existing **pure** `JobPhotoOrientation` rule, so **no dependency was added** and the rule keeps its
+JVM coverage (`JobPhotoOrientationTest`, 5 cases). The API, the schema, the permissions, the limit and the
+uploaded-byte contract are unchanged. A turn the device cannot perform refuses the photo (`BR-042`), the
+same answer the display path gives — the unturned pixels are never written as if they were correct. The
+pixel turn itself needs `BitmapFactory`/`Bitmap`, so its on-device behaviour is **device QA**, handed over
+as `## Manual QA runbook — Phase 4b`; and evidence already stored or uploaded from a re-encoded photo stays
+**historical** (`D7b` option (c) was not taken).
+
 ### D8 — Audio and files
 
 **Question.** Do audio recordings and file attachments join evidence in this roadmap, or stay out of v1?
@@ -740,7 +767,7 @@ Filled in by product ownership. An answer here is what unblocks the phase named 
 | D4b | Preview and caching strategy (HTTP cache, disk cache, server-derived thumbnails) | **Answered — (a): Coil 3 behind the existing `JobPhotoImages` port**, with its memory and disk cache and its sampling/EXIF handling; the API read keeps the session-renewal path, and the cache is keyed and cleared **per session subject**. Server-derived thumbnails were **not** taken (`ADR-013` open question 3 stays open), and there is no API, database, permission or pipeline change | product ownership | 2026-09-15 | this tracker (D4b); `docs/decisions/016-…`; implemented by **Phase 4c**. Retires the hand-rolled decode/sampling rules and their tests; the risk row "Every gallery tile downloads full-resolution bytes" closes as a per-cold-start cost and stays as a per-object download |
 | D5 | Offline visibility of accepted evidence | **Deferred** — option (d): revisited later rather than answered now. Accepted evidence and the Activity stay **online-only**, so Phase 5 does not run and the risk row stays open. Nothing is decided about photo bytes on the device, and a cache is not a retention policy | product ownership | 2026-09-15 | this tracker (D5); no other document changes — the offline standard already records these reads as online-only |
 | D6 | Evidence lifecycle (delete/edit, refused photos, Job deletion, retention) | **D6c answered — (a): a refused photo may be explicitly discarded** — local file and queued row together, with the refusal reason shown — which satisfies `BR-014` on both sides. **`D6a`/`D6b` (delete/edit a recorded photo), `D6d` (retention) and `D6e` (Job deletion and orphan objects) remain awaiting** | product ownership | 2026-09-15 | this tracker (D6); implemented by **Phase 6a** — the rest of Phase 6 stays blocked |
-| D7 | Metadata beyond the phase | **D7b answered — (a): the preparation steps turn the pixels** of a photo they re-encode, so stored evidence is upright and needs no orientation tag. Evidence already stored or uploaded is **historical and is not repaired**. **The rest of D7 (tags versus `phase` only, phase persistence, EXIF/GPS policy) remains awaiting** | product ownership | 2026-09-15 | this tracker (D7); implemented by **Phase 4b**. No API, schema or uploaded-byte change; the pixel turn's verification is device-bound |
+| D7 | Metadata beyond the phase | **D7b answered — (a): the preparation steps turn the pixels** of a photo they re-encode, so stored evidence is upright and needs no orientation tag. Evidence already stored or uploaded is **historical and is not repaired**. **The rest of D7 (tags versus `phase` only, phase persistence, EXIF/GPS policy) remains awaiting** | product ownership | 2026-09-15 | this tracker (D7); **implemented in Phase 4b (landed 2026-09-15)**. No API, schema or uploaded-byte change; the pixel turn's verification is device-bound |
 | D8 | Audio and files in v1 | *awaiting* | — | — | — |
 | D9 | Viewer gestures and photo navigation | **Answered — (b): pinch-zoom and pan** on the one photo, Telephoto on top of the Coil 3 stack. Swiping between photos and a gallery-wide pager are **not** decided | product ownership | 2026-09-15 | this tracker (D9); `docs/decisions/016-…`; implemented by **Phase 4d**; the viewer row of `docs/design/android-design-system.md` changes with it |
 | D10 | Device media access and the in-app gallery surface | **Answered — (a): the system photo picker stays the only library source.** No media-read permission, no in-app `MediaStore` grid and no in-app camera; the design's camera request stays open exactly as `D3` left it | product ownership | 2026-09-15 | this tracker (D10); no manifest, permission or design change |
@@ -979,6 +1006,8 @@ deferred); editing or deleting a photo (**D6**).
 
 ## Phase 4b — Re-encoded evidence is stored upright (D7b)
 
+**Status: LANDED (2026-09-15).**
+
 **Goal.** A photo the preparation steps rewrite is stored the way it must be presented, so the evidence
 itself is upright instead of depending on a tag the rewrite discards.
 
@@ -988,29 +1017,73 @@ the display-path fix of 2026-09-15 already made what is **drawn** correct, and t
 **Layers.** Android, tests, documentation. **No API, database, permission or contract change**: what a
 re-encoded photo produces is still a JPEG under the same limit, and `docs/api/job-photos.md` is untouched.
 
-**Work.**
+**What landed.**
 
-1. `android/.../data/jobs/JobPhotoProcessing.kt` — both steps (`convertToJpeg`, `fitToUploadLimit`) apply
-   the source bytes' own EXIF orientation to what they decoded, **before** scaling and encoding, so the JPEG
-   they write is upright. It uses the platform `android.media.ExifInterface` and the existing pure
-   `JobPhotoOrientation` rule — no dependency is added, which is the choice the display fix already made.
-2. The tag read must not be written twice: `JobPhotoImages` reads the same tag for display, so the shared
-   read belongs beside the rule (one small leaf both call) rather than being restated in each.
-3. `FIT_TARGETS`' recorded measurement stays valid: what a resized photo is stored as changes only in
-   orientation, not in longest edge or quality (Phase 2's numbers are not re-opened).
-4. Documentation: this tracker's state table ("Preparation" row), the `D3b`/`D3c` consequence notes, and
-   `docs/design/android-design-system.md` if it states how a re-encoded photo is presented.
+1. `android/.../data/jobs/JobPhotoExifOrientation.kt` (**new**) — the **one** read of the EXIF
+   `Orientation` tag and the **one** turn of decoded pixels.
+   `jobPhotoExifOrientation(bytes)` answers the orientation the **source** bytes declare, and `Normal` when
+   the file states none, so a photo is never guessed into a rotation (`BR-042`); the read is wrapped, so a
+   malformed tag is a property of the file rather than a failure of the caller. `Bitmap.turnedBy(orientation)`
+   copies nothing when the photo is already upright (the common case), releases the unturned original when
+   it is not, and answers `null` when the device cannot turn it. It sits **beside** the rule rather than
+   inside it because `JobPhotoOrientation` is deliberately free of the Android runtime so the JVM can check
+   it (`qa.md` §6.1), while the read needs the platform `android.media.ExifInterface` and the turn needs
+   `Bitmap`/`Matrix`. **No dependency was added** — the platform reader is the one the display fix chose.
+2. `android/.../data/jobs/JobPhotoProcessing.kt` — both steps turn what they decoded, by the orientation the
+   **source** bytes declare, **before** scaling and encoding, through one private
+   `decodeUpright(bytes, maxEdgePx, orientation)`. `fitToUploadLimit` reads the tag once for the whole
+   target loop, because the tag describes the source bytes every target decodes again. A turn the device
+   cannot perform answers `null` from the step, so the photo is refused with nothing recorded — the same
+   answer the display path gives — rather than evidence stored as pixels known to be wrong
+   (`BR-014`, `BR-042`).
+3. `android/.../data/jobs/JobPhotoImages.kt` — its private `jobPhotoExifOrientation` and `Bitmap.oriented`
+   were **deleted**; the display decode calls the shared leaf. Presentation is unchanged (same sample size,
+   same "cannot be presented" answer), and the display path and the stored path are now one implementation,
+   which is what stops them drifting.
+4. `FIT_TARGETS` and Phase 2's measurement are untouched: a turn never changes which edge is the longest,
+   so what a resized photo is stored as changed only in orientation — same rung, same longest edge, same
+   quality, same JPEG under the same limit.
+5. Documentation: this tracker (the `Preparation` and `Thumbnails` rows, the `D3b`/`D3c`/`D7b` consequence
+   notes, the risk row, `## Current phase`, the phases table and this entry) and `README.md`.
+   **`docs/design/android-design-system.md` was checked and needed no change**: its photo rows describe how
+   a tile and the viewer are **drawn**, not how a re-encoded photo is presented or stored, so it states
+   nothing this phase made untrue. Nothing else documents the stored-orientation behaviour, and no API,
+   domain, schema or permission document is affected.
 
-**Verification.** The rule that decides the turn keeps its JVM coverage (`JobPhotoOrientationTest`, 5 cases),
-and `JobPhotoProcessing` stays behind its port so the existing fakes (`FakeJobPhotoProcessing`,
-`PhotoCollaborators`) still test the session's decisions. Commands: `make android-test`,
-`make android-lint`, `make android-build`, plus `./gradlew assembleDebugAndroidTest` so device-test sources
-still compile (`qa.md` §7.3 — the agent runs no `adb`). **The pixel turn itself needs
-`BitmapFactory`/`Bitmap`, so its on-device behaviour is `NOT RUN — device QA is the product owner's`**, with a
-runbook for a portrait HEIC pick (`D3b`) and a portrait photo over 15 MiB (`D3c`).
+**Verification (executed).**
+
+```
+Android
+- Unit (JVM):              PASS  ./gradlew testDebugUnitTest --rerun → 430 tests, 0 failures, 0 errors, 0 skipped
+                                 (includes JobPhotoOrientationTest, 5 cases — the turn the pipeline applies)
+- Lint:                    PASS  ./gradlew lintDebug (abortOnError = true)
+- Debug build:             PASS  ./gradlew assembleDebug → app-debug.apk
+- Device-test sources:     PASS  ./gradlew assembleDebugAndroidTest (compiles; every case in it NEEDS A DEVICE)
+- Physical device:         NOT RUN — device QA is the product owner's (qa.md §7.3)
+                                 runbook: ## Manual QA runbook — Phase 4b
+API / database:            Not run — nothing under api/ was changed (no contract, schema, permission or scope change)
+```
+
+The whole battery was run twice, the second time on the final tree after the last (comment-only) edit, so
+the reported result is the tree that would be committed. **No `adb` and no device or emulator command was
+run** (`qa.md` §7.3). The one behaviour this phase changes — turning decoded pixels — needs
+`BitmapFactory`/`Bitmap` and therefore cannot be exercised by a JVM test: no test dependency is added for
+it (that would be a Robolectric-style dependency the project does not use), so it stays **device QA** and is
+handed over as the Phase 4b runbook. `JobPhotoProcessing` stays behind its port, so `FakeJobPhotoProcessing`
+and `PhotoCollaborators` still test the session's decisions about *when* each step runs, and that coverage
+is unchanged and passing.
+
+**Offline (the offline standard's §13).** This phase adds **no read and no mutation**: it changes what two
+steps on the existing path *write*, for the operation `job.photo.add` that already runs through the outbox.
+The queued operation, its idempotency key (the photo id), the replay engine and the conflict model are
+untouched, and a re-prepared photo is still one JPEG under the API's limit with the same declared type — so
+there is no new local state, nothing is stored twice, and no synchronization question is opened (`§5`,
+`§6`, `§13`). `JobPhotoSession`'s decisions (which step runs when, and the refusal when one cannot deliver)
+are unchanged, which is why its JVM tests still describe this change correctly.
 
 **Not in this phase.** Repairing evidence already stored or uploaded (`D7b` option (c), not taken); the rest
-of `D7`; the display path, which the 2026-09-15 fix already covers.
+of `D7` (tags, phase persistence, the EXIF/GPS policy); the display path, which the 2026-09-15 fix already
+covers; and any change to the API, the schema, the permissions or the upload contract.
 
 ## Phase 4c — Image stack and preview caching (D4b)
 
@@ -1040,7 +1113,10 @@ handling reads the same tag the preparation steps stop relying on.
    tags, their sizes (512 px tiles, the viewer's request bound) and their "cannot be shown" report
    (`BR-042`).
 5. Retire what the library replaces: `jobPhotoFittingSampleSize` and `JobPhotoSamplingTest` (the viewer's
-   ceiling rule) and the in-memory `LruCache`. The **pure orientation rule stays** — Phase 4b needs it.
+   ceiling rule) and the in-memory `LruCache`. The **pure orientation rule stays**, and so does the one
+   read/turn leaf it now shares with the preparation steps — `data/jobs/JobPhotoExifOrientation.kt`,
+   **landed in Phase 4b** — because the preparation pipeline still needs it after Coil takes over the
+   display decode.
 6. Report the measurement `D4` named: bytes downloaded per photo per cold start, before and after.
 7. Documentation: the state table's "Thumbnails" row, `README.md`'s Android stack line, the ADR, and
    `docs/design/android-design-system.md` if it fixes how a preview is produced.
@@ -1219,7 +1295,7 @@ must not step on.
 | No retention or delete rule exists; the store has no lifecycle rule | Evidence accumulates permanently | 6 |
 | A picked original may be a **HEIC/HEIF** or exceed the API's 15 MiB limit | The API accepts only JPEG/PNG/WebP and refuses oversized bodies. **Both halves decided** (D3b: converted on device; D3c: resized to fit) — the risk is now a Phase 2 implementation duty, not an open question | 2 (D3b ✓, D3c ✓) |
 | EXIF/GPS inside a photo is stored and served verbatim | Location policy (`BR-038`) is open | 0 (D7) / 6 |
-| The decode ignored a photo's EXIF orientation tag | Every portrait capture drew rotated 90° in the review preview, the tray, the gallery tiles and the viewer. **Fixed 2026-09-15 on the display path** (`JobPhotoImages` applies `JobPhotoOrientation` to what it decodes). **Decided (`D7b` ✓)** for the stored half: the preparation steps turn those pixels (Phase 4b), so what Servora stores is upright; evidence already stored or uploaded stays historical and is not repaired | fixed (display, 2026-09-15) / decided for the future (`D7b` ✓, 4b) |
+| The decode ignored a photo's EXIF orientation tag | Every portrait capture drew rotated 90° in the review preview, the tray, the gallery tiles and the viewer. **Fixed 2026-09-15 on the display path** (`JobPhotoImages` applies `JobPhotoOrientation` to what it decodes). **Landed for the stored half by Phase 4b (2026-09-15, `D7b` ✓)**: the preparation steps turn what they re-encode — through the shared `JobPhotoExifOrientation` read and turn the display path uses — so what Servora stores from now on is upright. Evidence already stored or uploaded stays historical and is **not** repaired | fixed (display, 2026-09-15) / fixed for new evidence (stored, Phase 4b 2026-09-15) |
 
 ## Phase log
 
@@ -1237,6 +1313,8 @@ must not step on.
 | 029 — Phase 3 landed | 2026-09-15 | The two photo sources in the Add update sheet (D3 ✓, and the phase question the plan left open). **New** `ui/jobs/JobPhotoPicker.kt` — `PickMultipleVisualMedia` at the system's own item limit, `PickVisualMediaRequest(ImageOnly)` and therefore **no storage or media-read permission and no new dependency**; an empty answer is a dismissed picker (nothing read, nothing recorded) and a launch no application can answer is reported rather than passing as a cancellation (`dev.md` §1). **New** `data/jobs/JobPhotoPickedItems.kt` — the port that reads an item's bytes through the device's content resolver, off the main thread, with `ContentResolverJobPhotoPickedItems` bound in `di/JobsOfflineModule.kt`, `FakeJobPhotoPickedItems` for the JVM and `inertJobPhotoPickedItems()` for the device tests. `JobPhotoSession.recordPickedPhoto` gained the **`phase`** it records the draft with (§ "Status" above: the phase in effect, as a capture's draft has, so a pick can never be trapped unuploadable), and an item that handed over nothing is its own refusal `JobPhotoRefusal.NOT_READ` rather than the camera's `NO_BYTES`, so the screen does not claim "the camera did not save a photo". `JobDetailsViewModel` gained `photosPicked(uris)`: a private queue takes **one item at a time** — read, prepared, written to app-private storage, recorded as its own draft with its own id — then opens the review panel the camera path already owns, and takes the next item when that review ends (`confirmCapturedPhoto` / `discardCapturedPhoto` / `keepCapturedPhoto`); a skipped item is reported **by its place in the pick** (`PhotoItemPosition`, "Photo 2 of 5: …") and the pass continues, with each skip held so every one is reported rather than the last one overwriting the others; the queue and the reports are dropped when the screen resets or reads another Job. `photoPickerUnavailable()` and `JobPhotoFailure.PHOTO_NOT_READ` / `PICKER_UNAVAILABLE` were added with EN/FR strings, and the screen composes the item's place into the report. **Work item 7 (the client gate):** `Permission.EVIDENCE_PHOTO_ADD` (`evidence.photo.add`) was added to the Android catalogue with `CustomerPermissionsUiState.canAddEvidencePhoto`; the update action is drawn on `canUpdateJob` **or** `canAddEvidencePhoto`, the note kind additionally requires `canUpdateJob` **and** a represented Visit, and the photo kinds require `evidence.photo.add` — so a default Technician reaches the camera and the picker without being given a Manager capability (`BR-009`, `BR-011`, `ADR-015`). `ui/jobs/JobUpdateSheet.kt` states the photo kind and then its two sources as targets of the same height (`Take photo`, `Choose photos`) with a new `ic_photo_library` glyph (lucide `Images`), because three targets in one 56 dp row cannot carry localized labels; a Job with no Visit is offered the sources directly. Docs: `docs/design/android-design-system.md` (the sheet row), `README.md`, tracker `028`'s open question 3 (closed with a pointer here), and this tracker's `Current phase`, state table and Phase 3 section. **Not changed, deliberately:** the evidence **read** side — the gallery tiles still fetch through the API, which refuses without `evidence.view` and draws the tile's placeholder, and nothing in the client gates that read (no capability is inferred from another). | **Android** — unit: PASS (`make android-test`: **414 tests, 0 failures**, up from 406, with 8 new `JobPhotoCaptureViewModelTest` cases pinning a two-item pick recorded and reviewed one at a time with its own ids and files, the phase in effect as the picked draft's phase, an unreadable item named by its place with the pass continued, an unprepared item refused with the rest recorded, every skipped item reported one at a time as the screen acknowledges them, a dismissed picker recording nothing, a pick with no session, and an unopenable picker, plus `JobPhotoSessionTest`'s picked-photo cases updated to the recorded phase and the new `NOT_READ` refusal); device-test sources compile: PASS (`./gradlew assembleDebugAndroidTest`); lint: PASS (`make android-lint`); debug build: PASS (`make android-build`, `app-debug.apk`). No API file was changed, so no API command was run. **No `adb` and no device or emulator command was run (`qa.md` §7.3).** **Physical-device QA: NOT RUN — device QA is the product owner's** (`qa.md` §7.3); the runbook below is the hand-off. |
 | 029 — Phase 4 landed | 2026-09-15 | The full-size viewer, on **D4 = (a)**: the viewer only, with the caching/thumbnail options recorded as the new **`D4b`** rather than assumed. **New** `ui/jobs/JobPhotoViewer.kt` — a full-screen `Dialog` (`usePlatformDefaultWidth = false`) drawn on the theme's own `surface`/`onSurface` (no new colour token), showing the photo (`ContentScale.Fit`), the phase badge, a close action with its own 48 dp target and content description, and the technician's whole note, closed by its action or the platform's back gesture. It holds **only the photo id**: `viewedJobPhoto(jobId, photoId, pendingPhotos, activity)` resolves the phase, the note and the source from the records that already state them (the device's own file while it holds the photo — the id is the device's operation id — and the API's evidence once it does not), and answers nothing for a photo neither holds, so the viewer is never a second copy of the evidence and never shows a photo it cannot place (`BR-001`, `BR-042`). A photo that cannot be read or decoded is **reported** (`job_photo_viewer_unavailable`), not replaced. **`JobPhotoImages`** gained `localFullSize` / `jobPhotoFullSize` beside the 512 px thumbnail path, sharing one `decodeImage` with a per-caller sample-size rule, answering `null` for bytes this build cannot decode and deliberately **not** caching (one full-size bitmap would evict the tray's worth of previews). **`data/jobs/JobPhotoSampling.kt`** gained `jobPhotoFittingSampleSize(widthPx, heightPx, maxEdgePx)` — the *ceiling* rule the viewer needs, where the existing `jobPhotoSampleSize` is a *floor* rule for the encode pipeline — taking plain bounds so the arithmetic is verifiable on the JVM; the decode is bounded by `VIEWER_MAX_EDGE_PX` (2560 px, the widest supported screen), so a 4032 px capture is drawn at 2016 px instead of decoded at ~48 MB. **Tiles became tap targets**: `JobPhotoGalleryTile` (its whole column, with a localized `onClickLabel`) and the tray tile (the X that removes a never-submitted photo stays its own control); `JobActivitySection` and `JobPhotoTray` carry the tap through, and `JobDetailsScreen` holds the viewed photo's id in `rememberSaveable` so a rotation does not lose the viewer. **Localization:** `job_photo_viewer_open` / `_close` / `_unavailable` in EN and FR. **No API, database, permission or `ADR-013` change** — the read is the route Phase 1 already guards with `evidence.view`, so a session the API refuses is refused here exactly as on a tile (`BR-007`). Docs: `docs/design/android-design-system.md` (the viewer row and the tap targets), `README.md`, the tracker's `Current phase`, state table, Phase 0 log (D4 answered, D4b raised), Phase 4 section, risks and "not implemented" list. | **Android** — unit: PASS (`make android-test`: **425 tests, 0 failures**, up from 414, with the new `ui/jobs/JobPhotoViewerTest` — 6 cases: the device's own bytes with their phase and note, the backend's evidence once the device no longer has it, the device's copy preferred while both exist, nothing for a photo neither holds, no phase for a code this build cannot read, and a blank note as no note — and `data/jobs/JobPhotoSamplingTest` — 5 cases: a photo that already fits decoded as it is, a phone capture halved to fit, either orientation bounded, never over the ceiling across six shapes, and no declared bounds decoded at 1); device-test sources compile: PASS (`./gradlew assembleDebugAndroidTest`) with the three new Compose cases in `ui/jobs/JobDetailsScreenTest` (an accepted photo opened full size from the gallery, read through the full-size path and closed again; a pending photo opened from the bytes the device still holds; a photo that cannot be read reported rather than drawn); lint: PASS (`make android-lint`); debug build: PASS (`make android-build`). **No device or emulator command was run and no `adb` was used (`qa.md` §7.3)**, so the three Compose cases are **NOT RUN — device QA is the product owner's**; the runbook below is the hand-off. Nothing was changed in `api/`, so no API command was run. The requests-per-photo measurement `D4` named belongs to the caching change this decision did not take and is not claimed. |
 | 029 — Photo orientation defect fixed | 2026-09-15 | Reported by product ownership: a photo captured in **portrait** appeared **landscape** in the review preview and in the gallery when a tile was tapped. Cause: `BitmapFactory` does not apply a file's EXIF `Orientation`, and the device's camera stores a portrait capture as sensor-landscape pixels plus that tag, so every decode drew it on its side. **New** `data/jobs/JobPhotoOrientation.kt` — the EXIF code (`1`–`8`) as a **pure** rule over a plain `Int` (clockwise degrees plus an optional mirror, following the mapping image loaders use), JVM-verifiable and free of the Android runtime; a code the build does not know (`0`, a value outside `1`–`8`, or no tag at all) is `Normal` rather than a guessed rotation (`BR-042`). **`data/jobs/JobPhotoImages.kt`** — the one `decodeImage` the 512 px thumbnails and the viewer's bounded full-size decode share now reads the file's tag with the **platform** `android.media.ExifInterface` (no new dependency, the fix option product ownership selected) and turns what it decoded: the turn copies nothing when a photo is already upright, releases the unturned original when it is not, and answers `null` — "cannot be presented" — rather than drawing unturned pixels if the turn itself fails (`BR-042`). One leaf layer is why the review preview, the pending tray, the gallery tiles and the Phase 4 viewer now all turn a photo the same way. The sample size is unchanged: a turn never changes which edge is longest, so the decode bounds (`VIEWER_MAX_EDGE_PX`, the 512 px thumbnail edge) still hold. **Presentation only** — not a byte is rewritten, and the API, the database, the permissions, `MAX_JOB_PHOTO_BYTES` and `docs/api/job-photos.md` are untouched; stored evidence that went through the Phase 2 re-encode keeps its known gap (no tag, landscape pixels), which is recorded as D7's question rather than silently changed here. Docs: the tracker's `Current phase`, state table, D7 note, risk table and this entry; `README.md`. | **Android** — unit: PASS (`make android-test`: **430 tests, 0 failures**, up from 425, with the new `data/jobs/JobPhotoOrientationTest` — 5 cases: all eight EXIF codes mapped to the pixel mapping each one means, the two portrait codes `6`/`8` turned a quarter turn with no mirror, `1` left exactly as stored, every code a quarter turn and never a scale, and an unknown code never invented into a rotation); device-test sources compile: PASS (`./gradlew assembleDebugAndroidTest`); lint: PASS (`make android-lint`); debug build: PASS (`make android-build`). **No `adb` and no device or emulator command was run (`qa.md` §7.3)**, so every on-device result is **NOT RUN — device QA is the product owner's**; the runbook below is the hand-off. Nothing was changed in `api/`, so no API command was run. |
+| 029 — Phase 4b landed | 2026-09-15 | Re-encoded evidence is stored upright (`D7b` ✓). **New** `data/jobs/JobPhotoExifOrientation.kt` — the **one** EXIF read and the **one** pixel turn: `jobPhotoExifOrientation(bytes)` answers the orientation the source bytes declare (and `Normal` when the file states none, so nothing is guessed into a rotation, `BR-042`), and `Bitmap.turnedBy(orientation)` copies nothing when the photo is already upright, releases the unturned original when it is not, and answers `null` when the device cannot turn it. It sits **beside** the pure rule rather than inside it because `JobPhotoOrientation` is deliberately free of the Android runtime so the JVM keeps checking it (`qa.md` §6.1) — **no dependency was added**; the platform `android.media.ExifInterface` is the reader the display fix already chose. **`data/jobs/JobPhotoProcessing.kt`** — `convertToJpeg` and `fitToUploadLimit` now decode, turn by the **source** bytes' own orientation, **then** scale and encode, through one private `decodeUpright`; the size step reads the tag once for its whole target loop, and a turn the device cannot perform refuses the photo with nothing recorded instead of writing pixels known to be wrong (`BR-014`, `BR-042`). Because the size step's source is the type step's output — an upright JPEG that carries no tag — a converted-then-resized photo is turned exactly once. **`data/jobs/JobPhotoImages.kt`** — its private `jobPhotoExifOrientation` and `Bitmap.oriented` were **deleted** and the display decode calls the shared leaf, so the 2026-09-15 display fix and what is stored are one implementation and cannot drift; presentation is unchanged (same sample size, same "cannot be presented" answer). `FIT_TARGETS` and Phase 2's measurement are untouched: a turn never changes which edge is the longest, so what a resized photo is stored as differs only in orientation. **No API, database, permission, schema or uploaded-byte change**: a re-encoded photo is still a JPEG under the same limit. Docs: this tracker (`## Current phase`, the state table's `Preparation` and `Thumbnails` rows, the phases table, the `D3b`/`D3c`/`D7b` consequence notes, the risk row, the Phase 4b section, the orientation-fix runbook's closing note and the new `## Manual QA runbook — Phase 4b`), `docs/decisions/016-android-image-stack-and-viewer-zoom.md` (the shared read it promised now exists, and Phase 4c must keep it for the pipeline) and `README.md`. `docs/design/android-design-system.md` was **checked and needed no change**: its photo rows are about drawing a tile and the viewer, not about stored orientation. | **Android** — unit (JVM): **PASS** (`./gradlew testDebugUnitTest --rerun`: **430 tests, 0 failures, 0 errors, 0 skipped**, including `JobPhotoOrientationTest`'s 5 cases, which pin the turn the pipeline applies); lint: **PASS** (`lintDebug`, `abortOnError = true`); debug build: **PASS** (`assembleDebug`, `app-debug.apk`); device-test sources: **PASS** (`assembleDebugAndroidTest` compiles — its cases are the product owner's to run). The battery was run twice, the second time on the final tree, so the reported result is the tree committed. **No `adb` and no device or emulator command was run** (`qa.md` §7.3): the pixel turn needs `BitmapFactory`/`Bitmap`, so it cannot be exercised by a JVM test and is **NOT RUN — device QA is the product owner's**, handed over as `## Manual QA runbook — Phase 4b`. `JobPhotoProcessing` stays behind its port, so `FakeJobPhotoProcessing`/`PhotoCollaborators` still cover the session's decisions unchanged. Nothing under `api/` was changed, so no API command was run. |
+
 
 
 
@@ -1358,10 +1436,67 @@ copy of the photo.
 
 Worth knowing while testing: this is a **display** fix, so a photo's stored bytes are exactly what the
 camera wrote — an uploaded portrait photo still carries its EXIF orientation tag, which is what any other
-viewer (including a browser) uses. The **known exception** is a photo the preparation steps had to rewrite:
-one over the API's 15 MiB limit (resized) or one whose bytes were not JPEG/PNG/WebP (converted). Those
-lose the tag with the rest of their metadata, so they still appear sideways — that half is `D7`'s decision
-about stored evidence, recorded in this tracker rather than guessed at here.
+viewer (including a browser) uses. The **known exception at the time** was a photo the preparation steps had
+to rewrite: one over the API's 15 MiB limit (resized) or one whose bytes were not JPEG/PNG/WebP (converted).
+Those lose the tag with the rest of their metadata. **That exception is closed for new evidence by Phase 4b
+(2026-09-15)**, which turns such a photo's pixels before encoding it, so there is no longer a sideways case
+this build creates — see `## Manual QA runbook — Phase 4b` below. Evidence **already** stored or uploaded
+from a re-encoded photo is historical and stays exactly as it is.
+
+## Manual QA runbook — Phase 4b (product owner)
+
+**What changed.** A photo the preparation steps rewrite — the `D3b` conversion (bytes that are not
+JPEG/PNG/WebP, e.g. a HEIC pick) or the `D3c` resize (over the API's 15 MiB limit) — is now **stored
+upright**: the step turns the pixels it decoded, by the orientation the source bytes declared, before it
+scales and encodes. `Bitmap.compress` writes no EXIF orientation tag, so before this phase such a photo was
+stored sideways with nothing in the file saying otherwise, and every client drew it sideways. A photo that
+needs no rewriting is **unchanged**: it is stored byte for byte as the source wrote it, tag included.
+
+Requires the API reachable from the device (`adb reverse tcp:3000 tcp:3000`) and `make up`. It is worth
+re-running the first case of this runbook even if the display fix was already accepted, because it is the
+path this phase must not have touched.
+
+```text
+1. Camera capture, portrait (no rewriting — the unchanged path).
+   Sign in, open a Job, "Add update" -> "Add photo" -> "Take photo". Hold the phone in portrait and capture
+   something whose orientation is unmistakable (a door, a page of text).
+   Expect: upright in the review preview, in the tray tile, and in the viewer when the tile is tapped — as
+   before this phase. Save it, wait for the upload to be accepted, then open it in the gallery at the head
+   of Job Activity.
+   Expect: still upright, and this is now the backend's own bytes.
+
+2.  A picked photo that has to be converted (D3b), portrait.
+    "Add update" -> "Add photo" -> "Choose photos", and pick a **HEIC/HEIF** portrait photo from the
+    device's library (on many phones the camera's own library items are HEIC).
+    Expect: the review panel opens for it and shows it upright; the tray tile is upright; tapping it opens
+    it upright in the viewer.
+
+3.  Save it and wait for the upload to be accepted, then tap it in the gallery.
+    Expect: upright. This is the stored evidence — the converted JPEG has no orientation tag at all, so
+    upright here means the pixels themselves are upright, which is what this phase changed.
+
+4.  A picked photo that has to be resized (D3c), portrait.
+    Pick a **portrait original larger than 15 MiB** (a 48 MP photo, a large PNG, a panorama).
+    Expect: exactly as in steps 2-3 — upright in the review preview, the tray, the viewer, and in the
+    gallery after the upload is accepted — and it uploads at all, so the resize still brings it under the
+    API's limit.
+
+5.  The same two cases in landscape (a landscape HEIC pick, a landscape oversized photo), and a
+    front-camera photo if the device has one.
+    Expect: each is stored and drawn the way the device's own gallery shows it — a landscape photo stays
+    landscape and nothing that should not be mirrored is.
+
+6.  Optional, outside Servora: fetch one of the re-encoded photos from the object store and open it in an
+    image viewer or utility that ignores EXIF orientation (the local MinIO Console is at `make
+    minio-console`; the key is `evidence/job-photos/{organizationId}/{jobId}/{photoId}.jpg`).
+    Expect: it opens upright with no orientation metadata at all.
+```
+
+Worth knowing while testing: the two cases above are the only ones this phase can affect. A camera capture
+or an already-JPEG/PNG/WebP pick that fits under the limit never enters a preparation step, so it is stored
+byte for byte as the camera or the picker produced it, EXIF tag and all — which the display path still
+honours. A photo that comes out **sideways** after an upload is a defect of this phase: note which case it
+was (HEIC pick or oversized photo) and keep the source photo for the report.
 
 ## Not implemented, and not to be assumed
 

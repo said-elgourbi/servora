@@ -108,7 +108,10 @@ strip remains how photos are browsed, and a tap still opens exactly the photo it
   tags, their sizes and their "cannot be shown" report (`BR-042`).
 - **`jobPhotoFittingSampleSize` and `JobPhotoSamplingTest` retire** (the viewer's ceiling rule), along with the
   in-memory `LruCache`. **`JobPhotoOrientation` does not retire**: the preparation pipeline needs exactly that
-  rule for `D7b` (Phase 4b), so its JVM coverage stays and the tag read is shared rather than written twice.
+  rule for `D7b`, so its JVM coverage stays and the tag read is shared rather than written twice. That share
+  **exists as of Phase 4b** (landed 2026-09-15): `data/jobs/JobPhotoExifOrientation.kt` holds the platform
+  tag read and the pixel turn for both the display path and the preparation steps, so Phase 4c must keep it
+  for the pipeline even where the library takes over the display decode.
 - `ui/jobs/JobPhotoViewer.kt` gains the zoom/pan layer; the viewer's resolution logic (`viewedJobPhoto`,
   `JobPhotoViewerTest`) is untouched, because it answers which photo and from where, not how it is drawn.
 - Verification is partly **device-bound**: gesture behaviour and the library's on-device decoding are
