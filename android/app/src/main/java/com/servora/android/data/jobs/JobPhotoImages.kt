@@ -2,14 +2,11 @@ package com.servora.android.data.jobs
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Matrix
-import android.media.ExifInterface
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
-import java.io.ByteArrayInputStream
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -34,10 +31,10 @@ import retrofit2.HttpException
  *
  * Every preview is drawn the way the photo's own bytes say it should be presented: the file's EXIF
  * orientation is applied to the decode, because `BitmapFactory` does not apply it and a camera's
- * portrait capture is stored as landscape pixels plus that tag (`JobPhotoOrientation`). This leaf
- * layer is the one place it has to happen, so the review preview, the tray, the gallery tiles and the
- * viewer all turn a photo the same way. The bytes themselves are never rewritten: the stored evidence
- * stays exactly what the camera wrote.
+ * portrait capture is stored as landscape pixels plus that tag (`JobPhotoOrientation`). The read and
+ * the turn are the shared leaf `JobPhotoExifOrientation`, which the preparation steps call too
+ * (`D7b`), so the review preview, the tray, the gallery tiles, the viewer and a re-encode all turn a
+ * photo the same way. Drawing rewrites nothing: the stored evidence stays exactly what was recorded.
  */
 interface JobPhotoImages {
     /** A thumbnail of a photo whose bytes are still on this device (`§9`). */
@@ -222,49 +219,5 @@ private fun decodeImage(bytes: ByteArray, sampleSizeFor: (BitmapFactory.Options)
         bytes.size,
         BitmapFactory.Options().apply { inSampleSize = sampleSizeFor(bounds) },
     ) ?: return null
-    return decoded.oriented(jobPhotoExifOrientation(bytes))
-}
-
-/**
- * The orientation the photo's own bytes declare, or `Normal` when the file states none.
- *
- * `BitmapFactory` does not read EXIF at all, which is why a portrait capture has to be turned here.
- * A file that carries no readable tag — a photo that was stripped of its metadata, a format the
- * device cannot parse EXIF from, or bytes that are not an image — answers `Normal`: the photo is drawn
- * as stored rather than guessed into a rotation (`BR-042`). The read is wrapped because a malformed
- * tag is a property of the file, not a failure of the screen: a photo whose metadata cannot be read is
- * still a photo.
- */
-private fun jobPhotoExifOrientation(bytes: ByteArray): JobPhotoOrientation {
-    val code = runCatching {
-        ExifInterface(ByteArrayInputStream(bytes))
-            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-    return JobPhotoOrientation.of(code)
-}
-
-/**
- * The photo turned so it is presented upright, or `null` when it cannot be turned.
- *
- * It copies nothing when the photo is already upright, which is what an ordinary photo is. The turned
- * copy is what the caller keeps: the unturned original is released here so a photo is never held
- * twice. A turn the device cannot perform is answered `null` — the same answer as a photo that cannot
- * be decoded — because presenting the unturned pixels instead would be exactly the wrong image the
- * caller must not draw (`BR-042`).
- */
-private fun Bitmap.oriented(orientation: JobPhotoOrientation): Bitmap? {
-    if (orientation.isIdentity) {
-        return this
-    }
-    return runCatching {
-        val matrix = Matrix().apply {
-            postRotate(orientation.rotationDegrees.toFloat())
-            if (orientation.mirror) {
-                postScale(-1f, 1f)
-            }
-        }
-        val turned = Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
-        recycle()
-        turned
-    }.getOrNull()
+    return decoded.turnedBy(jobPhotoExifOrientation(bytes))
 }

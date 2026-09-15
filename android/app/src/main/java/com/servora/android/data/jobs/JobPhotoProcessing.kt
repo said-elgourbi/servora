@@ -28,6 +28,13 @@ const val MAX_JOB_PHOTO_BYTES: Int = 15 * 1024 * 1024
  * where the JVM can check them (`qa.md` §6.1). A step that cannot deliver answers `null`: the photo is
  * then refused and **nothing** is recorded, rather than a photo being created that could never upload
  * (`BR-014`).
+ *
+ * Each step also **turns the pixels it decoded** so what it writes is upright (`D7b`). That is not
+ * cosmetic: `Bitmap.compress` writes no EXIF orientation tag, so a re-encode of a portrait capture —
+ * stored as sensor-landscape pixels plus a tag — would become evidence that is sideways *and* says
+ * nothing about it, in the bucket and on every client. The tag is read from the **source** bytes and
+ * the turn is applied before scaling and encoding, and both the read and the turn are the shared leaf
+ * `JobPhotoExifOrientation`, which is also what the display path uses, so the two cannot drift.
  */
 interface JobPhotoProcessing {
     /**
@@ -55,29 +62,39 @@ interface JobPhotoProcessing {
  * A photo is decoded no larger than the edge the step works at ([jobPhotoSampleSize]), so a very large
  * original is never expanded into memory at full size, and the work of both steps runs off the main
  * thread and per item (`D3b`, `D3c`).
+ *
+ * What it decodes is turned upright before it is scaled and encoded (`D7b`), using the orientation the
+ * **source** bytes declare. A turn never changes which edge is the longest, so it leaves the sampling
+ * and the published `FIT_TARGETS` measurement exactly as Phase 2 recorded them: what a resized photo is
+ * stored as changes only in orientation. A turn the device cannot perform refuses the photo rather than
+ * writing pixels that are known to be wrong (`BR-042`).
  */
 @Singleton
 class DefaultJobPhotoProcessing @Inject constructor() : JobPhotoProcessing {
 
     override suspend fun convertToJpeg(bytes: ByteArray): ByteArray? =
         withContext(Dispatchers.Default) {
-            val decoded = decode(bytes, maxEdgePx = DECODE_EDGE_PX) ?: return@withContext null
-            val encoded = encodeJpeg(decoded, CONVERSION_QUALITY)
-            decoded.recycle()
+            val upright = decodeUpright(bytes, DECODE_EDGE_PX, jobPhotoExifOrientation(bytes))
+                ?: return@withContext null
+            val encoded = encodeJpeg(upright, CONVERSION_QUALITY)
+            upright.recycle()
             encoded
         }
 
     override suspend fun fitToUploadLimit(bytes: ByteArray): ByteArray? =
         withContext(Dispatchers.Default) {
+            // The tag describes the source bytes every target decodes again, so it is read once.
+            val orientation = jobPhotoExifOrientation(bytes)
             for (target in FIT_TARGETS) {
-                val decoded = decode(bytes, maxEdgePx = target.maxEdgePx) ?: return@withContext null
-                val scaled = decoded.scaledTo(target.maxEdgePx)
+                val upright = decodeUpright(bytes, target.maxEdgePx, orientation)
+                    ?: return@withContext null
+                val scaled = upright.scaledTo(target.maxEdgePx)
                 val encoded = encodeJpeg(scaled, target.quality)
                 // Neither bitmap is needed once the bytes exist, and the next target decodes its own.
-                if (scaled !== decoded) {
+                if (scaled !== upright) {
                     scaled.recycle()
                 }
-                decoded.recycle()
+                upright.recycle()
                 if (encoded != null && encoded.size <= MAX_JOB_PHOTO_BYTES) {
                     return@withContext encoded
                 }
@@ -86,6 +103,16 @@ class DefaultJobPhotoProcessing @Inject constructor() : JobPhotoProcessing {
             // the API would refuse must not become a draft (`BR-014`, D3c).
             null
         }
+
+    /**
+     * Decodes [bytes] with about [maxEdgePx] on its longest edge and turns it by the orientation the
+     * source declares, or `null` when either step cannot deliver.
+     */
+    private fun decodeUpright(
+        bytes: ByteArray,
+        maxEdgePx: Int,
+        orientation: JobPhotoOrientation,
+    ): Bitmap? = decode(bytes, maxEdgePx)?.turnedBy(orientation)
 
     /**
      * Decodes [bytes] with about [maxEdgePx] on its longest edge, or `null` when the bytes are not an
