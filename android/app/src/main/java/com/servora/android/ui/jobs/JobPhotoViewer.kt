@@ -16,6 +16,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -25,13 +29,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil3.compose.SubcomposeAsyncImage
-import coil3.compose.SubcomposeAsyncImageContent
 import com.servora.android.R
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobPhotoPhase
 import com.servora.android.domain.model.PendingJobPhoto
+import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 
 /*
  * A photo, opened from the Job's gallery or from the capture tray (`D4`, `BR-015`, `BR-027`).
@@ -130,6 +133,24 @@ internal fun viewedJobPhoto(
 }
 
 /**
+ * What the viewer is showing for the photo it asked for (`BR-042`).
+ *
+ * The gesture layer draws the photo but does not report how its read ended, so the viewer keeps its
+ * own three states rather than inferring one from pixels: the photo is being read, it is on screen, or
+ * it cannot be shown at all.
+ */
+private enum class JobPhotoViewerImageState {
+    /** The stack is still reading the photo. */
+    READING,
+
+    /** The photo is on screen, and the gesture layer draws it. */
+    SHOWN,
+
+    /** The photo could not be read, so the viewer says so instead of drawing something else. */
+    UNAVAILABLE,
+}
+
+/**
  * One photo, full size, over the screen that holds it.
  *
  * The photo is drawn by the image stack, from the request this feature answers with
@@ -138,6 +159,12 @@ internal fun viewedJobPhoto(
  * refused on a tile, and a photo that cannot be read or decoded is reported instead of being replaced
  * by another picture (`BR-007`, `BR-042`). Because the stack keeps what it decoded, opening the same
  * photo again is drawn from memory rather than read a second time (`D4b`).
+ *
+ * Since Phase 4d the photo is **zoomable and pannable** (`D9`): a pinch zooms, a drag pans within the
+ * photo's bounds, a double-tap goes to the library's zoom ceiling and no scale goes below "fit". The
+ * gestures belong to the photo's own area, which is the screen between the phase badge and the note,
+ * so the badge, the note and the close action are untouched by them, and closing is unchanged — this
+ * viewer's own action or the platform's back gesture.
  *
  * It is closed by its own action or by the platform's back gesture, and it holds nothing after that:
  * the photo's phase, note and bytes remain the record's and the device's (`BR-001`).
@@ -151,6 +178,23 @@ internal fun JobPhotoViewer(
     val image = when (photo) {
         is ViewedJobPhoto.Pending -> photoImages.localFullSize(photo.localPath)
         is ViewedJobPhoto.Stored -> photoImages.jobPhotoFullSize(photo.jobId, photo.photoId)
+    }
+
+    /*
+     * The reading / shown / cannot-be-shown state the viewer presents, observed from the stack's own
+     * result. The gesture layer has no slot for it, and the request the stack executes is the same one
+     * the port answered with, so the read is listened to rather than repeated: Coil reports every
+     * request's outcome through it, the memory and disk cache included, so a photo that comes back from
+     * the cache still leaves the reading state (`BR-042`).
+     */
+    var imageState by remember(image) { mutableStateOf(JobPhotoViewerImageState.READING) }
+    val request = remember(image) {
+        image?.newBuilder()
+            ?.listener(
+                onSuccess = { _, _ -> imageState = JobPhotoViewerImageState.SHOWN },
+                onError = { _, _ -> imageState = JobPhotoViewerImageState.UNAVAILABLE },
+            )
+            ?.build()
     }
 
     Dialog(
@@ -189,31 +233,45 @@ internal fun JobPhotoViewer(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (image == null) {
+                    if (request == null) {
+                        // Nothing to draw at all: no session to read the photo under, or an
+                        // implementation that draws none (`BR-042`).
                         JobPhotoViewerUnavailable()
                     } else {
-                        SubcomposeAsyncImage(
-                            model = image,
+                        ZoomableAsyncImage(
+                            model = request,
                             contentDescription = stringResource(R.string.job_photo_image_description),
                             contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                            loading = {
-                                CircularProgressIndicator(
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .testTag(JobPhotoViewerLoadingTag),
-                                )
-                            },
-                            error = { JobPhotoViewerUnavailable() },
-                            success = {
-                                SubcomposeAsyncImageContent(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .testTag(JobPhotoViewerImageTag),
-                                )
-                            },
+                            // The photo's own area, and the whole of it is the gesture surface: a pinch
+                            // zooms, a drag pans within bounds and a double-tap goes to the zoom
+                            // ceiling (`D9`). The badge, the note and the close action are outside this
+                            // area, so zooming never puts them out of reach, and the dialog's closing
+                            // is unaffected.
+                            //
+                            // The tag marks the photo only once the stack has drawn it, so a photo that
+                            // could not be read is reported by the state below rather than by a node
+                            // that says it is there.
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .then(
+                                    if (imageState == JobPhotoViewerImageState.SHOWN) {
+                                        Modifier.testTag(JobPhotoViewerImageTag)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
                         )
+                        when (imageState) {
+                            JobPhotoViewerImageState.READING -> CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag(JobPhotoViewerLoadingTag),
+                            )
+
+                            JobPhotoViewerImageState.UNAVAILABLE -> JobPhotoViewerUnavailable()
+                            JobPhotoViewerImageState.SHOWN -> Unit
+                        }
                     }
                 }
 

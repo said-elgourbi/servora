@@ -8,8 +8,9 @@ Servora is a monorepo built feature by feature as controlled vertical slices.
 - **Android** — Kotlin / Jetpack Compose native field application (offline-first). Implemented for
   authentication, appearance controls, the Manager Home, the Manager Job Details screen (read and
   management actions), customers, the customer Property surface, and technician photo evidence
-  (capture, offline upload, gallery, viewer). Photo evidence is drawn by **Coil 3** behind the
-  feature's own `JobPhotoImages` port (`docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
+  (capture, offline upload, gallery, viewer, zoom). Photo evidence is drawn by **Coil 3** behind the
+  feature's own `JobPhotoImages` port, and the full-size viewer zooms and pans through **Telephoto**
+  over that same stack (`docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
 - **Angular** — management/office client. *Not yet implemented.*
 
 Initial supported languages are **English** and **French**. Development rules live in
@@ -200,8 +201,12 @@ make android-build       # Android debug APK (requires Android SDK)
   questions were decided on 2026-09-15: evidence is
   Job-level (D2), the image stack is Coil 3 behind the existing port (D4b) with pinch-zoom and pan in the
   viewer (D9), a re-encoded photo is stored upright (D7b), a refused photo becomes discardable (D6c), the
-  device's media library is not read (D10), and D5 was deferred. Phase 4d (viewer gestures) is next;
-  Phase 5 (offline evidence) stays blocked on the deferred D5.**
+  device's media library is not read (D10), and D5 was deferred. **Phase 4d (viewer gestures) landed on
+  2026-09-15**: the full-size photo is drawn zoomable and pannable through **Telephoto** over the same
+  Coil 3 stack — a pinch zooms, a drag pans within the photo's bounds, and a double-tap goes to the zoom
+  ceiling — while the phase badge, the note and the close action, the viewer's three states and the
+  platform's back gesture are unchanged. **Phase 6a (refused photos are explicitly discardable) is
+  next**; Phase 5 (offline evidence) stays blocked on the deferred D5.**
   `docs/tracker/029-photo-evidence-phases.md`
   (decisions: `docs/decisions/015-evidence-capabilities.md`,
   `docs/decisions/016-android-image-stack-and-viewer-zoom.md`).

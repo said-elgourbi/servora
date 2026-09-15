@@ -1,10 +1,9 @@
 # ADR-016 — Android image stack: Coil 3 behind the `JobPhotoImages` port, and Telephoto for viewer zoom
 
-**Status:** Accepted (product-owner decision, 2026-09-15; **Phase 4c implemented 2026-09-15**, Phase 4d still to
-come)
+**Status:** Accepted (product-owner decision, 2026-09-15; **Phases 4c and 4d implemented 2026-09-15**)
 
 Date: 2026-09-15
-Tracker: `docs/tracker/029-photo-evidence-phases.md` (Phase 0 D4b ✓ and D9 ✓; Phase 4c implements the stack,
+Tracker: `docs/tracker/029-photo-evidence-phases.md` (Phase 0 D4b ✓ and D9 ✓; Phase 4c landed the stack,
 Phase 4d the gestures)
 Contract: **none.** The API, its routes, its answers and `docs/api/job-photos.md` are unchanged by either
 decision.
@@ -141,11 +140,69 @@ handling for *display* is now the library's. The shared read/turn leaf `JobPhoto
 preparation steps still need it (Phase 4b) — and `jobPhotoSampleSize`, the one sampling rule that survives, now
 takes the bounds as plain numbers so that its coverage can live in a JVM test (`qa.md` §6.1).
 
+## Implementation record — viewer gestures (Phase 4d, 2026-09-15)
+
+**The dependency.** `me.saket.telephoto:zoomable-image-coil3:0.19.0`, pinned in `android/gradle/libs.versions.toml`
+the way every other version there is (`dev.md` §4). It is Telephoto's **Coil 3** integration — `…-coil3`, not
+`…-coil`, which is the Coil 2 build — so the library loads *the request this feature already answers with*: there is
+no second `ImageLoader`, no second cache and no second HTTP path. Its transitive `coil-compose:3.2.0` resolves up to
+the 3.6.2 this module pins, its Kotlin stdlib (2.1.21) and Compose (1.8.0) floors are below what this module already
+compiles with (Kotlin 2.3.21, Compose BOM 2026.08.00), and it declares `minSdkVersion 21` against this module's
+`minSdk 26` — so nothing in the toolchain is downgraded.
+
+**What carries D3.**
+
+| Piece | What it is |
+| --- | --- |
+| `ui/jobs/JobPhotoViewer.kt` | The photo is drawn by `ZoomableAsyncImage` instead of `SubcomposeAsyncImage`: a pinch zooms, a drag pans, a double-tap goes to the ceiling, and the request is the port's own — so the fetcher, the `401 → renew once` read and the session-keyed caches are all unchanged |
+| `JobPhotoViewerImageState` (same file) | The viewer's own reading / shown / "cannot be shown" states (`BR-042`), observed from the stack's result for the request it already has |
+| `ui/jobs/JobPhotoViewer.kt`'s gesture surface | The `Box` the photo occupies — between the top row and the note — so the phase badge, the note and the 48 dp close action are outside the gestures, and the `Dialog` keeps the platform back gesture |
+
+**How D3 is met.**
+
+- **Zoom is real, not a scale-up.** The layer sub-samples the file the stack cached (for evidence, the object Coil
+  downloaded and cached; for a photo the device still holds, its app-private file), so what a zoomed photo shows is
+  read at the size it is drawn rather than enlarged from the fit-size decode the request bounds.
+- **No scale below "fit"**, and the gestures are the library's own: `ZoomSpec`'s minimum factor is 1 (the fit
+  scale), its maximum is 2 relative to that, and the double-tap is `DoubleClickToZoomListener.cycle()`. The ceiling
+  is the library's default rather than a number invented here **because the capture pipeline prepares evidence at no
+  more than 2048 px on its longest edge** (`D3c`), so twice the fit scale already reaches roughly the photo's own
+  pixels on a phone. Raising it is a product decision and a one-line change, recorded in the tracker's runbook
+  rather than taken here.
+- **D2 still holds for the new draw path.** The layer executes the request through the singleton `ImageLoader` this
+  feature installs (`ServoraApplication`), so the renewal and the subject-partitioned cache are the ones Phase 4c
+  built, and no new read of evidence exists.
+
+**The question D3's letter did not settle, and the answer taken.** Telephoto's composable draws the photo but
+exposes **no loading and no error slot** — its Coil 3 source resolves a failed read to a painter-less result, which
+draws nothing. Silently losing the viewer's "cannot be shown" report would regress `BR-042`, and re-implementing the
+library's Coil source to get it back would rebuild the very integration D1 chose not to write. So the viewer keeps
+its own state and observes the stack's **own result for the same request**, through Coil's `ImageRequest.Listener`:
+one read, not two, and Coil reports every request through that listener — memory- and disk-cache hits included — so
+a photo served from the cache still leaves the reading state. The photo's test tag is applied only once the stack has
+drawn it, so one node never claims both "shown" and "cannot be shown". The alternative considered and not taken was
+accepting a blank area after a failed read and reporting only a request that could not be built.
+
+**A consequence recorded rather than left implicit.** To sub-sample, the layer needs a file to sub-sample, and it
+maps a disabled disk-cache policy to a *write*: so a photo the device still holds — a pending capture — is also
+written into the feature's cache directory (`cacheDir/job-photo-cache`) when the viewer draws it. That is a cache
+entry beside the authoritative app-private file, not a second copy of evidence: the file is untouched, the entry is
+evictable at any time and is keyed per session subject (D2), and `BR-014`/`BR-015` are unaffected. It is recorded
+because `DefaultJobPhotoImages`'s own comment (a pending photo is read from the file that already holds it, so
+caching it would add nothing) describes the thumbnail path, and the viewer's path now differs from it.
+
+**What did not change.** The API, its routes, `docs/api/job-photos.md`, the permission catalogue, the capture
+pipeline, the database and the evidence itself are untouched: a zoom is a change in how much of the bytes is drawn.
+The viewer's own resolution logic (`viewedJobPhoto`) and its JVM cases are unchanged, and so are every other call
+site's previews.
+
 ## Consequences
 
 - `android/gradle/libs.versions.toml` + `android/app/build.gradle.kts` gain the library (and Telephoto), in the
   file's "pinned deliberately" convention. **Resolved for Coil by Phase 4c (2026-09-15): 3.6.2**, with its
-  compatibility against the pinned toolchain recorded above; **Telephoto's version is resolved by Phase 4d**.
+  compatibility against the pinned toolchain recorded above; **Telephoto by Phase 4d (2026-09-15):
+  `me.saket.telephoto:zoomable-image-coil3:0.19.0`**, with its compatibility recorded in this ADR's Phase 4d
+  implementation record.
 - `data/jobs/JobPhotoImages.kt` keeps its interface and both sources; its internals move to the library, and
   the `401 → renew` path is wired into the library's fetch of the content route.
 - The call sites draw with the library's composable instead of a hand-held `ImageBitmap`, keeping their test
@@ -186,5 +243,6 @@ Recorded rather than guessed (`BR-042`); tracker 029 carries them with the phase
 2. `Cache-Control` on the content answer, and any server-side cache policy for evidence.
 3. Offline visibility of accepted evidence (`D5`, deferred) and any retention rule for bytes kept on device
    (`D6d`).
-4. The exact library versions, pinned when Phase 4c/4d add them, with their compatibility check. **Coil 3.6.2 is
-   pinned and recorded (Phase 4c, 2026-09-15); Telephoto's version is resolved by Phase 4d.**
+4. The exact library versions, pinned when Phase 4c/4d add them, with their compatibility check. **Both are pinned
+   and recorded (2026-09-15)**: Coil `3.6.2` by Phase 4c and `me.saket.telephoto:zoomable-image-coil3:0.19.0` by
+   Phase 4d.

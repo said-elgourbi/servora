@@ -4,9 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -17,6 +19,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import coil3.request.ImageRequest
@@ -40,6 +44,7 @@ import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.theme.ServoraTheme
+import java.io.File
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -329,6 +334,84 @@ class JobDetailsScreenTest {
 
         composeTestRule.onNodeWithTag(JobPhotoViewerUnavailableTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun reportsAPhotoTheStackCouldNotReadRatherThanDrawingSomethingElse() {
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                pendingPhotos = listOf(pendingPhoto()),
+            ),
+            // A request exists, so the viewer is drawn and the read is attempted — and the read fails,
+            // which is what an API refusal or bytes the device cannot decode produces (`BR-042`).
+            photoImages = UnreadableJobPhotoImages(ApplicationProvider.getApplicationContext()),
+        )
+
+        composeTestRule.onNodeWithTag(jobPhotoPendingTileTag("photo-1")).performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = PHOTO_LOAD_TIMEOUT) {
+            composeTestRule
+                .onAllNodesWithTag(JobPhotoViewerUnavailableTag)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        composeTestRule.onNodeWithTag(JobPhotoViewerUnavailableTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun zoomsAndPansWithoutLosingThePhotoItsPhaseNoteOrItsCloseAction() {
+        val images = RecordingJobPhotoImages(ApplicationProvider.getApplicationContext())
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(
+                    activityEvent(
+                        id = "photo-1",
+                        kind = JobActivityKind.JOB_PHOTO_ADDED,
+                        visitSequence = null,
+                        body = "Panel before the repair",
+                        photoId = "photo-1",
+                        photoPhase = "BEFORE_WORK",
+                    ),
+                ),
+            ),
+            photoImages = images,
+        )
+
+        composeTestRule.onNodeWithTag(jobPhotoGalleryTileTag("photo-1")).performClick()
+        awaitPhoto()
+
+        // The photo is drawn zoomable (`D9`): a double-tap zooms it, and a two-finger pinch zooms it
+        // further. What the viewer holds around the photo — its phase, its note and the close action —
+        // is outside the gesture surface, so it stays where it was.
+        composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).performTouchInput { doubleClick() }
+        composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).performTouchInput {
+            down(pointerId = 0, position = center - Offset(24f, 0f))
+            down(pointerId = 1, position = center + Offset(24f, 0f))
+            moveTo(pointerId = 0, position = center - Offset(160f, 0f))
+            moveTo(pointerId = 1, position = center + Offset(160f, 0f))
+            up(pointerId = 1)
+            up(pointerId = 0)
+        }
+        // Panning is the same gesture one finger makes, and it stays inside the photo's own bounds.
+        composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).performTouchInput {
+            swipe(start = center, end = center + Offset(120f, 90f))
+        }
+
+        composeTestRule.onNodeWithTag(JobPhotoViewerImageTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Panel before the repair").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Before work").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoViewerCloseTag).assertIsDisplayed()
+
+        // Closing from a zoomed state is the closing it always was: the viewer holds no zoom after it,
+        // because the photo and its phase are no more than what the record and the device hold
+        // (`BR-001`).
+        composeTestRule.onNodeWithTag(JobPhotoViewerCloseTag).performClick()
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertDoesNotExist()
     }
 
     @Test
@@ -1061,6 +1144,29 @@ private fun pendingPhoto(
     recordedAt = 1_000L,
     submitted = submitted,
 )
+
+/**
+ * The stack was asked for the photo, and could not read it.
+ *
+ * It is the other half of [JobPhotoImages.None]: a request exists, so the viewer draws and reads, and
+ * the read ends in the stack's failure — what an API refusal, a file that is gone, or bytes the device
+ * cannot decode produces. The viewer must report that rather than draw something else (`BR-042`).
+ */
+private class UnreadableJobPhotoImages(private val context: Context) : JobPhotoImages {
+
+    override fun localThumbnail(path: String): ImageRequest = request()
+
+    override fun jobPhotoThumbnail(jobId: String, photoId: String): ImageRequest = request()
+
+    override fun localFullSize(path: String): ImageRequest = request()
+
+    override fun jobPhotoFullSize(jobId: String, photoId: String): ImageRequest = request()
+
+    /** A file that is not there, so the read cannot end in anything but the stack's own failure. */
+    private fun request(): ImageRequest = ImageRequest.Builder(context)
+        .data(File(context.cacheDir, "no-such-photo.jpg"))
+        .build()
+}
 
 /**
  * The photo reads the screen asked for (`D4`, `D4b`).
