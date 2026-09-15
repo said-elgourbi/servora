@@ -415,6 +415,7 @@
     <string name="job_activity_empty_message">Les mises à jour de l\'équipe apparaîtront ici.</string>
     <string name="job_activity_error_message">Impossible de charger l\'activité.</string>
     <string name="job_activity_add_update">Ajouter une mise à jour</string>
+    <string name="job_activity_update_note">Écrire une note</string>
     <string name="job_activity_text_label">Mise à jour</string>
     <string name="job_activity_text_placeholder">Saisir une mise à jour texte…</string>
     <string name="job_activity_save_update">Enregistrer</string>
@@ -437,6 +438,48 @@
     <string name="job_activity_outcome_needs_followup">Suivi requis</string>
     <string name="job_activity_outcome_needs_quote_approval">Approbation de soumission requise</string>
     <string name="job_activity_outcome_unable_to_complete">Impossible de terminer</string>
+
+    <!--
+      Job photo evidence (`BR-015`, `BR-027`). The phase codes are stable domain values; only these
+      labels are language-specific, and the badges reuse the same labels as the selector so a photo and
+      the choice made about it can never read differently (`BR-028`, `BR-041`).
+    -->
+    <string name="job_photo_add_action">Ajouter une photo</string>
+    <string name="job_photo_review_title">Ajouter cette photo</string>
+    <string name="job_photo_phase_label">Étape</string>
+    <string name="job_photo_phase_before">Avant le travail</string>
+    <string name="job_photo_phase_during">Pendant le travail</string>
+    <string name="job_photo_phase_after">Après le travail</string>
+    <string name="job_photo_phase_unknown">Étape non enregistrée</string>
+    <string name="job_photo_note_label">Note (facultative)</string>
+    <string name="job_photo_note_placeholder">Que montre cette photo ?</string>
+    <string name="job_photo_review_confirm">Ajouter</string>
+    <string name="job_photo_review_discard">Supprimer</string>
+    <string name="job_photo_remove">Retirer la photo</string>
+    <string name="job_photo_image_description">Photo de l’intervention</string>
+    <string name="job_photo_tray_title">Photos à enregistrer</string>
+    <string name="job_photo_tray_unsaved">%1$d non enregistrée(s)</string>
+    <string name="job_photo_tray_capture">Prendre une autre</string>
+    <string name="job_photo_tray_submit">Enregistrer les photos</string>
+    <string name="job_photo_state_queued">En attente de téléversement</string>
+    <string name="job_photo_state_uploading">Téléversement…</string>
+    <string name="job_photo_state_retrying">Nouvelle tentative</string>
+    <string name="job_photo_state_refused">Refusé par le serveur</string>
+    <string name="job_photo_saved_message">Photos enregistrées sur cet appareil. Elles seront téléversées dès que le serveur sera joignable.</string>
+    <string name="job_photo_error_capture_failed">L’appareil photo n’a enregistré aucune photo.</string>
+    <string name="job_photo_error_not_signed_in">Reconnectez-vous pour enregistrer des photos.</string>
+    <string name="job_photo_error_not_queued">Les photos n’ont pas pu être enregistrées pour l’instant. Elles restent sur cet appareil.</string>
+    <string name="job_photo_error_already_submitted">Cette photo est déjà en attente de téléversement.</string>
+    <string name="job_photo_error_type_not_accepted">Ce format de photo n’est pas accepté par Servora. Prenez ou choisissez une image JPEG, PNG ou WebP.</string>
+    <string name="job_photo_error_too_large">Cette photo est trop volumineuse pour être téléversée. Reprenez-la dans un format plus petit.</string>
+    <string name="job_photo_error_not_saved">La photo n’a pas pu être enregistrée sur cet appareil.</string>
+    <string name="job_photo_error_not_read">Cette photo n’a pas pu être lue sur cet appareil.</string>
+    <string name="job_photo_error_picker_unavailable">Le sélecteur de photos de l’appareil n’a pas pu être ouvert.</string>
+    <string name="job_photo_error_item">Photo %1$d sur %2$d : %3$s</string>
+    <string name="job_update_photo_camera">Prendre une photo</string>
+    <string name="job_update_photo_library">Choisir des photos</string>
+    <string name="job_photo_activity_added">Photo ajoutée (%1$s)</string>
+    <string name="job_photo_activity_added_generic">Photo ajoutée</string>
 
     <!-- Actions sur l'intervention (`BR-058`, `BR-066`, `BR-068`, `BR-070`, `BR-073`). -->
     <string name="job_action_change_status">Changer le statut</string>

@@ -79,6 +79,9 @@ import com.servora.android.ui.customers.ServoraHomeScreen
 import com.servora.android.ui.customers.customerDetailJobTag
 import com.servora.android.ui.customers.customerRowTag
 import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.jobs.inertJobPhotoPickedItems
+import com.servora.android.data.jobs.inertJobPhotoSession
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.theme.ServoraTheme
 import java.time.Clock
@@ -322,7 +325,13 @@ class ServoraHomeNavigationTest {
         val managerHomeViewModel = ManagerHomeViewModel(FakeManagerHomeRepository())
         // The Job Details destination is wired by the shell too; the fake answers "not found",
         // because these tests cover navigation rather than Job behaviour.
-        val jobDetailsViewModel = JobDetailsViewModel(FakeJobDetailsRepository())
+        val jobDetailsViewModel = JobDetailsViewModel(
+            repository = FakeJobDetailsRepository(),
+            photos = inertJobPhotoSession(),
+            jobPhotoImages = JobPhotoImages.None,
+            pickedItems = inertJobPhotoPickedItems(),
+            clock = Clock.systemUTC(),
+        )
         composeTestRule.setContent {
             ServoraTheme {
                 ServoraHomeScreen(

@@ -6,9 +6,67 @@ import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobDetails
+import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.JobPhotoSyncState
+import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
 import java.time.Instant
+
+/**
+ * Why a photo action could not be completed (`BR-042`).
+ *
+ * They are stable codes the screen resolves to localized copy, so the technician is told what
+ * actually happened rather than that "something went wrong".
+ */
+enum class JobPhotoFailure {
+    /** The camera returned, but nothing was written: no photo exists on this device. */
+    CAPTURE_FAILED,
+
+    /** No session is held, so the photo cannot be attributed or queued (`§10`). */
+    NOT_SIGNED_IN,
+
+    /** The photos could not be queued, so they stay on the device unsubmitted (`BR-014`). */
+    NOT_QUEUED,
+
+    /** The photo has already been queued for upload, so it can no longer be removed here. */
+    ALREADY_SUBMITTED,
+
+    /** The photo's bytes are not a type Servora accepts and could not be converted to one (`D3b`). */
+    PHOTO_TYPE_NOT_ACCEPTED,
+
+    /** The photo is over the API's upload limit and could not be resized to fit (`D3c`). */
+    PHOTO_TOO_LARGE,
+
+    /** The photo's bytes could not be stored on this device, so nothing was recorded (`BR-014`). */
+    PHOTO_NOT_SAVED,
+
+    /** A photo the technician chose handed over nothing readable, so nothing was recorded (`D3`). */
+    PHOTO_NOT_READ,
+
+    /** The device's own photo picker could not be opened, so no photo could be chosen (`D3`). */
+    PICKER_UNAVAILABLE,
+}
+
+/**
+ * Which photo of a multi-photo pick an action refers to (`D3`).
+ *
+ * A pick may hand over several photos at once, and each is recorded on its own, so a photo that
+ * cannot be taken has to be named: "one of them did not work" tells the technician nothing about
+ * which one to choose again (`BR-012`).
+ */
+data class PhotoItemPosition(
+    /** The photo's place in the pick, counting from one. */
+    val position: Int,
+    /** How many photos the pick handed over. */
+    val total: Int,
+)
+
+/** What the last photo action did, until the screen acknowledges it. */
+enum class JobPhotoMessage {
+    /** The photos are queued on the device and will upload when the API can be reached (`§7`). */
+    QUEUED,
+}
 
 /** The management action the screen last completed, so its confirmation names what happened. */
 enum class JobActionKind {
@@ -60,6 +118,11 @@ sealed interface PendingJobAction {
  * The action flags are separate from the read, so a failed read and a refused action cannot be
  * confused with each other, and nothing here is derived from another client's copy: even whether the
  * represented Visit may be rescheduled is the API's answer (`BR-007`, `BR-073`).
+ *
+ * [pendingPhotos] are the technician's own captures the backend has not accepted yet. They are
+ * presented separately from [activity] on purpose: the Activity is what the backend reported
+ * (`BR-080`), and a pending photo is a local, unconfirmed action (`offline-first-architecture.md`
+ * §2, §7).
  */
 @Immutable
 data class JobDetailsUiState(
@@ -87,6 +150,27 @@ data class JobDetailsUiState(
     val activity: List<JobActivityEvent>? = null,
     /** Why the activity could not be read, or `null`. */
     val activityFailure: CustomersFailureReason? = null,
+    /**
+     * The photo the technician just captured and is reviewing, or `null` when no review is open.
+     *
+     * The row it refers to is already durable, so closing the app mid-review cannot lose the photo;
+     * the phase and note the technician is choosing are recorded when they confirm (`BR-014`).
+     */
+    val capturedPhoto: PendingJobPhoto? = null,
+    /** The Job's photos the backend has not accepted yet, oldest first (`§9`). */
+    val pendingPhotos: List<PendingJobPhoto> = emptyList(),
+    /** How far each queued upload has got, derived from the queue (`§7`). */
+    val photoUploads: Map<String, JobPhotoSyncState> = emptyMap(),
+    /** The phase the next capture starts in: the one the technician chose last (`BR-012`). */
+    val photoPhase: JobPhotoPhase = JobPhotoPhase.DURING_WORK,
+    /** Whether the pending photos are being queued right now. */
+    val isSubmittingPhotos: Boolean = false,
+    /** Why the last photo action did not complete, or `null`. */
+    val photoFailure: JobPhotoFailure? = null,
+    /** Which photo of a multi-photo pick [photoFailure] is about, or `null` when it is not one pick. */
+    val photoFailureItem: PhotoItemPosition? = null,
+    /** What the last photo action did, until the screen acknowledges it. */
+    val photoMessage: JobPhotoMessage? = null,
 ) {
     /** Nothing has been read yet: the screen shows its first-load state. */
     val showsInitialLoading: Boolean

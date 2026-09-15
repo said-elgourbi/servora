@@ -63,9 +63,32 @@ export const TECHNICIAN_PERMISSIONS = {
 export type TechnicianPermission =
   (typeof TECHNICIAN_PERMISSIONS)[keyof typeof TECHNICIAN_PERMISSIONS];
 
+/**
+ * The evidence capability catalogue (`BR-006`, `BR-015`, `BR-027`; tracker 029 D1/D1b).
+ *
+ * Evidence is added and read by the person who records it, so it is authorized by capabilities of
+ * its own rather than by the Job or Customer capability the Job photo routes used as an interim
+ * decision: the default Technician role (`BR-009`) does not hold `JOB_UPDATE` or `customers.view`,
+ * and a technician who may photograph a Job must not be refused by a Manager's capability.
+ *
+ * The capability is **per kind**, so one kind of evidence can be withdrawn from a member without
+ * withdrawing the others. `evidence.audio.add` is the agreed extension point for audio evidence but
+ * is deliberately **not** in this catalogue: no product rule defines audio yet (`BR-027`,
+ * tracker 029 D8), and a capability for a kind that cannot be added would be invented (`BR-042`).
+ * When audio lands it is added here, additively, together with the rules that accept it.
+ */
+export const EVIDENCE_PERMISSIONS = {
+  VIEW: 'evidence.view',
+  PHOTO_ADD: 'evidence.photo.add',
+} as const;
+
+export type EvidencePermission =
+  (typeof EVIDENCE_PERMISSIONS)[keyof typeof EVIDENCE_PERMISSIONS];
+
 export type PermissionCode =
   | CustomerPermission
   | PropertyPermission
   | JobPermission
   | TechnicianPermission
+  | EvidencePermission
   | (string & {});

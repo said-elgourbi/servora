@@ -2,6 +2,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { DatabaseService } from '../database/database.service.js';
 import {
   jobCustomerHistory,
+  jobPhotos,
   jobPropertyHistory,
   jobStatusHistory,
   organizationMembers,
@@ -40,6 +41,7 @@ export const JOB_ACTIVITY_KINDS = [
   'JOB_STATUS_CHANGED',
   'JOB_PROPERTY_CHANGED',
   'JOB_CUSTOMER_CHANGED',
+  'JOB_PHOTO_ADDED',
   'VISIT_STATUS_CHANGED',
   'VISIT_SCHEDULED',
   'VISIT_RESCHEDULED',
@@ -85,8 +87,15 @@ export interface JobActivityEventDto {
   outcomeCode: string | null;
   /** The outcome's summary (`VISIT_OUTCOME_RECORDED`, `BR-077`). */
   outcomeSummary: string | null;
-  /** The note's text (`VISIT_NOTE_ADDED`). */
+  /** The note's text (`VISIT_NOTE_ADDED`, or a photo's optional note for `JOB_PHOTO_ADDED`). */
   body: string | null;
+  /**
+   * The photo's identifier (`JOB_PHOTO_ADDED`), which is also the idempotency key the device
+   * generated. A client asks `GET /jobs/:id/photos/:photoId/content` for its bytes.
+   */
+  photoId: string | null;
+  /** The field-work phase a photo was taken in (`JOB_PHOTO_ADDED`, `BR-027`). */
+  photoPhase: string | null;
 }
 
 /** The Job Activity read's response body. */
@@ -110,6 +119,15 @@ interface RawEvent {
   outcomeCode: string | null;
   outcomeSummary: string | null;
   body: string | null;
+  /**
+   * The photo's id and phase, carried only by `JOB_PHOTO_ADDED`.
+   *
+   * They are optional here because only one kind carries them, and every event is mapped onto the
+   * response with them normalized to `null` — the response contract still states every field on
+   * every event (`docs/api/job-activity.md` §3.1).
+   */
+  photoId?: string | null;
+  photoPhase?: string | null;
 }
 
 /** Wraps the read's events in its response body (`docs/api/job-activity.md`). */
@@ -157,6 +175,7 @@ export async function readJobActivity(
     technicianRows,
     outcomeRows,
     noteRows,
+    photoRows,
   ] = await Promise.all([
     db
       .select({
@@ -239,6 +258,21 @@ export async function readJobActivity(
       body: visitNotes.body,
       recordedAt: visitNotes.recordedAt,
     }),
+    db
+      .select({
+        id: jobPhotos.id,
+        uploaderMembershipId: jobPhotos.uploaderMembershipId,
+        phase: jobPhotos.phase,
+        note: jobPhotos.note,
+        recordedAt: jobPhotos.recordedAt,
+      })
+      .from(jobPhotos)
+      .where(
+        and(
+          eq(jobPhotos.organizationId, scope.organizationId),
+          eq(jobPhotos.jobId, jobId),
+        ),
+      ),
   ]);
 
   const rawEvents: RawEvent[] = [
@@ -365,6 +399,26 @@ export async function readJobActivity(
       outcomeSummary: null,
       body: row.body,
     })),
+    // A photo is Job-level evidence (`BR-015`, `BR-027`): it carries no Visit, its actor is the
+    // member who uploaded it, and its optional note travels in `body`, which is the field a client
+    // already renders as an entry's own text (`BR-080`).
+    ...photoRows.map((row): RawEvent => ({
+      id: row.id,
+      kind: 'JOB_PHOTO_ADDED',
+      recordedAt: row.recordedAt as Date,
+      actorMembershipId: row.uploaderMembershipId,
+      visitId: null,
+      fromStatus: null,
+      toStatus: null,
+      technicianMembershipId: null,
+      roleCode: null,
+      previousRoleCode: null,
+      outcomeCode: null,
+      outcomeSummary: null,
+      body: row.note,
+      photoId: row.id,
+      photoPhase: row.phase,
+    })),
   ];
 
   const membershipIds = new Set<string>();
@@ -403,6 +457,8 @@ export async function readJobActivity(
     outcomeCode: event.outcomeCode,
     outcomeSummary: event.outcomeSummary,
     body: event.body,
+    photoId: event.photoId ?? null,
+    photoPhase: event.photoPhase ?? null,
   }));
 }
 

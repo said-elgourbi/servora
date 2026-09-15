@@ -18,6 +18,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.servora.android.R
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
+import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
@@ -28,7 +29,10 @@ import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
+import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.theme.ServoraTheme
 import java.time.Instant
@@ -144,10 +148,127 @@ class JobDetailsScreenTest {
         assertTrue("The failure's retry action must ask for the Job again", retried)
     }
 
+    @Test
+    fun showsAPendingPhotoWithItsPhaseNoteAndARemoveAction() {
+        render(
+            details = job(),
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                pendingPhotos = listOf(pendingPhoto()),
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(JobPhotoTrayTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobPhotoPendingTileTag("photo-1")).assertIsDisplayed()
+        // The phase the photo was taken in, and the note the technician typed.
+        composeTestRule.onNodeWithText("During work").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Sawdust on the belt").assertIsDisplayed()
+        // The X exists while the photo is unsaved (`BR-027`, §9).
+        composeTestRule.onNodeWithTag(jobPhotoPendingRemoveTag("photo-1")).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoTraySubmitTag).assertIsDisplayed()
+    }
+
+    @Test
+    fun reportsTheUploadStateOfAQueuedPhotoInsteadOfOfferingRemoval() {
+        render(
+            details = job(),
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                pendingPhotos = listOf(pendingPhoto(submitted = true)),
+                photoUploads = mapOf("photo-1" to JobPhotoSyncState.QUEUED),
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(jobPhotoPendingStateTag("photo-1")).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Waiting to upload").assertIsDisplayed()
+        // The backend may already hold it, so the device no longer offers to delete it (`BR-014`).
+        composeTestRule.onNodeWithTag(jobPhotoPendingRemoveTag("photo-1")).assertDoesNotExist()
+    }
+
+    @Test
+    fun showsTheReviewPanelWithTheThreePhasesAsLargeOptions() {
+        render(
+            details = job(),
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                capturedPhoto = pendingPhoto(),
+                photoPhase = JobPhotoPhase.DURING_WORK,
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(JobPhotoReviewSheetTag).assertIsDisplayed()
+        // The preview, the optional note and the two decisions the technician can take.
+        composeTestRule.onNodeWithTag(JobPhotoReviewPreviewTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoReviewNoteTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoReviewConfirmTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoReviewDiscardTag).assertIsDisplayed()
+
+        // Three large phase buttons, never radio buttons (`BR-012`).
+        composeTestRule.onNodeWithTag(JobPhotoPhaseSelectorTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobPhotoPhaseOptionTag(JobPhotoPhase.BEFORE_WORK))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobPhotoPhaseOptionTag(JobPhotoPhase.DURING_WORK))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobPhotoPhaseOptionTag(JobPhotoPhase.AFTER_WORK))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Before work").assertIsDisplayed()
+        composeTestRule.onNodeWithText("After work").assertIsDisplayed()
+    }
+
+    @Test
+    fun rendersAcceptedPhotosAsAGalleryWithTheirPhaseAndNote() {
+        render(
+            details = job(),
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(
+                    activityEvent(
+                        id = "photo-1",
+                        kind = JobActivityKind.JOB_PHOTO_ADDED,
+                        visitSequence = null,
+                        body = "Panel before the repair",
+                        photoId = "photo-1",
+                        photoPhase = "BEFORE_WORK",
+                    ),
+                    activityEvent(id = "event-2"),
+                ),
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(JobPhotoGalleryTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobPhotoGalleryTileTag("photo-1")).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Panel before the repair").assertIsDisplayed()
+    }
+
+    @Test
+    fun offersTheOneAddUpdateActionToASessionThatMayUpdateTheJob() {
+        render(details = job(), canUpdateJob = true)
+
+        // One action adds anything to the Activity, and it is offered for a Job whether or not a
+        // Visit represents it, because a photo is Job-level evidence (`BR-015`, `BR-051`).
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertIsDisplayed()
+        // The timeline itself carries no second way in: the former Add photo action is gone.
+        composeTestRule.onAllNodesWithText(string(R.string.job_photo_add_action)).assertCountEquals(0)
+    }
+
+    @Test
+    fun doesNotOfferTheAddUpdateActionWithoutTheUpdateCapability() {
+        render(details = job(), canUpdateJob = false)
+
+        // A hidden action is not authorization, but an action nobody may perform is not offered
+        // either (`BR-006`, `BR-007`).
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertDoesNotExist()
+    }
+
     private fun render(
         details: JobDetails? = null,
         state: JobDetailsUiState? = null,
         canUpdateJob: Boolean = false,
+        canAddEvidencePhoto: Boolean = false,
         canViewTechnicians: Boolean = false,
         onRetry: () -> Unit = {},
         onRetryActivity: () -> Unit = {},
@@ -161,6 +282,15 @@ class JobDetailsScreenTest {
         onConfirmPendingAction: () -> Unit = {},
         onDismissPendingAction: () -> Unit = {},
         onDismissActionMessage: () -> Unit = {},
+        onCapturePhoto: () -> Unit = {},
+        onChoosePhotos: () -> Unit = {},
+        onConfirmCapturedPhoto: (JobPhotoPhase, String?) -> Unit = { _, _ -> },
+        onDiscardCapturedPhoto: () -> Unit = {},
+        onKeepCapturedPhoto: () -> Unit = {},
+        onRemovePendingPhoto: (String) -> Unit = {},
+        onSubmitPendingPhotos: () -> Unit = {},
+        onDismissPhotoMessage: () -> Unit = {},
+        photoImages: JobPhotoImages = JobPhotoImages.None,
     ) {
         val screenState = state ?: JobDetailsUiState(jobId = JOB_ID, details = details)
         composeTestRule.setContent {
@@ -168,6 +298,7 @@ class JobDetailsScreenTest {
                 JobDetailsScreen(
                     state = screenState,
                     canUpdateJob = canUpdateJob,
+                    canAddEvidencePhoto = canAddEvidencePhoto,
                     canViewTechnicians = canViewTechnicians,
                     onRetry = onRetry,
                     onRetryActivity = onRetryActivity,
@@ -181,6 +312,15 @@ class JobDetailsScreenTest {
                     onConfirmPendingAction = onConfirmPendingAction,
                     onDismissPendingAction = onDismissPendingAction,
                     onDismissActionMessage = onDismissActionMessage,
+                    onCapturePhoto = onCapturePhoto,
+                    onChoosePhotos = onChoosePhotos,
+                    onConfirmCapturedPhoto = onConfirmCapturedPhoto,
+                    onDiscardCapturedPhoto = onDiscardCapturedPhoto,
+                    onKeepCapturedPhoto = onKeepCapturedPhoto,
+                    onRemovePendingPhoto = onRemovePendingPhoto,
+                    onSubmitPendingPhotos = onSubmitPendingPhotos,
+                    onDismissPhotoMessage = onDismissPhotoMessage,
+                    photoImages = photoImages,
                 )
             }
         }
@@ -593,27 +733,127 @@ class JobDetailsScreenTest {
     }
 
     @Test
-    fun floatingActivityActionAddsATextOnlyUpdate() {
+    fun theAddUpdateActionOffersANoteAndAPhotoAndSavesTheNote() {
         var update: String? = null
+        var captured = false
         render(
             details = job(),
             state = JobDetailsUiState(jobId = JOB_ID, details = job(), activity = emptyList()),
             canUpdateJob = true,
+            canAddEvidencePhoto = true,
             onAddActivityText = { update = it },
+            onCapturePhoto = { captured = true },
         )
 
         composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).performClick()
 
-        composeTestRule.onNodeWithTag(JobDetailsActivityTextTag).assertIsDisplayed()
-        composeTestRule.onAllNodesWithText("Photo", substring = true).assertCountEquals(0)
+        // One sheet states what kind of update it is, and the note is the kind in effect, so its
+        // field is ready without a second choice (`BR-012`, `BR-027`).
+        composeTestRule.onNodeWithTag(JobUpdateSheetTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobUpdateNoteKindTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobUpdatePhotoKindTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobUpdateNoteTag).assertIsDisplayed()
+        // Audio is not offered: it does not exist yet, and an action that cannot be performed is not
+        // presented (`BR-042`).
         composeTestRule.onAllNodesWithText("Audio", substring = true).assertCountEquals(0)
 
-        composeTestRule.onNodeWithTag(JobDetailsActivityTextTag)
+        composeTestRule.onNodeWithTag(JobUpdateNoteTag)
             .performTextInput("  Replaced the air filter.  ")
-        composeTestRule.onNodeWithText(string(R.string.job_activity_save_update)).performClick()
+        composeTestRule.onNodeWithTag(JobUpdateSaveTag).performClick()
 
         assertEquals("Replaced the air filter.", update)
+        assertEquals(false, captured)
+    }
+
+    @Test
+    fun theAddUpdateSheetHandsAPhotoOverToTheCaptureFlow() {
+        var captured = false
+        render(
+            details = job(),
+            state = JobDetailsUiState(jobId = JOB_ID, details = job(), activity = emptyList()),
+            canUpdateJob = true,
+            canAddEvidencePhoto = true,
+            onCapturePhoto = { captured = true },
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).performClick()
+        // The photo kind states where the photo comes from, because there are two sources (`D3`).
+        composeTestRule.onNodeWithTag(JobUpdatePhotoKindTag).performClick()
+        composeTestRule.onNodeWithTag(JobUpdateTakePhotoTag).performClick()
+
+        // The photo keeps the flow the photo slice owns — camera, review, tray — so the sheet closes
+        // and hands over rather than growing a second photo UI (`BR-015`).
+        assertTrue(captured)
+        composeTestRule.onNodeWithTag(JobUpdateSheetTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun theAddUpdateSheetHandsAPhotoOverToTheDevicePicker() {
+        var picked = false
+        render(
+            details = job(),
+            state = JobDetailsUiState(jobId = JOB_ID, details = job(), activity = emptyList()),
+            canUpdateJob = true,
+            canAddEvidencePhoto = true,
+            onChoosePhotos = { picked = true },
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).performClick()
+        composeTestRule.onNodeWithTag(JobUpdatePhotoKindTag).performClick()
+        composeTestRule.onNodeWithTag(JobUpdateChoosePhotosTag).performClick()
+
+        // The library source hands over to the picker the photo slice owns, which asks for no storage
+        // or media permission because it reads only what the technician selects (`D3`).
+        assertTrue(picked)
+        composeTestRule.onNodeWithTag(JobUpdateSheetTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun offersTheEvidenceSourcesToASessionWithoutTheJobUpdateCapability() {
+        var picked = false
+        render(
+            details = job(),
+            state = JobDetailsUiState(jobId = JOB_ID, details = job(), activity = emptyList()),
+            canAddEvidencePhoto = true,
+            onChoosePhotos = { picked = true },
+        )
+
+        // A default Technician holds the evidence capability and no Job update capability, so the
+        // action is offered for the work they do record (`BR-009`, `BR-011`).
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).performClick()
+
+        // A note is a Job update, which this session may not write, so only the sources are offered.
+        composeTestRule.onNodeWithTag(JobUpdateNoteKindTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobUpdateTakePhotoTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobUpdateChoosePhotosTag).performClick()
+        assertTrue(picked)
+    }
+
+    @Test
+    fun theAddUpdateSheetOffersNoNoteForAJobWithNoRepresentedVisit() {
+        val jobWithoutVisit = job().copy(selectedVisit = null)
+        render(
+            details = jobWithoutVisit,
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = jobWithoutVisit,
+                activity = emptyList(),
+            ),
+            canUpdateJob = true,
+            canAddEvidencePhoto = true,
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).performClick()
+
+        // A note belongs to a Visit, so a Job with none can only be given the evidence that is
+        // Job-level (`BR-015`, `BR-051`), and the photo sources are what it is offered.
+        composeTestRule.onNodeWithTag(JobUpdatePhotoKindTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobUpdateNoteKindTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobUpdateNoteTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobUpdateTakePhotoTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobUpdateChoosePhotosTag).assertIsDisplayed()
     }
 
     private companion object {
@@ -682,6 +922,8 @@ private fun activityEvent(
     visitSequence: Int? = 2,
     toStatus: String? = null,
     body: String? = "Found a damaged capacitor.",
+    photoId: String? = null,
+    photoPhase: String? = null,
 ) = JobActivityEvent(
     id = id,
     kind = kind,
@@ -696,4 +938,25 @@ private fun activityEvent(
     outcomeCode = null,
     outcomeSummary = null,
     body = body,
+    photoId = photoId,
+    photoPhase = photoPhase,
 )
+
+/** One photo the technician captured that the backend has not accepted yet (`§9`). */
+private fun pendingPhoto(
+    photoId: String = "photo-1",
+    phase: JobPhotoPhase? = JobPhotoPhase.DURING_WORK,
+    note: String? = "Sawdust on the belt",
+    submitted: Boolean = false,
+) = PendingJobPhoto(
+    photoId = photoId,
+    jobId = "job-1",
+    localPath = "app-private/job-photos/user-1/$photoId.jpg",
+    phase = phase,
+    note = note,
+    capturedAt = "2026-09-15T13:04:05Z",
+    mimeType = "image/jpeg",
+    recordedAt = 1_000L,
+    submitted = submitted,
+)
+

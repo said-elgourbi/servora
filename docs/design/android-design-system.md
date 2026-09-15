@@ -262,6 +262,7 @@ appears to have (`docs/tracker/021-android-job-details-status-polish.md`).
 | Assignment sheet | a Material 3 `ModalBottomSheet`: one row per technician with a `Checkbox` and a Lead choice, and one primary button; a crew that is not exactly one Lead cannot be confirmed |
 | Reschedule dialog | an `AlertDialog` whose date and time fields open the platform pickers, plus length choices |
 | Conflict confirmation | an `AlertDialog` listing each overlapping technician, job number and window, with **Schedule anyway** as its confirming action (`BR-070`) |
+| Job update action and sheet | one floating **Add update** action at the bottom of the screen — an `ExtendedFloatingActionButton` in `primary` on `onPrimary` with the 18 dp `ic_add` — opening a Material 3 `ModalBottomSheet` titled *Add update*. The sheet states the **kind** of update as one row of large targets at the height of the photo slice's phase buttons (`jobPhotoPhaseButtonHeight`, 56 dp): **Write note** (`ic_file_text`), filled `primary`/`onPrimary` while it is the kind in effect, and **Add photo** (`ic_camera`) in `surfaceVariant`/`onSurfaceVariant`. Tapping *Write note* puts the cursor in the note's `OutlinedTextField` (4 lines, `outline` label and placeholder) below it, with a `TextButton` **Cancel** and a `Button` **Save update** in `shapes.medium`, exactly as the photo review panel's foot is drawn. Tapping *Add photo* makes the photo the kind in effect and draws its **two sources** as a second row of the same height — **Take photo** (`ic_camera`) and **Choose photos** (`ic_photo_library`, lucide `Images`) — because a photo now comes from the device's camera or from the device's own photo picker (`D3`); each source closes the sheet and hands over to the flow the photo slice owns (capture or pick, then the review panel, then the tray). Three targets are deliberately not drawn in one row: a localized label does not fit at that height. The kind row is drawn on the capability the API enforces for each kind — the note on the Job update capability **and** a represented Visit, the photo sources on `evidence.photo.add` — so a default Technician reaches the camera and the picker without being given a Manager capability (`BR-006`, `BR-007`, `BR-009`, `BR-011`), and the action itself is drawn when the session may do either (`BR-015`, `BR-051`); the tray takes the bottom of the screen while it holds photos, as it already did. Audio is not drawn until it exists (`BR-042`, `docs/tracker/028-android-unified-job-update.md`, `docs/tracker/029-photo-evidence-phases.md` Phase 3) |
 
 The action surfaces are localized in both languages and are the same rows the customer screens use for
 their own lifecycle actions, so the two features do not drift apart.
@@ -278,9 +279,13 @@ avatar for a note, a quiet dot for a system event — followed by the action as 
 `Visit N · member · time` (or `member · time` for a Job-level event) as secondary metadata. A Visit-level
 entry states its Visit as the derived `Visit N` sequence, never a database id. The section keeps an
 empty state, a loading state, and a failure state with retry, and the page reserves bottom clearance for
-the floating Add update action so the last entry is never covered. Notes as a write source (and the Add
-update action itself) are still undecided (`docs/tracker/022-android-job-activity-timeline.md`, open
-questions).
+the floating Add update action so the last entry is never covered.
+
+**One Add update action adds everything to the Activity** (`BR-012`, `BR-027`,
+`docs/tracker/028-android-unified-job-update.md`). The section itself draws no action — a second
+**Add photo** action used to sit beside it, and two entry points for one write made the technician choose
+a place before choosing what they were recording. The floating action opens the sheet that states the
+kind, and the accepted photos it produces are drawn in the gallery above the timeline.
 
 ## Appearance controls (sign-in top bar)
 

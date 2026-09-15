@@ -459,6 +459,7 @@
     <string name="job_activity_empty_message">Updates from the team will appear here.</string>
     <string name="job_activity_error_message">Couldn\'t load activity.</string>
     <string name="job_activity_add_update">Add update</string>
+    <string name="job_activity_update_note">Write note</string>
     <string name="job_activity_text_label">Update</string>
     <string name="job_activity_text_placeholder">Type a text update…</string>
     <string name="job_activity_save_update">Save update</string>
@@ -481,6 +482,48 @@
     <string name="job_activity_outcome_needs_followup">Needs follow-up</string>
     <string name="job_activity_outcome_needs_quote_approval">Needs quote approval</string>
     <string name="job_activity_outcome_unable_to_complete">Unable to complete</string>
+
+    <!--
+      Job photo evidence (`BR-015`, `BR-027`). The phase codes are stable domain values; only these
+      labels are language-specific, and the badges reuse the same labels as the selector so a photo and
+      the choice made about it can never read differently (`BR-028`, `BR-041`).
+    -->
+    <string name="job_photo_add_action">Add photo</string>
+    <string name="job_photo_review_title">Add this photo</string>
+    <string name="job_photo_phase_label">Phase</string>
+    <string name="job_photo_phase_before">Before work</string>
+    <string name="job_photo_phase_during">During work</string>
+    <string name="job_photo_phase_after">After work</string>
+    <string name="job_photo_phase_unknown">Phase not recorded</string>
+    <string name="job_photo_note_label">Note (optional)</string>
+    <string name="job_photo_note_placeholder">What does this show?</string>
+    <string name="job_photo_review_confirm">Add</string>
+    <string name="job_photo_review_discard">Discard</string>
+    <string name="job_photo_remove">Remove photo</string>
+    <string name="job_photo_image_description">Job photo</string>
+    <string name="job_photo_tray_title">Photos to save</string>
+    <string name="job_photo_tray_unsaved">%1$d not saved</string>
+    <string name="job_photo_tray_capture">Take another</string>
+    <string name="job_photo_tray_submit">Save photos</string>
+    <string name="job_photo_state_queued">Waiting to upload</string>
+    <string name="job_photo_state_uploading">Uploading…</string>
+    <string name="job_photo_state_retrying">Will retry</string>
+    <string name="job_photo_state_refused">Refused by the server</string>
+    <string name="job_photo_saved_message">Photos saved on this device. They will upload when the server can be reached.</string>
+    <string name="job_photo_error_capture_failed">The camera did not save a photo.</string>
+    <string name="job_photo_error_not_signed_in">Sign in again to save photos.</string>
+    <string name="job_photo_error_not_queued">The photos could not be saved yet. They are still on this device.</string>
+    <string name="job_photo_error_already_submitted">That photo is already queued for upload.</string>
+    <string name="job_photo_error_type_not_accepted">That photo is not a format Servora accepts. Take or choose a JPEG, PNG or WebP image.</string>
+    <string name="job_photo_error_too_large">That photo is too large to upload. Retake it at a smaller size.</string>
+    <string name="job_photo_error_not_saved">The photo could not be saved on this device.</string>
+    <string name="job_photo_error_not_read">That photo could not be read from this device.</string>
+    <string name="job_photo_error_picker_unavailable">The device\'s photo picker could not be opened.</string>
+    <string name="job_photo_error_item">Photo %1$d of %2$d: %3$s</string>
+    <string name="job_update_photo_camera">Take photo</string>
+    <string name="job_update_photo_library">Choose photos</string>
+    <string name="job_photo_activity_added">Added a photo (%1$s)</string>
+    <string name="job_photo_activity_added_generic">Added a photo</string>
 
     <!--
       Job management actions (`BR-058`, `BR-066`, `BR-068`, `BR-070`, `BR-073`).

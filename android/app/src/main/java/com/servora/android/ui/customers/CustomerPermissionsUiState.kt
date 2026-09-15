@@ -22,6 +22,11 @@ data class CustomerPermissionsUiState(
     // authorizes every action it receives (`BR-007`).
     val canUpdateJob: Boolean = false,
     val canViewTechnicians: Boolean = false,
+    // The evidence capability the photo sources are drawn on (`BR-011`, `BR-015`). It is a separate
+    // capability from the Job update one, so a Technician who may record evidence is offered the
+    // action even though the default Technician role holds no Job update capability
+    // (`docs/decisions/015-evidence-capabilities.md`).
+    val canAddEvidencePhoto: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -41,4 +46,5 @@ fun customerPermissionsUiState(
         canDeleteProperty = permissionChecker.has(Permission.PROPERTIES_DELETE),
         canUpdateJob = permissionChecker.has(Permission.JOB_UPDATE),
         canViewTechnicians = permissionChecker.has(Permission.TECHNICIAN_VIEW),
+        canAddEvidencePhoto = permissionChecker.has(Permission.EVIDENCE_PHOTO_ADD),
     )

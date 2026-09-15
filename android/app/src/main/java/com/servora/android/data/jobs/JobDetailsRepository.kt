@@ -604,5 +604,7 @@ private fun JobActivityEventDto.toJobActivityEvent(): JobActivityEvent? {
         outcomeCode = outcomeCode,
         outcomeSummary = outcomeSummary,
         body = body,
+        photoId = photoId,
+        photoPhase = photoPhase,
     )
 }

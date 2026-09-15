@@ -40,6 +40,9 @@ enum class JobActivityKind {
 
     /** A note was added to a Visit (`BR-027`). */
     VISIT_NOTE_ADDED,
+
+    /** A photo was added to the Job as field evidence (`BR-015`, `BR-027`). */
+    JOB_PHOTO_ADDED,
 }
 
 /**
@@ -73,6 +76,15 @@ data class JobActivityEvent(
     val outcomeCode: String?,
     /** The outcome's summary (`VISIT_OUTCOME_RECORDED`). */
     val outcomeSummary: String?,
-    /** The note's text (`VISIT_NOTE_ADDED`). */
+    /** The note's text (`VISIT_NOTE_ADDED`), or a photo's optional note (`JOB_PHOTO_ADDED`). */
     val body: String?,
+    /**
+     * The photo's identifier (`JOB_PHOTO_ADDED`), which is the value the bytes are asked for with.
+     *
+     * It is absent on every other kind, and it is `null` for a photo whose id this build cannot read,
+     * which is why the screen checks both it and [photoPhase] before it draws a photo (`BR-042`).
+     */
+    val photoId: String? = null,
+    /** The field-work phase a photo was taken in (`JOB_PHOTO_ADDED`), as the API's stable code. */
+    val photoPhase: String? = null,
 )

@@ -1,15 +1,17 @@
 # Servora — Offline-First Architecture Standard (Android)
 
 > **Status: IMPLEMENTED for the operations that adopt it.** The store, the outbox, the replay engine
-> and the triggers exist, and three adopters use them: **Property archive and restore** (`BR-086`),
-> the **Customer Detail read** and the **Customers list read**. Everything else is still online-only,
-> and §11 keeps the questions the standard deliberately does not answer.
+> and the triggers exist, and four adopters use them: **Property archive and restore** (`BR-086`), the
+> **Customer Detail read**, the **Customers list read**, and the **Job photo upload** (`BR-015`,
+> `BR-027`). Everything else is still online-only, and §11 keeps the questions the standard
+> deliberately does not answer.
 >
 > Decision records: `docs/decisions/012-property-lifecycle-and-permissions.md` (D7, which defined this
 > standard) and `docs/decisions/014-android-offline-engine.md` (the engine as built).
 >
 > Implementation records: `docs/tracker/025-android-offline-room-outbox.md` (the engine and its first
-> two adopters) and `docs/tracker/026-android-offline-customers-list.md` (the list read).
+> two adopters), `docs/tracker/026-android-offline-customers-list.md` (the list read) and
+> `docs/tracker/027-android-job-photo-updates.md` (the photo upload, and the local draft table it added).
 >
 > **Update (2026-09-14).** The client half now exists. The **server** half of the Property contract
 > already did: Property archive and restore accept a client-generated `clientOperationId` and the
@@ -238,8 +240,16 @@ These remain **OPEN QUESTION** and must not be invented:
    asked to apply, so the store keeps **one row per filter** and serves a row only for the filter it
    was read under. A list is mutated only through the Customer feature's own online paths; the list
    read queues nothing (`BR-032`).
+4. **The Job photo upload** (`BR-015`, `BR-027`) — offline-capable, carrying a `clientOperationId`,
+   applied by `JobPhotoUploadHandler` and queued through the existing `OutboxStore`. It adds one shape
+   the adopters above do not have: a mutation whose payload is a **file**. The outbox row holds the
+   local path and the metadata, the bytes stay in app-private storage, and the local copy is deleted
+   only once the API has answered that it holds the photo. The feature keeps its own local table for
+   photos the technician has **not** submitted yet — a draft is removable and must survive process
+   death, which is neither a working-set answer nor a queued mutation — and that table holds paths and
+   metadata, never image bytes (§9). Recorded in `docs/tracker/027-android-job-photo-updates.md`.
 
-What is still **online-only** on Android: Manager Home, Job Details and Job Activity, technician
+What is still **online-only** on Android: Manager Home, Job Details and Job Activity reads, technician
 assignment, scheduling and rescheduling, Job and Visit status actions, notes, Customer and Property
 writes, and every form. Their routes accept no idempotency key yet, or their mutation conflict policy
 is undecided (§8, §11.1), so they must not be queued or invented.

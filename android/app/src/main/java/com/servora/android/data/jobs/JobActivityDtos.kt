@@ -33,4 +33,6 @@ data class JobActivityEventDto(
     val outcomeCode: String? = null,
     val outcomeSummary: String? = null,
     val body: String? = null,
+    val photoId: String? = null,
+    val photoPhase: String? = null,
 )

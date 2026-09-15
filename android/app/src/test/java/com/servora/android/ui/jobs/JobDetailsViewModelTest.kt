@@ -7,6 +7,16 @@ import com.servora.android.data.jobs.JobActivityResult
 import com.servora.android.data.jobs.AssignableTechniciansResult
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsResult
+import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.jobs.JobPhotoSession
+import com.servora.android.data.jobs.PhotoCollaborators
+import com.servora.android.data.jobs.TEST_CLOCK
+import com.servora.android.data.jobs.FakeJobPhotoFiles
+import com.servora.android.data.jobs.FakeJobPhotoPickedItems
+import com.servora.android.data.jobs.FakeOfflineSync
+import com.servora.android.data.jobs.InMemoryPendingJobPhotoStore
+import com.servora.android.data.offline.InMemoryOutboxStore
+import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.jobs.VisitNoteResult
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.AssignmentRole
@@ -16,6 +26,7 @@ import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
+import com.servora.android.domain.model.JobPhotoPhase
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
@@ -60,7 +71,7 @@ class JobDetailsViewModelTest {
     @Test
     fun `reads the Job it is asked for and reports the backend's values`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
 
         viewModel.start(JOB_ID)
         assertTrue(viewModel.uiState.value.showsInitialLoading)
@@ -89,7 +100,7 @@ class JobDetailsViewModelTest {
     @Test
     fun `does not read the same Job twice while it is already held`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
 
         viewModel.start(JOB_ID)
         advanceUntilIdle()
@@ -105,7 +116,7 @@ class JobDetailsViewModelTest {
         val repository = RecordingJobDetailsRepository(
             JobDetailsResult.Failure(CustomersFailureReason.NETWORK),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
 
         viewModel.start(JOB_ID)
         advanceUntilIdle()
@@ -128,7 +139,7 @@ class JobDetailsViewModelTest {
                 JobDetailsResult.Failure(CustomersFailureReason.NOT_FOUND),
             ),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
 
         viewModel.start(JOB_ID)
         advanceUntilIdle()
@@ -146,7 +157,7 @@ class JobDetailsViewModelTest {
     @Test
     fun `retry without a Job to read does nothing`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
 
         viewModel.retry()
         advanceUntilIdle()
@@ -157,7 +168,7 @@ class JobDetailsViewModelTest {
     @Test
     fun `reset releases the Job and allows it to be read again`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
 
         viewModel.start(JOB_ID)
         advanceUntilIdle()
@@ -176,7 +187,7 @@ class JobDetailsViewModelTest {
     @Test
     fun `asks the backend to move the Job with the version the screen was shown`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -209,7 +220,7 @@ class JobDetailsViewModelTest {
                 result = JobDetailsResult.Success(job()),
                 actionResults = ArrayDeque(listOf(JobActionResult.Conflicts(conflicts), JobActionResult.Success(job()))),
             )
-            val viewModel = JobDetailsViewModel(repository)
+            val viewModel = viewModel(repository)
             viewModel.start(JOB_ID)
             advanceUntilIdle()
 
@@ -242,7 +253,7 @@ class JobDetailsViewModelTest {
             result = JobDetailsResult.Success(job()),
             actionResults = ArrayDeque(listOf(JobActionResult.Conflicts(emptyList()))),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -265,7 +276,7 @@ class JobDetailsViewModelTest {
                 listOf(JobActionResult.Failure(JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET)),
             ),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -287,7 +298,7 @@ class JobDetailsViewModelTest {
                 listOf(JobActionResult.Success(job().copy(status = JobStatus.IN_PROGRESS, version = 8))),
             ),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -306,7 +317,7 @@ class JobDetailsViewModelTest {
                 result = JobDetailsResult.Success(job()),
                 assignable = offered,
             )
-            val viewModel = JobDetailsViewModel(repository)
+            val viewModel = viewModel(repository)
             viewModel.start(JOB_ID)
             advanceUntilIdle()
 
@@ -320,7 +331,7 @@ class JobDetailsViewModelTest {
     @Test
     fun `does not start a second action while one is in flight`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -350,7 +361,7 @@ class JobDetailsViewModelTest {
                 ),
             ),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -368,7 +379,7 @@ class JobDetailsViewModelTest {
                 JobActivityResult.Failure(CustomersFailureReason.NETWORK),
             ),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -383,7 +394,7 @@ class JobDetailsViewModelTest {
             result = JobDetailsResult.Success(job()),
             noteResult = VisitNoteResult.Success(listOf(note)),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -416,7 +427,7 @@ class JobDetailsViewModelTest {
                 JobActivityResult.Success(listOf(assigned, note)),
             ),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
         assertEquals(listOf("note-1"), viewModel.uiState.value.activity?.map { it.id })
@@ -455,7 +466,7 @@ class JobDetailsViewModelTest {
                     JobActivityResult.Success(listOf(rescheduled)),
                 ),
             )
-            val viewModel = JobDetailsViewModel(repository)
+            val viewModel = viewModel(repository)
             viewModel.start(JOB_ID)
             advanceUntilIdle()
 
@@ -480,7 +491,7 @@ class JobDetailsViewModelTest {
                 listOf(JobActionResult.Failure(JobActionFailure.VERSION_CONFLICT)),
             ),
         )
-        val viewModel = JobDetailsViewModel(repository)
+        val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
@@ -491,6 +502,76 @@ class JobDetailsViewModelTest {
         // for again.
         assertEquals(listOf(JOB_ID), repository.requestedActivityJobIds)
     }
+
+    @Test
+    fun `reads the Job Activity again once an upload is accepted so the timeline shows the photo`() =
+        runTest(dispatcher) {
+            val photo = activityEvent(
+                id = "photo-1",
+                kind = JobActivityKind.JOB_PHOTO_ADDED,
+                visitSequence = null,
+                body = "Panel before the repair",
+                photoId = "photo-1",
+                photoPhase = "BEFORE_WORK",
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(
+                    JobActivityResult.Success(emptyList()),
+                    JobActivityResult.Success(listOf(photo)),
+                ),
+            )
+            val photos = PhotoCollaborators()
+            val viewModel = viewModel(repository, photos.session)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.activity.isNullOrEmpty())
+
+            val capture = requireNotNull(viewModel.beginPhotoCapture())
+            photos.files.writeCapture(capture.localPath)
+            viewModel.photoCaptured(capture)
+            advanceUntilIdle()
+            viewModel.confirmCapturedPhoto(JobPhotoPhase.BEFORE_WORK, "Panel before the repair")
+            viewModel.submitPendingPhotos()
+            advanceUntilIdle()
+
+            // Saving queues the upload. The Activity is not read for that, because the backend has not
+            // recorded anything yet (`BR-031`).
+            assertEquals(listOf(JOB_ID), repository.requestedActivityJobIds)
+
+            // What the upload handler does once the API accepts the photo (`JobPhotoUploadHandler`).
+            photos.store.remove(capture.photoId)
+            advanceUntilIdle()
+
+            // The photo is evidence the Activity projects, so the timeline is read again rather than
+            // left showing a Job without the photo the technician just recorded (`BR-001`, `BR-080`).
+            assertEquals(listOf(JOB_ID, JOB_ID), repository.requestedActivityJobIds)
+            assertEquals(listOf("photo-1"), viewModel.uiState.value.activity?.map { it.id })
+        }
+
+    @Test
+    fun `does not read the Job Activity again when an unsaved photo is removed`() =
+        runTest(dispatcher) {
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(emptyList())),
+            )
+            val photos = PhotoCollaborators()
+            val viewModel = viewModel(repository, photos.session)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            val capture = requireNotNull(viewModel.beginPhotoCapture())
+            photos.files.writeCapture(capture.localPath)
+            viewModel.photoCaptured(capture)
+            advanceUntilIdle()
+            viewModel.removePendingPhoto(capture.photoId)
+            advanceUntilIdle()
+
+            // The photo was never sent, so nothing was recorded and there is nothing new to read
+            // (`BR-014`).
+            assertEquals(listOf(JOB_ID), repository.requestedActivityJobIds)
+        }
 
 }
 
@@ -548,6 +629,8 @@ private fun activityEvent(
     roleCode: String? = null,
     toStatus: String? = null,
     body: String? = "Found a damaged capacitor.",
+    photoId: String? = null,
+    photoPhase: String? = null,
 ) = JobActivityEvent(
     id = id,
     kind = kind,
@@ -562,6 +645,8 @@ private fun activityEvent(
     outcomeCode = null,
     outcomeSummary = null,
     body = body,
+    photoId = photoId,
+    photoPhase = photoPhase,
 )
 
 /** Records every Job it is asked for, and every action it is asked to send. */
@@ -714,3 +799,22 @@ private class ScriptedJobDetailsRepository(
     private fun unsupported(): Nothing =
         throw AssertionError("these tests only read a Job")
 }
+
+/**
+ * The ViewModel under test, with the photo slice's collaborators a test controls.
+ *
+ * The real [JobPhotoSession] is used rather than a fake: how the tray, the outbox queue and the local
+ * file cleanup behave is what the photo slice's own test (`JobPhotoCaptureViewModelTest`) covers, and
+ * only the collaborators that need a device or a network are replaced here (`qa.md` §6.1).
+ */
+private fun viewModel(
+    repository: JobDetailsRepository,
+    session: JobPhotoSession = PhotoCollaborators().session,
+) = JobDetailsViewModel(
+    repository = repository,
+    photos = session,
+    jobPhotoImages = JobPhotoImages.None,
+    // These tests are about the Job's own actions, so no photo source hands over anything.
+    pickedItems = FakeJobPhotoPickedItems(emptyMap()),
+    clock = TEST_CLOCK,
+)

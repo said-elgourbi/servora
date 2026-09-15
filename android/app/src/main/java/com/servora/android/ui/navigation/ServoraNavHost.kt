@@ -40,6 +40,8 @@ import com.servora.android.ui.customers.PropertyDetailScreen
 import com.servora.android.ui.customers.PropertyDetailViewModel
 import com.servora.android.ui.jobs.JobDetailsScreen
 import com.servora.android.ui.jobs.JobDetailsViewModel
+import com.servora.android.ui.jobs.rememberJobPhotoCapture
+import com.servora.android.ui.jobs.rememberJobPhotoPicker
 
 /**
  * Every destination the signed-in application can be at.
@@ -292,9 +294,30 @@ fun ServoraNavHost(
             LaunchedEffect(jobId) { jobDetailsViewModel.start(jobId) }
             val state by jobDetailsViewModel.uiState.collectAsState()
             val context = LocalContext.current
+            // Capturing evidence opens the device's camera into a file this app owns, so no storage
+            // access and no camera permission are needed (`BR-015`, offline standard §9).
+            val capturePhoto = rememberJobPhotoCapture(
+                beginCapture = jobDetailsViewModel::beginPhotoCapture,
+                onCaptured = jobDetailsViewModel::photoCaptured,
+                // A dismissed or unavailable camera captured nothing, so nothing is recorded and
+                // nothing is claimed (`BR-042`); any file it created is cleaned up (`§9`).
+                onCancelled = jobDetailsViewModel::photoCaptureCancelled,
+            )
+            // The second source is the device's own photo picker, which the technician chooses from
+            // in the update sheet (`D3`): it hands over only what they select, and Servora asks for no
+            // storage or media-read permission (`BR-015`).
+            val choosePhotos = rememberJobPhotoPicker(
+                onPicked = jobDetailsViewModel::photosPicked,
+                // A device whose picker no application can show is reported rather than looking like
+                // a cancellation (`BR-042`).
+                onUnavailable = jobDetailsViewModel::photoPickerUnavailable,
+            )
             JobDetailsScreen(
                 state = state,
                 canUpdateJob = permissions.canUpdateJob,
+                // The evidence capability is its own, so a technician who records field evidence is
+                // offered the photo sources without holding the Job update capability (`BR-009`).
+                canAddEvidencePhoto = permissions.canAddEvidencePhoto,
                 canViewTechnicians = permissions.canViewTechnicians,
                 onRetry = jobDetailsViewModel::retry,
                 onRetryActivity = jobDetailsViewModel::retryActivity,
@@ -314,6 +337,15 @@ fun ServoraNavHost(
                 onConfirmPendingAction = jobDetailsViewModel::confirmPendingAction,
                 onDismissPendingAction = jobDetailsViewModel::dismissPendingAction,
                 onDismissActionMessage = jobDetailsViewModel::dismissActionMessage,
+                onCapturePhoto = capturePhoto,
+                onChoosePhotos = choosePhotos,
+                onConfirmCapturedPhoto = jobDetailsViewModel::confirmCapturedPhoto,
+                onDiscardCapturedPhoto = jobDetailsViewModel::discardCapturedPhoto,
+                onKeepCapturedPhoto = jobDetailsViewModel::keepCapturedPhoto,
+                onRemovePendingPhoto = jobDetailsViewModel::removePendingPhoto,
+                onSubmitPendingPhotos = jobDetailsViewModel::submitPendingPhotos,
+                onDismissPhotoMessage = jobDetailsViewModel::dismissPhotoMessage,
+                photoImages = jobDetailsViewModel.photoImages,
             )
         }
 

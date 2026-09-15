@@ -4,7 +4,18 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.servora.android.data.jobs.JobPhotoOperations
+import com.servora.android.data.jobs.JobPhotoPayloads
+import com.servora.android.data.jobs.RoomPendingJobPhotoStore
+import com.servora.android.data.session.AuthenticatedSubject
+import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.PendingJobPhoto
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -175,6 +186,85 @@ class OfflineDatabaseTest {
         assertNull(workingSet.get(SUBJECT, TYPE, "property-2"))
         assertNotNull(workingSet.get("user-2", TYPE, "property-1"))
     }
+
+    /**
+     * The pending photo records on SQLite (`BR-015`, `offline-first-architecture.md` §9).
+     *
+     * What the feature depends on is that a captured photo is durable, scoped to the subject and the
+     * Job, editable only while it is unsaved, and removed only by an explicit decision — including the
+     * queueing of its upload, which is the same write the technician's save performs (`§5`).
+     */
+    @Test
+    fun keepsPendingPhotosPerSubjectAndJobAndQueuesTheUploadOnce() = runTest {
+        val photos = pendingPhotos()
+        photos.record(photo("photo-1", jobId = "job-1"))
+        photos.record(photo("photo-2", jobId = "job-2"))
+
+        assertEquals(
+            listOf("photo-1"),
+            photos.pending(SUBJECT, "job-1").first().map { it.photoId },
+        )
+        assertEquals(
+            listOf("photo-2"),
+            photos.pending(SUBJECT, "job-2").first().map { it.photoId },
+        )
+        // Another subject's pending evidence is never visible to this one (`§10`).
+        assertEquals(emptyList<String>(), photos.pending("user-2", "job-1").first().map { it.photoId })
+    }
+
+    @Test
+    fun recordsTheChoiceMadeWhileReviewingAndTheQueueingWhenItIsSaved() = runTest {
+        val photos = pendingPhotos()
+        photos.record(photo("photo-1"))
+
+        photos.updateReview("photo-1", JobPhotoPhase.AFTER_WORK, "Panel closed")
+        assertEquals("Panel closed", photos.find("photo-1")?.note)
+        assertEquals(JobPhotoPhase.AFTER_WORK, photos.find("photo-1")?.phase)
+
+        assertEquals(true, photos.submit(photo("photo-1")))
+        assertEquals(true, photos.find("photo-1")?.submitted)
+        // The upload is queued with the photo's own id as its idempotency key (`BR-031`).
+        assertEquals("photo-1", outbox.head(SUBJECT)?.operationId)
+        assertEquals(JobPhotoOperations.ADD_PHOTO, outbox.head(SUBJECT)?.operationType)
+    }
+
+    @Test
+    fun refusesToReviewAPhotoWhoseUploadIsAlreadyQueued() = runTest {
+        val photos = pendingPhotos()
+        photos.record(photo("photo-1"))
+        photos.submit(photo("photo-1"))
+
+        photos.updateReview("photo-1", JobPhotoPhase.BEFORE_WORK, "too late")
+
+        assertEquals(JobPhotoPhase.DURING_WORK, photos.find("photo-1")?.phase)
+        assertNull(photos.find("photo-1")?.note)
+    }
+
+    private fun pendingPhotos(): RoomPendingJobPhotoStore = RoomPendingJobPhotoStore(
+        dao = database.pendingJobPhotoDao(),
+        outbox = outbox,
+        payloads = JobPhotoPayloads(Json),
+        subject = object : AuthenticatedSubject {
+            override fun current(): String? = SUBJECT
+        },
+        clock = Clock.fixed(Instant.parse("2026-09-15T13:05:00Z"), ZoneOffset.UTC),
+    )
+
+    private fun photo(
+        photoId: String,
+        jobId: String = "job-1",
+        phase: JobPhotoPhase? = JobPhotoPhase.DURING_WORK,
+    ): PendingJobPhoto = PendingJobPhoto(
+        photoId = photoId,
+        jobId = jobId,
+        localPath = "app-private/job-photos/$SUBJECT/$photoId.jpg",
+        phase = phase,
+        note = null,
+        capturedAt = "2026-09-15T13:04:05Z",
+        mimeType = "image/jpeg",
+        recordedAt = 1_000L,
+        submitted = false,
+    )
 
     /** The ids one subject's queue holds, oldest first; the queue is consumed as it is read. */
     private suspend fun queueIds(subjectId: String): List<String> {

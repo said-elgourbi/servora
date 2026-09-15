@@ -18,6 +18,12 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     // A capability named here is a UI gate only: the backend remains the authority (`BR-007`).
     JOB_UPDATE("JOB_UPDATE", aliases = setOf("jobs.update", "update.jobs")),
     TECHNICIAN_VIEW("TECHNICIAN_VIEW", aliases = setOf("technicians.view", "view.technicians")),
+    // The evidence capabilities the API enforces on the Job photo routes (`BR-006`, `BR-015`,
+    // `BR-027`; `docs/decisions/015-evidence-capabilities.md`). Adding evidence is its own capability
+    // rather than a Job one, because the person who records it is the technician on site, who holds
+    // neither `JOB_UPDATE` nor `customers.view` (`BR-009`). A capability named here is a UI gate only:
+    // the backend remains the authority (`BR-007`, `BR-011`).
+    EVIDENCE_PHOTO_ADD("evidence.photo.add"),
 }
 
 class PermissionChecker(granted: Set<String>) {

@@ -14,6 +14,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -763,6 +766,35 @@ private class FakeJobDetailsApi(
             AssignableTechnicianDto(membershipId = "member-1", name = "Mike Lead"),
             AssignableTechnicianDto(membershipId = "member-2", name = null),
         )
+    }
+
+    /**
+     * The photo route (`BR-015`). These tests are about the Job read and its actions, so the photo
+     * endpoints answer the smallest honest thing rather than being exercised here; what the upload
+     * sends is asserted by `JobPhotoUploadHandlerTest` (`qa.md` §6.1).
+     */
+    override suspend fun addJobPhoto(
+        authorization: String,
+        jobId: String,
+        clientOperationId: RequestBody,
+        phase: RequestBody,
+        note: RequestBody?,
+        capturedAt: RequestBody?,
+        file: MultipartBody.Part,
+    ): JobActivityDto {
+        lastAuthorization = authorization
+        lastJobId = jobId
+        return JobActivityDto(jobId = jobId, events = emptyList())
+    }
+
+    override suspend fun jobPhotoContent(
+        authorization: String,
+        jobId: String,
+        photoId: String,
+    ): ResponseBody {
+        lastAuthorization = authorization
+        lastJobId = jobId
+        return "".toResponseBody("image/jpeg".toMediaType())
     }
 }
 

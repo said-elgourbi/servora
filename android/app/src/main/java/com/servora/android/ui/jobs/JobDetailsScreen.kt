@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,20 +18,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,10 +44,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
+import com.servora.android.domain.model.JobPhotoPhase
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.ui.components.InfoCard
@@ -104,11 +100,8 @@ const val JobDetailsTechniciansTag = "job-details-technicians"
 /** Identifies the state shown when the represented Visit has no technicians. */
 const val JobDetailsUnassignedTag = "job-details-unassigned"
 
-/** Identifies the floating action that starts a text Activity update. */
+/** Identifies the floating action that starts a Job Activity update. */
 const val JobDetailsAddActivityTag = "job-details-add-activity"
-
-/** Identifies the text field used to add a text-only Activity update. */
-const val JobDetailsActivityTextTag = "job-details-activity-text"
 
 /** Identifies one assigned technician's row. */
 fun jobDetailsTechnicianTag(membershipId: String): String = "job-details-technician-$membershipId"
@@ -123,6 +116,9 @@ fun jobDetailsLeadBadgeTag(membershipId: String): String = "job-details-lead-$me
 private val JobDetailsPageGutter = 20.dp
 private val JobDetailsSectionSpacing = 20.dp
 private val JobDetailsBottomClearance = 72.dp
+
+/** The clearance the capture tray needs, so the last timeline entry is never covered by it. */
+private val JobDetailsTrayClearance = 260.dp
 private val JobDetailsAvatarSize = 36.dp
 private val JobDetailsMapAffordanceSize = 18.dp
 
@@ -157,6 +153,7 @@ private val JobDetailsMapAffordanceSize = 18.dp
 fun JobDetailsScreen(
     state: JobDetailsUiState,
     canUpdateJob: Boolean,
+    canAddEvidencePhoto: Boolean,
     canViewTechnicians: Boolean,
     onRetry: () -> Unit,
     onRetryActivity: () -> Unit,
@@ -170,6 +167,15 @@ fun JobDetailsScreen(
     onConfirmPendingAction: () -> Unit,
     onDismissPendingAction: () -> Unit,
     onDismissActionMessage: () -> Unit,
+    onCapturePhoto: () -> Unit,
+    onChoosePhotos: () -> Unit,
+    onConfirmCapturedPhoto: (JobPhotoPhase, String?) -> Unit,
+    onDiscardCapturedPhoto: () -> Unit,
+    onKeepCapturedPhoto: () -> Unit,
+    onRemovePendingPhoto: (String) -> Unit,
+    onSubmitPendingPhotos: () -> Unit,
+    onDismissPhotoMessage: () -> Unit,
+    photoImages: JobPhotoImages = JobPhotoImages.None,
     modifier: Modifier = Modifier,
 ) {
     val details = state.details
@@ -180,9 +186,24 @@ fun JobDetailsScreen(
 
     val actionFailure = state.actionFailure
     val completedAction = state.completedAction
+    val photoFailure = state.photoFailure
+    val photoMessage = state.photoMessage
     val actionMessage = when {
         actionFailure != null -> stringResource(jobActionFailureMessage(actionFailure))
         completedAction != null -> stringResource(jobActionCompletionMessage(completedAction))
+        photoFailure != null -> {
+            // A photo that could not be taken is named by its place in the pick, because a pick hands
+            // over several at once and "a photo did not work" would not say which one to choose again
+            // (`D3`, `BR-012`).
+            val reason = stringResource(jobPhotoFailureMessage(photoFailure))
+            val item = state.photoFailureItem
+            if (item == null) {
+                reason
+            } else {
+                stringResource(R.string.job_photo_error_item, item.position, item.total, reason)
+            }
+        }
+        photoMessage != null -> stringResource(jobPhotoMessageText(photoMessage))
         else -> null
     }
     val dismissLabel = stringResource(R.string.job_action_dismiss)
@@ -191,15 +212,16 @@ fun JobDetailsScreen(
     // presents the change, so the report is shown and released instead of being left standing in the
     // layout (`BR-001`, `BR-042`). A refusal waits for the user, because nothing on screen reflects a
     // change that did not happen and the refusal is the action's only report.
-    LaunchedEffect(actionMessage, actionFailure != null) {
+    LaunchedEffect(actionMessage, actionFailure != null, photoFailure != null) {
         if (actionMessage == null) {
             return@LaunchedEffect
         }
+        val isFailure = actionFailure != null || photoFailure != null
         try {
             snackbarHostState.showSnackbar(
                 message = actionMessage,
-                actionLabel = if (actionFailure != null) dismissLabel else null,
-                duration = if (actionFailure != null) {
+                actionLabel = if (isFailure) dismissLabel else null,
+                duration = if (isFailure) {
                     SnackbarDuration.Indefinite
                 } else {
                     SnackbarDuration.Short
@@ -209,6 +231,7 @@ fun JobDetailsScreen(
             // Released once it has been shown, so re-entering the screen does not report an action the
             // Job on screen already shows.
             onDismissActionMessage()
+            onDismissPhotoMessage()
         }
     }
 
@@ -231,6 +254,7 @@ fun JobDetailsScreen(
                     onOpenReschedule = { showReschedule = true },
                     onChangeJobStatus = onChangeJobStatus,
                     onRetryActivity = onRetryActivity,
+                    photoImages = photoImages,
                 )
 
             state.showsFailure -> JobDetailsFailure(onRetry = onRetry)
@@ -245,14 +269,25 @@ fun JobDetailsScreen(
             snackbar = { data ->
                 JobActionSnackbar(
                     message = data.visuals.message,
-                    isError = actionFailure != null,
+                    isError = actionFailure != null || photoFailure != null,
                     actionLabel = data.visuals.actionLabel,
                     onAction = { data.performAction() },
                 )
             },
         )
 
-        if (details?.selectedVisit != null && canUpdateJob) {
+        // One action adds anything to the Job's Activity: it opens the sheet that states what kind
+        // of update it is (`BR-012`, `BR-027`). It needs no represented Visit, because a photo is
+        // Job-level evidence even when the Job has no Visit yet (`BR-015`, `BR-051`), and each kind it
+        // offers is drawn on the capability the API enforces for that kind: the Job update capability
+        // for a note, and the evidence capability for a photo (`BR-006`, `BR-007`). A technician who
+        // may record evidence therefore reaches the camera and the picker without being given the
+        // Manager's Job capability (`BR-009`, `docs/decisions/015-evidence-capabilities.md`).
+        if (
+            details != null &&
+            (canUpdateJob || canAddEvidencePhoto) &&
+            state.pendingPhotos.isEmpty()
+        ) {
             ExtendedFloatingActionButton(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -272,16 +307,64 @@ fun JobDetailsScreen(
                 Text(stringResource(R.string.job_activity_add_update))
             }
         }
+
+        // The photo tray is the technician's working state, so while it holds anything it takes the
+        // bottom of the screen: the next thing they want is another capture or saving what they have,
+        // and the floating action would otherwise sit on top of it (`BR-012`).
+        if (state.pendingPhotos.isNotEmpty()) {
+            JobPhotoTray(
+                photos = state.pendingPhotos,
+                uploads = state.photoUploads,
+                isSubmitting = state.isSubmittingPhotos,
+                onCapture = onCapturePhoto,
+                onSubmit = onSubmitPendingPhotos,
+                onRemove = onRemovePendingPhoto,
+                photoImages = photoImages,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
     }
 
     if (details != null && showAddActivity) {
-        AddActivityTextDialog(
+        JobUpdateSheet(
+            // A note is the represented Visit's, so a Job with no Visit has none to write here, and
+            // writing one takes the Job update capability the API enforces for it (`BR-015`,
+            // `BR-051`, `BR-066`).
+            canWriteNote = canUpdateJob && details.selectedVisit != null,
+            // A photo is authorized by the evidence capability, which the technician who records the
+            // field evidence holds (`BR-006`, `BR-009`).
+            canAddPhoto = canAddEvidencePhoto,
             isSubmitting = state.isSubmitting,
-            onConfirm = { body ->
+            onConfirmNote = { body ->
                 showAddActivity = false
                 onAddActivityText(body)
             },
+            // Both photo sources keep the flow the photo slice owns — capture or pick, then the
+            // review, then the tray — so the sheet hands over rather than growing a second photo UI
+            // (`BR-015`, `D3`).
+            onTakePhoto = {
+                showAddActivity = false
+                onCapturePhoto()
+            },
+            onChoosePhotos = {
+                showAddActivity = false
+                onChoosePhotos()
+            },
             onDismiss = { showAddActivity = false },
+        )
+    }
+
+    // The photo the technician just captured. Dismissing it keeps the photo — it is already recorded
+    // on the device — so the explicit Discard is the only way to lose one (`BR-014`).
+    state.capturedPhoto?.let { captured ->
+        JobPhotoReviewSheet(
+            photo = captured,
+            initialPhase = state.photoPhase,
+            isBusy = state.isSubmittingPhotos,
+            photoImages = photoImages,
+            onConfirm = onConfirmCapturedPhoto,
+            onDiscard = onDiscardCapturedPhoto,
+            onDismiss = onKeepCapturedPhoto,
         )
     }
 
@@ -323,64 +406,6 @@ fun JobDetailsScreen(
             onConfirm = onConfirmPendingAction,
             onDismiss = onDismissPendingAction,
         )
-    }
-}
-
-/** Text-only Activity composer. Photos and audio are intentionally left for the next slice. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddActivityTextDialog(
-    isSubmitting: Boolean,
-    onConfirm: (body: String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var body by rememberSaveable { mutableStateOf("") }
-    val trimmed = body.trim()
-    ModalBottomSheet(
-        onDismissRequest = {
-            if (!isSubmitting) onDismiss()
-        },
-        sheetState = sheetState,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.job_activity_add_update),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            OutlinedTextField(
-                value = body,
-                onValueChange = { body = it },
-                modifier = Modifier.fillMaxWidth().testTag(JobDetailsActivityTextTag),
-                label = { Text(stringResource(R.string.job_activity_text_label)) },
-                placeholder = { Text(stringResource(R.string.job_activity_text_placeholder)) },
-                minLines = 4,
-                enabled = !isSubmitting,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onDismiss, enabled = !isSubmitting) {
-                    Text(stringResource(R.string.job_activity_cancel_update))
-                }
-                Button(
-                    onClick = { onConfirm(trimmed) },
-                    enabled = trimmed.isNotEmpty() && !isSubmitting,
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Text(stringResource(R.string.job_activity_save_update))
-                }
-            }
-        }
     }
 }
 
@@ -456,6 +481,7 @@ private fun JobDetailsContent(
     onOpenReschedule: () -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
     onRetryActivity: () -> Unit,
+    photoImages: JobPhotoImages,
 ) {
     Column(
         modifier = Modifier
@@ -491,10 +517,23 @@ private fun JobDetailsContent(
             canManage = canManageTechnicians,
             onManage = onOpenAssign,
         )
-        JobActivitySection(state = state, onRetry = onRetryActivity)
+        JobActivitySection(
+            state = state,
+            onRetry = onRetryActivity,
+            photoImages = photoImages,
+        )
         // Keeps the last timeline entry clear of the floating Add update action the design places
-        // over the timeline, so it is never covered (`Figma/src/screens/JobDetails.tsx`).
-        Spacer(Modifier.height(JobDetailsBottomClearance))
+        // over the timeline, so it is never covered (`Figma/src/screens/JobDetails.tsx`), and clear of
+        // the photo tray when it is open, which is taller than the action it replaces.
+        Spacer(
+            Modifier.height(
+                if (state.pendingPhotos.isEmpty()) {
+                    JobDetailsBottomClearance
+                } else {
+                    JobDetailsTrayClearance
+                },
+            ),
+        )
     }
 }
 

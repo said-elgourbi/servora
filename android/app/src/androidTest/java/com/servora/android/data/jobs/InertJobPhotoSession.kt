@@ -1,0 +1,107 @@
+package com.servora.android.data.jobs
+
+import com.servora.android.data.offline.OfflineSync
+import com.servora.android.data.offline.OutboxFailureReason
+import com.servora.android.data.offline.OutboxOperation
+import com.servora.android.data.offline.OutboxStore
+import com.servora.android.data.session.AuthenticatedSubject
+import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.PendingJobPhoto
+import java.io.File
+import java.time.Clock
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+
+/**
+ * A photo session that holds nothing, for instrumented tests about something else.
+ *
+ * The Job Details destination is wired by the application shell, so a navigation test has to build the
+ * ViewModel that destination uses. These tests are about where navigation goes, not about photo
+ * evidence, so every collaborator here answers the smallest honest thing: no pending photos, no bytes
+ * and no uploads (`qa.md` §6.2).
+ */
+fun inertJobPhotoSession(): JobPhotoSession = JobPhotoSession(
+    pending = InertPendingJobPhotoStore,
+    files = InertJobPhotoFiles,
+    processing = InertJobPhotoProcessing,
+    outbox = InertOutboxStore,
+    subject = InertSubject,
+    offlineSync = InertOfflineSync,
+    clock = Clock.systemUTC(),
+)
+
+private object InertPendingJobPhotoStore : PendingJobPhotoStore {
+    override fun pending(subjectId: String, jobId: String): Flow<List<PendingJobPhoto>> =
+        flowOf(emptyList())
+
+    override suspend fun record(photo: PendingJobPhoto) = Unit
+
+    override suspend fun updateReview(photoId: String, phase: JobPhotoPhase?, note: String?) = Unit
+
+    override suspend fun submit(photo: PendingJobPhoto): Boolean = false
+
+    override suspend fun find(photoId: String): PendingJobPhoto? = null
+
+    override suspend fun remove(photoId: String) = Unit
+}
+
+private object InertJobPhotoFiles : JobPhotoFiles {
+    override fun fileFor(
+        subjectId: String,
+        photoId: String,
+        contentType: JobPhotoContentType,
+    ): File = File("app-private/job-photos/$subjectId/$photoId.${contentType.extension}")
+
+    override fun exists(path: String): Boolean = false
+
+    override fun readBytes(path: String): ByteArray? = null
+
+    override fun write(path: String, bytes: ByteArray): Boolean = false
+
+    override fun delete(path: String) = Unit
+}
+
+private object InertJobPhotoProcessing : JobPhotoProcessing {
+    override suspend fun convertToJpeg(bytes: ByteArray): ByteArray? = null
+
+    override suspend fun fitToUploadLimit(bytes: ByteArray): ByteArray? = null
+}
+
+private object InertOutboxStore : OutboxStore {
+    override suspend fun record(operation: OutboxOperation) = Unit
+
+    override suspend fun head(subjectId: String): OutboxOperation? = null
+
+    override suspend fun markInFlight(operationId: String) = Unit
+
+    override suspend fun markApplied(operationId: String) = Unit
+
+    override suspend fun markRetryable(
+        operationId: String,
+        reason: OutboxFailureReason,
+        at: Long,
+    ) = Unit
+
+    override suspend fun markRejected(
+        operationId: String,
+        reason: OutboxFailureReason,
+        at: Long,
+    ) = Unit
+
+    override suspend fun recoverInFlight() = Unit
+
+    override suspend fun awaitingCount(subjectId: String): Int = 0
+
+    override suspend fun rejected(subjectId: String): List<OutboxOperation> = emptyList()
+
+    override suspend fun queuedFor(subjectId: String, targetId: String): List<OutboxOperation> =
+        emptyList()
+}
+
+private object InertSubject : AuthenticatedSubject {
+    override fun current(): String? = "inert-subject"
+}
+
+private object InertOfflineSync : OfflineSync {
+    override fun requestSync() = Unit
+}

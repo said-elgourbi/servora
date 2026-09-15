@@ -197,6 +197,22 @@ const PERMISSION_TEMPLATES = [
     descriptionEn: 'Record the outcome of assigned visits.',
     descriptionFr: 'Enregistrer le resultat des visites assignees.',
   },
+  {
+    code: 'evidence.view',
+    nameEn: 'View evidence',
+    nameFr: 'Voir les preuves',
+    descriptionEn:
+      'View evidence attached to a Job and read its stored content.',
+    descriptionFr:
+      'Voir les preuves jointes a un travail et lire leur contenu enregistre.',
+  },
+  {
+    code: 'evidence.photo.add',
+    nameEn: 'Add photo evidence',
+    nameFr: 'Ajouter des preuves photo',
+    descriptionEn: 'Attach a photo to a Job as field evidence.',
+    descriptionFr: 'Joindre une photo a un travail comme preuve terrain.',
+  },
 ] as const;
 
 const ROLE_TEMPLATES = {
@@ -218,6 +234,10 @@ const ROLE_TEMPLATES = {
       'VISIT_UPDATE_ASSIGNED_STATUS',
       'VISIT_ADD_NOTE',
       'VISIT_RECORD_OUTCOME',
+      // A technician records the evidence of the work performed, so the evidence capabilities are
+      // part of the default field role rather than a Manager grant (`BR-009`, `BR-015`, tracker 029).
+      'evidence.view',
+      'evidence.photo.add',
     ],
   },
 } as const;

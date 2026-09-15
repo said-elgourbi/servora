@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- The only capability this slice needs: reaching the Servora API. Device/GPS/camera
-         permissions arrive with the field-work features that use them. -->
+    <!-- The only capability this slice needs: reaching the Servora API. Device/GPS permissions arrive
+         with the field-work features that use them. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Photo evidence is captured by the device's own camera application, through
+         `ACTION_IMAGE_CAPTURE`, so Servora needs no camera permission and no camera feature: the
+         camera app owns the capture and writes the photo into this app's private storage. The
+         hardware is therefore declared optional, so the app installs on a device without one. -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />    
 
     <!-- Reads whether a network is available, so a queued operation can be replayed when one comes
          back (`docs/architecture/offline-first-architecture.md` §6). It is a trigger, not a gate:
@@ -44,6 +52,31 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          Exposes exactly one directory — the Job photo evidence a capture is written into — so the
+          device's camera application can write the photo through a content URI instead of a `file://`
+          path (offline standard §9, `res/xml/file_paths.xml`).
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
+
+    <!--
+      `ACTION_IMAGE_CAPTURE` is resolved through the package manager, and on Android 11+ an
+      application that queries another one must declare the intent it looks for (`BR-042`).
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
 
 </manifest>

@@ -84,9 +84,16 @@ it; the API never returns presentation text (`BR-028`).
 | `VISIT_TECHNICIAN_ROLE_CHANGED` | Visit | `technicianName?`, `previousRoleCode`, `roleCode` |
 | `VISIT_OUTCOME_RECORDED`      | Visit | `outcomeCode`, `outcomeSummary?`                |
 | `VISIT_NOTE_ADDED`            | Visit | `body`                                          |
+| `JOB_PHOTO_ADDED`             | Job   | `photoId`, `photoPhase?`, `body?`               |
 
 `fromStatus`/`toStatus` are the status codes the kind's vocabulary defines (`BR-058` for a Job,
 `BR-074` for a Visit); the kind names which vocabulary the codes belong to.
+
+`photoId` is the photo the entry records, and the value its bytes are read with
+(`GET /jobs/:id/photos/:photoId/content`, `docs/api/job-photos.md` §4). `photoPhase` is the field-work
+phase the technician chose (`BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK`) — a stable code, not a label
+(`BR-028`, `BR-041`) — and a photo's note travels in `body`, the same field a text update uses.
+`JOB_PHOTO_ADDED` is Job-level, because that is where a photo is recorded (`BR-015`, `BR-051`).
 
 ### 3.3 The Visit sequence
 
@@ -100,8 +107,9 @@ identifier, and never a cross-system key (`BR-052`, `docs/domain/job-visit-domai
 - Nothing outside the caller's organization: every query is scoped by `organization_id` (`BR-001`).
 - Nothing for a Job whose Customer the organization has deleted: `BR-023` hides a deleted customer's
   Jobs, so the route answers `404` rather than disclosing the Job.
-- No event vocabulary outside the table above, and no `photos`/`audio`/`files`: those evidence kinds
-  have no authoritative source yet (`BR-027`).
+- No event vocabulary outside the table above. Photos are the one evidence kind that has an authoritative
+  source, so `JOB_PHOTO_ADDED` is the one evidence event; `audio` and `files` still have none and no kind
+  is invented for them (`BR-027`, `BR-042`).
 - No pagination: the read returns the whole history, newest-first. Ordering and row limits are
   presentation concerns; pagination is a later decision.
 

@@ -1,6 +1,7 @@
 package com.servora.android.ui.jobs
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -27,6 +28,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobStatus
@@ -59,6 +61,19 @@ private val ActivityLineWidth = 2.dp
 private val ActivityRailSpacing = 12.dp
 private val ActivityRowSpacing = 20.dp
 
+/*
+ * The Job Activity section of the Job Details screen (`BR-080`).
+ *
+ * It is a projection of authoritative records and is never a second list of its own: the photo gallery
+ * it draws is built from the `JOB_PHOTO_ADDED` entries the API returned, and the timeline below it is
+ * the API's own order (`BR-001`, `BR-080`).
+ *
+ * Adding an update is the technician's action, and it is offered as the screen's one Add update
+ * action rather than beside the Activity: an update is a note or a photo, and two entry points for
+ * one job made the technician choose a place before choosing what they were recording (`BR-012`,
+ * `BR-015`, `BR-027`).
+ */
+
 /**
  * The Job's unified, chronological activity, newest first (`BR-080`).
  *
@@ -67,11 +82,16 @@ private val ActivityRowSpacing = 20.dp
  * a Visit-level entry states its Visit as the human-readable sequence `Visit 1`, `Visit 2`, … — never
  * a database id. Each entry is a title/action, with the member, time and Visit context as secondary
  * metadata, and a marker on a connecting vertical line (`Figma/src/screens/JobDetails.tsx`).
+ *
+ * Photos the backend accepted are gathered into a gallery above the timeline (`BR-015`), because a
+ * photo is read as an image rather than as a line of text; their entries stay in the timeline, since
+ * the Activity is the account of what happened (`BR-080`).
  */
 @Composable
 internal fun JobActivitySection(
     state: JobDetailsUiState,
     onRetry: () -> Unit,
+    photoImages: JobPhotoImages = JobPhotoImages.None,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth().testTag(JobActivityTag)) {
@@ -79,11 +99,30 @@ internal fun JobActivitySection(
             label = stringResource(R.string.job_activity_label),
             count = state.activity?.takeIf { it.isNotEmpty() }?.size,
         )
+
         when {
             state.showsActivityLoading -> ActivityLoading()
             state.activityFailure != null -> ActivityFailure(onRetry = onRetry)
             state.activity.isNullOrEmpty() -> ActivityEmpty()
-            else -> ActivityTimeline(state.activity)
+            else -> {
+                val photos = jobActivityPhotos(state.activity)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    // The photos the backend accepted, read as images rather than as lines of text.
+                    // Their entries stay in the timeline below, because the Activity is the account of
+                    // what happened (`BR-080`).
+                    if (photos.isNotEmpty()) {
+                        JobPhotoGallery(
+                            photos = photos,
+                            jobId = state.jobId,
+                            photoImages = photoImages,
+                        )
+                    }
+                    ActivityTimeline(state.activity)
+                }
+            }
         }
     }
 }
@@ -282,14 +321,29 @@ private fun activityTitle(event: JobActivityEvent): String =
         }
 
         JobActivityKind.VISIT_NOTE_ADDED -> event.body.orEmpty()
+
+        // A photo is evidence (`BR-015`): the entry names the phase it was taken in, and its own note
+        // (when there is one) is the entry's text — the same place a text update's body appears.
+        JobActivityKind.JOB_PHOTO_ADDED -> {
+            val label = jobPhotoPhaseOrNull(event.photoPhase)
+            if (label == null) {
+                stringResource(R.string.job_photo_activity_added_generic)
+            } else {
+                stringResource(R.string.job_photo_activity_added, stringResource(
+                    jobPhotoPhaseLabel(label),
+                ))
+            }
+        }
     }
 
-/** The optional secondary text an entry carries: an outcome's summary. */
+/** The optional secondary text an entry carries: an outcome's summary, or a photo's note. */
 @Composable
 private fun activityContent(event: JobActivityEvent): String? =
     when (event.kind) {
         JobActivityKind.VISIT_OUTCOME_RECORDED ->
             event.outcomeSummary?.takeIf { it.isNotBlank() }
+
+        JobActivityKind.JOB_PHOTO_ADDED -> event.body?.takeIf { it.isNotBlank() }
 
         else -> null
     }

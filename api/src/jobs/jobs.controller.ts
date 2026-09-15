@@ -10,19 +10,39 @@ import {
   Post,
   Put,
   Req,
+  StreamableFile,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthApiError } from '../auth/auth-error.js';
 import { AuthGuard } from '../auth/auth.guard.js';
-import { CUSTOMER_PERMISSIONS, JOB_PERMISSIONS } from '../auth/permissions.js';
+import {
+  CUSTOMER_PERMISSIONS,
+  EVIDENCE_PERMISSIONS,
+  JOB_PERMISSIONS,
+} from '../auth/permissions.js';
 import { RequirePermissions } from '../auth/permissions.decorator.js';
 import { PermissionsGuard } from '../auth/permissions.guard.js';
 import type { PermissionedRequest } from '../auth/permissions.guard.js';
+import { ObjectStorageError } from '../storage/object-storage.js';
 import { DomainValidationError } from '../validation/domain-validation.js';
 import { toJobDetailsDto } from './job-details.dto.js';
 import type { JobDetailsDto, JobDetails } from './job-details.dto.js';
 import { toJobActivityDto } from './job-activity.js';
 import type { JobActivityDto } from './job-activity.js';
+import {
+  MAX_JOB_PHOTO_BYTES,
+  parseCreateJobPhotoDto,
+  validateJobPhotoUpload,
+} from './job-photo.dto.js';
+import type { JobPhotoUpload } from './job-photo.dto.js';
+import {
+  JobPhotoNotFoundError,
+  JobPhotoOperationReusedError,
+  JobPhotosService,
+} from './job-photos.service.js';
 import {
   parseAssignVisitTechniciansDto,
   parseAddVisitNoteDto,
@@ -60,6 +80,12 @@ import {
  * reuse the one that exists; the interim decision and its open question are recorded in
  * `docs/api/job-actions.md` §2 and `docs/tracker/018-android-job-actions.md`.
  *
+ * The **evidence routes** are the exception, and deliberately so: a photo is added by the technician
+ * who took it (`BR-015`, `BR-027`), so they are guarded by the evidence capabilities the catalogue
+ * defines for that purpose (`EVIDENCE_PERMISSIONS`) instead of by a Manager capability. The decision
+ * and the per-kind catalogue are recorded in `docs/decisions/015-evidence-capabilities.md` and
+ * `docs/api/job-photos.md` §2.
+ *
  * Every action is an explicit, authorized business action whose outcome the service records in
  * append-only history (`BR-066`, `BR-067`). This controller orchestrates and maps failures onto the
  * HTTP contract; it decides no business rule of its own.
@@ -67,7 +93,10 @@ import {
 @Controller('jobs')
 @UseGuards(AuthGuard, PermissionsGuard)
 export class JobsController {
-  constructor(private readonly jobs: JobsService) {}
+  constructor(
+    private readonly jobs: JobsService,
+    private readonly photos: JobPhotosService,
+  ) {}
 
   @Get(':id')
   @RequirePermissions(CUSTOMER_PERMISSIONS.VIEW)
@@ -222,6 +251,86 @@ export class JobsController {
     }
   }
 
+  /**
+   * Adds one photo to a Job's Activity and returns the refreshed timeline (`BR-015`, `BR-027`).
+   *
+   * A photo is field evidence a technician captures while working, so it is offered on the Job rather
+   * than on a Visit: a Job may exist with no Visit at all (`BR-051`), and the camera must not depend
+   * on one. The bytes are validated before they become evidence (`ADR-013` D7) and the write is
+   * idempotent on the device's own operation id (`BR-031`), so a retry after a timeout returns the
+   * original activity instead of storing the photo twice.
+   *
+   * `evidence.photo.add` guards the route rather than `JOB_UPDATE`: the caller is the technician who
+   * took the photo, and the default Technician role does not update Jobs (`BR-009`,
+   * `docs/decisions/015-evidence-capabilities.md`).
+   *
+   * The part is read through the same multipart handling the API already has, bounded by
+   * `MAX_JOB_PHOTO_BYTES`; an oversized body is refused by the parser before it is buffered further.
+   */
+  @Post(':id/photos')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(EVIDENCE_PERMISSIONS.PHOTO_ADD)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_JOB_PHOTO_BYTES, files: 1 },
+    }),
+  )
+  async addPhoto(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @UploadedFile() file: JobPhotoUpload | undefined,
+  ): Promise<JobActivityDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseCreateJobPhotoDto(body));
+    const photo = parseInput(() => validateJobPhotoUpload(file));
+    try {
+      const events = await this.photos.addJobPhoto(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+        photo,
+      );
+      return toJobActivityDto(id, events);
+    } catch (error) {
+      throw mapPhotoError(error);
+    }
+  }
+
+  /**
+   * Returns one photo's bytes (`BR-015`).
+   *
+   * Evidence travels through the API on the API port, never through a presigned URL: the request is
+   * authorized like every other one, the object's key is derived from the record rather than supplied
+   * by the client, and moving to a provider later stays a configuration change (`ADR-013` D6.4, D7).
+   *
+   * `evidence.view` is required in its own right: adding photo evidence does not grant reading it,
+   * so the capability can be withdrawn per kind (`BR-006`, tracker 029 D1b).
+   */
+  @Get(':id/photos/:photoId/content')
+  @RequirePermissions(EVIDENCE_PERMISSIONS.VIEW)
+  async readPhotoContent(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('photoId') photoId: string,
+  ): Promise<StreamableFile> {
+    const authorization = authorizationOf(request);
+    try {
+      const object = await this.photos.readJobPhotoContent(
+        { organizationId: authorization.organizationId },
+        id,
+        photoId,
+      );
+      return new StreamableFile(object.body, {
+        type: object.contentType,
+        length: object.byteSize,
+      });
+    } catch (error) {
+      throw mapPhotoError(error);
+    }
+  }
+
   /** Runs one action and answers with the Job as it now stands, or maps its failure. */
   private async action(
     perform: () => Promise<JobDetails>,
@@ -268,6 +377,51 @@ function parseInput<T>(parser: () => T): T {
     }
     throw error;
   }
+}
+
+/** Maps a Job photo failure onto the HTTP contract (`dev.md` §7). */
+function mapPhotoError(error: unknown): unknown {
+  if (error instanceof JobNotFoundError) {
+    return jobNotFound();
+  }
+  if (error instanceof JobPhotoNotFoundError) {
+    return photoNotFound();
+  }
+  if (error instanceof JobPhotoOperationReusedError) {
+    return new HttpException(
+      {
+        statusCode: HttpStatus.CONFLICT,
+        code: 'PHOTO_OPERATION_REUSED',
+        message: 'That operation id was already used for another job.',
+      },
+      HttpStatus.CONFLICT,
+    );
+  }
+  if (error instanceof ObjectStorageError) {
+    // The evidence was not stored, so the request did not succeed. Answering with a success status
+    // would tell the client its photo is safe when the backend does not hold it (`BR-015`, `BR-042`).
+    return new HttpException(
+      {
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+        code: 'STORAGE_UNAVAILABLE',
+        message: 'The photo could not be stored.',
+      },
+      HttpStatus.SERVICE_UNAVAILABLE,
+    );
+  }
+  return error;
+}
+
+/** The photo is not in the caller's organization and Job, or its bytes are unavailable (`BR-001`). */
+function photoNotFound(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.NOT_FOUND,
+      code: 'JOB_PHOTO_NOT_FOUND',
+      message: 'Job photo was not found.',
+    },
+    HttpStatus.NOT_FOUND,
+  );
 }
 
 /** Maps a Job or Visit action failure onto the HTTP contract (`dev.md` §7). */

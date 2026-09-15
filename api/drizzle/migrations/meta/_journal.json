@@ -64,6 +64,20 @@
       "when": 1789387200000,
       "tag": "0008_customer_lifecycle_history",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789482613678,
+      "tag": "0009_job_photos",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789569010000,
+      "tag": "0010_evidence_permissions",
+      "breakpoints": true
     }
   ]
 }

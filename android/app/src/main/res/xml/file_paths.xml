@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The one directory the app's `FileProvider` exposes, so the device's camera application can write a
+  captured photo into app-private storage (BR-015, offline standard §9).
+
+  The path is the feature's own `job-photos` directory: no other application, and no other part of
+  the app, is given access to anything outside it.
+-->
+<paths>
+    <files-path
+        name="job-photos"
+        path="job-photos/" />
+</paths>

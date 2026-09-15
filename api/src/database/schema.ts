@@ -843,6 +843,71 @@ export const jobPropertyHistory = pgTable(
   ],
 );
 
+// --------------------------------------------------------------- job photos
+
+/**
+ * One photo a field technician attached to a Job — evidence, not a Job field (`BR-015`, `BR-027`).
+ *
+ * The photo is recorded on the **Job**, so it can be captured whether or not the Job has a Visit: a
+ * Job may exist with no Visit at all (`BR-051`), and the technician's camera must not depend on a
+ * Visit existing. The row holds the object's **key**, never a URL and never a signed URL, because
+ * read URLs are derived when they are needed and stay provider-agnostic (`ADR-013` D6.4).
+ *
+ * `client_operation_id` is the idempotency key the device generated once, before its first attempt
+ * (`BR-031`, offline standard §5): it is unique per organization, so a replay after a timeout returns
+ * the original row instead of recording the evidence twice.
+ *
+ * `phase` is the stable field-work phase the technician chose (`BEFORE_WORK`, `DURING_WORK` or
+ * `AFTER_WORK` — codes, never localized text, `BR-028`, `BR-041`). `captured_at` is the device
+ * instant the photo was taken: display and provenance only, never business time (`BR-031`) —
+ * `recorded_at` is the backend's own.
+ */
+export const jobPhotos = pgTable(
+  'job_photos',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    uploaderMembershipId: uuid('uploader_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    phase: varchar('phase', { length: 20 }).notNull(),
+    note: text('note'),
+    objectKey: varchar('object_key', { length: 512 }).notNull(),
+    contentType: varchar('content_type', { length: 100 }).notNull(),
+    byteSize: integer('byte_size').notNull(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'job_photos_phase_check',
+      sql`${table.phase} in ('BEFORE_WORK', 'DURING_WORK', 'AFTER_WORK')`,
+    ),
+    check(
+      'job_photos_content_type_check',
+      sql`${table.contentType} in ('image/jpeg', 'image/png', 'image/webp')`,
+    ),
+    check('job_photos_byte_size_check', sql`${table.byteSize} > 0`),
+    index('job_photos_organization_job_recorded_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.recordedAt,
+    ),
+    uniqueIndex('job_photos_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
 // ------------------------------------------------------------------- visits
 
 export const visits = pgTable(

@@ -46,7 +46,17 @@ Initial supported languages are **English** and **French**. Development rules li
 >
 > Local object storage — MinIO behind an S3-only application contract, so production can use a
 > third-party S3-compatible provider — is `docs/tracker/023-object-storage-minio.md`
-> (decision: `docs/decisions/013-object-storage-minio-and-s3.md`).
+> (decision: `docs/decisions/013-object-storage-minio-and-s3.md`). The storage adapter and the first
+> evidence feature, technician Job photo updates, are `docs/tracker/027-android-job-photo-updates.md`
+> (wire contract: `docs/api/job-photos.md`), consolidated into one entry point by
+> `docs/tracker/028-android-unified-job-update.md`.
+>
+> The photo-evidence work that follows — the capability set, a photo picker, a viewer, offline evidence
+> and the lifecycle questions — is planned in `docs/tracker/029-photo-evidence-phases.md`. **Its Phase 1,
+> the evidence capability set (`evidence.view`/`evidence.photo.add`), Phase 2, the content-type-aware
+> capture pipeline, and Phase 3, the two photo sources (camera and the system photo picker) with the
+> client permission gate, are implemented**, with the capability decision in
+> `docs/decisions/015-evidence-capabilities.md`; Phase 4 is next and waits on decision D4.
 
 ## Layout
 
@@ -165,4 +175,12 @@ make android-build       # Android debug APK (requires Android SDK)
 - Object storage and the S3 contract (MinIO locally, a third-party S3-compatible provider in
   production): `docs/tracker/023-object-storage-minio.md`
   (decision: `docs/decisions/013-object-storage-minio-and-s3.md`).
+- Technician Job photo updates — capture, offline upload through the outbox, and the Activity gallery:
+  `docs/tracker/027-android-job-photo-updates.md` (wire contract: `docs/api/job-photos.md`).
+- Photo evidence after 028 — the phased plan for the capability set, a gallery picker, a viewer, offline
+  evidence and the lifecycle questions. **Phases 1 (the evidence capability set), 2 (the
+  content-type-aware capture pipeline) and 3 (the camera and system photo picker behind the update
+  action, and the client's evidence gate) have landed; Phase 4 (the viewer) is next and waits on D4.**
+  `docs/tracker/029-photo-evidence-phases.md`
+  (decision: `docs/decisions/015-evidence-capabilities.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.
