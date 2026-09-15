@@ -71,6 +71,15 @@ internal fun CustomersFailureReason.toReplayOutcome(): ReplayOutcome =
     }
 
 /**
+ * Whether a failure means the backend could not be reached, rather than having answered.
+ *
+ * Only this kind of failure may be served from the working set: an answer — a refusal included — is
+ * the backend's own and is never replaced by a copy held on the device (`BR-007`, §2, §10).
+ */
+internal fun CustomersFailureReason.couldNotReachBackend(): Boolean =
+    this == CustomersFailureReason.NETWORK || this == CustomersFailureReason.SERVER
+
+/**
  * What an attempt means for the row the engine is holding (§6).
  *
  * An answered call is applied; a refusal is terminal and kept; anything that never reached the

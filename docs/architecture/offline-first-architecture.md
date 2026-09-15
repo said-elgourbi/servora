@@ -1,20 +1,21 @@
 # Servora — Offline-First Architecture Standard (Android)
 
-> **Status: DEFINED — NOT YET IMPLEMENTED.**
+> **Status: IMPLEMENTED for the operations that adopt it.** The store, the outbox, the replay engine
+> and the triggers exist, and two adopters use them: **Property archive and restore** (`BR-086`) and
+> the **Customer Detail read**. Everything else is still online-only, and §11 keeps the questions the
+> standard deliberately does not answer.
 >
-> This is the standard that offline-capable Android features follow. No offline-capable
-> feature or outbox exists in the repository yet; the first adopter is Property archive/restore
-> (`BR-086`).
+> Decision records: `docs/decisions/012-property-lifecycle-and-permissions.md` (D7, which defined this
+> standard) and `docs/decisions/014-android-offline-engine.md` (the engine as built).
 >
-> Decision record: `docs/decisions/012-property-lifecycle-and-permissions.md`.
+> Implementation record: `docs/tracker/025-android-offline-room-outbox.md`.
 >
-> **Update (2026-09-13).** The **server** half of this contract exists: Property archive and restore
-> accept a client-generated `clientOperationId` and the device `capturedAt`, persist them, and
-> recognise a replay instead of applying it twice (`docs/tracker/013-property-lifecycle.md`,
-> `docs/api/customers.md` §4.2). The local working set and outbox described below are still **not**
-> implemented, so an archive performed with no connectivity is not queued yet.
+> **Update (2026-09-14).** The client half now exists. The **server** half of the Property contract
+> already did: Property archive and restore accept a client-generated `clientOperationId` and the
+> device `capturedAt`, persist them, and recognise a replay instead of applying it twice
+> (`docs/tracker/013-property-lifecycle.md`, `docs/api/customers.md` §4.2).
 >
-> Read together with `Project.md` §13–§15, `Android.md`, `dev.md` §10 and the business rules
+> Read together with `Project.md` §13–§15, `dev.md` §10 and the business rules
 > `BR-013`, `BR-014`, `BR-015`, `BR-031`, `BR-032` and `BR-086`.
 
 ---
@@ -48,11 +49,17 @@ A feature keeps two kinds of local state, and they have different rules.
 | Outbox      | Pending mutations the user performed offline, in the order they were made. | Provisional. Applied only by the backend.                                     |
 
 **Working set.** Reads that must work offline are served from it. It is populated from API
-responses; the client does not merge its own guesses into it.
+responses; the client does not merge its own guesses into it. A read served from it is presented as
+the last answer the backend reported rather than as a current one (`§7`).
 
-**Outbox.** Every offline-capable mutation appends one outbox row and updates the local working
-set optimistically so the technician sees their own action (`BR-012`). Nothing is discarded
-because a request has not succeeded yet (`BR-014`).
+**Outbox.** Every offline-capable mutation appends one outbox row and makes the user's own action
+visible immediately (`BR-012`).
+
+**How the user's own action is shown.** The working set is not written optimistically: it is only
+ever written from an answer the backend gave, because §10 requires a successful read to replace it and
+`BR-086` requires a client never to present an unconfirmed change as done. A queued action is instead
+**derived from the outbox rows** for the entity and presented next to the record, with its state and
+any refusal reason (`docs/decisions/014-android-offline-engine.md` D6).
 
 ---
 
@@ -80,13 +87,20 @@ One row describes one business mutation.
 | `operationId`                                   | Client-generated UUID, created once when the user acts. The idempotency key.            |
 | `operationType`                                 | The stable machine-readable operation code (e.g. `property.archive`, `visit.note.add`). |
 | `targetId`                                      | The entity the operation acts on.                                                       |
-| `organizationId`                                | The tenant the operation was made under, so a replay cannot widen scope.                |
+| `subjectId`                                     | The authenticated subject the operation was made under, so a replay is never attributed to another session. See the note below. |
 | `payload`                                       | The operation's arguments, as the API request body.                                     |
 | `capturedAt`                                    | Device clock at the moment the user acted. Display/diagnostic only (`BR-031`).          |
 | `recordedAt`                                    | The instant the outbox accepted the operation. Ordering within a device.                |
 | `expectedVersion`                               | The version the client last saw, where the entity is versioned (`BR-086`).              |
 | `attemptCount`, `lastAttemptAt`, `lastFailure`  | Retry bookkeeping.                                                                      |
 | `state`                                         | `PENDING`, `IN_FLIGHT`, `FAILED`, `REJECTED`.                                           |
+
+**Why the scope field is `subjectId` and not `organizationId`.** This field exists so a replay cannot
+widen scope. The API resolves the tenant of every request from the session and never names an
+organization to the client — sign-in returns the session id, the token pair and the permission codes
+— so the strongest scope the device can hold is the subject of the access token it was issued. The
+tenant boundary stays entirely with the API, which authorizes every replay (`BR-001`, `BR-007`,
+`BR-039`). Recorded in `docs/decisions/014-android-offline-engine.md` D2.
 
 Rules:
 
@@ -189,17 +203,24 @@ Photos, audio and files are business evidence (`BR-015`, `BR-027`).
 
 These remain **OPEN QUESTION** and must not be invented:
 
-1. Which operations are offline-capable, per feature (`BR-032`).
-2. The concrete conflict strategy per operation (§8).
-3. The disposition of a non-empty outbox at sign-out (§10).
+1. Which operations are offline-capable, per feature (`BR-032`). **Adopted so far:** Property archive
+   and restore (`BR-086`), and the Customer Detail read. Job and Visit actions cannot be queued until
+   their routes accept an idempotency key (§5).
+2. The concrete conflict strategy per operation (§8). **Decided for the Property lifecycle only:**
+   read the version the API reports now, then apply with it (`docs/decisions/014-android-offline-engine.md` D5).
+3. The disposition of a non-empty outbox at sign-out (§10). Pending work is kept; what should happen
+   to it is undecided.
 4. Local data retention for the working set.
 5. Whether a rejected operation can be discarded by the user, and the audit trail for that
    (`BR-014`).
 
 ---
 
-## 12. First adopter
+## 12. Adopters
 
-Property archive and restore (`BR-086`) are the first operations to follow this standard. They are
-offline-capable and carry a `client_operation_id`. Permanent deletion is online-only and must never
-be queued.
+1. **Property archive and restore** (`BR-086`) — offline-capable, carrying a `client_operation_id`.
+   **Permanent deletion is online-only** and must never be queued; a Property **edit** is online-only
+   too, because the API accepts no idempotency key for it (§5).
+2. **The Customer Detail read** — served from the working set when the API cannot be reached, so the
+   path to a Property survives a loss of connectivity. Only a failure that could not reach the backend
+   falls back: an answer, a refusal included, is never replaced by a local copy.

@@ -54,6 +54,7 @@ import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PropertyStatus
 import com.servora.android.ui.components.InfoCard
 import com.servora.android.ui.components.JobStatusPill
+import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
 import com.servora.android.ui.components.addressLine
 import com.servora.android.ui.theme.stateColors
@@ -62,6 +63,9 @@ const val CustomerDetailTag = "customer-detail"
 const val CustomerDetailContentTag = "customer-detail-content"
 const val CustomerDetailAllJobsTag = "customer-detail-all-jobs"
 const val CustomerDetailCreateJobTag = "customer-detail-create-job"
+
+/** Identifies the notice that the values shown are the last the server reported (`§2`). */
+const val CustomerDetailLastReportedTag = "customer-detail-last-reported"
 const val CustomerDetailPropertiesTag = "customer-detail-properties"
 const val CustomerDetailJobsTag = "customer-detail-jobs"
 const val CustomerDetailSeeAllJobsTag = "customer-detail-see-all-jobs"
@@ -110,6 +114,7 @@ fun CustomerDetailScreen(
             detail != null ->
                 CustomerDetailContent(
                     detail = detail,
+                    showingLastReported = state.showingLastReported,
                     canViewProperties = canViewProperties,
                     canAddProperty = canAddProperty,
                     onAddProperty = onAddProperty,
@@ -149,6 +154,7 @@ fun CustomerDetailScreen(
 @Composable
 private fun CustomerDetailContent(
     detail: CustomerDetail,
+    showingLastReported: Boolean,
     canViewProperties: Boolean,
     canAddProperty: Boolean,
     onAddProperty: () -> Unit,
@@ -161,6 +167,16 @@ private fun CustomerDetailContent(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         item { CustomerDetailIdentity(detail) }
+        if (showingLastReported) {
+            // The values are the last the server reported rather than a fresh answer, and the screen
+            // says so instead of presenting a local copy as current (`§2`, `§7`).
+            item {
+                OfflineNotice(
+                    message = stringResource(R.string.offline_last_reported),
+                    tag = CustomerDetailLastReportedTag,
+                )
+            }
+        }
         item { CustomerDetailContactCard(detail.customer) }
         // Properties are their own capability set (`BR-085`), so the section is absent rather than
         // empty for a caller without `properties.view`; the backend independently refuses the read

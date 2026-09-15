@@ -28,6 +28,7 @@ import com.servora.android.data.customers.PropertyDeleteResult
 import com.servora.android.data.customers.PropertyLifecycleRequest
 import com.servora.android.data.customers.PropertyRepository
 import com.servora.android.data.customers.PropertyResult
+import com.servora.android.data.customers.QueuedPropertyOperation
 import com.servora.android.data.customers.UpdateCustomerRequest
 import com.servora.android.data.customers.UpdatePropertyRequest
 import com.servora.android.data.home.ManagerHomeRepository
@@ -81,6 +82,8 @@ import com.servora.android.ui.home.ManagerHomeViewModel
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.theme.ServoraTheme
 import java.time.Clock
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -535,6 +538,10 @@ private class FakePropertyRepository : PropertyRepository {
         propertyId: String,
     ): PropertyDeleteResult =
         PropertyDeleteResult.Failure(CustomersFailureReason.NOT_FOUND)
+
+    override suspend fun queuedOperation(propertyId: String): QueuedPropertyOperation? = null
+
+    override val appliedOperations: Flow<Unit> = emptyFlow()
 }
 
 /** A [ManagerHomeRepository] that answers an empty day, so the shell always has one to render. */

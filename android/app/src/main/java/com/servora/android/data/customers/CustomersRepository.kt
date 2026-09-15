@@ -1,5 +1,7 @@
 package com.servora.android.data.customers
 
+import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.Customer
@@ -100,6 +102,8 @@ interface CustomersRepository {
 class DefaultCustomersRepository @Inject constructor(
     private val api: CustomersApi,
     private val sessionAuthenticator: SessionAuthenticator,
+    private val cache: CustomerDetailCache,
+    private val subject: AuthenticatedSubject,
 ) : CustomersRepository {
 
     override suspend fun listCustomers(filters: CustomerFilters): CustomersResult {
@@ -112,10 +116,32 @@ class DefaultCustomersRepository @Inject constructor(
     override suspend fun loadCustomerDetail(
         customerId: String,
     ): CustomerDetailResult {
+        val subjectId = subject.current()
+            ?: return CustomerDetailResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         val accessToken = sessionAuthenticator.accessToken()
             ?: return CustomerDetailResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
 
-        return readDetail(accessToken, allowRenewal = true, customerId = customerId)
+        return when (
+            val read = readDetail(accessToken, allowRenewal = true, customerId = customerId)
+        ) {
+            is DetailRead.Answered -> {
+                // A successful read replaces the local copy rather than being merged into it (§10).
+                cache.remember(subjectId, customerId, read.payload)
+                CustomerDetailResult.Success(read.detail)
+            }
+
+            is DetailRead.Failed ->
+                // Only a failure that could not reach the backend falls back: a refusal is the
+                // backend's answer, and a copy held on the device must never mask it
+                // (`BR-007`, `BR-042`).
+                if (read.reason.couldNotReachBackend()) {
+                    cache.reported(subjectId, customerId)?.let { reported ->
+                        CustomerDetailResult.Success(reported, ReadSource.WORKING_SET)
+                    } ?: CustomerDetailResult.Failure(read.reason)
+                } else {
+                    CustomerDetailResult.Failure(read.reason)
+                }
+        }
     }
 
     override suspend fun createProperty(
@@ -434,7 +460,7 @@ class DefaultCustomersRepository @Inject constructor(
         accessToken: String,
         allowRenewal: Boolean,
         customerId: String,
-    ): CustomerDetailResult =
+    ): DetailRead =
         try {
             val authorization = "Bearer $accessToken"
             val detail = api.detail(authorization, customerId)
@@ -451,29 +477,35 @@ class DefaultCustomersRepository @Inject constructor(
                 status = PropertyStatus.ARCHIVED.name,
             )
             val jobs = api.jobs(authorization, customerId)
+            val payload = CustomerDetailPayload(
+                detail = detail,
+                properties = properties,
+                archivedProperties = archivedProperties,
+                jobs = jobs,
+            )
             val mapped = detail.toDetail(properties, archivedProperties, jobs)
             if (mapped == null) {
-                CustomerDetailResult.Failure(CustomersFailureReason.UNEXPECTED)
+                DetailRead.Failed(CustomersFailureReason.UNEXPECTED)
             } else {
-                CustomerDetailResult.Success(mapped)
+                DetailRead.Answered(payload = payload, detail = mapped)
             }
         } catch (failure: HttpException) {
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
                 renewAndRetryDetail(accessToken, customerId)
             } else {
-                CustomerDetailResult.Failure(failure.toFailureReason())
+                DetailRead.Failed(failure.toFailureReason())
             }
         } catch (failure: IOException) {
-            CustomerDetailResult.Failure(CustomersFailureReason.NETWORK)
+            DetailRead.Failed(CustomersFailureReason.NETWORK)
         } catch (failure: SerializationException) {
-            CustomerDetailResult.Failure(CustomersFailureReason.UNEXPECTED)
+            DetailRead.Failed(CustomersFailureReason.UNEXPECTED)
         }
 
     /** Retries the detail read once with a renewed session, or reports why it could not renew. */
     private suspend fun renewAndRetryDetail(
         rejectedToken: String,
         customerId: String,
-    ): CustomerDetailResult =
+    ): DetailRead =
         when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
             is SessionRenewal.Renewed ->
                 readDetail(
@@ -483,10 +515,10 @@ class DefaultCustomersRepository @Inject constructor(
                 )
 
             SessionRenewal.Rejected ->
-                CustomerDetailResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+                DetailRead.Failed(CustomersFailureReason.UNAUTHENTICATED)
 
             SessionRenewal.Unavailable ->
-                CustomerDetailResult.Failure(CustomersFailureReason.NETWORK)
+                DetailRead.Failed(CustomersFailureReason.NETWORK)
         }
 
     /**
@@ -617,9 +649,11 @@ private fun CustomerDto.toCustomer(): Customer? {
  * carries.
  *
  * A Job whose status code this build does not know fails the whole read rather than being dropped
- * silently, which is the same contract-mismatch rule the list follows (`BR-042`).
+ * silently, which is the same contract-mismatch rule the list follows (`BR-042`). The working set
+ * holds the same wire answers and maps them with this same function, so an offline read cannot
+ * describe the customer differently from an online one (`BR-041`).
  */
-private fun CustomerDetailDto.toDetail(
+internal fun CustomerDetailDto.toDetail(
     properties: List<CustomerPropertyDto>,
     archivedProperties: List<CustomerPropertyDto>,
     jobs: List<CustomerJobDto>,
@@ -718,3 +752,15 @@ private fun CustomerJobAddressDto.toAddress(): CustomerJobAddress =
         postalCode = postalCode,
         country = country,
     )
+
+/** The outcome of composing the customer detail read, before the caller decides what to report. */
+private sealed interface DetailRead {
+    /** The API answered all four reads; [detail] is the mapped projection. */
+    data class Answered(
+        val payload: CustomerDetailPayload,
+        val detail: CustomerDetail,
+    ) : DetailRead
+
+    /** The read failed; [reason] decides whether the last reported answer may be served instead. */
+    data class Failed(val reason: CustomersFailureReason) : DetailRead
+}

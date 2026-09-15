@@ -1,5 +1,8 @@
 package com.servora.android.data.customers
 
+import com.servora.android.data.offline.InMemoryWorkingSetStore
+import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.CustomerFilters
@@ -10,8 +13,12 @@ import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PropertyStatus
 import java.io.IOException
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
@@ -46,7 +53,7 @@ class CustomersRepositoryTest {
                 )
             },
         )
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         val customers = assertSuccess(repository.listCustomers())
 
@@ -64,7 +71,7 @@ class CustomersRepositoryTest {
     @Test
     fun `sends the filter codes the backend validates`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         repository.listCustomers(
             CustomerFilters(
@@ -80,7 +87,7 @@ class CustomersRepositoryTest {
     @Test
     fun `sends the list's default active-only filter when none is given`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         repository.listCustomers()
 
@@ -91,7 +98,7 @@ class CustomersRepositoryTest {
     @Test
     fun `sends no constraint when the filter is unconstrained`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         repository.listCustomers(CustomerFilters.Unconstrained)
 
@@ -107,7 +114,7 @@ class CustomersRepositoryTest {
             accessToken = "expired-token",
             renewal = SessionRenewal.Renewed(accessToken = "fresh-token"),
         )
-        val repository = DefaultCustomersRepository(api, authenticator)
+        val repository = repository(api, authenticator)
 
         val customers = assertSuccess(repository.listCustomers())
 
@@ -129,7 +136,7 @@ class CustomersRepositoryTest {
 
         assertEquals(
             CustomersFailureReason.UNAUTHENTICATED,
-            assertFailure(DefaultCustomersRepository(api, authenticator).listCustomers()),
+            assertFailure(repository(api, authenticator).listCustomers()),
         )
         assertEquals(2, api.calls)
         assertEquals(1, authenticator.renewals)
@@ -146,7 +153,7 @@ class CustomersRepositoryTest {
 
         assertEquals(
             CustomersFailureReason.UNAUTHENTICATED,
-            assertFailure(DefaultCustomersRepository(api, authenticator).listCustomers()),
+            assertFailure(repository(api, authenticator).listCustomers()),
         )
         assertEquals(1, api.calls)
     }
@@ -162,7 +169,7 @@ class CustomersRepositoryTest {
 
         assertEquals(
             CustomersFailureReason.NETWORK,
-            assertFailure(DefaultCustomersRepository(api, authenticator).listCustomers()),
+            assertFailure(repository(api, authenticator).listCustomers()),
         )
         assertEquals(1, api.calls)
     }
@@ -170,7 +177,7 @@ class CustomersRepositoryTest {
     @Test
     fun `fails without a session and never calls the backend`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = null))
+        val repository = repository(api, authenticator(accessToken = null))
 
         assertEquals(
             CustomersFailureReason.UNAUTHENTICATED,
@@ -212,7 +219,7 @@ class CustomersRepositoryTest {
     @Test
     fun `reports a row this build cannot represent as unexpected`() = runTest {
         val api = FakeCustomersApi(answer = { listOf(customerDto(type = "FRANCHISE")) })
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         assertEquals(CustomersFailureReason.UNEXPECTED, assertFailure(repository.listCustomers()))
     }
@@ -225,7 +232,7 @@ class CustomersRepositoryTest {
             propertiesAnswer = { listOf(propertyDto()) },
             jobsAnswer = { listOf(jobDto()) },
         )
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         val detail = assertDetailSuccess(repository.loadCustomerDetail("c1"))
 
@@ -254,7 +261,7 @@ class CustomersRepositoryTest {
             archivedPropertiesAnswer = { listOf(propertyDto(id = "p2", status = "ARCHIVED")) },
             jobsAnswer = { listOf(jobDto()) },
         )
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         val detail = assertDetailSuccess(repository.loadCustomerDetail("c1"))
 
@@ -275,7 +282,7 @@ class CustomersRepositoryTest {
             jobsAnswer = { listOf(jobDto()) },
         )
         api.propertiesFailure = httpFailure(403)
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         val detail = assertDetailSuccess(repository.loadCustomerDetail("c1"))
 
@@ -291,7 +298,7 @@ class CustomersRepositoryTest {
     fun `reports a refused customer read as forbidden`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
         api.failures += httpFailure(403)
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         // Only the optional Property projection tolerates a refusal; the customer itself does not.
         assertEquals(
@@ -307,7 +314,7 @@ class CustomersRepositoryTest {
             detailAnswer = { detailDto() },
             jobsAnswer = { listOf(jobDto(status = "ARCHIVED")) },
         )
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         assertEquals(
             CustomersFailureReason.UNEXPECTED,
@@ -328,7 +335,7 @@ class CustomersRepositoryTest {
         )
 
         assertDetailSuccess(
-            DefaultCustomersRepository(api, authenticator).loadCustomerDetail("c1"),
+            repository(api, authenticator).loadCustomerDetail("c1"),
         )
 
         assertEquals(1, authenticator.renewals)
@@ -338,7 +345,7 @@ class CustomersRepositoryTest {
     @Test
     fun `fails the detail read without a session and never calls the backend`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = null))
+        val repository = repository(api, authenticator(accessToken = null))
 
         assertEquals(
             CustomersFailureReason.UNAUTHENTICATED,
@@ -359,7 +366,7 @@ class CustomersRepositoryTest {
             answer = { emptyList() },
             createPropertyAnswer = { propertyDto() },
         )
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         val property = assertCreateSuccess(
             repository.createProperty("c1", createRequest()),
@@ -383,7 +390,7 @@ class CustomersRepositoryTest {
     @Test
     fun `fails the create without a session and never calls the backend`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = null))
+        val repository = repository(api, authenticator(accessToken = null))
 
         assertEquals(
             CustomersFailureReason.UNAUTHENTICATED,
@@ -396,7 +403,7 @@ class CustomersRepositoryTest {
     fun `classifies a rejected create payload as validation`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
         api.failures += httpFailure(422)
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+        val repository = repository(api, authenticator(accessToken = "access-token"))
 
         assertEquals(
             CustomersFailureReason.VALIDATION,
@@ -442,7 +449,7 @@ class CustomersRepositoryTest {
         )
 
         assertCreateSuccess(
-            DefaultCustomersRepository(api, authenticator)
+            repository(api, authenticator)
                 .createProperty("c1", createRequest()),
         )
 
@@ -472,8 +479,66 @@ class CustomersRepositoryTest {
                 throw AssertionError("expected a failure, got a property")
         }
 
+    @Test
+    fun `serves the last reported detail when the API cannot be reached`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() }, detailAnswer = { detailDto() })
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+        repository.loadCustomerDetail("c1")
+        api.failures += IOException()
+
+        val result = repository.loadCustomerDetail("c1")
+
+        val success = result as CustomerDetailResult.Success
+        assertEquals(ReadSource.WORKING_SET, success.source)
+        assertEquals("c1", success.detail.customer.id)
+    }
+
+    @Test
+    fun `reports the network failure when nothing was reported yet`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() }, detailAnswer = { detailDto() })
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+        api.failures += IOException()
+
+        val result = repository.loadCustomerDetail("c1")
+
+        assertEquals(CustomersFailureReason.NETWORK, assertDetailFailure(result))
+    }
+
+    @Test
+    fun `does not serve the local copy when the API refuses the read`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() }, detailAnswer = { detailDto() })
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+        repository.loadCustomerDetail("c1")
+        // A refusal is the backend's answer, so the copy held on the device must not be shown in its
+        // place (`BR-007`, `BR-042`).
+        api.failures += httpFailure(403)
+
+        val result = repository.loadCustomerDetail("c1")
+
+        assertEquals(CustomersFailureReason.FORBIDDEN, assertDetailFailure(result))
+    }
+
+    @Test
+    fun `replaces the local copy with the answer of a later read`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            detailAnswer = { detailDto(displayName = "Martha Reynolds") },
+        )
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+        repository.loadCustomerDetail("c1")
+        api.detailAnswer = { detailDto(displayName = "Martha Reynolds-Smith") }
+        repository.loadCustomerDetail("c1")
+        api.failures += IOException()
+
+        val result = repository.loadCustomerDetail("c1")
+
+        val success = result as CustomerDetailResult.Success
+        assertEquals(ReadSource.WORKING_SET, success.source)
+        assertEquals("Martha Reynolds-Smith", success.detail.customer.displayName)
+    }
+
     private fun repositoryFailingCreateWith(failure: Throwable) =
-        DefaultCustomersRepository(
+        repository(
             FakeCustomersApi(answer = { emptyList() }).apply { failures += failure },
             authenticator(accessToken = "access-token"),
         )
@@ -486,9 +551,9 @@ class CustomersRepositoryTest {
             throw AssertionError("expected a failure, got a detail")
     }
 
-    private fun detailDto() = CustomerDetailDto(
+    private fun detailDto(displayName: String = "ABC Property Management") = CustomerDetailDto(
         customer = customerDto(
-            displayName = "ABC Property Management",
+            displayName = displayName,
             propertyCount = 2,
             jobCount = 3,
         ),
@@ -502,7 +567,7 @@ class CustomersRepositoryTest {
             createCustomerAnswer = { createdCustomerDto(id = "created-1") },
         )
         val repository =
-            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+            repository(api, authenticator(accessToken = "access-token"))
 
         val result = repository.createCustomer(
             CreateCustomerRequest.Individual(
@@ -528,7 +593,7 @@ class CustomersRepositoryTest {
             createCustomerAnswer = { createdCustomerDto(id = "created-2") },
         )
         val repository =
-            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+            repository(api, authenticator(accessToken = "access-token"))
 
         repository.createCustomer(
             CreateCustomerRequest.Company(
@@ -559,7 +624,7 @@ class CustomersRepositoryTest {
             renewal = SessionRenewal.Renewed(accessToken = "fresh-token"),
         )
 
-        val result = DefaultCustomersRepository(api, authenticator).createCustomer(
+        val result = repository(api, authenticator).createCustomer(
             CreateCustomerRequest.Individual(
                 CreateIndividualCustomerRequest(
                     type = "INDIVIDUAL",
@@ -584,7 +649,7 @@ class CustomersRepositoryTest {
             createContactAnswer = { contactDto() },
         )
         val repository =
-            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+            repository(api, authenticator(accessToken = "access-token"))
 
         val result = repository.createContact(
             customerId = "c1",
@@ -605,7 +670,7 @@ class CustomersRepositoryTest {
         val api = FakeCustomersApi(answer = { emptyList() })
         api.failures += httpFailure(400)
         val repository =
-            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+            repository(api, authenticator(accessToken = "access-token"))
 
         val result = repository.createContact(
             customerId = "c1",
@@ -622,7 +687,7 @@ class CustomersRepositoryTest {
             updateCustomerAnswer = { createdCustomerDto(id = "c1") },
         )
         val repository =
-            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+            repository(api, authenticator(accessToken = "access-token"))
 
         val result = repository.updateCustomer(
             customerId = "c1",
@@ -651,7 +716,7 @@ class CustomersRepositoryTest {
         val api = FakeCustomersApi(answer = { emptyList() })
         api.failures += httpFailure(400)
         val repository =
-            DefaultCustomersRepository(api, authenticator(accessToken = "access-token"))
+            repository(api, authenticator(accessToken = "access-token"))
 
         val result = repository.updateCustomer(
             customerId = "c1",
@@ -672,7 +737,7 @@ class CustomersRepositoryTest {
             accessToken = "access-token",
             renewal = SessionRenewal.Renewed(accessToken = "fresh-token"),
         )
-        val repository = DefaultCustomersRepository(api, authenticator)
+        val repository = repository(api, authenticator)
 
         val result = repository.updateCustomer(
             customerId = "c1",
@@ -687,7 +752,7 @@ class CustomersRepositoryTest {
     @Test
     fun `fails the edit without a session and never calls the backend`() = runTest {
         val api = FakeCustomersApi(answer = { emptyList() })
-        val repository = DefaultCustomersRepository(api, authenticator(accessToken = null))
+        val repository = repository(api, authenticator(accessToken = null))
 
         val result = repository.updateCustomer(
             customerId = "c1",
@@ -748,8 +813,24 @@ class CustomersRepositoryTest {
     ): FakeSessionAuthenticator =
         FakeSessionAuthenticator(accessToken = accessToken, renewal = renewal)
 
-    private fun repositoryFailingWith(failure: Throwable) =
+    /** The repository under test, with the local store its offline fallback uses. */
+    private fun repository(
+        api: CustomersApi,
+        authenticator: SessionAuthenticator,
+    ): DefaultCustomersRepository =
         DefaultCustomersRepository(
+            api = api,
+            sessionAuthenticator = authenticator,
+            cache = CustomerDetailCache(
+                workingSet = InMemoryWorkingSetStore(),
+                json = Json { ignoreUnknownKeys = true },
+                clock = Clock.fixed(Instant.parse("2026-09-14T12:00:00Z"), ZoneOffset.UTC),
+            ),
+            subject = FakeAuthenticatedSubject(),
+        )
+
+    private fun repositoryFailingWith(failure: Throwable) =
+        repository(
             FakeCustomersApi(answer = { throw failure }),
             authenticator(accessToken = "access-token"),
         )
@@ -811,7 +892,7 @@ class CustomersRepositoryTest {
 /** API double standing in for the generated Retrofit implementation. */
 private class FakeCustomersApi(
     private val answer: suspend () -> List<CustomerDto>,
-    private val detailAnswer: suspend () -> CustomerDetailDto = {
+    var detailAnswer: suspend () -> CustomerDetailDto = {
         error("the detail was not scripted for this test")
     },
     private val propertiesAnswer: suspend () -> List<CustomerPropertyDto> = { emptyList() },

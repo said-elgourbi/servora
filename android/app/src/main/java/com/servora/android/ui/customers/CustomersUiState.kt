@@ -47,12 +47,16 @@ data class CustomersUiState(
  *
  * The Property and Job rows are the backend's projections (`BR-081`), so [detail] stays `null`
  * until a read succeeds and [failureReason] reports why the last read did not.
+ *
+ * [showingLastReported] says the values are the last the backend reported rather than a fresh
+ * answer, because the API could not be reached (`offline-first-architecture.md` §2, §7).
  */
 @Immutable
 data class CustomerDetailUiState(
     val customerId: String,
     val isLoading: Boolean = false,
     val detail: CustomerDetail? = null,
+    val showingLastReported: Boolean = false,
     val failureReason: CustomersFailureReason? = null,
 )
 

@@ -9,6 +9,7 @@ import com.servora.android.data.customers.CustomerDetailResult
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.data.customers.CustomerUpdateResult
 import com.servora.android.data.customers.PropertyCreateResult
 import com.servora.android.data.customers.UpdateCustomerRequest
@@ -344,6 +345,37 @@ class CustomersViewModelTest {
         val state = viewModel.uiState.value.customerDetail
         assertEquals(CustomersFailureReason.NETWORK, state?.failureReason)
         assertNull(state?.detail)
+    }
+
+    @Test
+    fun `marks a detail served from the last reported answer`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            detailResult = CustomerDetailResult.Success(
+                detail(),
+                ReadSource.WORKING_SET,
+            ),
+        )
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.openCustomerDetail("c1")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value.customerDetail
+        assertEquals(true, state?.showingLastReported)
+    }
+
+    @Test
+    fun `does not mark a detail the backend answered`() = runTest(dispatcher) {
+        val repository = RecordingCustomersRepository(
+            detailResult = CustomerDetailResult.Success(detail(), ReadSource.BACKEND),
+        )
+        val viewModel = CustomersViewModel(repository)
+
+        viewModel.openCustomerDetail("c1")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value.customerDetail
+        assertEquals(false, state?.showingLastReported)
     }
 
     @Test

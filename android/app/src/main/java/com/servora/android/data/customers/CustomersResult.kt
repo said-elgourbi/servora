@@ -1,5 +1,6 @@
 package com.servora.android.data.customers
 
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.Customer
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerProperty
@@ -15,8 +16,16 @@ sealed interface CustomersResult {
 
 /** Outcome of a customer detail read. */
 sealed interface CustomerDetailResult {
-    /** The backend returned the customer's detail and its section projections. */
-    data class Success(val detail: CustomerDetail) : CustomerDetailResult
+    /**
+     * The backend returned the customer's detail and its section projections.
+     *
+     * [source] says whether the backend answered or the last answer it reported is being shown
+     * (`offline-first-architecture.md` §2).
+     */
+    data class Success(
+        val detail: CustomerDetail,
+        val source: ReadSource = ReadSource.BACKEND,
+    ) : CustomerDetailResult
 
     /** The read failed; [reason] decides what the UI reports. */
     data class Failure(val reason: CustomersFailureReason) : CustomerDetailResult

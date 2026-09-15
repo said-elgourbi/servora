@@ -44,6 +44,7 @@ import com.servora.android.data.customers.QueuedPropertyOperation
 import com.servora.android.domain.model.PropertyDetail
 import com.servora.android.domain.model.PropertyStatus
 import com.servora.android.ui.components.InfoCard
+import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
 
 const val PropertyDetailTag = "property-detail"
@@ -510,60 +511,9 @@ private fun QueuedOperationNotice(operation: QueuedPropertyOperation) {
 @Composable
 private fun LastReportedNotice() {
     OfflineNotice(
-        message = stringResource(R.string.property_sync_last_reported),
-        isRefusal = false,
-        glyphRes = null,
+        message = stringResource(R.string.offline_last_reported),
         tag = PropertyDetailLastReportedTag,
     )
-}
-
-/**
- * An offline-related notice.
- *
- * Waiting uses the quiet secondary container so it never competes with a refusal, and a refusal uses
- * the error container the screen's other refusals use (`BR-012`, `BR-015`). Only a refusal carries a
- * glyph, which is the same one the screen's other refusals use.
- */
-@Composable
-private fun OfflineNotice(
-    message: String,
-    isRefusal: Boolean,
-    glyphRes: Int?,
-    tag: String,
-) {
-    val container = if (isRefusal) {
-        MaterialTheme.colorScheme.errorContainer
-    } else {
-        MaterialTheme.colorScheme.secondaryContainer
-    }
-    val content = if (isRefusal) {
-        MaterialTheme.colorScheme.onErrorContainer
-    } else {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    }
-    Surface(
-        modifier = Modifier.fillMaxWidth().testTag(tag),
-        shape = MaterialTheme.shapes.large,
-        color = container,
-        contentColor = content,
-        border = BorderStroke(1.dp, content.copy(alpha = 0.25f)),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (glyphRes != null) {
-                Icon(
-                    painter = painterResource(glyphRes),
-                    contentDescription = null,
-                    tint = content,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-            Text(text = message, style = MaterialTheme.typography.bodySmall)
-        }
-    }
 }
 
 /** A refusal the user needs to see, with an explicit way to clear it. */

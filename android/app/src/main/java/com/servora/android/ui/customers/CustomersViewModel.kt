@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.servora.android.data.customers.CustomerDetailResult
 import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CustomerFilters
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -152,6 +153,10 @@ class CustomersViewModel @Inject constructor(
                                 customerDetail = current.copy(
                                     isLoading = false,
                                     detail = result.detail,
+                                    // The values may be the last the backend reported rather than a
+                                    // fresh answer, and the screen says so (`§2`, §7).
+                                    showingLastReported =
+                                        result.source == ReadSource.WORKING_SET,
                                     failureReason = null,
                                 ),
                             )
@@ -163,6 +168,7 @@ class CustomersViewModel @Inject constructor(
                                     // A failed read must not leave the previous detail on
                                     // screen: it described different data (`BR-001`).
                                     detail = null,
+                                    showingLastReported = false,
                                     failureReason = result.reason,
                                 ),
                             )

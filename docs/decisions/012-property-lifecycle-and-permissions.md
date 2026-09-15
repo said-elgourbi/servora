@@ -6,8 +6,9 @@
 > together with their Android flows: see `docs/tracker/013-property-lifecycle.md`. Where the
 > consequences below describe `properties.edit`, `properties.archive` and `properties.delete` as
 > "not enforced by a route yet", that tracker supersedes them. The **client** half of D7's
-> offline/outbox standard — the Room working set and outbox — is still not implemented; D7 itself
-> remains the decision that governs it.
+> offline/outbox standard — the Room working set and outbox — is now implemented as well: see
+> `docs/decisions/014-android-offline-engine.md` and `docs/tracker/025-android-offline-room-outbox.md`.
+> D7 itself remains the decision that governs it.
 
 Extends `ADR-009` (Android session persistence) by naming the offline/outbox standard it builds on.
 No earlier decision is superseded.

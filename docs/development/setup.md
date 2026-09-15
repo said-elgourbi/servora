@@ -144,6 +144,15 @@ The winner is baked into `BuildConfig.API_BASE_URL` and consumed in
 `NetworkModule.provideRetrofit()`, so **changing it requires a rebuild and reinstall** — a
 restart of the app is not enough.
 
+### The offline local store
+
+The app keeps its working set and its outbox in a Room database (`servora-offline.db`). The schema is
+exported to `android/app/schemas` by KSP and **committed**, so a change to the local schema is a
+reviewed change with a migration: the database is built without a destructive fallback, because
+dropping it would drop pending work (`BR-014`,
+`docs/architecture/offline-first-architecture.md` §3). A migration test reads that exported JSON as an
+instrumented-test asset.
+
 ### Physical device
 
 ```bash
