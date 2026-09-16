@@ -73,6 +73,13 @@ make android-lint
 make android-build
 ```
 
+Hygiene commands, run after the last Android command of a task:
+
+```bash
+make android-stop        # stop the Gradle/Kotlin build daemons Android verification leaves running
+make tidy                # the same, plus a report of anything else still running
+```
+
 The agent must use the repository's current commands rather than assuming these commands still exist after project restructuring.
 
 If a required command does not exist, the agent must report that rather than silently substituting an unrelated command.
@@ -316,6 +323,17 @@ If a task appears to require device interaction, the agent stops at that boundar
 
 ---
 
+## 7.4 Release the build daemons when Android verification is finished
+
+The Android verification commands start build daemons that outlive the command (`dev.md` §18). A Gradle daemon holds roughly 5 GB resident and a Kotlin daemon roughly 2.4 GB, and both idle for hours, so a series of tasks exhausts the machine even though every command reported success.
+
+* After the last Gradle command of a task (`make android-test`, `make android-lint`, `make android-build`, `./gradlew assembleDebugAndroidTest`, `compileDebugKotlin`, …), run `make android-stop`.
+* Check the result with `make tidy` (or `pgrep -af 'GradleDaemon|KotlinCompileDaemon'`). Both daemons are gone when nothing is listed.
+* Do not stop a build that is not yours: if a Gradle build started by the product owner is in progress, leave the daemons alone and report that.
+* The same expectation applies to any other long-running process a verification starts (a dev server, a file watcher, a browser-automation run).
+
+---
+
 # 8. Offline & Synchronization Testing
 
 Offline behavior is a critical Servora capability.
@@ -533,6 +551,13 @@ A task may be reported as **Done** only when all applicable items have been veri
 * [ ] New input surfaces are validated.
 * [ ] Authentication/authorization behavior is tested where applicable.
 
+### Hygiene
+
+* [ ] The build daemons the task started were stopped after the last Android command (§7.4, `make android-stop`).
+* [ ] `make tidy` shows nothing left running by the agent.
+* [ ] No scratch files, logs, screenshots or temporary scripts remain; `git status` shows only the intended changes.
+* [ ] Any process or file the task could not clean up is reported in the completion summary (§16).
+
 ### Self-review
 
 * [ ] Agent reviewed its own diff.
@@ -567,6 +592,11 @@ Android
 - Lint: PASS
 - Build: PASS
 - Physical device: AWAITING PRODUCT OWNER
+
+Left running
+- Gradle/Kotlin build daemons: stopped (make android-stop)
+- Foundation stack (make up): untouched
+- Editor tabs opened by the task: none
 
 Manual QA required
 - Verify job assignment on physical Android device.

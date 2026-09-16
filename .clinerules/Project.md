@@ -887,6 +887,7 @@ The agent must:
 * follow established patterns;
 * update tests;
 * update documentation;
+* stop the processes and build daemons the task started, and leave the workspace clean (`dev.md` §18);
 * stop when the approved scope is complete.
 
 ## The agent must NOT
@@ -901,6 +902,8 @@ The agent must:
 * modify database structure without a migration;
 * bypass authentication or authorization;
 * treat UI behavior as a substitute for server-side enforcement;
+* leave the build daemons, background servers or other long-running processes it started behind when the task ends (`dev.md` §18);
+* leave scratch files, logs or files it did not change open in the product owner's editor;
 * claim work is complete without verification.
 
 ---
@@ -989,6 +992,7 @@ A feature is Done only when:
 * lint passes;
 * type checking passes;
 * affected builds pass;
+* the build daemons and background processes the task started are stopped, and no scratch files remain (`dev.md` §18);
 * documentation is updated;
 * tracker status is updated;
 * no known unrelated regressions were introduced;

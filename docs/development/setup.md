@@ -202,6 +202,7 @@ Notes:
 | `make api-test` / `api-test-e2e`                       | API unit tests / API e2e tests (needs `make up`) |
 | `make api-lint` / `api-format`                         | Lint / format the API sources                    |
 | `make android-build` / `android-test` / `android-lint` | Assemble debug APK / JVM tests / lint            |
+| `make android-stop` / `tidy`                           | Stop the Gradle/Kotlin build daemons / stop them and report leftovers (§8) |
 | `make test` / `lint` / `build`                         | Aliases for the API targets                      |
 
 ## 6. Transactional email (`ADR-008`)
@@ -283,7 +284,45 @@ to be.** If reads ever move to presigned URLs, the signature is bound to the exa
 that change would need `S3_PUBLIC_ENDPOINT` plus a second tunnel (`adb reverse tcp:9000 tcp:9000`)
 locally, and an HTTPS endpoint in a release build. The reasoning is recorded in `ADR-013` D7.
 
-## 8. Troubleshooting
+## 8. Resource hygiene (build daemons)
+
+The Android targets are the one part of this setup that leaves heavyweight processes behind.
+`./gradlew` starts a **Gradle daemon** and a **Kotlin daemon** that are deliberately long-lived, and
+nothing about a successful build tells you they are still there. Measured on this working copy after
+a single Android build:
+
+| Process                               | Resident memory | Idle timeout (default) |
+| ------------------------------------- | --------------- | ---------------------- |
+| Gradle daemon (`GradleDaemon`)        | ≈ 4.9 GB        | 3 h                    |
+| Kotlin daemon (`KotlinCompileDaemon`) | ≈ 2.4 GB        | 2 h                    |
+
+Those numbers are why the machine becomes unusable after a few Android tasks: on this machine
+`available` memory went from 3.1 GB to 10.5 GB the moment both daemons were stopped.
+
+```bash
+make android-stop        # stop the Gradle + Kotlin build daemons
+make tidy                # the same, then report anything else still running
+```
+
+Notes:
+
+- `./gradlew --stop` stops the Gradle daemon, and the Kotlin daemon belonging to it exits with it
+  (verified here with Gradle 9.7.1 and Kotlin 2.3.21). `make tidy` additionally reports leftover
+  Node/API processes and the foundation container states, without changing them.
+- `android/gradle.properties` sets `org.gradle.daemon.idletimeout` to 10 minutes, so a daemon nobody
+  stopped releases its heap on its own instead of holding it for three hours. One daemon is still
+  reused across the builds of a single working session (`test` → `lint` → `assemble`).
+- Stopping a daemon is safe: it holds no build result, only caches in `~/.gradle`, and the next build
+  starts a fresh one.
+- **Do not run these while a Gradle build is running** — `make tidy` stops the daemon that build is
+  using. The agent runs it only after its own last Android command (`.clinerules/dev.md` §18,
+  `.clinerules/qa.md` §7.4); the product owner decides when their own builds are finished.
+- `make tidy` never stops the foundation stack, never deletes a volume and never touches a device
+  session. `make down` / `make down-v` remain the explicit ways to stop compose.
+
+---
+
+## 9. Troubleshooting
 
 | Symptom                                                                         | Cause                                                                | Fix                                                                                                             |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -298,3 +337,5 @@ locally, and an HTTPS endpoint in a release build. The reasoning is recorded in 
 | The `minio` container restarts repeatedly, or its healthcheck never goes healthy | The pinned image cannot run on this CPU                              | Use the `-cpuv1` variant of `quay.io/minio/minio` at the same release in `docker-compose.yml`                     |
 | `http://localhost:9001` does not answer                                         | The Console binds a random port when `--console-address` is missing  | Keep `--console-address ":9001"` in the `minio` command                                                          |
 | A presigned URL returns `SignatureDoesNotMatch` (once presigning exists)        | SigV4 covers the `Host` header, so the URL was signed for another host | Sign for exactly the host the client calls; see `ADR-013` D7 and `S3_PUBLIC_ENDPOINT`                             |
+| The machine becomes sluggish and `free -m` shows several GB held by `java`      | Gradle/Kotlin daemons from earlier Android builds are still idling   | `make tidy` (§8)                                                                                                 |
+| A change to `android/gradle.properties` seems to have no effect                 | The running daemon still uses the JVM arguments it started with       | `make android-stop`, then run the build again (§8)                                                               |

@@ -123,9 +123,12 @@ make api-test-e2e        # API e2e tests against PostgreSQL (needs `make up`)
 make api-lint            # API lint (oxlint)
 make api-start           # run the compiled API on the host
 make android-build       # Android debug APK (requires Android SDK)
+make android-stop        # stop the Gradle/Kotlin build daemons an Android build leaves behind
+make tidy                # the same, plus a report of anything else still running
 ```
 
-`make help` lists every target.
+`make help` lists every target. Android builds leave Gradle and Kotlin daemons holding several GB of
+RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/setup.md` §8.
 
 ## Configuration
 
@@ -222,4 +225,7 @@ make android-build       # Android debug APK (requires Android SDK)
   (decisions: `docs/decisions/015-evidence-capabilities.md`,
   `docs/decisions/016-android-image-stack-and-viewer-zoom.md`,
   `docs/decisions/017-viewer-paging-save-and-share.md`).
+- Development-environment hygiene — the Gradle/Kotlin build daemons Android verification leaves
+  behind, and the `make android-stop` / `make tidy` targets that release them:
+  `docs/tracker/030-development-environment-hygiene.md`.
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.
