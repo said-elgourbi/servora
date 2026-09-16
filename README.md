@@ -59,15 +59,17 @@ Initial supported languages are **English** and **French**. Development rules li
 > the evidence capability set (`evidence.view`/`evidence.photo.add`), Phase 2, the content-type-aware
 > capture pipeline, Phase 3, the two photo sources (camera and the system photo picker) with the client
 > permission gate, Phase 4, the full-size viewer, Phase 4b, which turns a re-encoded photo's pixels so
-> what Servora stores is upright, and Phase 4c, the image stack (Coil 3 behind the existing
-> `JobPhotoImages` port, with a per-session memory and disk cache), are implemented**, with the capability
+> what Servora stores is upright, Phase 4c, the image stack (Coil 3 behind the existing
+> `JobPhotoImages` port, with a per-session memory and disk cache), Phase 4d, the viewer's pinch-zoom and
+> pan, and Phase 4e, which makes the viewer page through the Job's photos and lets a photo be saved on the
+> device or shared with another application, are implemented**, with the capability
 > decision in
 > `docs/decisions/015-evidence-capabilities.md`. **Phase 0's remaining questions were decided on
 > 2026-09-15**: the image stack is Coil 3 behind the existing `JobPhotoImages` port (D4b,
 > `docs/decisions/016-android-image-stack-and-viewer-zoom.md`), the viewer gains pinch-zoom and pan (D9,
 > Telephoto), evidence is Job-level (D2), a re-encoded photo is stored upright (D7b), a refused photo
-> becomes discardable (D6c), and the device's media library is not read (D10). **Phase 4d is
-> next; Phase 5 stays blocked because D5 was deferred.**
+> becomes discardable (D6c), and the device's media library is not read (D10). **Phase 6a (a refused
+> photo is explicitly discardable) is next; Phase 5 stays blocked because D5 was deferred.**
 
 ## Layout
 
@@ -192,10 +194,12 @@ make android-build       # Android debug APK (requires Android SDK)
   evidence and the lifecycle questions. **Phases 1 (the evidence capability set), 2 (the
   content-type-aware capture pipeline), 3 (the camera and system photo picker behind the update
   action, and the client's evidence gate), 4 (the full-size viewer a photo opens into), 4b (a
-  re-encoded photo's pixels are turned, so what Servora stores is upright) and 4c (the image stack:
+  re-encoded photo's pixels are turned, so what Servora stores is upright), 4c (the image stack:
   **Coil 3** draws every preview and the full-size photo behind the existing `JobPhotoImages` port,
   with a memory and disk cache keyed and released per session subject, and the API read keeping its
-  `401 → renew once` path) have
+  `401 → renew once` path), 4d (the viewer's **pinch-zoom and pan**, through Telephoto over that stack)
+  and 4e (the viewer **pages** through the Job's photos, and a photo can be **saved on the device** or
+  **shared** with another application) have
   landed; a reported portrait-orientation display defect was fixed on 2026-09-15 (a decode now applies
   the photo's own EXIF orientation — the image stack applies it from 4c on). Phase 0's remaining
   questions were decided on 2026-09-15: evidence is
@@ -205,9 +209,17 @@ make android-build       # Android debug APK (requires Android SDK)
   2026-09-15**: the full-size photo is drawn zoomable and pannable through **Telephoto** over the same
   Coil 3 stack — a pinch zooms, a drag pans within the photo's bounds, and a double-tap goes to the zoom
   ceiling — while the phase badge, the note and the close action, the viewer's three states and the
-  platform's back gesture are unchanged. **Phase 6a (refused photos are explicitly discardable) is
+  platform's back gesture are unchanged. **Phase 4e (viewer paging, save and share) landed on
+  2026-09-15**: the viewer draws the Job's photos as one sequence in the order Job Details presents them
+  (evidence the backend holds first, then the photos this device still holds), a swipe pages only while
+  the photo is at fit — a zoomed photo still pans — the chrome carries the photo's phase, a localized
+  position and its note, and two actions read evidence on `evidence.view`: **Save to device** (a `Servora`
+  album in the device's own gallery; no permission from Android 10, and `WRITE_EXTERNAL_STORAGE` capped
+  at API 28 for Android 8–9, asked for when a save needs it) and **Share** (the platform's own chooser,
+  through one added `FileProvider` path). **Phase 6a (refused photos are explicitly discardable) is
   next**; Phase 5 (offline evidence) stays blocked on the deferred D5.**
   `docs/tracker/029-photo-evidence-phases.md`
   (decisions: `docs/decisions/015-evidence-capabilities.md`,
-  `docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
+  `docs/decisions/016-android-image-stack-and-viewer-zoom.md`,
+  `docs/decisions/017-viewer-paging-save-and-share.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.
