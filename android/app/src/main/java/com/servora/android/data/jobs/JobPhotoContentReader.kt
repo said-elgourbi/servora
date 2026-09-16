@@ -15,10 +15,10 @@ import retrofit2.HttpException
  * ([JobPhotoExportContent]). Evidence is read through the API on the API port, so no storage endpoint,
  * bucket or signature host is configured in or visible to the client (`ADR-013` D7).
  *
- * A session the API refuses is renewed **once**, exactly as every other read of evidence renews: a
- * photo that still cannot be read — a refusal, or a backend that could not be reached — is answered
- * with nothing rather than with an exception, because a caller that has no bytes has nothing to draw
- * or to write (`BR-007`, `BR-042`).
+ * A session the API refuses is renewed **once**, exactly as every other read of evidence renews. What
+ * the caller is told when the bytes do not arrive is **why** ([JobPhotoContentRead]): a photo is
+ * readable offline only when this device already holds it, so a read that did not reach the backend and
+ * a read the backend refused are different things to say to a technician (`D5`, `BR-013`, `BR-042`).
  *
  * The type is what the API served the bytes as; which type the bytes *are* is proven from the bytes
  * themselves by the caller ([JobPhotoContentType.ofBytes]), which is the rule the upload path uses
@@ -30,39 +30,55 @@ class JobPhotoContentReader @Inject constructor(
     private val sessionAuthenticator: SessionAuthenticator,
 ) {
 
-    /** The evidence's bytes, or `null` when they cannot be read by this session. */
-    suspend fun read(jobId: String, photoId: String): JobPhotoContentBytes? {
-        val accessToken = sessionAuthenticator.accessToken() ?: return null
+    /** The evidence's bytes, or why this session did not get them. */
+    suspend fun read(jobId: String, photoId: String): JobPhotoContentRead {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobPhotoContentRead.Unavailable
         return try {
             read(jobId, photoId, accessToken)
         } catch (failure: HttpException) {
-            if (failure.code() != HTTP_UNAUTHORIZED) {
-                return null
-            }
-            when (val renewal = sessionAuthenticator.renew(accessToken)) {
-                is SessionRenewal.Renewed ->
-                    try {
-                        read(jobId, photoId, renewal.accessToken)
-                    } catch (failure: HttpException) {
-                        null
-                    } catch (failure: IOException) {
-                        null
-                    }
+            when {
+                failure.code() == HTTP_UNAUTHORIZED ->
+                    renewAndRead(accessToken, jobId, photoId)
 
-                SessionRenewal.Rejected, SessionRenewal.Unavailable -> null
+                // A backend that answered with a server failure did not deliver the photo; it is a
+                // reachability failure, exactly as the offline standard classifies it (`§13`).
+                failure.code() >= HTTP_SERVER_ERROR -> JobPhotoContentRead.Unreachable
+
+                else -> JobPhotoContentRead.Unavailable
             }
         } catch (failure: IOException) {
-            null
+            JobPhotoContentRead.Unreachable
         }
     }
+
+    /** Reads the photo once more with a renewed session, or reports what the renewal itself meant. */
+    private suspend fun renewAndRead(
+        rejectedToken: String,
+        jobId: String,
+        photoId: String,
+    ): JobPhotoContentRead =
+        when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
+            is SessionRenewal.Renewed ->
+                try {
+                    read(jobId, photoId, renewal.accessToken)
+                } catch (failure: HttpException) {
+                    JobPhotoContentRead.Unavailable
+                } catch (failure: IOException) {
+                    JobPhotoContentRead.Unreachable
+                }
+
+            SessionRenewal.Rejected -> JobPhotoContentRead.Unavailable
+            SessionRenewal.Unavailable -> JobPhotoContentRead.Unreachable
+        }
 
     private suspend fun read(
         jobId: String,
         photoId: String,
         accessToken: String,
-    ): JobPhotoContentBytes =
+    ): JobPhotoContentRead =
         api.jobPhotoContent("Bearer $accessToken", jobId, photoId).use { body ->
-            JobPhotoContentBytes(
+            JobPhotoContentRead.Bytes(
                 bytes = body.bytes(),
                 contentType = body.contentType()?.toString()?.let { served ->
                     JobPhotoContentType.ofMimeType(served)
@@ -72,11 +88,41 @@ class JobPhotoContentReader @Inject constructor(
 
     private companion object {
         const val HTTP_UNAUTHORIZED = 401
+        const val HTTP_SERVER_ERROR = 500
     }
 }
 
-/** One evidence photo's bytes as the backend served them, with the type it declared for them. */
-class JobPhotoContentBytes(
-    val bytes: ByteArray,
-    val contentType: JobPhotoContentType?,
-)
+/**
+ * What one evidence read delivered (`D5`, `BR-042`).
+ *
+ * The distinction exists because it is what a technician can act on: evidence this device does not
+ * hold is readable offline **only** when the device already has it, so "the backend could not be
+ * reached" is a state field work can wait out, while an answer the backend gave is not.
+ */
+sealed interface JobPhotoContentRead {
+    /** The backend served the photo's bytes, with the type it declared for them. */
+    data class Bytes(
+        val bytes: ByteArray,
+        val contentType: JobPhotoContentType?,
+    ) : JobPhotoContentRead {
+        // The bytes are the photo itself, so two reads of the same photo are equal data rather than
+        // the same instance; the generated `equals` would compare array identity (`dev.md` §1).
+        override fun equals(other: Any?): Boolean =
+            this === other ||
+                (other is Bytes && contentType == other.contentType && bytes.contentEquals(other.bytes))
+
+        override fun hashCode(): Int = 31 * bytes.contentHashCode() + (contentType?.hashCode() ?: 0)
+    }
+
+    /**
+     * The read never got an answer: no connectivity, a server failure, or a renewal that was never
+     * answered. Nothing is known about the photo, and nothing on the device holds it (`BR-013`).
+     */
+    data object Unreachable : JobPhotoContentRead
+
+    /**
+     * The backend answered, or no session could ask it: no session is held, the request was refused, or
+     * the photo is not there for this session. A local copy is not substituted for it (`BR-007`).
+     */
+    data object Unavailable : JobPhotoContentRead
+}

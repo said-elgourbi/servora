@@ -1,6 +1,9 @@
 package com.servora.android.data.jobs
 
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.data.customers.couldNotReachBackend
+import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.AssignableTechnician
@@ -29,10 +32,21 @@ import retrofit2.HttpException
  * (`BR-001`, `BR-007`, `BR-068`, `BR-081`).
  */
 interface JobDetailsRepository {
-    /** Returns the Job, or why it could not be read. */
+    /**
+     * Returns the Job, or why it could not be read.
+     *
+     * A Job the API cannot be reached for is served from the last Job the backend reported
+     * (`offline-first-architecture.md` §2, §12), which is what keeps the evidence a Job holds and the
+     * Activity that projects it visible without connectivity (`D5`, `BR-013`).
+     */
     suspend fun loadJobDetails(jobId: String): JobDetailsResult
 
-    /** Returns the Job's chronological activity, newest first, or why it could not be read. */
+    /**
+     * Returns the Job's chronological activity, newest first, or why it could not be read.
+     *
+     * It follows the same read policy as the Job itself: the API's answer when it can be reached, the
+     * last one it reported when it cannot (`offline-first-architecture.md` §12, `D5`).
+     */
     suspend fun loadJobActivity(jobId: String): JobActivityResult
 
     /** Adds one text update to the represented Visit and returns the refreshed activity. */
@@ -96,30 +110,80 @@ interface JobDetailsRepository {
  * [SessionAuthenticator], and a call the backend refuses with `401` is retried once with a renewed
  * session before the outcome is reported.
  *
- * The actions are **online-only** for now. The offline architecture's local store is the one
- * mechanism that will hold business data on the device
- * (`docs/architecture/offline-first-architecture.md`), and this screen has no offline working set
- * yet, so an action is not queued: the backend's answer is the only outcome reported (`BR-001`).
+ * The actions are **online-only**: an action is not queued, because the backend's answer is the only
+ * outcome reported (`BR-001`). The two **reads** follow the offline standard
+ * (`docs/architecture/offline-first-architecture.md` §12, §13): the Job and its activity are kept as
+ * the last answer the backend reported and served from there when the API cannot be reached, so the
+ * evidence a Job holds and the Activity around it stay readable without connectivity (`D5`, `BR-013`).
+ * Only a failure that could not reach the backend falls back: an answer, a refusal included, is never
+ * replaced by a local copy (`BR-007`, `BR-042`).
  */
 class DefaultJobDetailsRepository @Inject constructor(
     private val api: JobDetailsApi,
     private val sessionAuthenticator: SessionAuthenticator,
+    /** The last Job and activity the backend reported, for a read that cannot reach it (§2, §12). */
+    private val evidence: JobEvidenceCache,
+    /** The subject the working set is partitioned by; local answers are never read across sessions. */
+    private val subject: AuthenticatedSubject,
     /** Reads the API's error envelope, so a refusal is reported as what it is (`BR-070`). */
     private val json: Json,
 ) : JobDetailsRepository {
 
     override suspend fun loadJobDetails(jobId: String): JobDetailsResult {
+        // The working set is scoped to the subject of the session that produced it, so a read whose
+        // subject cannot be read is refused rather than answered without local state (§10).
+        val subjectId = subject.current()
+            ?: return JobDetailsResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         val accessToken = sessionAuthenticator.accessToken()
             ?: return JobDetailsResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
 
-        return read(accessToken, allowRenewal = true, jobId = jobId)
+        return when (val read = read(accessToken, allowRenewal = true, jobId = jobId)) {
+            is JobRead.Answered -> {
+                // A successful read replaces the local copy rather than being merged into it (§10).
+                evidence.rememberJob(subjectId, jobId, read.job)
+                JobDetailsResult.Success(read.details)
+            }
+
+            is JobRead.Failed ->
+                if (read.reason.couldNotReachBackend()) {
+                    evidence.reportedJob(subjectId, jobId)
+                        ?.toJobDetails()
+                        ?.let { reported ->
+                            JobDetailsResult.Success(reported, ReadSource.WORKING_SET)
+                        }
+                        ?: JobDetailsResult.Failure(read.reason)
+                } else {
+                    JobDetailsResult.Failure(read.reason)
+                }
+        }
     }
 
     override suspend fun loadJobActivity(jobId: String): JobActivityResult {
+        val subjectId = subject.current()
+            ?: return JobActivityResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
         val accessToken = sessionAuthenticator.accessToken()
             ?: return JobActivityResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
 
-        return readActivity(accessToken, allowRenewal = true, jobId = jobId)
+        return when (val read = readActivity(accessToken, allowRenewal = true, jobId = jobId)) {
+            is ActivityRead.Answered -> {
+                evidence.rememberActivity(subjectId, jobId, read.activity)
+                JobActivityResult.Success(read.events)
+            }
+
+            is ActivityRead.Failed ->
+                if (read.reason.couldNotReachBackend()) {
+                    evidence.reportedActivity(subjectId, jobId)
+                        ?.let { reported ->
+                            JobActivityResult.Success(
+                                events = reported.events.mapNotNull { it.toJobActivityEvent() },
+                                source = ReadSource.WORKING_SET,
+                            )
+                        }
+                        ?: JobActivityResult.Failure(read.reason)
+                } else {
+                    JobActivityResult.Failure(read.reason)
+                }
+        }
     }
 
     override suspend fun addVisitNote(
@@ -346,43 +410,46 @@ class DefaultJobDetailsRepository @Inject constructor(
         accessToken: String,
         allowRenewal: Boolean,
         jobId: String,
-    ): JobDetailsResult =
+    ): JobRead =
         try {
-            val details = api.jobDetails(
+            val job = api.jobDetails(
                 authorization = "Bearer $accessToken",
                 jobId = jobId,
-            ).toJobDetails()
+            )
+            val details = job.toJobDetails()
             if (details == null) {
-                JobDetailsResult.Failure(CustomersFailureReason.UNEXPECTED)
+                JobRead.Failed(CustomersFailureReason.UNEXPECTED)
             } else {
-                JobDetailsResult.Success(details)
+                // The wire response is carried with the mapped object, so the answer the backend gave
+                // is what the local copy holds (`BR-041`).
+                JobRead.Answered(job = job, details = details)
             }
         } catch (failure: HttpException) {
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
                 renewAndRetry(accessToken, jobId)
             } else {
-                JobDetailsResult.Failure(failure.toFailureReason())
+                JobRead.Failed(failure.toFailureReason())
             }
         } catch (failure: IOException) {
-            JobDetailsResult.Failure(CustomersFailureReason.NETWORK)
+            JobRead.Failed(CustomersFailureReason.NETWORK)
         } catch (failure: SerializationException) {
-            JobDetailsResult.Failure(CustomersFailureReason.UNEXPECTED)
+            JobRead.Failed(CustomersFailureReason.UNEXPECTED)
         }
 
     /** Retries the read once with a renewed session, or reports why it could not renew. */
     private suspend fun renewAndRetry(
         rejectedToken: String,
         jobId: String,
-    ): JobDetailsResult =
+    ): JobRead =
         when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
             is SessionRenewal.Renewed ->
                 read(renewal.accessToken, allowRenewal = false, jobId = jobId)
 
             SessionRenewal.Rejected ->
-                JobDetailsResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+                JobRead.Failed(CustomersFailureReason.UNAUTHENTICATED)
 
             SessionRenewal.Unavailable ->
-                JobDetailsResult.Failure(CustomersFailureReason.NETWORK)
+                JobRead.Failed(CustomersFailureReason.NETWORK)
         }
 
     /** Reads the Job's activity, renewing the session once when the backend rejects the token. */
@@ -390,40 +457,66 @@ class DefaultJobDetailsRepository @Inject constructor(
         accessToken: String,
         allowRenewal: Boolean,
         jobId: String,
-    ): JobActivityResult =
+    ): ActivityRead =
         try {
-            val events = api
-                .jobActivity(authorization = "Bearer $accessToken", jobId = jobId)
-                .events
-                .mapNotNull { it.toJobActivityEvent() }
-            JobActivityResult.Success(events)
+            val activity = api.jobActivity(authorization = "Bearer $accessToken", jobId = jobId)
+            ActivityRead.Answered(
+                activity = activity,
+                events = activity.events.mapNotNull { it.toJobActivityEvent() },
+            )
         } catch (failure: HttpException) {
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
                 renewAndRetryActivity(accessToken, jobId)
             } else {
-                JobActivityResult.Failure(failure.toFailureReason())
+                ActivityRead.Failed(failure.toFailureReason())
             }
         } catch (failure: IOException) {
-            JobActivityResult.Failure(CustomersFailureReason.NETWORK)
+            ActivityRead.Failed(CustomersFailureReason.NETWORK)
         } catch (failure: SerializationException) {
-            JobActivityResult.Failure(CustomersFailureReason.UNEXPECTED)
+            ActivityRead.Failed(CustomersFailureReason.UNEXPECTED)
         }
 
     /** Retries the activity read once with a renewed session, or reports why it could not renew. */
     private suspend fun renewAndRetryActivity(
         rejectedToken: String,
         jobId: String,
-    ): JobActivityResult =
+    ): ActivityRead =
         when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
             is SessionRenewal.Renewed ->
                 readActivity(renewal.accessToken, allowRenewal = false, jobId = jobId)
 
             SessionRenewal.Rejected ->
-                JobActivityResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+                ActivityRead.Failed(CustomersFailureReason.UNAUTHENTICATED)
 
             SessionRenewal.Unavailable ->
-                JobActivityResult.Failure(CustomersFailureReason.NETWORK)
+                ActivityRead.Failed(CustomersFailureReason.NETWORK)
         }
+}
+
+/**
+ * The outcome of the Job read, before the caller decides what to report.
+ *
+ * [Answered] carries both the API's response and the object it maps to: the response is what the
+ * working set keeps, so the offline read runs the same mapper the online read ran (`BR-041`).
+ */
+private sealed interface JobRead {
+    /** The API answered; [job] is the wire response and [details] is that response mapped. */
+    data class Answered(val job: JobDetailsDto, val details: JobDetails) : JobRead
+
+    /** The read failed; [reason] decides whether the last reported Job may be served instead. */
+    data class Failed(val reason: CustomersFailureReason) : JobRead
+}
+
+/** The outcome of the Job Activity read, before the caller decides what to report (`BR-080`). */
+private sealed interface ActivityRead {
+    /** The API answered; [activity] is the wire response and [events] is that response mapped. */
+    data class Answered(
+        val activity: JobActivityDto,
+        val events: List<JobActivityEvent>,
+    ) : ActivityRead
+
+    /** The read failed; [reason] decides whether the last reported activity may be served instead. */
+    data class Failed(val reason: CustomersFailureReason) : ActivityRead
 }
 
 private const val HTTP_BAD_REQUEST = 400
@@ -445,6 +538,7 @@ private const val CODE_VISIT_NOT_FOUND = "VISIT_NOT_FOUND"
 private const val CODE_TRANSITION_NOT_ALLOWED = "JOB_STATUS_TRANSITION_NOT_ALLOWED"
 private const val CODE_CANCELLATION_UNAVAILABLE = "JOB_CANCELLATION_UNAVAILABLE"
 private const val CODE_REVIEW_CONDITION_NOT_MET = "JOB_REVIEW_CONDITION_NOT_MET"
+private const val CODE_COMPLETION_BLOCKED = "JOB_COMPLETION_BLOCKED"
 private const val CODE_VISIT_NOT_RESCHEDULABLE = "VISIT_NOT_RESCHEDULABLE"
 private const val CODE_TECHNICIANS_NOT_ASSIGNABLE = "TECHNICIANS_NOT_ASSIGNABLE"
 private const val CODE_SCHEDULE_CONFLICT = "SCHEDULE_CONFLICT"
@@ -500,6 +594,7 @@ private fun HttpException.toActionFailure(errorCode: String? = null): JobActionF
         CODE_TRANSITION_NOT_ALLOWED -> JobActionFailure.JOB_TRANSITION_NOT_ALLOWED
         CODE_CANCELLATION_UNAVAILABLE -> JobActionFailure.JOB_CANCELLATION_UNAVAILABLE
         CODE_REVIEW_CONDITION_NOT_MET -> JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET
+        CODE_COMPLETION_BLOCKED -> JobActionFailure.JOB_COMPLETION_BLOCKED
         CODE_VISIT_NOT_RESCHEDULABLE -> JobActionFailure.VISIT_NOT_RESCHEDULABLE
         CODE_TECHNICIANS_NOT_ASSIGNABLE -> JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE
         CODE_VERSION_CONFLICT, CODE_SCHEDULE_CONFLICT ->

@@ -179,12 +179,58 @@ objects, the production provider and its provisioning, and the evidence domain m
 photos (the photo model that landed is a Job-scoped, append-only row — `docs/api/job-photos.md` §7
 lists what remains undefined).
 
+## Update (2026-09-16) — the read model and derived objects are decided
+
+`docs/tracker/029-photo-evidence-phases.md` Phase 0 answers the two questions this ADR left open (its
+open questions 3 and 4), together with the evidence lifecycle that touches the store (2). The decisions
+are recorded there (D6d, D6e, D7, D8, and the object-storage answer recorded as D15) and as business
+rules `BR-088` – `BR-091`; this section records what they mean **for this ADR**.
+
+**Reads move to short-lived presigned GET URLs, issued by the API after authorization (open question 4,
+reads only).** The bucket stays private, the API remains the authorization boundary, and the client
+receives a temporary URL rather than credentials. **Uploads do not change**: evidence continues to travel
+to the API on the API port, where its bytes are validated before they become evidence (D7).
+
+**No server-side derived objects in v1 (open question 3).** No thumbnail pipeline is introduced: the
+store holds the normalized original, and the clients render what they need from it — on Android, the
+Coil 3 stack and its per-subject cache (`docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
+Derived objects are revisited only when bandwidth or gallery performance proves them necessary.
+
+**No second, separately configured storage endpoint is introduced in v1.** The client is not configured
+with a storage host, bucket or credential; it asks the API and is handed a URL.
+
+**Object lifetime follows the database record, not a UI action (open question 2).** Evidence is immutable
+once accepted (`BR-088`) and a removal is soft and audited (`BR-089`): the object stays until retention
+purges it, and v1 retention is indefinite for the life of the tenant (`BR-090`). A storage object must
+never outlive its database record accidentally, and a future administrative purge deletes objects
+asynchronously and idempotently after their records (`BR-090`).
+
+**Recorded conflict to resolve at the presigned-read phase.** This ADR's D7 records three constraints a
+presigned URL runs into: a SigV4 signature is bound to the `Host` it was generated for, so presigning
+needs `S3_PUBLIC_ENDPOINT` (locally `http://127.0.0.1:9000` plus a second `adb reverse tcp:9000 tcp:9000`),
+and a plain-HTTP URL is usable only by a debug build because release builds permit HTTPS only. A presigned
+URL is also served from the provider's own host, which is in tension with the same decision's aim that
+clients not assume a particular S3 vendor. **Nothing is implemented until the phase that delivers
+presigned reads states the resolution**; the constraint is recorded here rather than resolved by a guess
+(`BR-042`).
+
+**Open question 1 is partly answered**: photos are Job-level and append-only with an audited soft removal
+(`BR-088`, `BR-089`), and audio is a further evidence kind using the same abstraction (`BR-091`), whose
+row model and content types its own design records. **Open question 5 is unchanged**: the production
+provider and its provisioning are still open.
+
 ## Open questions not decided here
 
-1. The evidence domain model, and the object-key layout for evidence.
-2. Retention, lifecycle and versioning (`BR-027`, `BR-033`).
-3. Thumbnails and other derived objects.
-4. Whether reads ever move to presigned URLs, and whether uploads do.
-5. The production provider, its bucket, and how it is provisioned.
+1. The evidence domain model, and the object-key layout for evidence. **Partly answered 2026-09-16**:
+   photos are Job-level and append-only, with an audited soft removal (`BR-088`, `BR-089`); audio is a
+   further evidence kind on the same abstraction (`BR-091`), and its row model is that feature's design.
+2. Retention, lifecycle and versioning (`BR-027`, `BR-033`). **Answered 2026-09-16** (`BR-090`):
+   indefinite for the life of the tenant, no content versioning (evidence is immutable, `BR-088`), and a
+   future administrative purge is a deliberate cascade with async, idempotent object deletion.
+3. Thumbnails and other derived objects. **Answered 2026-09-16**: none in v1 — the normalized original is
+   stored and clients render from it; revisit only when performance proves it necessary.
+4. Whether reads ever move to presigned URLs, and whether uploads do. **Answered 2026-09-16**: reads do
+   (short-lived, API-issued, private bucket); uploads do not and stay on the API port.
+5. The production provider, its bucket, and how it is provisioned. **Still open.**
 
 

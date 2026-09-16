@@ -459,7 +459,13 @@
     <string name="job_activity_empty_message">Updates from the team will appear here.</string>
     <string name="job_activity_error_message">Couldn\'t load activity.</string>
     <string name="job_activity_add_update">Add update</string>
+    <!--
+      The kinds of update the Add update sheet offers, as peers in one choice, and the controls each
+      kind owns. The label states what the choice is (`BR-012`, `BR-027`).
+    -->
+    <string name="job_activity_update_type_label">Update type</string>
     <string name="job_activity_update_note">Write note</string>
+    <string name="job_activity_update_audio">Add audio</string>
     <string name="job_activity_text_label">Update</string>
     <string name="job_activity_text_placeholder">Type a text update…</string>
     <string name="job_activity_save_update">Save update</string>
@@ -502,8 +508,21 @@
     <string name="job_photo_remove">Remove photo</string>
     <string name="job_photo_image_description">Job photo</string>
     <string name="job_photo_viewer_open">View photo</string>
+    <string name="job_photo_gallery_label">Photos</string>
+    <string name="job_photo_gallery_expand">Show photos</string>
+    <string name="job_photo_gallery_collapse">Hide photos</string>
     <string name="job_photo_viewer_close">Close photo</string>
     <string name="job_photo_viewer_unavailable">This photo could not be shown.</string>
+    <!--
+      A photo that is not on this device and cannot be read without connectivity (`D5`, `BR-013`). The
+      technician can act on it, which is why it is not the generic failure above; the short form is the
+      glyph a tile draws (`BR-028`).
+    -->
+    <string name="job_photo_viewer_unavailable_offline">This photo is not available offline. Connect to view it.</string>
+    <string name="job_photo_offline_description">Not available offline</string>
+    <string name="job_photo_viewer_notes_label">Notes</string>
+    <string name="job_photo_notes_more">More</string>
+    <string name="job_photo_notes_less">Less</string>
     <string name="job_photo_tray_title">Photos to save</string>
     <string name="job_photo_tray_unsaved">%1$d not saved</string>
     <string name="job_photo_tray_capture">Take another</string>
@@ -527,7 +546,7 @@
       reports (`D11`, `D12`, `D13`). Both actions read evidence the API authorizes; nothing here records
       or changes a photo (`BR-027`).
     -->
-    <string name="job_photo_viewer_position">%1$d of %2$d</string>
+    <string name="job_photo_viewer_position">%1$d / %2$d</string>
     <string name="job_photo_viewer_save">Save to device</string>
     <string name="job_photo_viewer_share">Share</string>
     <string name="job_photo_viewer_share_title">Share photo</string>
@@ -538,10 +557,10 @@
     <string name="job_photo_error_share_unavailable">No application on this device can share the photo.</string>
     <string name="job_photo_error_save_permission">Servora needs permission to save photos on this device.</string>
     <string name="job_photo_error_item">Photo %1$d of %2$d: %3$s</string>
+    <string name="job_update_photo_sources_label">Add photos from</string>
     <string name="job_update_photo_camera">Take photo</string>
-    <string name="job_update_photo_library">Choose photos</string>
-    <string name="job_photo_activity_added">Added a photo (%1$s)</string>
-    <string name="job_photo_activity_added_generic">Added a photo</string>
+    <string name="job_update_photo_library">Choose from device</string>
+    <string name="job_photo_activity_added">Added a photo</string>
 
     <!--
       Job management actions (`BR-058`, `BR-066`, `BR-068`, `BR-070`, `BR-073`).
@@ -573,6 +592,7 @@
     <string name="job_action_error_version_conflict">The job changed since you opened it. Reopen it and try again.</string>
     <string name="job_action_error_transition">The job cannot move to that status from where it is.</string>
     <string name="job_action_error_review_condition">The job cannot await review yet: work is still open or the last visit did not resolve it.</string>
+    <string name="job_action_error_completion_blocked">This job can\'t be completed while it has active visits.</string>
     <string name="job_action_error_cancellation_unavailable">Cancelling a job is not available yet.</string>
     <string name="job_action_error_visit_not_reschedulable">Only a scheduled visit can be rescheduled.</string>
     <string name="job_action_error_technicians_not_assignable">One or more technicians cannot be assigned.</string>
@@ -601,6 +621,17 @@
     <string name="job_conflict_title">This time overlaps another visit</string>
     <string name="job_conflict_message">The same technician is already booked. You can still schedule this visit.</string>
     <string name="job_conflict_confirm">Schedule anyway</string>
+
+    <!--
+      The consequential Job status changes the user confirms before the change is sent (`BR-058`,
+      `BR-062`, `BR-063`). Closing a Job ends its field work and reopening one returns it to the
+      scheduling workflow, so neither happens from a single tap on the status menu.
+    -->
+    <string name="job_status_confirm_close_title">Close this job?</string>
+    <string name="job_status_confirm_close_message">Job #%1$d will be closed. Closing it ends the job\'s field work and makes its visit outcomes final.</string>
+    <string name="job_status_confirm_reopen_title">Reopen this job?</string>
+    <string name="job_status_confirm_reopen_message">Job #%1$d will return to New. Its completed and canceled visits stay as they are.</string>
+    <string name="job_status_confirm_accept">Confirm</string>
     <!-- A read served without connectivity (`docs/architecture/offline-first-architecture.md` §2, §7). -->
     <string name="offline_last_reported">Offline — showing the last update the server reported.</string>
 </resources>

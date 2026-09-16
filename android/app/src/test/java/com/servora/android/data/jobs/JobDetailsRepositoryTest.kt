@@ -1,6 +1,9 @@
 package com.servora.android.data.jobs
 
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.data.offline.InMemoryWorkingSetStore
+import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.AssignmentRole
@@ -392,6 +395,10 @@ class JobDetailsRepositoryTest {
             failureFor("JOB_REVIEW_CONDITION_NOT_MET"),
         )
         assertEquals(
+            JobActionFailure.JOB_COMPLETION_BLOCKED,
+            failureFor("JOB_COMPLETION_BLOCKED"),
+        )
+        assertEquals(
             JobActionFailure.VISIT_NOT_RESCHEDULABLE,
             failureFor("VISIT_NOT_RESCHEDULABLE"),
         )
@@ -442,10 +449,250 @@ class JobDetailsRepositoryTest {
         assertActionSuccess(result)
     }
 
+    /**
+     * What the local copy is for: a read that cannot reach the API is answered from the last Job the
+     * backend reported, so the evidence a Job holds and the Activity around it stay readable without
+     * connectivity (`D5`, `BR-013`, `§2`).
+     */
+    @Test
+    fun `serves the last reported Job when the backend cannot be reached`() = runTest {
+        val workingSet = InMemoryWorkingSetStore()
+        var reachable = true
+        val repository = repository(
+            api = FakeJobDetailsApi(
+                answer = {
+                    if (reachable) {
+                        jobDetailsDto()
+                    } else {
+                        throw IOException("offline")
+                    }
+                },
+            ),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+        )
+
+        // The backend's own answer is what fills the working set.
+        assertEquals(1042, assertSuccess(repository.loadJobDetails(JOB_ID)).jobNumber)
+        reachable = false
+
+        val result = repository.loadJobDetails(JOB_ID)
+
+        val success = result as JobDetailsResult.Success
+        assertEquals(ReadSource.WORKING_SET, success.source)
+        // The local answer runs the same mapper the online one does, so it describes the same Job —
+        // including who is assigned and who is the Lead (`BR-041`, `BR-068`).
+        assertEquals(1042, success.details.jobNumber)
+        assertEquals("Furnace repair", success.details.title)
+        assertEquals(
+            listOf("Mike Lead", "Sarah Moreau", null),
+            success.details.technicians.map { it.name },
+        )
+    }
+
+    @Test
+    fun `serves the last reported Job when the backend fails the read too`() = runTest {
+        // A `5xx` did not deliver the Job, which is the offline standard's own classification of a
+        // failure that could not reach the backend (`§13`).
+        val workingSet = InMemoryWorkingSetStore()
+        var reachable = true
+        val repository = repository(
+            api = FakeJobDetailsApi(
+                answer = {
+                    if (reachable) {
+                        jobDetailsDto()
+                    } else {
+                        throw httpFailure(503)
+                    }
+                },
+            ),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+        )
+        assertSuccess(repository.loadJobDetails(JOB_ID))
+        reachable = false
+
+        assertEquals(
+            ReadSource.WORKING_SET,
+            (repository.loadJobDetails(JOB_ID) as JobDetailsResult.Success).source,
+        )
+    }
+
+    @Test
+    fun `never replaces a refusal with the last reported Job`() = runTest {
+        // A refusal is the backend's own answer, so a copy held on the device must never mask it
+        // (`BR-007`, `BR-042`, `§13`).
+        val workingSet = InMemoryWorkingSetStore()
+        var refusal: Throwable? = null
+        val repository = repository(
+            api = FakeJobDetailsApi(
+                answer = { refusal?.let { throw it } ?: jobDetailsDto() },
+            ),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+        )
+        assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        for (failure in listOf(httpFailure(403), httpFailure(404), httpFailure(422))) {
+            refusal = failure
+
+            assertEquals(
+                "A refusal must not be answered from the device",
+                failure.httpReason(),
+                assertFailure(repository.loadJobDetails(JOB_ID)),
+            )
+        }
+    }
+
+    @Test
+    fun `reports the read failure when nothing has been reported yet`() = runTest {
+        // Nothing was ever read, so there is no answer to serve: the failure is reported rather than a
+        // Job invented out of nothing (`BR-042`).
+        val repository = repository(
+            api = FakeJobDetailsApi(answer = { throw IOException("offline") }),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        assertEquals(CustomersFailureReason.NETWORK, assertFailure(repository.loadJobDetails(JOB_ID)))
+    }
+
+    @Test
+    fun `replaces the reported Job rather than merging a newer answer into it`() = runTest {
+        val workingSet = InMemoryWorkingSetStore()
+        var title = "Furnace repair"
+        var reachable = true
+        val repository = repository(
+            api = FakeJobDetailsApi(
+                answer = {
+                    if (reachable) {
+                        jobDetailsDto().copy(title = title)
+                    } else {
+                        throw IOException("offline")
+                    }
+                },
+            ),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+        )
+        assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        title = "Furnace replacement"
+        assertSuccess(repository.loadJobDetails(JOB_ID))
+        reachable = false
+
+        val offline = repository.loadJobDetails(JOB_ID) as JobDetailsResult.Success
+        assertEquals("Furnace replacement", offline.details.title)
+        // One row per Job per subject: the newest answer replaced the earlier one (`§2`, `§10`).
+        assertEquals(1, workingSet.stored.size)
+        assertEquals(SUBJECT_ID, workingSet.stored.single().subjectId)
+    }
+
+    @Test
+    fun `keeps another session's reported Job out of this session's read`() = runTest {
+        val workingSet = InMemoryWorkingSetStore()
+        val reader = repository(
+            api = FakeJobDetailsApi(answer = { jobDetailsDto() }),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+        )
+        assertSuccess(reader.loadJobDetails(JOB_ID))
+
+        val otherSession = repository(
+            api = FakeJobDetailsApi(answer = { throw IOException("offline") }),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+            subjectId = "user-2",
+        )
+
+        assertEquals(
+            CustomersFailureReason.NETWORK,
+            assertFailure(otherSession.loadJobDetails(JOB_ID)),
+        )
+    }
+
+    @Test
+    fun `serves the last reported activity when the backend cannot be reached`() = runTest {
+        val workingSet = InMemoryWorkingSetStore()
+        var reachable = true
+        val repository = repository(
+            api = FakeJobDetailsApi(
+                answer = { jobDetailsDto() },
+                activityAnswer = {
+                    if (reachable) {
+                        jobActivityDto(
+                            jobActivityEventDto(
+                                id = "event-1",
+                                kind = "VISIT_NOTE_ADDED",
+                                body = "Fixed.",
+                            ),
+                        )
+                    } else {
+                        throw IOException("offline")
+                    }
+                },
+            ),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+        )
+        assertActivitySuccess(repository.loadJobActivity(JOB_ID))
+        reachable = false
+
+        val result = repository.loadJobActivity(JOB_ID)
+
+        val success = result as JobActivityResult.Success
+        assertEquals(ReadSource.WORKING_SET, success.source)
+        // Which photos the Job holds, with their phase, note and time, is what `D5` requires to be
+        // readable offline (`BR-013`, `BR-080`).
+        assertEquals(listOf("event-1"), success.events.map { it.id })
+        assertEquals("Fixed.", success.events.single().body)
+    }
+
+    @Test
+    fun `never replaces a refused activity with the last reported one`() = runTest {
+        val workingSet = InMemoryWorkingSetStore()
+        var refusal: Throwable? = null
+        val repository = repository(
+            api = FakeJobDetailsApi(
+                answer = { jobDetailsDto() },
+                activityAnswer = {
+                    refusal?.let { throw it }
+                        ?: jobActivityDto(
+                            jobActivityEventDto(id = "event-1", kind = "VISIT_NOTE_ADDED"),
+                        )
+                },
+            ),
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+        )
+        assertActivitySuccess(repository.loadJobActivity(JOB_ID))
+        refusal = httpFailure(403)
+
+        val result = repository.loadJobActivity(JOB_ID)
+
+        assertEquals(
+            CustomersFailureReason.FORBIDDEN,
+            (result as JobActivityResult.Failure).reason,
+        )
+    }
+
     private fun assertActionSuccess(result: JobActionResult) = when (result) {
         is JobActionResult.Success -> result.details
         else -> throw AssertionError("expected the Job, got $result")
     }
+
+    private fun assertActivitySuccess(result: JobActivityResult) = when (result) {
+        is JobActivityResult.Success -> result.events
+        is JobActivityResult.Failure ->
+            throw AssertionError("expected activity, got ${result.reason}")
+    }
+
+    /** The reason a refusal is classified as, so the offline test states the answer it expects. */
+    private fun Throwable.httpReason(): CustomersFailureReason =
+        when ((this as HttpException).code()) {
+            403 -> CustomersFailureReason.FORBIDDEN
+            404 -> CustomersFailureReason.NOT_FOUND
+            else -> CustomersFailureReason.VALIDATION
+        }
 
     private fun failingWith(failure: Throwable) =
         repository(
@@ -808,12 +1055,23 @@ private class FakeSessionAuthenticator(
     override suspend fun renew(rejectedToken: String): SessionRenewal = renewal
 }
 
-/** The repository these tests exercise, with the JSON reader its error handling needs. */
+/** The repository these tests exercise, with the in-memory working set and its JSON reader. */
 private fun repository(
     api: JobDetailsApi,
     sessionAuthenticator: SessionAuthenticator,
+    workingSet: InMemoryWorkingSetStore = InMemoryWorkingSetStore(),
+    subjectId: String? = SUBJECT_ID,
 ) = DefaultJobDetailsRepository(
     api = api,
     sessionAuthenticator = sessionAuthenticator,
+    evidence = JobEvidenceCache(
+        workingSet = workingSet,
+        json = Json { ignoreUnknownKeys = true },
+        clock = TEST_CLOCK,
+    ),
+    subject = FakeAuthenticatedSubject(subjectId),
     json = Json { ignoreUnknownKeys = true },
 )
+
+/** The subject the working set's rows are filed under; a second one stands for another session. */
+private const val SUBJECT_ID = "user-1"

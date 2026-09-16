@@ -1,9 +1,13 @@
 # Tracker 029 — Photo evidence after 028: permissions, picker, viewer, offline and lifecycle
 
-**Status: PHASE 4e LANDED (2026-09-15) — the viewer pages, saves and shares (`D11`, `D12`, `D13` ✓).** Phases 1, 2,
-3, 4, 4b, 4c, 4d and 4e are implemented; **Phase 6a (refused photos are explicitly discardable, `D6c` ✓) is next**.
-Phase 5 stays blocked because `D5` was **deferred** by product ownership, and Phase 6 waits on `D6`'s remaining
-sub-questions.
+**Status: PHASE 0 ANSWERED IN FULL (2026-09-16) — `D5`, `D6a`–`D6e`, `D7`, `D8`, `D14` and `D15` are
+decided; no question in this tracker is awaiting an answer.** Phases 1, 2, 3, 4, 4b, 4c, 4d, 4e and **5**
+are implemented, and the viewer's **chrome** (2026-09-16,
+`docs/tracker/031-android-photo-viewer-ui.md`) and
+**Job Activity's photo UX** (2026-09-16, `docs/tracker/032-android-job-activity-photo-ux.md`) were refined
+without changing a decision or a contract. **Phase 6a (refused photos) is the phase to run**; **Phases 6b**
+(removing accepted evidence), **6c** (metadata: GPS/EXIF stripping and phase draft state), **8** (presigned
+reads) and **9** (audio evidence) follow from the same round.
 
 Date: 2026-09-15
 Predecessors: `docs/tracker/027-android-job-photo-updates.md` (capture, offline upload, Activity gallery),
@@ -38,8 +42,95 @@ Design reference that is **not** yet implemented: `Figma/src/imports/pasted_text
 
 ## Current phase
 
-**Phase 4e — the viewer pages, saves and shares (`D11`, `D12`, `D13` ✓). Phase 6a stays startable and is
-next; Phase 5 stays blocked on the deferred D5.**
+**Phase 6a — refused photos are explicitly discardable (`D6c` ✓). It is the earliest phase whose decisions
+are answered, so it is the phase to run; Phases 6b, 6c, 8 and 9 follow from the same 2026-09-16 decision
+round.**
+
+**Phase 5 (2026-09-16) — offline visibility of accepted evidence (`D5` ✓) is implemented.** The Job
+Details and Job Activity reads are served from the working set when the API cannot be reached, so the Job
+and the evidence it holds — which photos, with their phase, note and time — are readable without
+connectivity; both are marked on screen as the last answer the backend reported. Photo bytes stay
+best-effort: accepted evidence is read from the image stack's bounded, evictable cache when it is there and
+through the API when it is not, a pending upload's bytes are never a cache entry, nothing is prefetched, and
+a photo that is neither on the device nor cached is reported as **not available offline** rather than as an
+error. No decision changed and no API, database or shared contract was touched. Recorded below and in
+`## Phase log`.
+
+**Phase 4f (2026-09-16) — the viewer's chrome, recorded in its own tracker
+(`docs/tracker/031-android-photo-viewer-ui.md`).** The photo viewer was refined into a media-viewer surface:
+its own black ground and white ink rather than the theme's `surface`, a minimal overlay top bar
+(close · position · Save/Share icons), the phase badge over the photo, a **Notes** section with **More**,
+an in-flight signal on the action that is running — and, the defect it fixes, the report of a save, a share
+or a refusal drawn **inside the viewer** instead of behind it. No decision above changed: paging, order,
+zoom, the evidence actions and every API contract are untouched. Phase 6a stays startable beside Phase 5
+(2026-09-16).
+
+**Job Activity's photo UX (2026-09-16) — a collapsible gallery and each photo inside its own timeline
+entry, recorded in its own tracker (`docs/tracker/032-android-job-activity-photo-ux.md`).** The strip
+above the timeline became a folded-by-default section headed **Photos · n** (the whole heading is the
+target, the chevron turns while the strip is shown, and up to three 32 dp thumbnails preview what it
+counts), and a `JOB_PHOTO_ADDED` entry now reads **"Added a photo"** and draws the photo itself with the
+phase badge and the note under it — opening the **same** viewer on the same page as a gallery tile. No
+decision above changed: the collection, its order, the viewer, its paging, the evidence capabilities and
+every API contract are untouched. Phase 6a stays startable beside Phase 5 (2026-09-16).
+
+**Review panel (2026-09-16) — the note field was left under the keyboard and the preview was cropped.**
+Two physical-device defects in the panel a capture is confirmed in were fixed together, outside the
+phase sequence. Its content now **scrolls**, so the note stays reachable while the keyboard is up: the
+sheet already lifts with the keyboard — Material 3's sheet applies the IME inset inside its own window,
+which the signed-in shell's inset cannot reach, because the sheet is a window of its own — and what was
+missing was a content area that can shrink, that being the resize Compose answers by bringing the
+focused field back into view (`docs/tracker/014-android-add-customer.md`). The preview draws the
+**whole** photo (`ContentScale.Fit`) instead of a crop of it, because what is being confirmed is the
+photograph; the tray and gallery tiles keep cropping, a tile being a square that stands for a photo. No
+API, database, contract or permission change, and no decision of this tracker changed. See
+`## Manual QA runbook — review panel (2026-09-16)`.
+
+**Phase 0 is answered in full (2026-09-16).** Product ownership answered the questions this tracker was
+still carrying and stated the guiding position for evidence: **append-only once accepted, offline-first for
+the technician, and a storage lifecycle that follows the Job/evidence lifecycle rather than UI
+convenience** — recorded as `BR-088`. The answers are in `## Phase 0 decision log` (D5, D6, D7, D8, and two
+new rows D14 and D15) and as business rules `BR-088` – `BR-091` (`BR-040`). In one place, what the round
+decides:
+
+- **D5 ✓ — accepted evidence is readable offline.** Its **metadata** (phase, note, time, which photos the
+  Job has) must be readable without connectivity; its **bytes** are cached **best-effort** — cached when
+  the device already holds them or the technician explicitly opens or downloads them, never by downloading
+  every historical photo. A **pending** upload's bytes are guaranteed until synchronization confirms the
+  evidence; after that the local copy is an **evictable, size-based LRU cache** managed by the app and the
+  platform, not a fixed retention period. Delivered by **Phase 5**.
+- **D6a/D6b ✓ — accepted evidence is immutable.** No overwrite, no byte replacement, no phase change, no
+  silent delete. A photo can be discarded only **before** submission; afterwards it is removed only through
+  an explicit, audited, **Manager-level** `evidence.photo.remove` that soft-removes it from ordinary views
+  while the audit record is preserved. **No edit-photo route exists or will be built**; a note or caption
+  correction is recorded as new Activity. Delivered by **Phase 6b**.
+- **D6d/D6e ✓ — retention and the Job lifecycle.** Evidence belongs to the historical Job record; archiving
+  or canceling a Job never deletes it; archived Jobs and their evidence stay readable to members permitted
+  to view archived Jobs; v1 retention is **indefinite for the life of the tenant** rather than an invented
+  regulatory period; normal product flows do not hard-delete Jobs, so evidence never becomes orphaned, and
+  any future administrative or GDPR-style purge is a deliberate cascade (Job → Visits → records → objects)
+  with asynchronous, idempotent object deletion. Decided in `BR-090`, with no v1 implementation work left
+  beyond what Phase 6b carries.
+- **D7 ✓ — metadata.** `phase` (`BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK`) remains the **only** structured
+  photo classification; the chosen phase is **draft state for the update in progress** (it survives sheet
+  and process recreation) and never a global preference; and **GPS/location EXIF plus other unneeded
+  metadata are stripped from uploaded evidence by default**. Delivered by **Phase 6c**.
+- **D8 ✓ — audio yes, generic files no.** Audio notes become an evidence kind of their own on the same
+  storage, outbox, upload, authorization and immutable-history rules, activating the reserved
+  `evidence.audio.add` when it is implemented (**Phase 9**); arbitrary file attachments stay out of v1; and
+  a kind's affordance is not exposed before the kind actually works.
+- **D14 ✓ — the evidence entry point.** The Add update sheet stays the canonical way to choose the kind
+  (and therefore to switch Photo → Audio/Text); inside the photo flow, **Take another launches the camera
+  again** rather than bouncing the technician back through the picker. That is what the tray already does,
+  so no code changes — the open design-owner item is closed.
+- **D15 ✓ — the store's read model.** No server-side derived-thumbnail pipeline in v1: the normalized
+  original is stored and clients render from it. Reads move to **short-lived presigned GET URLs issued by
+  the API after authorization**, with the bucket private and uploads staying on the API port; no second,
+  separately configured storage endpoint is introduced. Delivered by **Phase 8**, whose design must first
+  resolve the presigning constraint `ADR-013` D7 records.
+
+**This documentation round implements none of it.** Each phase below names what it changes, and the state
+table still describes the code as it is today.
 
 - **Phase 4e landed (2026-09-15): the viewer pages through the Job's photos, and a photo can be saved on
   the device or shared with another application (`D11`, `D12`, `D13` ✓).** The sequence is the one the
@@ -73,15 +164,16 @@ next; Phase 5 stays blocked on the deferred D5.**
   keeps its three states (reading, the photo, "cannot be shown") by observing the stack's own result for the
   request it already has, rather than reading the photo a second time. No API, database, permission or contract
   change. See the Phase log entry, `docs/decisions/016-…` and `## Manual QA runbook — Phase 4d`.
-- **Phase 6a (refused photos are explicitly discardable) is next.** It is the earliest slice whose decision is
-  answered (`D6c` ✓) and which nothing else blocks: a photo the API permanently refused gains an explicit
-  discard that removes its file and its row together. Android-only, and it touches neither the API nor the
-  pipeline.
-- **Phase 5 is still blocked and is not next.** `D5` was **deferred** by product ownership, so accepted evidence
-  and the Activity stay online-only, Phase 5 does not run, and the gap stays in the risk table below.
+- **Phase 5 is the phase to run (2026-09-16).** `D5` is answered, so accepted evidence's metadata becomes
+  readable offline and its bytes are cached best-effort; the phase below states what it changes. It is the
+  earliest phase whose decisions are satisfied.
+- **Phase 6a (refused photos are explicitly discardable) stays startable beside Phase 5**, and is the
+  smallest slice: a photo the API permanently refused gains an explicit discard that removes its file and
+  its row together. Android-only, and it touches neither the API nor the pipeline.
 
-- **The decisions this section was waiting on are recorded (2026-09-15).** Product ownership answered
-  **D2, D4b, D6c, D7b, D9** and **D10**, and **deferred D5**. Each answer, its consequences and the
+- **The decisions this section was waiting on are recorded (2026-09-15, and completed 2026-09-16).** Product
+  ownership answered **D2, D4b, D6c, D7b, D9** and **D10** on 2026-09-15, **deferred `D5`** the same day and
+  then **answered it, with D6, D7, D8, D14 and D15, on 2026-09-16**. Each answer, its consequences and the
   document it changes are in `## Phase 0 decision log` and in the decision's own section below. Three of
   them shape the work that follows: **D4b = (a)** puts **Coil 3** behind the existing `JobPhotoImages`
   port, **D9 = (b)** adds **pinch-zoom and pan** to the viewer on top of it (Telephoto), and
@@ -117,10 +209,12 @@ next; Phase 5 stays blocked on the deferred D5.**
   the content-type-aware pipeline and its published `FIT_TARGETS` (Phase 2); the two photo sources and
   the client's evidence gate (Phase 3); the viewer and the full-size read (Phase 4); the turnaround of a
   re-encoded photo's pixels and the shared read/turn leaf (Phase 4b).
-- **Still open after this round:** `D5` (**deferred**) holds Phase 5; the remaining `D6` sub-questions
-  (`D6a`, `D6b`, `D6d`, `D6e`) hold the rest of Phase 6, with `D6c` answered and split out as **Phase 6a**;
-  `D7`'s remaining sub-questions (tags, phase persistence, EXIF/GPS policy) hold Phase 7's taxonomy; `D8`
-  (audio and files) is untouched. `D2`, `D4b`, `D6c`, `D7b`, `D9` and `D10` are decided and no longer open.
+- **Nothing in Phase 0 is still open (2026-09-16).** `D5` unblocks Phase 5; `D6` in full (including `D6a`,
+  `D6b`, `D6d` and `D6e`) narrows Phase 6 to **Phases 6a and 6b** and closes the rest; `D7` in full decides
+  the taxonomy, the phase's draft-state behaviour and the EXIF/GPS policy (**Phase 6c**); `D8` puts audio in
+  v1's scope (**Phase 9**) and keeps generic files out; `D14` closes the entry-point question with no code
+  change; and `D15` decides the store's read model (**Phase 8**) and the absence of derived objects.
+  **Phase 7** still waits on the Angular application itself, which is not a product question.
 - **Still outstanding from Phase 1:** the `Business Rules.md` `BR-008`/`BR-009` edit is product
   ownership's (`BR-040`). The Android update-action gate was work item 7 of Phase 3 and is **done**: the
   action is drawn on `evidence.photo.add` (or the Job update capability for a note), so a default
@@ -146,8 +240,9 @@ Phase 0 progress, kept for the record:
   **turn the pixels** of a re-encoded photo so stored evidence is upright (D7b); the viewer gains
   **pinch-zoom and pan** (D9); and the device's media library is **not** read — the system picker stays
   the only library source (D10). Three new phases follow from those answers: **4b, 4c and 4d**.
-- **D5 deferred (2026-09-15)** — the offline-visibility question was not answered, so Phase 5 stays
-  blocked and unstarted; the risk it names stays recorded.
+- **D5 deferred (2026-09-15), then answered (2026-09-16)** — the deferral carried the gap knowingly for a
+  day, with the reason recorded in the offline standard; the answer unblocks **Phase 5**, with accepted
+  evidence's metadata readable offline and its bytes cached best-effort.
 - **The picker's critical path is decided and delivered: Phases 1, 2, 3 and 4 have all landed.**
 
 
@@ -179,41 +274,46 @@ repository**, so there is no web photo surface and no reporting over evidence.
 | --- | --- | --- |
 | Capture (camera) | the device's **external** camera app through `ACTION_IMAGE_CAPTURE` / `TakePicture`; no camera permission, no in-app camera (declined in D3) | `android/app/src/main/java/com/servora/android/ui/jobs/JobPhotoCapture.kt`, `android/app/src/main/AndroidManifest.xml`, `android/app/src/main/res/xml/file_paths.xml` |
 | Capture (library) | the device's own **photo picker** (`PickMultipleVisualMedia`, images only, system maximum items), launched from the update sheet; no storage or media-read permission, no new dependency; an item's bytes are read through the `JobPhotoPickedItems` port | `android/.../ui/jobs/JobPhotoPicker.kt`, `android/.../data/jobs/JobPhotoPickedItems.kt` |
-| Entry point | one floating **Add update** action → sheet → the note kind (Job update capability) or the photo kind → the two sources: **Take photo** (camera) and **Choose photos** (picker) | `android/.../ui/jobs/JobDetailsScreen.kt`, `ui/jobs/JobUpdateSheet.kt`, `ui/navigation/ServoraNavHost.kt` |
+| Entry point | one floating **Add update** action → sheet → the note kind (Job update capability) or the photo kind → the two sources: **Take photo** (camera) and **Choose from device** (picker) | `android/.../ui/jobs/JobDetailsScreen.kt`, `ui/jobs/JobUpdateSheet.kt`, `ui/navigation/ServoraNavHost.kt` |
 | Client gate | the action and each kind are drawn on the capability the API enforces for it: `evidence.photo.add` for a photo, the Job update capability for a note — so a default Technician reaches the camera and the picker (`BR-009`, `BR-011`) | `android/.../domain/auth/Permission.kt`, `ui/customers/CustomerPermissionsUiState.kt`, `ui/jobs/JobDetailsScreen.kt` |
 | Local bytes | `filesDir/job-photos/<subjectId>/<photoId>.<jpg\|png\|webp>`, partitioned by session subject and named for the type the bytes were **proven** to be; never a blob in the database | `android/.../data/jobs/JobPhotoFiles.kt` |
 | Preparation | both sources go through one pipeline before a draft exists: the bytes are brought to a type Servora accepts (`D3b`, mirrored magic-number sniffer, JPEG conversion when the bytes are neither JPEG nor PNG nor WebP) and under the API's 15 MiB limit (`D3c`, resized/re-compressed as JPEG); a photo either step cannot deliver is refused with **nothing** recorded. **Since Phase 4b** each step also **turns the decoded pixels** by the orientation the source bytes declare, before scaling and encoding, so the JPEG it writes is upright: `Bitmap.compress` writes no orientation tag, and a photo whose pixels were not turned would be stored sideways with nothing to say otherwise (`D7b`) | `android/.../data/jobs/JobPhotoContentType.kt`, `JobPhotoProcessing.kt`, `JobPhotoExifOrientation.kt`, `JobPhotoSession.kt`, `JobPhotoRecording.kt` |
 | Local metadata | Room `pending_job_photos` (draft, survives process death, `submitted` flag) | `android/.../data/jobs/PendingJobPhotoEntity.kt`, `PendingJobPhotoStore.kt`, `data/offline/OfflineMigrations.kt` |
 | Upload | queued through the existing outbox (`job.photo.add`, `operationId` = photo id), replayed by the existing engine; the part declares the recorded type and its own file name; local file and row deleted **only** on `201` | `android/.../data/jobs/JobPhotoSession.kt`, `JobPhotoUploadHandler.kt`, `JobPhotoOperations.kt`, `data/offline/OutboxReplayEngine.kt` |
-| API | `POST /jobs/:id/photos` (`evidence.photo.add`), `GET /jobs/:id/photos/:photoId/content` (`evidence.view`) | `api/src/jobs/jobs.controller.ts`, `job-photos.service.ts`, `job-photo.dto.ts` |
-| Storage | S3-compatible store behind the `ObjectStorage` port; key `evidence/job-photos/{organizationId}/{jobId}/{photoId}.{ext}`; provider selected by `STORAGE_PROVIDER` (`noop` by default, so an upload is refused with `503`) | `api/src/storage/object-storage.ts`, `s3-object-storage.ts`, `storage.module.ts`, `storage-config.ts`, `ADR-013` |
+| API | `POST /jobs/:id/photos` (`evidence.photo.add`), `GET /jobs/:id/photos/:photoId/content` (`evidence.view`). **Decided (`D15` ✓, 2026-09-16) and not implemented:** reads answer with a **short-lived presigned GET URL** instead of the bytes (Phase 8), uploads stay on the API port | `api/src/jobs/jobs.controller.ts`, `job-photos.service.ts`, `job-photo.dto.ts` |
+| Storage | S3-compatible store behind the `ObjectStorage` port; key `evidence/job-photos/{organizationId}/{jobId}/{photoId}.{ext}`; provider selected by `STORAGE_PROVIDER` (`noop` by default, so an upload is refused with `503`). **No derived object is stored** (`D15` ✓, 2026-09-16), and **no store lifecycle rule exists**: retention is indefinite for the life of the tenant (`BR-090`) | `api/src/storage/object-storage.ts`, `s3-object-storage.ts`, `storage.module.ts`, `storage-config.ts`, `ADR-013` |
 | Database | `job_photos` (`phase` CHECK, content-type CHECK, byte-size CHECK, idempotency unique index) | `api/drizzle/migrations/0009_job_photos.sql`, `api/src/database/schema.ts` |
-| Timeline | one Activity projection, newest-first; `JOB_PHOTO_ADDED` is Job-level and carries `photoId`, `photoPhase`, `body` (the note) | `api/src/jobs/job-activity.ts`, `docs/api/job-activity.md` §3.2, `android/.../ui/jobs/JobActivitySection.kt` |
-| Gallery | a `LazyRow` of thumbnails at the head of Job Activity, phase badge + note snippet; each tile is a tap target that opens its photo in the viewer | `android/.../ui/jobs/JobPhotoComponents.kt` (`JobPhotoGallery`, `JobPhotoGalleryTile`) |
+| Timeline | one Activity projection, newest-first; `JOB_PHOTO_ADDED` is Job-level and carries `photoId`, `photoPhase`, `body` (the note). **Since 2026-09-16** a photo entry reads *Added a photo* and draws the photo itself (176 × 132 dp thumbnail, the phase badge over it, the note under it, the rest of a long note behind **More**), opening the same viewer on the same page a gallery tile does | `api/src/jobs/job-activity.ts`, `docs/api/job-activity.md` §3.2, `android/.../ui/jobs/JobActivitySection.kt`, `docs/tracker/032-android-job-activity-photo-ux.md` |
+| Gallery | **since 2026-09-16** a collapsible section at the head of Job Activity: heading `Photos · n` (`labelSmall` bold, whole row a ≥ 48 dp target, rotating chevron, action-labelled description), folded by default with up to three 32 dp preview thumbnails; unfolded, a `LazyRow` of 132 dp tiles (phase badge + note snippet), each a tap target that opens its photo in the viewer. It draws exactly the `JOB_PHOTO_ADDED` entries the API reported, in that order — never a second list | `android/.../ui/jobs/JobPhotoComponents.kt` (`JobPhotoGallerySection`, `JobPhotoGalleryHeading`, `JobPhotoGallery`), `docs/tracker/032-android-job-activity-photo-ux.md` |
 | Viewer | **exists since Phase 4**: a tap on a gallery tile or on a tray tile opens the photo itself in a full-screen dialog — phase badge, close action, the technician's whole note, and the photo drawn `ContentScale.Fit`; the surface is the theme's own (`surface` / `onSurface`), so no new colour token; a photo that cannot be read says so instead of drawing something else; closed by its action or the platform's back gesture. **Since Phase 4c (2026-09-15)** the photo is drawn by the image stack, and the three states it presents are the stack's own — reading, the photo, and "cannot be shown" — so a photo already drawn once comes back from memory instead of being read again (`D4b`). **Since Phase 4d (2026-09-15, `D9` ✓) the photo zooms and pans**: it is drawn through **Telephoto** over the stack — a pinch zooms, a drag pans within the photo's own bounds, a double-tap goes to the library's zoom ceiling and no scale goes below "fit" — and what a zoom shows is the photo's own pixels, because the layer sub-samples the file the stack cached. **Since Phase 4e (2026-09-15, `D11`/`D12`/`D13` ✓) the viewer pages, saves and shares**: it draws the Job's photos as one sequence in the order the screen presents them (evidence the backend holds first, then the photos this device still holds, one entry per photo id), the position says which of them is on screen, a swipe pages **only while the photo is at fit** (a zoomed photo pans, so the two gestures never compete), the note pages with its photo, a pending photo keeps reporting its upload state, and two actions read evidence on `evidence.view` — **Save to device** and **Share**. The phase badge, the position, the note and the 48 dp actions stay outside the gesture area, and the platform's back gesture still closes the viewer | `android/.../ui/jobs/JobPhotoViewer.kt`, wired in `ui/jobs/JobDetailsScreen.kt` |
 | Evidence out of Servora | **exists since Phase 4e (2026-09-15, `D12`/`D13` ✓)**: the viewer's two actions. **Save to device** writes the photo the technician is looking at into a `Servora` album in the device's own shared image collection — API 29+ with no permission and `IS_PENDING` until its bytes are complete, API 26–28 through `WRITE_EXTERNAL_STORAGE` (`android:maxSdkVersion="28"`), which the screen asks for when a save needs it and reports if it is declined. **Share** hands the photo to the platform's own chooser (`ACTION_SEND`, the photo's own MIME type) from one app-private cache directory cleared before each export and exposed by a single added `FileProvider` `cache-path`, so the receiving application is granted that one file and nothing else. The copy is named `Servora-<photoId>.<ext>`; only the photo travels (no note, no Job or customer detail), and both actions are available for evidence the backend holds and for a photo this device still holds | `android/.../data/jobs/JobPhotoExport.kt`, `AndroidJobPhotoExportTarget.kt`, `JobPhotoExportTest.kt`, `ui/jobs/JobPhotoViewer.kt`, `res/xml/file_paths.xml`, `AndroidManifest.xml` |
-| Pending tray / review | tray of not-yet-accepted photos with upload state, each tile a tap target that opens the viewer; review panel with preview, note and the three phase buttons, which a captured photo **and** a picked photo are each confirmed in; a pick's items are taken one at a time, and skipped items are reported by their place in the pick | `android/.../ui/jobs/JobPhotoTray.kt`, `JobPhotoReviewSheet.kt`, `ui/jobs/JobDetailsViewModel.kt` |
-| Thumbnails | **the image stack since Phase 4c (2026-09-15, `D4b` ✓)**: the library (Coil 3) decodes, samples, turns by the photo's own EXIF orientation and caches, so a photo is decoded once at the size it is drawn and read again from memory or disk instead of from the API on every cold start. A tile asks for a **512 px** decode and the viewer asks for one at `VIEWER_DECODE_EDGE_PX` — half of the 2560 px bound, because the library samples in powers of two and a request for the bound itself would leave a 4032 px capture unsampled. Both are drawn from a request the feature answers with (`JobPhotoImages`, `DefaultJobPhotoImages`), never from bytes it decoded itself. The memory and disk caches are keyed **per session subject** (`jobPhotoImageCacheKey`) and released once per session on a read under a different subject (`JobPhotoImageCacheScope`), so a member signing in on the same device can never be served another member's evidence (`BR-007`, and the position `JobPhotoFiles` takes with `filesDir/job-photos/<subjectId>/`). The bytes are read by `JobPhotoFetcher`: a pending photo from the app-private file that already holds it (§9) with no second cache **on that path** (the viewer's zoom layer does have the stack cache a copy so it can sub-sample — Phase 4d), and the backend's evidence through the API with the same `401 → renew once` path as every other read (`BR-018`), cached on disk so each photo is downloaded **once** rather than once per cold start. **The viewer's own photo is drawn by the zoom layer since Phase 4d (2026-09-15)**: the layer sub-samples the file the stack cached, so the decode a request bounds is the layer's fit-size preview and a zoomed photo is read from the cached file at the size it is drawn — which is what makes zoom legible rather than a scale-up of a screen-sized bitmap (`D9`). **No derived object server-side** (`ADR-013` open question 3, still open); `Cache-Control` on the content answer is not added. **Retired by this phase**: the hand-rolled decode path, the 24-entry in-memory `LruCache`, the viewer's ceiling rule `jobPhotoFittingSampleSize` and its cases, and the EXIF turn applied to a *decode* (the library applies the tag itself); the **shared read/turn leaf `JobPhotoExifOrientation` stays**, because the preparation steps still need it (`D7b`, Phase 4b), and the pure orientation rule keeps its JVM coverage | `android/.../data/jobs/JobPhotoImages.kt`, `JobPhotoImage.kt`, `JobPhotoFetcher.kt`, `JobPhotoImageCacheScope.kt`, `JobPhotoSampling.kt`, `JobPhotoOrientation.kt`, `JobPhotoExifOrientation.kt` |
+| Pending tray / review | tray of not-yet-accepted photos with upload state, each tile a tap target that opens the viewer; review panel with preview, note and the three phase buttons, which a captured photo **and** a picked photo are each confirmed in; a pick's items are taken one at a time, and skipped items are reported by their place in the pick. The preview draws the **whole** photo and the panel's content **scrolls**, so the note stays reachable while the keyboard is up (both fixed 2026-09-16) | `android/.../ui/jobs/JobPhotoTray.kt`, `JobPhotoReviewSheet.kt`, `ui/jobs/JobDetailsViewModel.kt` |
+| Thumbnails | **the image stack since Phase 4c (2026-09-15, `D4b` ✓)**: the library (Coil 3) decodes, samples, turns by the photo's own EXIF orientation and caches, so a photo is decoded once at the size it is drawn and read again from memory or disk instead of from the API on every cold start. A tile asks for a **512 px** decode and the viewer asks for one at `VIEWER_DECODE_EDGE_PX` — half of the 2560 px bound, because the library samples in powers of two and a request for the bound itself would leave a 4032 px capture unsampled. Both are drawn from a request the feature answers with (`JobPhotoImages`, `DefaultJobPhotoImages`), never from bytes it decoded itself. The memory and disk caches are keyed **per session subject** (`jobPhotoImageCacheKey`) and released once per session on a read under a different subject (`JobPhotoImageCacheScope`), so a member signing in on the same device can never be served another member's evidence (`BR-007`, and the position `JobPhotoFiles` takes with `filesDir/job-photos/<subjectId>/`). The bytes are read by `JobPhotoFetcher`: a pending photo from the app-private file that already holds it (§9) with no second cache **on that path** (the viewer's zoom layer does have the stack cache a copy so it can sub-sample — Phase 4d), and the backend's evidence through the API with the same `401 → renew once` path as every other read (`BR-018`), cached on disk so each photo is downloaded **once** rather than once per cold start. **The viewer's own photo is drawn by the zoom layer since Phase 4d (2026-09-15)**: the layer sub-samples the file the stack cached, so the decode a request bounds is the layer's fit-size preview and a zoomed photo is read from the cached file at the size it is drawn — which is what makes zoom legible rather than a scale-up of a screen-sized bitmap (`D9`). **No derived object server-side** (**`D15` answered on 2026-09-16: none in v1** — the normalized original is stored and clients render from it). `Cache-Control` on the content answer is not added. **Retired by this phase**: the hand-rolled decode path, the 24-entry in-memory `LruCache`, the viewer's ceiling rule `jobPhotoFittingSampleSize` and its cases, and the EXIF turn applied to a *decode* (the library applies the tag itself); the **shared read/turn leaf `JobPhotoExifOrientation` stays**, because the preparation steps still need it (`D7b`, Phase 4b), and the pure orientation rule keeps its JVM coverage | `android/.../data/jobs/JobPhotoImages.kt`, `JobPhotoImage.kt`, `JobPhotoFetcher.kt`, `JobPhotoImageCacheScope.kt`, `JobPhotoSampling.kt`, `JobPhotoOrientation.kt`, `JobPhotoExifOrientation.kt` |
 | Photo picker | **exists since Phase 3**: `PickMultipleVisualMedia` and a `PickVisualMediaRequest(ImageOnly)` launch, with each item's bytes read through `JobPhotoPickedItems`; still no `ACTION_PICK`, `GetContent`, `MediaStore` or CameraX — **`D10 = (a)` keeps the picker the only library source**, so the device's media library is never read and no media permission is requested. **Coil** (D4b) arrived in Phase 4c for **drawing**, not for reading the library | `android/.../ui/jobs/JobPhotoPicker.kt`, `android/.../data/jobs/JobPhotoPickedItems.kt` |
-| Tests | API unit + e2e for the contract; Android JVM tests for the pipeline, the handler, the photo ViewModel (both sources), the image stack's read path and its cache rules, and the viewer's photo resolution; instrumented Compose cases for tray/gallery, the update sheet's two sources and the viewer (opening, full-size read, reading nothing, a photo the stack cannot read, zooming and panning without losing the photo's phase, note or close action, and closing from a zoomed state) | `api/src/jobs/job-photo.dto.spec.ts`, `api/test/job-photos.e2e-spec.ts`, `android/app/src/test/.../JobPhotoContentTypeTest.kt`, `JobPhotoSessionTest.kt`, `JobPhotoUploadHandlerTest.kt`, `JobPhotoSamplingTest.kt`, `JobPhotoFetcherTest.kt`, `JobPhotoImageCacheKeyTest.kt`, `JobPhotoImageCacheScopeTest.kt`, `JobPhotoOrientationTest.kt`, `ui/jobs/JobPhotoCaptureViewModelTest.kt`, `ui/jobs/JobPhotoViewerTest.kt`, `android/app/src/androidTest/.../ui/jobs/JobDetailsScreenTest.kt` |
+| Offline visibility | **exists since Phase 5 (2026-09-16, `D5` ✓)**: the **Job Details** and **Job Activity** reads are the app's fifth and sixth working-set adopters, so without connectivity the Job and the evidence it holds — which photos, with their phase, note and time — and the Activity that projects them are still readable. Both answers are kept as the backend's **wire response** (`JobEvidenceCache`) and mapped on the way out, replaced by every successful read, partitioned by session subject, and served **only** when the failure could not reach the backend (a refusal is never masked). Each is marked on screen as the last reported answer (`OfflineNotice`, its own tag per read). Photo **bytes** are not held here: a pending upload's bytes stay in app-private storage and are given **no disk-cache key at all** (`jobPhotoImageDiskCacheKey`), while accepted evidence is read from the image stack's disk cache when it is there and through the API when it is not. Nothing prefetches, and a photo that is on neither the device nor the cache is reported as **not available offline** (the viewer's own report; an offline glyph on a tile) rather than as a failure | `android/.../data/jobs/JobEvidenceCache.kt`, `JobDetailsRepository.kt`, `data/offline/WorkingSetEntry.kt`, `ui/jobs/JobDetailsScreen.kt`, `ui/jobs/JobActivitySection.kt`, `ui/jobs/JobPhotoViewer.kt`, `ui/jobs/JobPhotoComponents.kt`, `data/jobs/JobPhotoFetcher.kt`, `data/jobs/JobPhotoBytesUnavailable.kt` |
+| Tests | API unit + e2e for the contract; Android JVM tests for the pipeline, the handler, the photo ViewModel (both sources), the image stack's read path and its cache rules, the viewer's photo resolution, and (since Phase 5) the Job read's offline fallback and the reason a photo's bytes could not be produced; instrumented Compose cases for tray/gallery, the update sheet's two sources and the viewer (opening, full-size read, reading nothing, a photo the stack cannot read, zooming and panning without losing the photo's phase, note or close action, and closing from a zoomed state) | `api/src/jobs/job-photo.dto.spec.ts`, `api/test/job-photos.e2e-spec.ts`, `android/app/src/test/.../JobPhotoContentTypeTest.kt`, `JobPhotoSessionTest.kt`, `JobPhotoUploadHandlerTest.kt`, `JobPhotoSamplingTest.kt`, `JobPhotoFetcherTest.kt`, `JobPhotoImageCacheKeyTest.kt`, `JobPhotoImageCacheScopeTest.kt`, `JobPhotoOrientationTest.kt`, `ui/jobs/JobPhotoCaptureViewModelTest.kt`, `ui/jobs/JobPhotoViewerTest.kt`, `ui/jobs/JobDetailsRepositoryTest.kt`, `data/jobs/JobPhotoFetcherTest.kt`, `ui/jobs/JobDetailsViewModelTest.kt`, `android/app/src/androidTest/.../ui/jobs/JobDetailsScreenTest.kt` |
 
 ## Phases at a glance
 
 | Phase | Goal | Depends on | Layers | Status |
 | --- | --- | --- | --- | --- |
-| 0 | Decide the open product questions below | — | none (product ownership) | **Partly answered — D1, D1b, D2, D3, D3b, D3c, D4, D4b, D6c, D7b, D9 and D10 answered (2026-09-15); D5 deferred; D6a/D6b/D6d/D6e, D7's remaining sub-questions and D8 awaiting** |
+| 0 | Decide the open product questions below | — | none (product ownership) | **Answered in full — D1, D1b, D2, D3, D3b, D3c, D4, D4b, D6c, D7b, D9, D10, D11, D12 and D13 (2026-09-15); D5, D6a–D6e, D7, D8, D14 and D15 (2026-09-16). Nothing below is awaiting an answer** |
 | 1 | Evidence capability set (who may add and read evidence) | **D1 ✓, D1b ✓** | API, database, docs | **Landed (2026-09-15)** |
 | 2 | Content-type-aware local capture pipeline | **D3 ✓, D3b ✓, D3c ✓** | Android | **Landed (2026-09-15)** |
 | 3 | Photo sources in the Add update sheet (gallery picker, multi-select) | **D3 ✓, D3b ✓, D3c ✓, Phase 1, Phase 2** | Android, localization, docs | **Landed (2026-09-15)** |
-| 4 | Full-size viewer and a thumbnail strategy | **D4 ✓** | Android, docs | **Landed (2026-09-15)** — the viewer; its thumbnail/caching half is now **Phase 4c** on the **D4b ✓** answer |
+| 4 | Full-size viewer and a thumbnail strategy | **D4 ✓** | Android, docs | **Landed (2026-09-15)** — the viewer; its thumbnail/caching half is **Phase 4c** on the **D4b ✓** answer, and derived thumbnails are decided **out of v1** (`D15` ✓) |
 | **4b** | **Re-encoded evidence is stored upright** | **D7b ✓** | Android, tests, docs | **Landed (2026-09-15)** — the preparation steps turn what they re-encode, through the shared read/turn leaf |
 | **4c** | **Image stack and preview caching (Coil 3)** | **D4b ✓** | Android, tests, `docs/decisions/`, docs | **Landed (2026-09-15)** — Coil 3 sits behind `JobPhotoImages`: the feature answers with a request, the library samples, turns by EXIF and caches it, the reader keeps the `401 → renew once` path, and the cache is keyed and released per session subject |
 | **4d** | **Viewer gestures (pinch-zoom and pan, Telephoto)** | **D9 ✓**, Phase 4c (landed) | Android, tests, design docs | **Landed (2026-09-15)** — the photo is drawn through Telephoto over the Coil 3 stack: a pinch to zoom, a drag to pan within bounds, a double-tap to the library's zoom ceiling and no scale below fit, with the phase badge, the note, the close action and the platform's back gesture unchanged, and a zoomed photo read from the file the stack cached |
 | **4e** | **Viewer paging, save and share** | **D11 ✓, D12 ✓, D13 ✓**, Phase 4d (landed) | Android, tests, `docs/decisions/`, docs | **Landed (2026-09-15)** — the viewer pages through the Job's photos in the order the screen presents them, paging only while the photo is at fit; the chrome carries the photo's phase, a localized position and its note, and two actions read evidence on `evidence.view`: **Save to device** (a `Servora` album in the shared gallery; `WRITE_EXTERNAL_STORAGE` capped at API 28 and asked for when needed) and **Share** (the platform's chooser, through one added `FileProvider` cache path) |
-| 5 | Offline visibility of accepted evidence | D5 — **deferred** | Android, `offline-first-architecture.md` | **Blocked — D5 was deferred 2026-09-15** |
-| **6a** | **Refused photos are explicitly discardable** | **D6c ✓** | Android, tests, docs | Startable as its own slice |
-| 6 | The rest of the evidence lifecycle (retention, delete/edit, orphan objects) | the remaining D6 sub-questions, D1 | API, database, Android, docs | Blocked on `D6a`/`D6b`/`D6d`/`D6e` |
-| 7 | Angular parity and reporting over evidence | D1–D7, an Angular application | Angular, API | Blocked on D1–D7 and on the Angular application |
+| 5 | Offline visibility of accepted evidence | **D5 ✓** | Android, `offline-first-architecture.md` | **Landed (2026-09-16)** — the Job Details and Job Activity reads adopt the working set (wire responses, mapped on the way out, refuses never masked) and both are marked as the last reported answer; the photo-byte cache is stated as one rule (a pending photo gets no disk key, accepted evidence is cached), nothing prefetches, and a photo that is neither held nor cached is reported as **not available offline** |
+| 6a | Refused photos are explicitly discardable | **D6c ✓** | Android, tests, docs | **Startable — the phase to run** — the smallest |
+| **6b** | **Removing accepted evidence (soft, audited, Manager-level)** | **D6a ✓, D6b ✓, D6d ✓, D1 ✓** | API, database, Android, permissions, docs | Startable after 6a |
+| **6c** | **Evidence metadata: strip GPS/EXIF, phase as draft state** | **D7 ✓, D7b ✓** | Android, API (validation), tests, docs | Startable |
+| 6 | The rest of the evidence lifecycle | **D6 answered in full; `D6e` ✓** | — | **Closed** — no hard Job deletion in normal flows, so there is no orphaned object to fix; what remains is carried by 6b and 6c |
+| 7 | Angular parity and reporting over evidence | D1–D15, Phases 5/6b/6c/8/9, an Angular application | Angular, API | Blocked on the Angular application, which does not exist in this repository |
+| 8 | Evidence reads through short-lived presigned URLs | **D15 ✓**, Phase 5 (the read path it changes) | API, Android, `docs/decisions/`, `docs/api/` | Startable once the design states the resolution `ADR-013` D7 requires |
+| 9 | Audio evidence (`evidence.audio.add`) | **D8 ✓**, Phase 1 | API, database, Android, offline, localization, tests, docs | Startable — the largest slice |
 
 ## Phase 0 — decisions requested
 
@@ -502,7 +602,8 @@ Consequences recorded with the decision:
   same device read the previous member's photos without the API answering — a read around `evidence.view`
   (`BR-007`). The local store already takes this position (`filesDir/job-photos/<subjectId>/`, whose own
   comment says one signed-in user's pending evidence is never read by another), and the cache follows it.
-- **Server-derived thumbnails were not taken** (option (d)): `ADR-013`'s open question 3 stays open, so a
+- **Server-derived thumbnails were not taken** (option (d)): `ADR-013`'s open question 3 stayed open that day
+  and was **closed by `D15` ✓ on 2026-09-16 (no derived object in v1)**, so a
   tile may still download a full-resolution object — but **once** rather than on every cold start, because
   the client-side cache is what changes.
 - **What the library replaces retires with its tests:** the viewer's ceiling rule
@@ -518,7 +619,8 @@ Consequences recorded with the decision:
   was deliberately not built, and that the library is maintained and compatible with the pinned toolchain
   (Kotlin, Compose BOM, OkHttp, `minSdk 26`).
 - **A cache is not a retention policy.** The cached bytes are a cache: they may be evicted at any time and
-  they decide nothing about offline evidence, which is `D5` and was deferred.
+  they decide nothing about offline evidence, which is `D5` — deferred on 2026-09-15 (option (d)) and
+  answered on 2026-09-16 (Phase 5).
 
 ### D5 — May accepted evidence be read offline?
 
@@ -559,6 +661,27 @@ Consequences recorded with the deferral:
   retention rule, and must not be presented as answering this question.
 - **No document changes beyond this tracker**: the offline standard already records these reads as
   online-only, which is still true, so the deferral adds nothing to it.
+
+**Decision (2026-09-16, product owner instruction) — the deferral is lifted; `D5` is answered.** Accepted
+evidence **is** readable offline, and photo bytes are cached **best-effort**:
+
+- **Metadata is required offline.** The evidence a Job holds — its phase, its note, its time and the
+  gallery/Activity projection around it — must be readable without connectivity, following the existing
+  read rules: the working set, an answer marked as the last reported one, and a refusal never masked.
+- **Bytes are best-effort, and never eagerly fetched.** A photo's bytes are cached locally when the device
+  already holds them (a pending or just-uploaded photo) or when the technician explicitly opens or
+  downloads that photo. Servora must **not** download every historical photo to make a screen complete.
+- **A pending upload's bytes are guaranteed, not cache.** They are kept until the upload is confirmed and
+  the evidence record is synchronized (`BR-014`, `BR-015`).
+- **After acceptance the local copy is an evictable cache** managed by the app and the platform on a
+  reasonable **size-based LRU** policy rather than a fixed retention period. Offline availability of a
+  previously viewed photo is therefore best-effort and is never presented as a promise.
+- **The Coil disk cache is not this policy.** The deferral's caution stands: an evictable image cache with
+  no retention rule must not be presented as an answer to this question. Phase 5 states the cache policy
+  the feature adopts.
+
+Delivered by **Phase 5**. Documents changed with this answer:
+`docs/architecture/offline-first-architecture.md` §9, §11 (items 1 and 4) and §12.
 
 ### D6 — Evidence lifecycle: retention, delete/edit, refused photos, orphan objects
 
@@ -606,6 +729,48 @@ Consequences recorded with the decision:
   refused photos, is unblocked and is split out as **Phase 6a**.
 - **Nothing is retained after a discard** beyond the app's own record of the refusal: the API never held
   those bytes, so there is no evidence to preserve.
+
+**Decision (2026-09-16, product owner instruction) — `D6a`, `D6b`, `D6d` and `D6e` are answered; the
+remaining D6 sub-questions are closed.**
+
+- **`D6a`/`D6b` — accepted evidence is immutable, and there is no edit operation.** A technician must not
+  overwrite a photo, replace its bytes, change its phase, or silently delete it once it has been accepted
+  into the Activity/evidence history. Before submission it is not evidence, and the existing draft
+  removal already applies. After submission, removal is an explicit **Remove evidence** operation available
+  only to a Manager-level capability, **`evidence.photo.remove`**: it soft-removes the evidence from
+  ordinary UI, records **who** removed it, **when** and **why**, and preserves the audit record; the stored
+  object may be physically purged later under retention. **An edit-photo route is avoided entirely**, and a
+  caption/note correction is recorded as another Activity/update rather than rewriting historical evidence.
+- **`D6d` — retention and visibility.** Evidence belongs to the historical Job record. Archiving a Job must
+  not delete its evidence, and archived Jobs and their evidence remain readable to users permitted to view
+  archived Jobs. For v1, retention is **indefinite while the tenant/account exists**, rather than a
+  regulatory period Servora cannot universally justify; configurable retention for tenants with their own
+  compliance requirements is a later capability. Soft-removed evidence disappears from ordinary technician
+  views but stays visible in an audit/history context to authorized managers.
+- **`D6e` — no hard Job deletion in normal product flows.** Jobs are archived/canceled, not deleted, so
+  evidence objects never become orphaned through a Job deletion. If a future administrative or GDPR-style
+  hard purge exists, it must be a deliberate cascading purge — Job → Visits → evidence records → storage
+  objects/derived objects — with object deletion handled asynchronously and idempotently. A storage object
+  must never outlive its database ownership accidentally.
+
+Delivered by **Phase 6b** (the remove operation and the visibility split; `D6d` and `D6e` need no v1 work
+of their own beyond it). Documents changed: `Business Rules.md` (`BR-088` – `BR-090`, and `BR-027`'s
+exceptions), `docs/api/job-photos.md` §1 and §7, `docs/decisions/015-…` (the new remove capability) and
+`docs/decisions/013-…` (object lifetime).
+
+Consequences recorded with the decisions:
+
+- The permission catalogue gains **`evidence.photo.remove`** when Phase 6b implements it — a third per-kind
+  capability beside `evidence.view` + `evidence.photo.add` (`ADR-015`). Its bilingual name and description
+  (`BR-005`) and its default-role grant are recorded then; the default **Technician** role does not receive
+  it.
+- **No route rewrites evidence.** There is no edit route to design, and the remove route records a removal
+  rather than mutating what was recorded.
+- **`job_photos` stays append-only**, with the removal expressed as new history (`docs/api/job-photos.md`
+  §7).
+- A **structured removal-reason catalogue** is not defined by these answers. If one is wanted, it is a
+  further product decision rather than something Phase 6b invents (`BR-042`) — Phase 6b records the reason
+  as free text alongside actor and timestamp.
 
 ### D7 — Metadata beyond the phase
 
@@ -660,8 +825,9 @@ Consequences recorded with the decision:
 - **Verification is partly device-bound**: the pixel turn needs `BitmapFactory`/`Bitmap`, so it runs behind
   the port and its on-device behaviour is the product owner's QA (`qa.md` §7.3), while the rule that decides
   the turn stays a JVM test.
-- **The rest of D7 is unchanged**: categories/tags versus `phase` only, phase persistence across process
-  death, and the EXIF/GPS policy (`BR-038`) remain open.
+- **The rest of D7 was unchanged by this answer** — categories/tags versus `phase` only, phase persistence
+  across process death, and the EXIF/GPS policy (`BR-038`) stayed open here **and were answered on
+  2026-09-16** (below).
 
 **Landed (Phase 4b, 2026-09-15).** Both steps of `DefaultJobPhotoProcessing` turn what they decoded by the
 orientation the **source** bytes declare, before scaling and encoding, so the JPEG they write is upright.
@@ -675,6 +841,29 @@ same answer the display path gives — the unturned pixels are never written as 
 pixel turn itself needs `BitmapFactory`/`Bitmap`, so its on-device behaviour is **device QA**, handed over
 as `## Manual QA runbook — Phase 4b`; and evidence already stored or uploaded from a re-encoded photo stays
 **historical** (`D7b` option (c) was not taken).
+
+**Decision (2026-09-16, product owner instruction) — the rest of D7 is answered.** `phase` stays the only
+structured classification, it becomes draft state, and uploaded evidence carries no location metadata:
+
+- **Classification.** `phase` — `BEFORE_WORK`, `DURING_WORK`, `AFTER_WORK` — remains the **only** structured
+  photo classification in v1. No arbitrary tags or categories are introduced: captions and notes cover
+  anything else without creating taxonomy complexity.
+- **Phase persistence.** The currently selected phase is persisted across Activity-sheet recreation and
+  process death **only as draft state for that in-progress update**. It must not become a global preference
+  that leaks into the next Job or the next update.
+- **EXIF/GPS.** Servora **strips GPS/location EXIF and other unnecessary metadata** from uploaded evidence by
+  default, preserving only what the application explicitly needs — normalized orientation and dimensions,
+  and Servora's own server-side capture/upload timestamps. **EXIF GPS is never used as Job-location
+  evidence**; using location at all would need an explicit product feature with clear disclosure
+  (`BR-038`, still open).
+
+Delivered by **Phase 6c**. Documents changed: `Business Rules.md` (`BR-091`), `docs/api/job-photos.md` §7.
+What this does **not** change: the display path already turns a photo by its orientation tag, and Phase 4b
+already stores a re-encoded photo upright (`D7b`) — stripping is about which metadata travels, not about
+how a photo is presented. One consequence to design carefully: the API accepts a photo whose bytes are
+already a JPEG under the limit **without** re-encoding it, so a strip that only happens in a re-encoding
+step would leave an untouched capture's metadata intact. Phase 6c must state where the strip runs (client
+pipeline and/or API) and prove it covers both paths, including the one that never re-encodes.
 
 ### D8 — Audio and files
 
@@ -699,6 +888,31 @@ evidence table with a `kind`), so photos are its first kind. (c) Audio only, lat
 **Agent recommendation (not a decision).** (a) — decide explicitly that v1 evidence is photos, so the
 question closes instead of being re-opened by each slice; if evidence types come later, (b) is the
 shape that avoids a second parallel table.
+
+**Decision (2026-09-16, product owner instruction) — audio is in v1's scope; generic files are not.**
+
+- **Audio: yes.** Voice/audio notes fit the technician workflow, so audio is implemented as another
+  evidence/activity kind using the **same** storage abstraction, offline outbox, upload lifecycle,
+  authorization and immutable-history principles as photos (`BR-088` – `BR-091`).
+- **The reserved capability is activated when the feature is implemented**: `evidence.audio.add` is created
+  by the audio slice, in the same per-kind shape as `evidence.view` + `evidence.photo.add` (`ADR-015`).
+- **The dead affordance is not exposed.** The Add update sheet draws the audio kind only when a session
+  actually holds the capability, and no session holds it today (`canAddAudio = false`), so nothing is
+  offered before audio works — which is exactly what this decision requires. The seam
+  `docs/tracker/033-android-add-update-hierarchy.md` built (kind, glyph, label, empty content composable and
+  its JVM/Compose coverage) stays as the place audio lands. If product ownership wants the seam itself
+  removed until then, that is a separate instruction, because removing it would also remove the tests that
+  prove the sheet's hierarchy.
+- **Generic files: no.** Arbitrary PDF/document/file attachments are left for a later phase: they bring MIME
+  validation, previews, malware considerations, file-size rules and a substantially broader UX.
+
+Delivered by **Phase 9**. Documents changed: `Business Rules.md` (`BR-091`) and `docs/decisions/015-…`
+(the audio capability is created by that slice). What the audio slice must still decide for itself — and
+record in an ADR rather than invent (`BR-042`): the evidence row model for a kind (a `kind` on one model
+versus a parallel structure), the audio content-type and size vocabulary, length limits, playback in both
+clients, and the shared Activity kind. One question this decision's shape raises rather than answers:
+whether an audio update also offers *choose an existing recording* beside *record* (the photo kind's two
+sources), and if so what capability covers reading a file — recorded by tracker `033`, still open.
 
 ### D9 — Viewer gestures and photo navigation
 
@@ -800,15 +1014,17 @@ Filled in by product ownership. An answer here is what unblocks the phase named 
 | D3c | What an oversized photo (over the API's 15 MiB limit) does | **Answered — downscaled/re-compressed on device to fit**, so every photo can upload; the stored evidence is the resized version and the original is not kept. Target edge/quality is an implementation detail Phase 2 must record | product ownership | 2026-09-15 | this tracker (D3c); implemented in Phase 2 |
 | D4 | Viewer and thumbnail strategy | **Answered — (a): a full-size in-app viewer only.** Tapping a photo (in the Job Activity gallery or in the capture tray) opens the photo in an in-app viewer; the caching/thumbnail items — an HTTP cache, `Cache-Control` on the answer, a disk-backed image cache, and server-derived thumbnails — are **not** built and stay recorded as undecided (`D4b`). The viewer decodes the photo itself, bounded by the screen it is drawn on, from the bytes already read (`JobPhotoImages`) | product ownership | 2026-09-15 | this tracker (D4); implemented in Phase 4. No API change: `docs/api/job-photos.md` is untouched, and `ADR-013`'s open question 3 stays open |
 | D4b | Preview and caching strategy (HTTP cache, disk cache, server-derived thumbnails) | **Answered — (a): Coil 3 behind the existing `JobPhotoImages` port**, with its memory and disk cache and its sampling/EXIF handling; the API read keeps the session-renewal path, and the cache is keyed and cleared **per session subject**. Server-derived thumbnails were **not** taken (`ADR-013` open question 3 stays open), and there is no API, database, permission or pipeline change | product ownership | 2026-09-15 | this tracker (D4b); `docs/decisions/016-…`; implemented by **Phase 4c**. Retires the hand-rolled decode/sampling rules and their tests; the risk row "Every gallery tile downloads full-resolution bytes" closes as a per-cold-start cost and stays as a per-object download |
-| D5 | Offline visibility of accepted evidence | **Deferred** — option (d): revisited later rather than answered now. Accepted evidence and the Activity stay **online-only**, so Phase 5 does not run and the risk row stays open. Nothing is decided about photo bytes on the device, and a cache is not a retention policy | product ownership | 2026-09-15 | this tracker (D5); no other document changes — the offline standard already records these reads as online-only |
-| D6 | Evidence lifecycle (delete/edit, refused photos, Job deletion, retention) | **D6c answered — (a): a refused photo may be explicitly discarded** — local file and queued row together, with the refusal reason shown — which satisfies `BR-014` on both sides. **`D6a`/`D6b` (delete/edit a recorded photo), `D6d` (retention) and `D6e` (Job deletion and orphan objects) remain awaiting** | product ownership | 2026-09-15 | this tracker (D6); implemented by **Phase 6a** — the rest of Phase 6 stays blocked |
-| D7 | Metadata beyond the phase | **D7b answered — (a): the preparation steps turn the pixels** of a photo they re-encode, so stored evidence is upright and needs no orientation tag. Evidence already stored or uploaded is **historical and is not repaired**. **The rest of D7 (tags versus `phase` only, phase persistence, EXIF/GPS policy) remains awaiting** | product ownership | 2026-09-15 | this tracker (D7); **implemented in Phase 4b (landed 2026-09-15)**. No API, schema or uploaded-byte change; the pixel turn's verification is device-bound |
-| D8 | Audio and files in v1 | *awaiting* | — | — | — |
+| D5 | Offline visibility of accepted evidence | **Answered (2026-09-16) — accepted evidence is readable offline: metadata is required, bytes are best-effort.** Bytes are cached when the device already holds them or the technician opens/downloads them, never by downloading every historical photo; a pending upload's bytes are **guaranteed** until synchronization confirms the evidence, and after that the local copy is an **evictable, size-based LRU cache** rather than a fixed retention period. Offline availability of a previously viewed photo is best-effort and is never a promise | product owner instruction | 2026-09-16 | this tracker (D5); **delivered by Phase 5**; `docs/architecture/offline-first-architecture.md` §9, §11, §12 |
+| D6 | Evidence lifecycle (delete/edit, refused photos, Job deletion, retention) | **Answered in full (2026-09-16).** `D6c`: a refused photo may be explicitly discarded — local file and queued row together, with the refusal reason shown. `D6a`/`D6b`: accepted evidence is **immutable** — no overwrite, no byte replacement, no phase change, no silent delete; removal is an explicit, audited, **Manager-level** `evidence.photo.remove` that soft-removes it while the audit record is preserved, and **no edit-photo route exists** (a note correction is new Activity). `D6d`: evidence belongs to the historical Job record — archiving a Job never deletes it, archived Jobs and their evidence stay readable to those permitted to view archived Jobs, and v1 retention is **indefinite for the life of the tenant**. `D6e`: normal flows never hard-delete a Job, so evidence is never orphaned; any future administrative purge is a deliberate cascade with asynchronous, idempotent object deletion | product owner instruction | 2026-09-16 | this tracker (D6); `BR-088` – `BR-090`; `docs/api/job-photos.md` §1, §7; `docs/decisions/015-…`, `013-…`. **Phase 6a** (D6c) stays startable; **Phase 6b** carries the rest; Phase 6 is closed |
+| D7 | Metadata beyond the phase | **Answered in full.** `D7b` (2026-09-15): the preparation steps turn the pixels of a photo they re-encode, so stored evidence is upright and needs no orientation tag; evidence already stored or uploaded stays **historical and is not repaired** (Phase 4b, landed). **2026-09-16:** `phase` stays the **only** structured classification (no tags or categories), the selected phase is **draft state for the in-progress update** only and never a global preference, and **GPS/location EXIF plus other unneeded metadata are stripped from uploaded evidence by default**, keeping only normalized orientation/dimensions and Servora's own timestamps; EXIF GPS is never used as Job-location evidence | product owner instruction | 2026-09-16 | this tracker (D7); `BR-091`; `docs/api/job-photos.md` §7. `D7b` was **implemented in Phase 4b (2026-09-15)**, with no API, schema or uploaded-byte change; the rest is **Phase 6c** |
+| D8 | Audio and files in v1 | **Answered — audio: yes; generic files: no.** Audio notes become an evidence kind of their own on the same storage, outbox, upload, authorization and immutable-history rules, and `evidence.audio.add` is activated when that slice is implemented; arbitrary file attachments stay out of v1 (MIME validation, previews, malware and size rules, broader UX). A kind's affordance is not exposed before the kind actually works, which the sheet already satisfies (`canAddAudio = false`) | product owner instruction | 2026-09-16 | this tracker (D8); `BR-091`; `docs/decisions/015-…`; **delivered by Phase 9** |
 | D9 | Viewer gestures and photo navigation | **Answered — (b): pinch-zoom and pan** on the one photo, Telephoto on top of the Coil 3 stack. Swiping between photos and a gallery-wide pager are **not** decided | product ownership | 2026-09-15 | this tracker (D9); `docs/decisions/016-…`; implemented by **Phase 4d**; the viewer row of `docs/design/android-design-system.md` changes with it |
 | D10 | Device media access and the in-app gallery surface | **Answered — (a): the system photo picker stays the only library source.** No media-read permission, no in-app `MediaStore` grid and no in-app camera; the design's camera request stays open exactly as `D3` left it | product ownership | 2026-09-15 | this tracker (D10); no manifest, permission or design change |
 | D11 | Swiping between photos in the viewer | **Answered — the viewer pages through the Job's photos in the order Job Details presents them**: evidence the backend holds first (as the Activity reports it), then the photos this device still holds (oldest first), a photo both records hold listed once. A swipe pages **only while the photo is at fit**; a zoomed photo pans instead. This answers the item `D4`/`D9` left undecided, and it is scoped to the Job on screen — a cross-Job gallery stays open | product owner instruction | 2026-09-15 | this tracker (D11); `docs/decisions/017-…`; **implemented by Phase 4e**; the viewer row of `docs/design/android-design-system.md` changes with it |
 | D12 | Saving a photo on the device | **Answered — (a): the photo is written into the device's own gallery**, in a `Servora` album beside the platform's Pictures folders. API 29+ needs no permission (`IS_PENDING` until its bytes are all there); API 26–28 declares `WRITE_EXTERNAL_STORAGE` with `maxSdkVersion="28"` and asks for it when a save needs it, retrying the same save once granted and reporting a declined one. `D10` is unchanged: this is a **write** with a two-release ceiling, and no media-read permission is added | product owner instruction | 2026-09-15 | this tracker (D12); `docs/decisions/017-…`; **implemented by Phase 4e**; `AndroidManifest.xml` and its permission change with it |
 | D13 | Sharing a photo with another application | **Answered — the platform's own share sheet** (`ACTION_SEND` with the photo's own MIME type), so WhatsApp or anything else on the device is the user's choice and Servora names no provider. The photo only: no note text, no Job or customer detail. The bytes are staged in one app-private cache directory exposed through the app's existing `FileProvider` (one added `cache-path`), and a device that accepts no image is reported | product owner instruction | 2026-09-15 | this tracker (D13); `docs/decisions/017-…`; **implemented by Phase 4e**; `res/xml/file_paths.xml` changes with it |
+| D14 | The evidence entry point, and the tray's **Take another** action | **Answered — the Add update sheet stays the canonical entry point for choosing the evidence kind** (and therefore for switching Photo → Audio/Text), while inside the photo flow **Take another launches the same camera target again** rather than bouncing the technician back through the picker: the intent is unambiguous once a photo is already being added. This is the behaviour the tray already has, so no code, copy or contract changes | product owner instruction | 2026-09-16 | this tracker (D14); `docs/design/android-design-system.md` (the update action's row); the design-owner risk row is closed |
+| D15 | The object store's read model and derived objects (`ADR-013` open questions 3 and 4) | **Answered — no derived objects in v1, and reads move to short-lived presigned GET URLs.** The normalized original is stored and clients render from it; a thumbnail pipeline is revisited only when bandwidth or gallery performance proves it necessary. For reads the API issues **short-lived presigned GET URLs** after authorization, with the bucket private, no client credentials and no second configured storage endpoint; uploads stay on the API port. **A recorded constraint must be resolved by that phase:** `ADR-013` D7 records that a signature is bound to its `Host`, that presigning needs `S3_PUBLIC_ENDPOINT` (with a second `adb reverse` locally) and that a plain-HTTP URL is debug-build-only — and a presigned URL is served from the provider's own host, which is in tension with clients not assuming a vendor | product owner instruction | 2026-09-16 | this tracker (D15); `docs/decisions/013-…` (its 2026-09-16 update); `docs/api/job-photos.md` §4; **delivered by Phase 8**, whose design states the resolution first |
 
 Every answer must name the document it changes: `Business Rules.md` (`BR-008`, `BR-009`, `BR-027`),
 `docs/api/job-photos.md`, `docs/architecture/offline-first-architecture.md` §12/§13, an ADR in
@@ -1032,15 +1248,18 @@ it, opening a pending photo from the device's bytes, and reporting a photo it ca
 `D4` named belongs to the caching change, which this decision did not take, so it is not reported here.
 
 **Offline (the offline standard's §13).** The viewer is an **online-only feature**, like the tiles it opens
-from: it reads the photo through the route that already exists, that read has no `WorkingSetStore`
-projection, and whether accepted evidence must be readable without connectivity is **D5**, **deferred on
-2026-09-15** (`BR-032`). It queues nothing — a read never does — and it keeps nothing of its own once it
+from: it reads the photo through the route that already exists and that read has no `WorkingSetStore`
+projection. Whether accepted evidence must be readable without connectivity is **D5**, **deferred on
+2026-09-15** and **answered on 2026-09-16**: metadata becomes readable offline and the bytes are cached
+best-effort, which is **Phase 5**'s work (`BR-032`) — until Phase 5 lands, the behaviour described here
+stands. The viewer queues nothing — a read never does — and it keeps nothing of its own once it
 closes. `docs/architecture/offline-first-architecture.md` §12 records the photo reads in its online-only
 list for exactly this reason.
 
 **Not in this phase.** Zoom, gestures, a gallery-wide pager, video; the request cache, `Cache-Control`
-and server-derived thumbnails (**D4b** — answered and carried by Phase 4c, landed); offline evidence (**D5**,
-deferred); editing or deleting a photo (**D6**).
+and server-derived thumbnails (**D4b** — answered and carried by Phase 4c, landed, and **D15** now decides
+there are no derived objects in v1); offline evidence (**D5** — answered 2026-09-16, Phase 5); editing or
+deleting a photo (**D6** — answered 2026-09-16: no edit route, and the removal is Phase 6b).
 
 ## Phase 4b — Re-encoded evidence is stored upright (D7b)
 
@@ -1180,8 +1399,9 @@ handed over as `## Manual QA runbook — Phase 4c`, which includes the measureme
 requests per photo per cold start, before and after) because only a device plus the API's log can report it.
 Nothing under `api/` changed, so no API command was run.
 
-**Not in this phase.** Server-derived thumbnails (`ADR-013` open question 3); `Cache-Control` on the content
-route; zoom and gestures (Phase 4d); offline visibility (`D5`, deferred).
+**Not in this phase.** Server-derived thumbnails (`ADR-013` open question 3, which **`D15` answered on
+2026-09-16: none in v1**); `Cache-Control` on the content route; zoom and gestures (Phase 4d); offline
+visibility (**`D5`** — answered 2026-09-16, Phase 5).
 
 ## Phase 4d — Viewer gestures (D9)
 
@@ -1233,8 +1453,8 @@ it is built on it rather than beside it.
 product owner covering a portrait and a landscape photo, a double-tap, a pinch, panning to each edge, and
 closing from a zoomed state.
 
-**Not in this phase.** Swiping between photos and any gallery-wide pager (not decided, `D9`); video; offline
-evidence (`D5`, deferred).
+**Not in this phase.** Swiping between photos and any gallery-wide pager (`D11` later decided the within-Job
+pager, delivered by Phase 4e); video; offline evidence (**`D5`** — answered 2026-09-16, Phase 5).
 
 ## Phase 4e — Viewer paging, save and share (D11, D12, D13)
 
@@ -1293,40 +1513,78 @@ device command is run** (`qa.md` §7.3), so swipe/pan arbitration, the gallery w
 device-bound and handed over as `## Manual QA runbook — Phase 4e`. Nothing under `api/` changes, so no API
 command is run.
 
-**Not in this phase.** Deleting or editing a recorded photo (`D6a`/`D6b`), retention (`D6d`), Job deletion
-and orphaned objects (`D6e`), the refused-photo discard (`D6c`, Phase 6a), swiping across Jobs or a
-device-wide gallery, sharing the note or Job context, offline visibility of accepted evidence (`D5`, Phase
-5), and any Angular surface (`BR-030`).
+**Not in this phase.** Deleting or editing a recorded photo (`D6a`/`D6b` — answered 2026-09-16: no edit route
+exists, and the removal is Phase 6b), retention (`D6d` — answered 2026-09-16: indefinite for the life of the
+tenant), Job deletion and orphaned objects (`D6e` — answered 2026-09-16: normal flows never hard-delete a
+Job), the refused-photo discard (`D6c`, Phase 6a), swiping across Jobs or a device-wide gallery (`D11`
+scoped paging to the open Job), sharing the note or Job context (`D13` decided the photo only), offline
+visibility of accepted evidence (`D5` — answered 2026-09-16, Phase 5), and any Angular surface (`BR-030`).
 
-## Phase 5 — Offline visibility of accepted evidence
+## Phase 5 — Offline visibility of accepted evidence (D5)
 
-**Goal.** A technician without connectivity can still see the Job's evidence and Activity to the extent
-the decision requires.
+**Status: LANDED 2026-09-16 (`D5` ✓).** Recorded in `## Phase log`; the runbook is
+`## Manual QA runbook — Phase 5`.
 
-**Depends on.** D5 — **deferred on 2026-09-15**, so this phase stays blocked and does not run: the current
-behaviour stands and the reason is recorded in the offline standard (its §13 requires exactly that). It
-becomes startable only when D5 is answered.
+**Goal.** A technician without connectivity still sees the Job's evidence **metadata** and its Activity, and
+a photo's bytes are readable offline when the device already holds them or the technician asked for them —
+never because a screen prefetched every photo.
 
-**Layers.** Android; `docs/architecture/offline-first-architecture.md`.
+**Depends on.** **`D5` ✓**: metadata required offline, bytes best-effort, pending uploads guaranteed,
+accepted bytes an evictable cache. Its read rules are the offline standard's (§2, §3, §7, §13), which this
+phase follows rather than reinvents.
+
+**Layers.** Android; `docs/architecture/offline-first-architecture.md`; tests; docs.
 
 **Work.**
 
-1. Adopt the existing stores for the read the decision names — the working set for the Activity
-   projection (`data/offline/WorkingSetStore.kt`), following the Customer Detail precedent in tracker
-   `025` (`data/customers/CustomerDetailCache.kt`).
-2. `android/.../data/jobs/JobDetailsRepository.kt` states its read policy today; the cached answer is
-   served when the API cannot be reached, and the screen reports that it is showing a last-known answer
-   (`ui/components/OfflineNotice.kt` is the existing component for that).
-3. If D5 is `(c)`, the photo **bytes** are cached too, which is a separate decision with its own
-   retention rules — do not fold it in silently.
-4. Update `docs/architecture/offline-first-architecture.md` §12 (the adopters list) and §13 (what this
-   read now uses).
+1. **The Job Details and Job Activity metadata reads adopted the working set** — the existing store
+   (`data/offline/WorkingSetStore.kt`), following the Customer Detail precedent in tracker `025`
+   (`data/customers/CustomerDetailCache.kt`), through a new `data/jobs/JobEvidenceCache.kt` and two new
+   rows, `WorkingSetEntityTypes.JOB_DETAILS` and `JOB_ACTIVITY`. Each answer is the backend's **wire
+   response**, stored under the authenticated subject and served **only** when the backend could not be
+   reached, marked as the last reported answer on screen (`ui/components/OfflineNotice.kt`, with
+   `JobDetailsLastReportedTag` and `JobActivityLastReportedTag`), and never replacing a refusal (§12.2).
+   This covers the Activity projection — which photo ids the Job has, with their phase, note and time — not
+   only the Job header.
+2. **`android/.../data/jobs/JobDetailsRepository.kt` states its read policy.** Both reads now report the
+   reason (`JobRead`/`ActivityRead`) so the DTO the backend answered with can be kept while the mapped
+   object is returned, and each falls back only for a failure that could not reach the backend
+   (`couldNotReachBackend()`: `NETWORK` or `SERVER`). An action stays online-only (`BR-001`).
+3. **The photo bytes.** A photo this device holds is read from the file that holds it, as before; a photo
+   whose bytes this device does **not** hold is read from the image stack's cache when that cache still has
+   it, and through the API when it does not. The cache policy is now stated **explicitly** — a bounded,
+   size-based LRU over the existing Coil disk cache rather than a new store (`D5` ✓, §9) — in the code's own
+   terms (`JobPhotoImageModule`'s documented constants) and as one rule for which photos may be cache
+   entries at all: `jobPhotoImageDiskCacheKey` answers `null` for a `Local` photo, so **a pending upload's
+   bytes can never be evicted** (`BR-014`, `BR-015`), and the session's own key for evidence, so accepted
+   bytes are exactly what the bounded cache holds. What going offline must **not** do is asserted too: no
+   eager download of the Job's historical photos (nothing prefetches), and a failed read leaves the cache
+   empty.
+4. **A photo that is neither held locally nor cached is reported as unavailable offline.** The reader now
+   says **why** bytes did not arrive (`JobPhotoContentRead`: `Unreachable` for no connection, a `5xx` or a
+   renewal that was never answered — the offline standard's own classification — and `Unavailable` for no
+   session, a refusal or a missing record), the fetcher carries that out as
+   `JobPhotoBytesUnavailableException`, and the surfaces report it: the viewer has its own
+   **"This photo is not available offline. Connect to view it."** report (`JobPhotoViewerOfflineTag`), and a
+   tile draws an offline glyph with a localized description. Never a different picture, and never a failure
+   the technician cannot act on (`BR-042`); a photo this device no longer holds stays the generic
+   "could not be shown", since reconnecting would not fix it.
+5. **Documentation**: `docs/architecture/offline-first-architecture.md` §9 (the one rule), §11 items 1 and
+   4, §12's adopter list and its online-only paragraph, and the header's adopter count; this tracker's
+   status, phase table, state table, risk table and the runbook below.
 
-**Verification.** Offline/synchronization tests per `qa.md` §8: a first read offline, a cached read
-offline, a refresh when connectivity returns, and — where the local database version changes — the Room
-migration test. Commands as in Phase 2.
+**Verification.** Offline/synchronization tests per `qa.md` §8, on the JVM where the behaviour is: the Job
+read served from the working set when the API is unreachable (a `5xx` included), a refusal never replaced by
+a local copy, a newer answer replacing the older one, another session's row never served, and the same for
+the activity read; the reason a photo's bytes could not be produced (offline, refused, gone from the device,
+a `5xx`), and that a failed read writes nothing and a photo this device holds is never a cache entry. Device
+bound work was left to the product owner (`qa.md` §7.3): no `adb` and no device or emulator command was run,
+and the manual runbook below is the hand-off.
 
-**Not in this phase.** Offline photo capture (already works); offline evidence upload (already works).
+**Not in this phase.** Offline photo capture (already works); offline evidence upload (already works);
+downloading every historical photo (explicitly excluded by `D5`); presigned reads (Phase 8, which changes
+where these bytes are read **from**); the offline posture of the removal operation (Phase 6b decides it
+against the offline standard's §13.2 — an idempotency key and a conflict policy first).
 
 ## Phase 6a — Refused photos are explicitly discardable (D6c)
 
@@ -1354,36 +1612,118 @@ extending `JobPhotoSessionTest` and `JobPhotoCaptureViewModelTest`; a Compose ca
 compiling in `JobDetailsScreenTest` and marked **NOT RUN — device QA is the product owner's**. Commands:
 `make android-test`, `make android-lint`, `make android-build`.
 
-**Not in this phase.** Deleting or editing a **recorded** photo (`D6a`/`D6b`), retention (`D6d`), Job deletion
-and orphaned objects (`D6e`).
+**Not in this phase.** Deleting or editing a **recorded** photo (`D6a`/`D6b` — answered 2026-09-16: no edit
+route, and the removal is Phase 6b), retention (`D6d` — answered 2026-09-16: indefinite, `BR-090`), Job
+deletion and orphaned objects (`D6e` — answered 2026-09-16: no hard Job deletion in normal flows).
+
+## Phase 6b — Removing accepted evidence (D6a, D6b, D6d)
+
+**Status: STARTABLE after Phase 6a.**
+
+**Goal.** Accepted evidence stays immutable, and taking it out of ordinary use is an explicit, authorized,
+audited action instead of a mutation — with no edit path at all.
+
+**Depends on.** **`D6a` ✓, `D6b` ✓** (immutability, no edit route, soft removal behind a Manager-level
+capability) and **`D6d` ✓** (soft-removed evidence leaves ordinary views but stays in an audit/history
+context for authorized managers). **`D1` ✓** for how the capability is authorized.
+
+**Layers.** API, database (a new migration), permissions, Android, tests, docs.
+
+**Work.**
+
+1. **The capability.** `evidence.photo.remove` in the API's permission catalogue, following the
+   `evidence.view` / `evidence.photo.add` shape (`ADR-015`), with a bilingual name and description
+   (`BR-005`) and a **new** migration granting it to the default **Manager** role and not to **Technician**
+   (`BR-089`; `dev.md` §6 — a new migration, never an edit of an applied one).
+2. **The route.** An explicit **Remove evidence** operation on the Job photo, authorized by
+   `evidence.photo.remove`, recording **actor, timestamp and reason** and soft-removing the evidence: the
+   record and its history are preserved, and the removal is **added history**, not a rewrite (`BR-067`,
+   `BR-089`). `docs/api/job-photos.md` §1/§7 change from "nothing deletes a photo" to exactly what this
+   operation does. **No edit route is built, in this phase or later** (`BR-088`).
+3. **Reads respect the removal.** Ordinary reads — the technician's field views in particular — exclude
+   soft-removed evidence; the audit/history context for authorized managers includes it and states that it
+   was removed, by whom, when and why (`D6d` ✓). The Job's Activity must not silently drop the event
+   (`BR-080`).
+4. **The Android surface.** The removal is offered where an authorized Manager acts on a Job's evidence,
+   drawn on the capability the API enforces (`BR-007`, `BR-011`), localized (`BR-028`) and confirmed before
+   it is applied (`BR-067`). A technician's app offers **nothing** for accepted evidence — only the existing
+   pre-submission discard (`BR-088`).
+5. **Offline posture, decided rather than assumed.** A removal is a mutation, so it may be queued **only**
+   if its route accepts a client-generated idempotency key **and** its conflict policy is decided (offline
+   standard §5, §8, §13.2). If either is missing when this phase is designed, the operation is
+   **online-only** and the phase records that reason instead of inventing a queue.
+6. **Retention is not this phase** (`D6d` ✓, `BR-090`): nothing physically purges an object here, and no
+   store lifecycle rule is added.
+
+**Verification.** API authorization e2e for the new route: `401` unauthenticated, `403` without
+`evidence.photo.remove`, successful authorized removal, a session that may add evidence but not remove it,
+the removed photo excluded from ordinary reads, present in the audit context with actor, time and reason,
+and no path that rewrites the recorded bytes. Migration test for the permission rows (`make api-test`,
+`make test-api-e2e`). Android JVM tests for the capability gate and the confirmation; the Compose case is
+compiled and **NOT RUN — device QA is the product owner's** (`qa.md` §7.3).
+
+**Not in this phase.** Any edit of accepted evidence (excluded by `D6a`/`D6b`); physical purge of the stored
+object (`BR-090`); a structured removal-reason catalogue, which is not defined.
+
+## Phase 6c — Evidence metadata: no location metadata, phase as draft state (D7)
+
+**Status: STARTABLE.**
+
+**Goal.** What Servora stores carries no location or unnecessary metadata, and the chosen phase survives an
+interrupted update without becoming a global preference.
+
+**Depends on.** **`D7` ✓** — `phase` is the only structured classification, the selected phase is draft
+state for the in-progress update, and GPS/location EXIF plus unneeded metadata are stripped by default.
+
+**Layers.** Android (pipeline and draft state), API (validation and the contract's own statement), tests,
+docs.
+
+**Work.**
+
+1. **Strip on the way in, for every path.** The preparation pipeline already re-encodes some photos (the
+   `D3b` conversion and the `D3c` resize), but a capture that is already JPEG/PNG/WebP and under the limit
+   travels **unchanged** today, with whatever metadata its source carried — GPS included. This phase states
+   where the strip runs (client pipeline, API, or both) and proves it covers **both** paths, keeping only
+   what the application needs: normalized orientation and dimensions, and Servora's own server-side
+   capture/upload timestamps (`BR-091`). Phase 4b's rule stands: the stored pixels are upright, and the
+   strip must not reintroduce a dependence on an orientation tag.
+2. **Nothing beyond what is needed**: no GPS/location, no device identifiers, no free-form EXIF the
+   application does not read. A strip the device cannot perform **refuses** the photo rather than storing
+   bytes with metadata Servora did not intend to keep (`BR-042`).
+3. **The phase is draft state, not a preference.** The selected phase persists across Activity-sheet
+   recreation and process death **for the update in progress**, and is never carried into another Job or
+   another update (`BR-091`). Today it lives in the screen's UI state alone, so a process death mid-update
+   loses it.
+4. **No taxonomy.** No tags or categories are added; the note remains the free-text place for anything more
+   (`BR-091`, `D7` ✓).
+5. **Documentation**: `docs/api/job-photos.md` §3.3/§7, the review-panel row of
+   `docs/design/android-design-system.md` if the draft state changes what it states, this tracker's state
+   table (**Preparation** row) and its risk row on EXIF/GPS.
+
+**Verification.** JVM tests for the strip's decision rule (pure where possible, as `JobPhotoOrientation` is)
+and for the phase's draft-state behaviour; API tests if validation changes; a device case for a capture
+carrying GPS EXIF — compiled, **NOT RUN — device QA is the product owner's** (`qa.md` §7.3), with a runbook
+stating how to confirm a stored photo carries no location metadata.
+
+**Not in this phase.** Repairing metadata on evidence **already stored** — it is historical (`D7b` option
+(c) was not taken, `BR-067`); using location as a product feature (`BR-038` remains open); audio metadata or
+transcription (Phase 9).
 
 ## Phase 6 — The rest of the evidence lifecycle
 
-**Goal.** Every state evidence can reach has decided behaviour, including the ones reachable today with
-none.
+**Status: CLOSED by the 2026-09-16 decisions; its work is carried by Phases 6a, 6b and 6c.**
 
-**Depends on.** The remaining D6 sub-questions separately — `D6a`/`D6b`, `D6d`, `D6e` — and D1 for whoever
-performs a delete or edit. **`D6c` is answered and split out as Phase 6a**, so this phase no longer covers
-refused photos.
+Every item this section listed is now decided, and two of them need no v1 work at all:
 
-**Layers.** API, database, Android, documentation.
-
-**Work.** Sized by the decisions, and each item is separate work:
-
-1. **Refused photos** — **answered (`D6c` ✓) and delivered by Phase 6a**, not here.
-2. **Job deletion and objects** (D6e) — `job_photos` cascades on Job deletion while the stored objects do
-   not, so a Job deletion orphans objects. Whatever is decided lands in the Job deletion path (once
-   `BR-021` decides Job deletion itself) and, if objects must go, in the `ObjectStorage` port, which has
-   no deletion operation today.
-3. **Delete or edit a recorded photo** (D6a/D6b) — only if decided: a route, an append-only history, a
-   permission from Phase 1's catalogue, and `docs/api/job-photos.md` §7's "nothing in this contract edits
-   or deletes a photo" changes with it.
-4. **Retention** (D6d) — only if decided: what is kept, for how long, and who may see it (`BR-027`,
-   `BR-033`).
-
-**Verification.** Authorization e2e for any new route; append-only history tests where a change records
-history; Android JVM tests for whatever the tray gains; the object lifetime stated explicitly against a
-real local stack (`make minio-ls`).
+1. **Refused photos** — `D6c` ✓, delivered by **Phase 6a**.
+2. **Delete or edit a recorded photo** — `D6a`/`D6b` ✓: no edit route exists or will be built, and the
+   removal is **Phase 6b**.
+3. **Retention** — `D6d` ✓: indefinite for the life of the tenant, with configurable retention a later
+   capability for tenants that need it; recorded in `BR-090`. **No v1 work.**
+4. **Job deletion and objects** — `D6e` ✓: normal product flows never hard-delete a Job, so a Job deletion
+   cannot orphan objects today. A future administrative purge has a decided shape (a deliberate cascade with
+   asynchronous, idempotent object deletion), but **no v1 work**, and `BR-021` still leaves Job deletion
+   itself open.
 
 **Not in this phase.** Angular; any retention policy that has not been decided.
 
@@ -1392,9 +1732,10 @@ real local stack (`make minio-ls`).
 **Goal.** The management surface sees the same evidence the Android client does, governed by the same
 permissions, with reporting where the product wants it.
 
-**Depends on.** D1–D7; and the Angular application itself, **which does not exist in this repository
-yet** (`Project.md` §23 names Angular, but there is no web project to change and no Playwright
-configuration to extend).
+**Depends on.** **D1–D15** — every Phase 0 question is now answered — and the Angular application itself,
+**which does not exist in this repository yet** (`Project.md` §23 names Angular, but there is no web project
+to change and no Playwright configuration to extend). It also consumes what Phases 5, 6b, 6c, 8 and 9
+decide, so it follows them rather than leading them.
 
 **Layers.** Angular, API (only as Phases 1–6 decided).
 
@@ -1408,6 +1749,93 @@ may expose evidence a user may not read.
 shared contract verified against affected applications (`qa.md` §12).
 
 **Not in this phase.** Any change to the evidence model that Phases 1–6 did not decide.
+
+## Phase 8 — Evidence reads through short-lived presigned URLs (D15)
+
+**Status: STARTABLE once the design states the resolution `ADR-013` D7 requires.**
+
+**Goal.** A client reads accepted evidence through a short-lived, API-issued URL instead of streaming the
+bytes through the API, with the bucket private, uploads unchanged and no derived object stored.
+
+**Depends on.** **`D15` ✓** (presigned GET for reads, private bucket, no second configured endpoint, no
+derived objects) and **Phase 5**, because the read path it changes is the one Phase 5 makes offline-capable.
+
+**Layers.** API, `docs/decisions/013-…`, `docs/api/job-photos.md`, Android, shared types, tests, docs.
+
+**Work.**
+
+1. **Resolve the recorded constraint first** (`ADR-013` D7, and its 2026-09-16 update): a SigV4 signature is
+   bound to its `Host`, so a device-reachable storage host is needed (`S3_PUBLIC_ENDPOINT` locally plus a
+   second `adb reverse`), and a plain-HTTP URL is usable only by a debug build. The design also states what
+   a client learns about the provider, because the same decision asks that clients not assume a particular
+   vendor. **No implementation starts before that is written down** (`BR-042`).
+2. **The API answers a read with a short-lived URL** for the evidence record the session may read
+   (`evidence.view`), instead of streaming the bytes; `docs/api/job-photos.md` §4 changes with it, and the
+   URL's lifetime is stated there (`dev.md` §7).
+3. **Android reads through the returned URL** while keeping the security path: the authorization is what
+   produced the URL, a refusal is still a refusal, and the discovery call keeps a `401 → renew once` path
+   (`BR-007`, `BR-018`). The image stack and its per-subject cache stay as Phases 4c/5 left them, and
+   evidence stays immutable and still cached (`BR-088`).
+4. **Uploads do not change**: `POST /jobs/:id/photos` still validates and stores through the API (`BR-015`).
+5. **No derived objects**, and no new client-visible endpoint configuration: storage stays an API concern
+   (`D15` ✓).
+
+**Verification.** API unit + e2e: the URL is short-lived, a session without `evidence.view` is refused, the
+bucket stays private (an unsigned direct fetch fails), and the object key is still derived from the record.
+Android JVM tests for reading through a returned URL and for the refusal path; the on-device round trip is
+handed over (`qa.md` §7.3). `ADR-013` and the offline standard's §12 are updated with the read's new shape.
+
+**Not in this phase.** Presigned **uploads** (`D15` keeps them on the API port); a public bucket, a CDN or a
+second configured endpoint; derived objects (decided against in `D15`); any change to what a photo is.
+
+## Phase 9 — Audio evidence (D8)
+
+**Status: STARTABLE — the largest of these slices.**
+
+**Goal.** A technician records an audio note on a Job; it uploads like a photo (offline-safe, idempotent,
+authorized); it appears in the Job's Activity and can be played back — as evidence of its own kind,
+immutable once accepted, removable only through Phase 6b's audited operation.
+
+**Depends on.** **`D8` ✓** (audio is in scope on the same abstraction and rules; generic files are out) and
+**Phase 1** (the capability catalogue this activates).
+
+**Layers.** Database (the evidence model), API, permissions, storage, offline, Android, localization, tests,
+docs, an ADR.
+
+**Work.**
+
+1. **An ADR first** (`Project.md` §31, `dev.md` §14): the evidence model for a **kind** — a `kind` on one
+   model versus a parallel structure — plus the audio content-type and size vocabulary, length limits, the
+   Activity kind and playback. Everything this tracker has **not** decided belongs there, before the
+   migration is written (`BR-042`).
+2. **The capability**: create `evidence.audio.add` (the reserved code, `ADR-015`) with a bilingual name and
+   description, granted to the default Technician and Manager roles as `evidence.photo.add` is, in a new
+   migration (`BR-005`, `BR-009`).
+3. **The record and the object**: an evidence row for a recording with its own provider-agnostic key under
+   the evidence prefix (`ADR-013` D6.5), the same validate-before-evidence rule (`BR-015`), the same
+   immutability from acceptance (`BR-088`), and the same removal through `evidence.photo.remove` — or its
+   own kind-specific removal capability if the ADR decides the per-kind shape requires one, recorded rather
+   than assumed.
+4. **Capture, offline and upload**: recording through the platform's own recorder, stored app-private first,
+   queued through the **existing** outbox with a client operation id and a **decided** conflict policy
+   (offline standard §5, §8, §13.2), never lost while pending (`BR-014`).
+5. **Activity and playback**: the recording is its own Activity entry (`BR-080`) and plays back in the client
+   that recorded it, with localized labels (`BR-028`) and nothing invented about the audio itself.
+6. **The affordance arrives with the capability**: the Add update sheet's audio kind becomes reachable
+   because `evidence.audio.add` now exists — and only then (`D8` ✓; today `canAddAudio = false`). Whether
+   the kind also offers *choose an existing recording* beside *record* is the question tracker `033`
+   recorded; it is decided here or explicitly left out.
+7. **Generic files stay out** (`D8` ✓): no PDF/document attachment surface.
+
+**Verification.** API unit + e2e: authorization (`401`/`403`/success), content-type and size validation,
+idempotent replay, immutability after acceptance, and removal through Phase 6b's operation. Android JVM
+tests for the recorder's state machine, the outbox handler and the Activity mapping; Compose cases compiled
+and **NOT RUN — device QA is the product owner's** (`qa.md` §7.3), with a runbook covering an offline
+recording, a restart with a pending recording, playback and a refusal. Offline/synchronization tests per
+`qa.md` §8.
+
+**Not in this phase.** Generic file attachments; transcription; audio in Angular (Phase 7, once the Angular
+application exists); any retention change (`BR-090` stands).
 
 ## Risks carried into these phases
 
@@ -1424,8 +1852,9 @@ must not step on.
 | The viewer showed a photo but could not zoom it, and a scale-up would show no more detail than the fit view | The design asks an attachment to open "an appropriate preview/viewer" and a photo is evidence whose detail is the point. **Decided (`D9` ✓) and delivered by Phase 4d (landed 2026-09-15)**: the photo is drawn through Telephoto over the Coil 3 stack, which sub-samples the file the stack cached, so a zoom reads the photo's own pixels rather than scaling a bitmap that was decoded to fit the screen | **4d ✓** |
 | The local pipeline hardcodes JPEG (`.jpg`, `image/jpeg`) | A picked PNG/WebP would be refused by the API's declared-versus-sniffed check | 2 |
 | No photo picker existed at all | The design's "Existing Photos" and multi-select were unimplemented. **Delivered by Phase 3**: the system photo picker, multi-select, one draft per item, and a per-item report for a photo that cannot be taken | 3 ✓ |
-| The tray's "Take another" action opens only the camera | After a pick, a second library photo needs the sheet again, while the design's attachment row pairs the two sources. Whether the tray gains a picker target, or the sheet stays the single way in, is a presentation decision the design owner has not taken — so Phase 3 changed nothing here | open (design owner) |
-| Job Details and Activity reads are online-only | Offline, accepted photos and the timeline disappear; only the pending tray remains. **`D5` was deferred on 2026-09-15**, so the gap is knowingly carried rather than closed | **5 — blocked (`D5` deferred)** |
+| The tray's "Take another" action opens only the camera | After a pick, a second library photo needs the sheet again, while the design's attachment row pairs the two sources. **Answered (`D14` ✓, 2026-09-16)**: the sheet stays the canonical entry point for the evidence kind, and inside the photo flow **Take another goes straight to the camera again** — which is what the tray already does, so no code changes | **0 (`D14` ✓)** |
+| Job Details and Activity reads are online-only | Offline, accepted photos and the timeline disappear; only the pending tray remains. **`D5` was deferred on 2026-09-15, answered on 2026-09-16, and delivered by Phase 5 (landed 2026-09-16)**: the Job and its Activity are served from the working set when the API is unreachable, the metadata is therefore readable offline, and the bytes are cached best-effort — never eagerly — with a pending upload's bytes never a cache entry | **5 ✓** |
+| A photo that is on neither the device nor the image stack's cache | Offline, a tile would silently show a camera glyph and the viewer a generic "could not be shown", which names no cause the technician can act on. **Delivered by Phase 5 (landed 2026-09-16)**: the read reports *why* (`JobPhotoContentRead` → `JobPhotoBytesUnavailableException`), so the viewer says the photo is **not available offline** and a tile draws an offline glyph — never a different picture (`BR-042`) | **5 ✓** |
 | A refused upload keeps its file and row with no affordance | Trapped evidence and unbounded device storage. **Decided (`D6c` ✓)**: the tray gains an explicit discard, delivered by Phase 6a | **6a (`D6c` ✓)** |
 | The viewer showed one photo and nothing else | After the first photo the technician had to close the viewer, find the next tile and tap it — the Job's evidence could not be read as a run. **Decided (`D11` ✓) and delivered by Phase 4e (landed 2026-09-15)**: one sequence in the order the screen presents the photos, a swipe to page and a zoomed photo that pans instead. A cross-Job or device-wide gallery stays undecided |
 | Evidence could only be looked at inside Servora | A technician who needs to send a photo to the office, a customer or a supplier had no way to, and no way to keep a copy on their own device. **Decided (`D12` ✓, `D13` ✓) and delivered by Phase 4e (landed 2026-09-15)**: Save to device (the shared gallery, `Servora` album) and Share (the platform's chooser), both explicit actions the technician takes |
@@ -1433,10 +1862,13 @@ must not step on.
 | `WRITE_EXTERNAL_STORAGE` is needed on API 26–28 for a share-sheet-style save | A save on those two releases needs a runtime permission; a silent failure would look like a successful save. **Decided (`D12` ✓), delivered by Phase 4e and bounded**: the declaration carries `android:maxSdkVersion="28"`, the screen asks when a save needs it, the same save is retried when it is granted, and a declined one is reported. No media-**read** permission exists, so `D10` is unchanged |
 | Photos are Job-scoped while `docs/domain/job-visit-domain-model.md` §469 says Visit-scoped | The domain document contradicted the implemented model. **Decided (`D2` ✓)**: evidence is Job-level and §469 is corrected with the decision | **0 (`D2` ✓)** |
 | `STORAGE_PROVIDER` defaults to `noop` | A local stack that does not select `s3` refuses every upload with `503` | operational, not a phase |
-| No retention or delete rule exists; the store has no lifecycle rule | Evidence accumulates permanently | 6 |
+| No retention or delete rule exists; the store has no lifecycle rule | Evidence accumulates permanently. **Answered (`D6d` ✓, 2026-09-16)**: v1 retention is **indefinite for the life of the tenant** — a deliberate decision, not a carried gap — configurable retention is a later capability, and a removal soft-removes the record while any object purge follows retention | **0 (`D6d` ✓); `BR-090`** |
 | A picked original may be a **HEIC/HEIF** or exceed the API's 15 MiB limit | The API accepts only JPEG/PNG/WebP and refuses oversized bodies. **Both halves decided** (D3b: converted on device; D3c: resized to fit) — the risk is now a Phase 2 implementation duty, not an open question | 2 (D3b ✓, D3c ✓) |
-| EXIF/GPS inside a photo is stored and served verbatim | Location policy (`BR-038`) is open | 0 (D7) / 6 |
+| EXIF/GPS inside a photo is stored and served verbatim | Location policy (`BR-038`) is open. **Answered (`D7` ✓, 2026-09-16)**: GPS/location EXIF and other unneeded metadata are **stripped from uploaded evidence by default**, keeping only what the application needs; `BR-038` stays open for any deliberate *product* use of location | **6c (`D7` ✓)** |
 | The decode ignored a photo's EXIF orientation tag | Every portrait capture drew rotated 90° in the review preview, the tray, the gallery tiles and the viewer. **Fixed 2026-09-15 on the display path** (`JobPhotoImages` applies `JobPhotoOrientation` to what it decodes). **Landed for the stored half by Phase 4b (2026-09-15, `D7b` ✓)**: the preparation steps turn what they re-encode — through the shared `JobPhotoExifOrientation` read and turn the display path uses — so what Servora stores from now on is upright. Evidence already stored or uploaded stays historical and is **not** repaired | fixed (display, 2026-09-15) / fixed for new evidence (stored, Phase 4b 2026-09-15) |
+| Accepted evidence cannot be removed at all | A manager who must take an accepted photo out of ordinary use — a wrong photo, a customer request — has no operation, and improvising one would mutate history. **Answered (`D6a`/`D6b` ✓, 2026-09-16)**: an audited, Manager-level `evidence.photo.remove` soft-removes it with actor, time and reason, the audit record is preserved, and **no edit route is built** | **6b (`D6a`/`D6b` ✓)** |
+| Every read of evidence streams bytes through the API | Bandwidth and API load grow with the gallery, and the client cannot read at the edge. **Answered (`D15` ✓, 2026-09-16)**: reads move to **short-lived presigned GET URLs** issued after authorization, with the bucket private and no derived objects. The phase must first resolve the `Host`/plain-HTTP constraint `ADR-013` D7 records | **8 (`D15` ✓)** |
+| The Add update sheet draws an audio kind no session can reach | A kind with no capability, no record and no playback could be mistaken for a working feature. **Answered (`D8` ✓, 2026-09-16)**: audio is implemented as its own evidence kind and `evidence.audio.add` is created **with** it; until then the kind is not offered anywhere (`canAddAudio = false`) | **9 (`D8` ✓)** |
 
 ## Phase log
 
@@ -1459,7 +1891,9 @@ must not step on.
 | 029 — Phase 4c landed | 2026-09-15 | **The image stack is Coil 3 behind `JobPhotoImages` (`D4b` ✓).** `io.coil-kt.coil3:coil-compose:3.6.2` is pinned and its compatibility recorded in `docs/decisions/016-…` (deliberately not `coil-network-okhttp`: the API keeps its one Retrofit transport). The port keeps its four names and both sources and now answers with the **request the stack loads**, built from the photo's identity (`data/jobs/JobPhotoImage.kt`), a size (512 px tiles, the viewer's bounded decode) and the session's cache key — or `null` when there is no session to attribute the photo to. `data/jobs/JobPhotoFetcher.kt` is the one reader: a pending photo comes from the app-private file that holds it, evidence from this session's disk-cache entry or from `GET /jobs/:id/photos/:photoId/content` with the `401 → renew once` renewal it already had, and anything unreadable answers nothing to draw (`BR-042`). `data/jobs/JobPhotoImageCacheScope.kt` releases the stack's caches on the first read of a session that is not the one they were cached for, and `jobPhotoImageCacheKey` puts the subject in the memory and disk keys (`BR-007`). One `ImageLoader` is built in `di/JobsOfflineModule.kt` (`JobPhotoImageModule`) and installed in `ServoraApplication`, so the composables draw through the app's own stack. `JobPhotoThumbnail`, the tray tile, the review preview and the viewer draw through `SubcomposeAsyncImage`, keeping their tags, sizes and "cannot be shown" state, which retires the viewer's hand-held `JobPhotoView` state machine (`JobPhotoViewerTest`'s resolution logic is untouched). Retired with it: the hand-rolled decode, the 24-entry `LruCache` and `jobPhotoFittingSampleSize` with its five cases; **`JobPhotoExifOrientation` stays** (the preparation steps need it), and the surviving sampling rule `jobPhotoSampleSize` now takes plain bounds so a JVM test can pin it. **Two deviations recorded rather than silent**: the viewer's request is `VIEWER_DECODE_EDGE_PX` (half of the 2560 px bound, because the library samples in powers of two and a request for the bound itself would decode a 4032 px capture at full size), and the release happens on the first read under a different session rather than at the instant of sign-out (the session owner does not depend on this feature's display cache). Documentation: this tracker (state table, phases at a glance, the Phase 4c section, this entry and `## Manual QA runbook — Phase 4c`), `docs/decisions/016-…` and `README.md`. Commit: `bc2a9a4` (this entry follows in its own commit) | `make android-test` — **PASS**: `./gradlew testDebugUnitTest --rerun` **450 tests, 0 failures, 0 errors, 0 skipped** across 46 suites, the result of this working tree and not a cache hit; the new cases are `JobPhotoFetcherTest` (11: a pending photo read from the file with the API never asked, evidence downloaded once and then served from the cache, the key per session, the release once per session, the `401 → renew once` retry, and every unreadable case answering nothing), `JobPhotoImageCacheKeyTest` (5) and `JobPhotoImageCacheScopeTest` (4). `make android-lint` — **PASS** (`lintDebug`, `abortOnError = true`). `make android-build` — **PASS** (`assembleDebug`, `app-debug.apk`). `./gradlew assembleDebugAndroidTest` — **PASS** (device-test sources compile). **No `adb` and no device or emulator command was run** (`qa.md` §7.3), so the library's on-device decodes, the cells as drawn and the cold-start cache measurement of work item 6 are **NOT RUN — device QA is the product owner's**, handed over as `## Manual QA runbook — Phase 4c`. Nothing under `api/` changed, so no API command was run. |
 | 029 — Phase 4d landed | 2026-09-15 | **The viewer's photo zooms and pans (`D9` ✓).** `me.saket.telephoto:zoomable-image-coil3:0.19.0` is pinned in `android/gradle/libs.versions.toml` and `android/app/build.gradle.kts`, with its compatibility recorded in `docs/decisions/016-…` — which closes that ADR's open question 4. It is Telephoto's **Coil 3** integration (not the Coil 2 one): its transitive `coil-compose:3.2.0` resolves up to the pinned 3.6.2, its Kotlin-stdlib and Compose floors (2.1.21 / 1.8.0) are below what this module already compiles with (Kotlin 2.3.21, Compose BOM 2026.08.00), and it declares `minSdk 21` against this module's `minSdk 26` — so nothing is downgraded. Because it is the Coil 3 build, the request the port answers with is executed by the app's **own** `ImageLoader`: the feature's fetcher, the `401 → renew once` read and the session-keyed caches of Phase 4c are the ones in use, and no second loader, cache or HTTP path exists. `ui/jobs/JobPhotoViewer.kt` draws that request through `ZoomableAsyncImage` instead of `SubcomposeAsyncImage`: a pinch zooms, a drag pans within the photo's own bounds, a double-tap goes to the library's zoom ceiling (`DoubleClickToZoomListener.cycle()`, its default) and no scale goes below fit (`ZoomSpec`'s minimum factor is 1), with the ceiling left at the library's default rather than a number this phase invented — because the capture pipeline prepares evidence at no more than 2048 px on its longest edge (`D3c`), twice the fit scale already reaches roughly the photo's own pixels on a phone. The gesture surface is the area between the top row and the note, so the phase badge, the whole note and the 48 dp close action stay exactly where they were and the `Dialog` keeps the platform's back gesture. **The one design question the phase had to answer rather than assume** — the layer draws the photo but exposes no loading or error slot — is settled by `JobPhotoViewerImageState` (reading / shown / "cannot be shown") observed from the stack's **own result for the request the viewer already has**, through Coil's `ImageRequest.Listener`: one read rather than two (Coil reports cache hits through it as well, so a cached photo still leaves the reading state), a photo that cannot be read is still reported instead of being replaced (`BR-042`), and the photo's test tag is applied only once the stack has drawn it. The alternative not taken was accepting a blank area after a failed read. **Consequence recorded rather than left implicit**: to sub-sample, the layer needs a file and maps a disabled disk-cache policy to a *write*, so a photo the device still holds is also written into the feature's cache directory — a cache entry beside the authoritative app-private file, evictable at any time and session-keyed, with `BR-014`/`BR-015` unaffected. Nothing under `api/` changed, and the viewer's resolution logic (`viewedJobPhoto`) and its JVM cases are untouched. Documentation: the viewer row of `docs/design/android-design-system.md`, this tracker's Viewer/Thumbnails/Tests rows, its risk table, runbook 4c's superseded zoom item and the new runbook below, `docs/decisions/016-…` and `README.md`. Commit: `f071f49` (this entry follows in its own commit) | `make android-test` — **PASS**: `./gradlew testDebugUnitTest --rerun lintDebug assembleDebug assembleDebugAndroidTest` on this tree, **450 tests, 0 failures, 0 errors, 0 skipped across 46 suites** (no new JVM case — the phase added no pure logic, and `JobPhotoViewerTest`'s 6 resolution cases are unchanged and green); `make android-lint` — **PASS** (`lintDebug` with `abortOnError = true`, `checkDependencies = true`, so the new dependency was linted too); `make android-build` — **PASS** (`assembleDebug`, `app-debug.apk`); device-test sources — **PASS** (`assembleDebugAndroidTest` compiles, including the two new cases in `JobDetailsScreenTest`: zooming/panning without losing the phase, note or close action, and a photo the stack cannot read being reported). **No `adb` and no device or emulator command was run** (`qa.md` §7.3), so the gestures as drawn, the library's on-device sub-sampled decode and the shapes in each form factor are **NOT RUN — device QA is the product owner's**, handed over as `## Manual QA runbook — Phase 4d`. Nothing under `api/` changed, so no API command was run. |
 | 029 — Phase 4e landed | 2026-09-15 | **The viewer pages through the Job's photos, and a photo can be saved on the device or shared with another application (`D11` ✓, `D12` ✓, `D13` ✓).** `ui/jobs/JobPhotoViewer.kt` draws the Job's photos as one `HorizontalPager`, built by three new **pure rules**: `viewedJobPhotoSequence` (the evidence the backend holds first, in the order Job Activity reports it, then the photos this device still holds, oldest first — one entry per photo id, each still resolved through `viewedJobPhoto`, so the device's own bytes keep winning while they exist), `jobPhotoViewerInitialPage` (the page the tapped photo is on, or `null` when no record holds it any more, which closes the viewer as before), and `jobPhotoViewerPagingEnabled` (a swipe is allowed only while the settled page reports a fit-sized zoom, ≤ 0.1 of Telephoto's own `zoomFraction` — the property the library's documentation uses for "is this zoomed in?"). Each page owns its own `rememberZoomableImageState()`, reports its fraction only while it is the **settled** page, and forgets its zoom when the pager leaves it — the library's own recipe for a pager. The chrome follows the photo: the phase badge, a localized position (`3 / 12`, drawn only when the Job has more than one photo), the note — now inside the page, so it pages with its photo, bounded at 160 dp and scrollable so a long one cannot push the photo out — the upload state of a photo the backend has not accepted yet (its own tag, because the tray is still composed behind the viewer), and two 48 dp actions. **The export** is `data/jobs/JobPhotoContentReader.kt` (extracted from `JobPhotoFetcher`, which now delegates to it: one evidence read, one `401 → renew once` path — `BR-007`, `BR-018`), `data/jobs/JobPhotoExport.kt` (`JobPhotoExportSource`, `JobPhotoExportOutcome`, `JobPhotoExporter`; `JobPhotoExportContent` reads the device's own file or the API, proves the type **from the bytes** with the served type as fallback and refuses bytes Servora does not accept rather than writing a file it cannot account for; the copy is `Servora-<photoId>.<ext>`; `DefaultJobPhotoExporter` does the device work on `Dispatchers.IO`), and `data/jobs/AndroidJobPhotoExportTarget.kt` (the only file that touches `Intent`/`ContentResolver` here): **save** inserts into the shared image collection as `Pictures/Servora` with `IS_PENDING` until the bytes are complete from API 29, and writes the file plus its `DATA` row on API 26–28; **share** stages the bytes in one app-private cache directory cleared before each export, hands `ACTION_SEND` the photo's own MIME type with a read grant for that one file, and reports a device with nothing to share with. Wiring: the `JobPhotoExporter`/`JobPhotoExportTarget` bindings, `Permission.EVIDENCE_VIEW` + `CustomerPermissionsUiState.canViewEvidence` (the client's first read-evidence gate, mirrored from the API's catalogue), `JobDetailsViewModel.savePhotoToDevice`/`sharePhoto`/`onSavePermissionResult` with `photoSaveAwaitingPermission` and four new failures plus two confirmations on the existing channels, `JobDetailsScreen`'s permission launcher and chooser title resolved from resources (`BR-028`), `AndroidManifest.xml`'s `WRITE_EXTERNAL_STORAGE` with `android:maxSdkVersion="28"`, the `evidence-share` `cache-path` in `res/xml/file_paths.xml`, the `ic_download`/`ic_share` glyphs, and 10 strings in both languages. Documentation: this tracker (the decision log's D11–D13, the Phase 4e section, the state table's viewer and new "Evidence out of Servora" rows, four risk rows, the "not implemented" list, `## Current phase`, this entry and `## Manual QA runbook — Phase 4e`), `docs/decisions/017-viewer-paging-save-and-share.md` (which also answers `dev.md` §10 / offline standard §13 for the slice: no mutation, no new local store, no synchronization — a read and a copy), the viewer row of `docs/design/android-design-system.md` and `README.md`. Commit: `7e0fafe` (this entry follows in its own commit) | `./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --rerun-tasks` — **PASS**: the JVM unit tests are **472 tests, 0 failures, 0 errors, 0 skipped across 47 suites**, up from 450/46 in Phase 4d — 22 new cases and one new suite (`JobPhotoExportTest`), with `JobPhotoViewerTest` (11: the old 6 resolution cases plus the sequence order, the single entry for a photo both records hold, an entry neither record can place being dropped, the initial page and the paging/zoom rule), `JobPhotoExportTest` (9: where each photo's bytes are read from, the name and the type proven from the bytes, what is refused, and every target outcome) and `JobPhotoCaptureViewModelTest` (8 more: save from the device, save from the API, the permission round trip retrying the same save, a declined permission, share including the chooser's title, an unreadable photo, a device with nothing to share with, and a photo no record holds exporting nothing); `lintDebug` — **PASS** (`abortOnError = true`, so the new manifest permission and both new sources were linted); `assembleDebug` — **PASS** (`app-debug.apk`); device-test sources — **PASS** (`assembleDebugAndroidTest` compiles, including the three new `JobDetailsScreenTest` cases: the position and both actions acting on the photo on screen, a tapped tray photo opening its own page of the one sequence, and the two actions being absent without `evidence.view`). **No `adb` and no device or emulator command was run** (`qa.md` §7.3), so the swipe/pan arbitration as felt, the gallery write on a real MediaStore, the share sheet and the API 26–28 permission prompt are **NOT RUN — device QA is the product owner's**, handed over as `## Manual QA runbook — Phase 4e`. Nothing under `api/` changed, so no API command was run. |
+| 029 — Phase 0 answered in full (D5, D6, D7, D8, D14, D15) | 2026-09-16 | Product ownership answered every question this tracker was still carrying and stated the guiding position for evidence — **append-only once accepted, offline-first for the technician, and a storage lifecycle that follows the Job/evidence lifecycle rather than UI convenience**. **`D5`**: accepted evidence is readable offline — metadata required, bytes cached best-effort when the device already holds them or the technician opens/downloads them (never a full backfill), pending bytes guaranteed until synchronization, accepted bytes an evictable size-based LRU cache rather than a retention period. **`D6a`/`D6b`**: accepted evidence is **immutable** — no overwrite, byte replacement, phase change or silent delete; removal only through an explicit, audited, Manager-level `evidence.photo.remove` that soft-removes it while the audit record is preserved; **no edit-photo route**, and a note correction is new Activity. **`D6d`**: evidence belongs to the historical Job record, archiving a Job never deletes it, archived Jobs' evidence stays readable to those permitted, and v1 retention is **indefinite for the life of the tenant**. **`D6e`**: no hard Job deletion in normal flows, so nothing is orphaned, and a future administrative purge is a deliberate cascade with asynchronous, idempotent object deletion. **`D7`**: `phase` stays the only structured classification, the phase is draft state for that update only, and **GPS/location EXIF plus unneeded metadata are stripped from uploaded evidence by default**. **`D8`**: audio is in scope as its own evidence kind on the same abstraction, `evidence.audio.add` is created **with** it, generic file attachments stay out, and the dead audio affordance stays unoffered. **`D14`**: the sheet stays the canonical way to choose the kind, and **Take another** goes straight back to the camera — the current behaviour, so no code change. **`D15`** (`ADR-013` open questions 3 and 4): no derived thumbnails in v1; reads move to **short-lived presigned GET URLs** issued after authorization, bucket private, no second configured endpoint, uploads unchanged. Recorded as business rules **`BR-088` – `BR-091`**, with `BR-013`, `BR-015` and `BR-027` updated (`BR-040`); the new phases **5, 6b, 6c, 8 and 9**; **D6 closed** (Phase 6 keeps no work of its own) and Phase 7's dependencies widened to D1–D15. Documents: this tracker (header, `## Current phase`, the D5–D8 decision sections, the decision log's D5–D8 plus new **D14**/**D15**, the phases table, the five new or rewritten phase sections, the state table, four updated risk rows and three new ones, the `Not implemented` list and two QA runbooks), `Business Rules.md`, `docs/decisions/013-…` (a 2026-09-16 update answering its open questions 2–4 and recording the `Host`/plain-HTTP conflict Phase 8 must resolve) and `docs/decisions/015-…` (its open-question list), `docs/architecture/offline-first-architecture.md` (§9, §11.1, §11.4, §12), `docs/api/job-photos.md` (§1, §4, §7), `docs/design/android-design-system.md` and `README.md` | **Documentation only** (`BR-042`) — no production code, migration, permission, contract, schema or design was changed by this round, because the decisions are recorded before the phases that implement them. **No test, lint, build, e2e or Android command was run, and none applies**: nothing under `api/`, `android/` or the database changed. **No `adb` and no device or emulator command was run** (`qa.md` §7.3). What is owed next is implementation, not verification: **Phase 5** is the phase to run, with **6a**, **6b**, **6c**, **8** and **9** startable behind it |
 
+| 029 — Phase 5 landed | 2026-09-16 | **The Job and its evidence are readable offline (`D5` ✓).**  **New** `data/jobs/JobEvidenceCache.kt` — the Job read's use of the working set: two rows (`WorkingSetEntityTypes.JOB_DETAILS`, `JOB_ACTIVITY`) holding the backend's own **wire response**, written by every successful read and mapped on the way out, so an offline answer runs the same mapper the online one ran (`BR-041`).  **`data/jobs/JobDetailsRepository.kt`** now reports the reason of each read through private `JobRead`/`ActivityRead` (the DTO is kept while the mapped object is returned) and falls back **only** when the failure could not reach the backend (`couldNotReachBackend()`: `NETWORK`/`SERVER`); a refusal is never replaced, and a read nothing has been reported for still reports its failure. `JobDetailsResult.Success`/`JobActivityResult.Success` carry a `ReadSource`, the ViewModel keeps `detailsSource`/`activitySource` (reset to `BACKEND` by an action's own answer, a write's refreshed timeline, or a failed read), and the screen marks both halves with the existing `OfflineNotice` (`JobDetailsLastReportedTag`, `JobActivityLastReportedTag`).  **The byte-cache policy is now one rule**: `jobPhotoImageDiskCacheKey` (new, pure, JVM-tested) answers `null` for a photo this device holds — so a pending upload's bytes can never be a cache entry and no size policy can evict them (`BR-014`, `BR-015`) — and the session's own key for accepted evidence, which is what the bounded, size-based LRU over the Coil disk cache holds (`JobPhotoImageModule` documents the constants and that nothing in the app prefetches).  **A photo that is neither held nor cached says why**: `JobPhotoContentReader.read` returns `JobPhotoContentRead` (`Bytes`/`Unreachable`/`Unavailable`, with an `IOException`, a `5xx` and an unanswered renewal classed as unreachable — the offline standard's own §13 rule, and `Unreachable` never used for a `401`/`403`/`404`/`422`), the fetcher carries it out as `JobPhotoBytesUnavailableException`, the viewer has its own report (`job_photo_viewer_unavailable_offline`, `JobPhotoViewerOfflineTag`) and a tile draws `ic_cloud_off` with a localized description — never a different picture; a photo this device no longer holds still reports the generic "could not be shown", since reconnecting would not fix it.  **No wire change**: no API, database, permission or contract was touched, so no API command was run. Docs: `offline-first-architecture.md` §9 (the one rule), §11 items 1/4, §12's adopters and online-only list, and its header; this tracker's status, `Current phase`, phase table, state table (new **Offline visibility** row), risk table, the Phase 5 section, and the Phase 5 runbook; `README.md`.  | **Android** — unit: PASS (`make android-test`: **505 tests, 0 failures**, with the new coverage: **8** cases in `data/jobs/JobDetailsRepositoryTest` — the Job and the activity each served from the last reported answer on an unreachable backend **and** on a `5xx`, a `403`/`404`/`422` never replaced, nothing reported yet, the newest answer replacing the older one, and another subject's row never served; **6** in `data/jobs/JobPhotoFetcherTest` — the reason carried out of a failed read (offline, a `5xx`, a refused session, a refusal that is not a `401`, a photo this device no longer holds), a failed read writing **nothing** to the cache, and a photo this device holds never entering it; **2** in `data/jobs/JobPhotoImageCacheKeyTest` — a `Local` photo given no disk key and evidence's disk key equal to its memory key; **4** in `ui/jobs/JobDetailsViewModelTest` — both sources reported, and a failure reporting neither; **2** in `ui/jobs/JobPhotoViewerTest` — the offline reason read back from the failure and everything else read as "could not be shown"). Device-test sources compile: PASS (`./gradlew assembleDebugAndroidTest`, with **2** new Compose cases in `ui/jobs/JobDetailsScreenTest`: both last-reported notices drawn for a device answer, and neither drawn for a backend answer). Lint: PASS (`make android-lint`, 46 findings, all pre-existing categories — **the first run crashed inside lint itself**, `Unexpected failure during lint analysis … this is a bug in lint or one of the libraries it depends on` while analysing `JobActivitySection.kt`; the identical re-run completed, and the compiled classes are newer than every source, so the report describes this build). Debug build: PASS (`make android-build`). **No device or emulator command was run and no `adb` was used (`qa.md` §7.3)**, so every on-device step is **NOT RUN — device QA is the product owner's**; the runbook above is the hand-off. |
 
 ## Manual QA runbook — Phase 3 (product owner)
 
@@ -1473,12 +1907,12 @@ capability; everything else works as a Manager.
    Expect: the sheet opens with "Write note" in effect and its field ready to type in — no photo source
    is drawn yet, because the photo kind is not the kind in effect.
 3. Tap "Add photo".
-   Expect: the two sources appear — "Take photo" and "Choose photos" — and no note field is drawn.
+   Expect: the two sources appear — "Take photo" and "Choose from device" — and no note field is drawn.
 4. Tap "Take photo".
    Expect: the sheet closes and the device's camera opens exactly as before; no permission prompt.
 5. Capture a photo and tap Add in the review panel.
    Expect: the photo is in the tray with its phase badge.
-6. Tap "Add update", then "Add photo", then "Choose photos".
+6. Tap "Add update", then "Add photo", then "Choose from device".
    Expect: the device's own photo picker opens, it offers multi-selection, and no storage or media
    permission is asked for.
 7. Select three photos and confirm.
@@ -1492,7 +1926,7 @@ capability; everything else works as a Manager.
 10. Tap "Save photos", then wait or leave and re-open the Job.
     Expect: the photos appear in the gallery and the Activity, one entry each, and the tray empties as
     their uploads are accepted.
-11. Tap "Add update" -> "Add photo" -> "Choose photos" and dismiss the picker.
+11. Tap "Add update" -> "Add photo" -> "Choose from device" and dismiss the picker.
     Expect: nothing is added, nothing is reported and the tray is unchanged.
 12. In airplane mode, pick two photos and save them.
     Expect: both are kept on the device with their own upload state, and nothing is claimed as uploaded
@@ -1607,7 +2041,7 @@ path this phase must not have touched.
    Expect: still upright, and this is now the backend's own bytes.
 
 2.  A picked photo that has to be converted (D3b), portrait.
-    "Add update" -> "Add photo" -> "Choose photos", and pick a **HEIC/HEIF** portrait photo from the
+    "Add update" -> "Add photo" -> "Choose from device", and pick a **HEIC/HEIF** portrait photo from the
     device's library (on many phones the camera's own library items are HEIC).
     Expect: the review panel opens for it and shows it upright; the tray tile is upright; tapping it opens
     it upright in the viewer.
@@ -1649,7 +2083,8 @@ should change**, with two exceptions worth knowing before testing:
 
 - a photo that has already been drawn **once in this session, or in an earlier one**, is drawn again from the
   device's cache rather than re-downloaded. Everything else about reads is unchanged: the Job and Activity reads
-  are still online-only (`D5` deferred), so offline the screen still shows no Activity and no gallery at all — a
+  are still online-only (`D5` is answered but **Phase 5 has not landed**, so nothing changes yet), so offline
+  the screen still shows no Activity and no gallery at all — a
   cache is not offline evidence;
 - the cache is **per signed-in member** and is released when a different member reads. That is what these steps
   check.
@@ -1664,7 +2099,7 @@ running so the content requests are visible. `adb` steps are yours to run (`qa.m
    shows it.
    Expect: the review preview and the tray tile show the photo upright; tapping the tray tile opens it upright
    in the viewer; after the upload is accepted the gallery tile shows it and tapping it opens it upright.
-   Expect the same for "Choose photos" (a library pick), and for a photo large enough to be resized.
+   Expect the same for "Choose from device" (a library pick), and for a photo large enough to be resized.
 
 2. The cache is used instead of the API (this is the measurement the phase owes).
    With `make logs` visible, open the Job and let the gallery's tiles load, then close the screen, reopen it,
@@ -1775,8 +2210,9 @@ actions**:
 - swiping left and right moves to the next or previous photo of the **same Job** — the evidence the backend
   holds first (newest first, as the gallery lists it), then the photos this device still holds (oldest first,
   as the tray lists them), each photo appearing once;
-- the top row shows the photo's phase **and** a position (`1 of 2`, `2 of 2`, …); the note under the photo
-  belongs to the photo on screen; and **Save to device** and **Share** sit below it;
+- the top bar shows a position (`1 / 2`, `2 / 2`, …) centred with **Save to device** and **Share** as icons
+  beside it, the photo's phase is a badge over the photo itself, and the note under the photo belongs to the
+  photo on screen;
 - **a swipe only pages while the photo is at fit.** Zoomed in, a drag pans the photo (as it already did) and
   the pager stays put; pinch back out and swiping pages again.
 
@@ -1785,8 +2221,9 @@ or more **accepted** photos (they appear in the Activity gallery), and — to se
 captured but not yet saved (it sits in the tray).
 
 1. Open the Job, then open the **first** photo in the Activity gallery.
-   **Expected:** the viewer shows the photo with its phase badge, a position such as `1 of 4`, its note, and
-   the two actions **Save to device** and **Share**.
+   **Expected:** the viewer shows the photo on its own black surface, its phase badge over the photo, a
+   position such as `1 / 4` in the top bar, its note under the photo, and the two evidence actions as icons
+   in the top bar. *(The chrome was refined on 2026-09-16 — `docs/tracker/031-android-photo-viewer-ui.md`.)*
 2. Swipe left and right through the photos.
    **Expected:** each swipe shows the next or previous photo **with its own phase, note and position**, and the
    sequence carries on from the gallery into the tray's not-yet-uploaded photos. The first photo does not
@@ -1798,19 +2235,21 @@ captured but not yet saved (it sits in the tray).
    **Expected:** the photo **pans** and the pager does not move. Zoom back out to fit, then swipe.
    **Expected:** paging works again. The back gesture right after zooming still closes the viewer.
 5. Open a photo whose note is several lines long.
-   **Expected:** the note is readable and, when it is very long, scrolls inside its area — the photo, the
-   position and both actions stay on screen.
+   **Expected:** three lines of note are read under the photo with a **More** action; tapping it expands the
+   complete note (**Less** puts it back), and the photo, the position and both actions stay on screen. A note
+   that already fits draws no action at all.
 6. Tap **Save to device**.
-   **Expected:** a confirmation Snackbar, and the photo appears in the device's own gallery/Pictures app in a
-   **Servora** album as `Servora-<photo-id>.jpg`. Nothing about the Job changes.
+   **Expected:** the icon is briefly replaced by the viewer's own progress, then a confirmation appears **over
+   the photo**, and the photo appears in the device's own gallery/Pictures app in a **Servora** album as
+   `Servora-<photo-id>.jpg`. Nothing about the Job changes.
 7. Tap **Share**.
    **Expected:** the system share sheet opens titled *Share photo*; choosing **WhatsApp** (or any other app)
    hands it the image. Cancelling the sheet changes nothing in Servora.
 8. Close the viewer with its own action, and again with the platform's back gesture.
    **Expected:** Job Details is exactly as it was, and the Job, its Activity and the tray are unchanged.
 9. Switch the app language to French and repeat steps 1–4.
-   **Expected:** the same behaviour, with *Enregistrer sur l'appareil* / *Partager* and a position such as
-   `1 sur 4`.
+   **Expected:** the same behaviour, with the position such as `1 / 4`, *Notes*, *Plus* / *Moins* under the
+   note, and *Enregistrer sur l'appareil* / *Partager* as the two icons' accessibility names.
 10. **Android 8 or 9 (API 26–28) only**: tap **Save to device** for the first time.
     **Expected:** Android asks for the storage permission and the save completes as soon as it is granted.
     Decline it on a later attempt and the app says it needs that permission rather than claiming a save.
@@ -1822,17 +2261,127 @@ captured but not yet saved (it sits in the tray).
   is outside its control: the app does not list, version, revoke or delete it.
 - **A photo whose bytes cannot be read** (evidence with no connectivity, a session the API refuses) is still
   shown, and save/share report that it could not be read rather than writing an empty file.
-- **A save or share of accepted evidence is online-only** (`D5` is deferred); a photo the device still holds
-  can be viewed, saved and shared with no connectivity at all.
-- Nothing here edits or deletes a recorded photo, and nothing deletes a saved or shared copy (`D6` stays open).
+- **A save or share is online-only.** Both read evidence through the API, and neither is queued (`D5` left
+  the export path as it is). A photo the device still holds can be viewed, saved and shared with no
+  connectivity at all. Offline, a photo whose bytes are on neither the device nor the image stack's cache
+  is now reported as **not available offline** rather than as a generic failure (**Phase 5, landed
+  2026-09-16**).
+- Nothing here edits or deletes a recorded photo, and nothing deletes a saved or shared copy (`D6` ✓: no edit
+  route, and the audited removal is Phase 6b).
+
+## Manual QA runbook — review panel (2026-09-16)
+
+The review panel a captured or picked photo is confirmed in. The API and the object store must be up
+(`make up`); everything here is on the device.
+
+1. Open a Job, tap **Add update** → **Add photo** → **Take photo**, and capture a photo.
+   **Expected:** the review panel opens with the photo, the phase label and its three targets, the note
+   field and the **Discard** / **Add** foot.
+2. Tap the note field and type a line or two.
+   **Expected:** the keyboard opens, the panel's content moves so the field stays **above** the
+   keyboard, and the **Discard** / **Add** foot can be brought back into view by scrolling the panel.
+   The panel must never leave the field under the keyboard.
+3. With the keyboard open, scroll the panel up and down, then dismiss the keyboard.
+   **Expected:** the content scrolls with nothing clipped behind the keyboard; after the keyboard is
+   dismissed the whole panel is readable again.
+4. Scroll back to the top and look at the photo.
+   **Expected:** the **whole** photo is shown — for a portrait photo its top and bottom edges and for a
+   landscape one its left and right edges are visible inside the panel's box, letterboxed inside the
+   card rather than cropped. Compare it with the same photo's tile in the tray: the **tile** still
+   crops, because a tile is a square that stands for the photo.
+5. Fill the note, choose a phase and tap **Add**.
+   **Expected:** the photo joins the tray with that phase and note; nothing else about the panel
+   changed.
+6. Repeat 1–4 from **Add update** → **Add photo** → **Choose from device**, picking a photo already on the
+   device.
+   **Expected:** the same panel behaves the same way for a picked photo.
+7. A very long note (several lines) and a landscape photo, then the same in French.
+   **Expected:** the field scrolls into view the same way with a tall field, and the labels stay
+   English / French as before.
+
+**Known limitations, deliberately.**
+
+- The panel's content scrolls rather than fitting: on a short phone with the keyboard up, the foot
+  (**Discard** / **Add**) is reached by scrolling, as the customer filter sheet's own foot already is.
+- Cropping was not removed everywhere: the tray and gallery **tiles** still crop, deliberately.
+- Nothing about what a photo is, whose it is or whether it may be added changed — the panel is still
+  presentation over the same API (`BR-001`, `BR-007`).
+
+## Manual QA runbook — Phase 5 (product owner)
+
+Offline visibility of accepted evidence (`D5` ✓). Everything here is on the device except the one case
+that needs the API unreachable; the API and the object store must be up (`make up`) to create the photos
+and to read one back.
+
+**Setup (online).** Sign in, open a Job that already has accepted photos on it (or add one through
+**Add update** → **Add photo** and let it upload), then **open each photo in the viewer once** and go back.
+That is the step that puts the bytes on the device: nothing prefetches them (`D5`).
+
+1. **The Job and its timeline are readable offline.**
+   Turn the device's connectivity off (airplane mode), and from the Jobs list open **the same Job**.
+   **Expected:** the Job opens with its number, title, status, Visit and crew, the Activity timeline is
+   there with its photo entries, and each of the two halves says **"Offline — showing the last update the
+   server reported."** — the Job's notice above the Visit card, the timeline's under the **Activity**
+   label. Nothing claims to be current.
+2. **A photo the technician already opened is still readable offline.**
+   Offline, tap a photo in the Activity gallery (or its timeline entry).
+   **Expected:** the photo opens full size in the viewer with its phase badge and its note, exactly as
+   online. This is the cache, and it is best-effort — a photo this device never opened is the next case.
+3. **A photo the device does not hold is reported as not available offline.**
+   Offline, open a **different** Job's accepted photo that this device has never opened (clearing the app's
+   cache in the system settings for Servora makes this certain).
+   **Expected:** the viewer says **"This photo is not available offline. Connect to view it."** — not a blank
+   screen, not a different photo, and not the generic "could not be shown". Its tile in the gallery shows
+   the crossed-cloud glyph with the description "Not available offline".
+4. **Nothing is lost by reading offline.**
+   Still offline, queue a photo through **Add update** → **Add photo** (camera or picker), then re-open the
+   Job and leave it.
+   **Expected:** the pending photo is in the tray exactly as before, its bytes readable in the review
+   panel and the viewer, and it still uploads when connectivity returns. A pending photo must never be
+   dropped or reported as unavailable offline — its bytes are guaranteed until the server accepts them.
+5. **Connectivity returning restores the current answer.**
+   Turn connectivity back on and re-open the Job (or pull the screen again by leaving and returning).
+   **Expected:** both notices are gone, the Job and timeline are the backend's current answers again, and a
+   photo that was reported as not available offline opens normally.
+6. **A refusal is never replaced by a local copy.**
+   With the Job cached offline, remove or change that session's permission so the Job read is refused
+   (that case needs a role without the Job permission, or a signed-out session).
+   **Expected:** the screen reports the failure it was given — never the cached Job presented as if the
+   backend had answered.
+7. **Another session does not read the first session's Job.**
+   Sign out (which clears the working set), then sign in as a different member with no connection.
+   **Expected:** no Job from the previous session is shown; the read reports that it could not reach the
+   server.
+8. **French.**
+   Repeat 1 and 3 with the app in French (`Paramètres` → langue).
+   **Expected:** both notices and the offline photo report are in French.
+
+**Known limitations, deliberately.**
+
+- **The offline answer is the last one reported, not current.** A change another user made while the
+  device was offline will appear once the backend answers again; there is no background refresh.
+- **Only the Job and its Activity are cached.** The Jobs list, Manager Home, the photo picker and every
+  action stay as they are, and a save or share of accepted evidence is still online-only.
+- **The byte cache is a cache.** It is bounded by size and evicted least-recently-used, so a photo opened
+  earlier may need the backend again. Nothing downloads the Job's photos to keep them: offline bytes are
+  best-effort by decision (`D5`).
+- **A `5xx` is treated as unreachable** (the offline standard's own classification, §13), so a server
+  failure shows the last reported answer with its notice rather than an error screen.
 
 ## Not implemented, and not to be assumed
 
-- Audio, files, video and any evidence kind other than photos (`BR-027`).
-- Editing, deleting or re-annotating a recorded photo.
-- Retention, visibility, audit and versioning of evidence (`BR-027`, `BR-033`).
-- Thumbnails or any derived object in the object store (`ADR-013` open question 3, **still open**), and any
-  `Cache-Control` on the content answer or OkHttp cache. The **request and preview cache is decided**
+- **Any evidence kind other than photos and audio.** Audio is decided **in scope** on the same abstraction
+  (`D8` ✓, 2026-09-16) and is **not implemented** (Phase 9); generic files — PDFs, documents — are **out of
+  scope in v1** (`BR-091`); video is not decided.
+- **Editing or re-annotating accepted evidence.** `D6a`/`D6b` ✓ (2026-09-16) decide there is **no edit
+  route**, in any client, ever, and that a caption/note correction is a new Activity. The audited **soft
+  removal** a Manager performs is Phase 6b and is **not implemented**.
+- **Retention, visibility and audit of evidence.** Decided (`BR-090`: indefinite for the life of the tenant,
+  no content versioning, and a future administrative purge only as a deliberate cascade) but **not
+  implemented** — nothing purges an object today, and configurable per-tenant retention is a later
+  capability.
+- Thumbnails or any derived object in the object store (**decided by `D15` ✓ on 2026-09-16: none in v1**),
+  and any `Cache-Control` on the content answer or OkHttp cache. The **request and preview cache is decided**
   (`D4b` ✓): Coil 3's memory and disk cache, keyed per session subject and released when a different session
   reads — **implemented by Phase 4c (landed 2026-09-15)**, in `JobPhotoFetcher`/`JobPhotoImageCacheScope` and
   the app's own `ImageLoader`.
@@ -1851,9 +2400,13 @@ captured but not yet saved (it sits in the tray).
   shared photo — `D13` decided the photo only.
 - **Any copy Servora knows about.** A photo saved into the device's gallery or shared with another
   application is outside the app's control: it is not recorded, listed, versioned, revoked or deleted by
-  Servora, and it is not evidence the API can answer for (`BR-027`; `D6` stays open).
+  Servora, and it is not evidence the API can answer for (`BR-027`; the evidence lifecycle is `BR-088` –
+  `BR-090`).
 - Any Angular surface for evidence, and any reporting over it (`BR-030`).
-- Presigned reads, and any second storage endpoint (`ADR-013` D7 and its open question 4).
+- **Presigned reads and any second configured storage endpoint.** `D15` ✓ (2026-09-16) decides reads move to
+  short-lived presigned GET URLs issued behind the API's authorization, with the bucket private and **no
+  second configured endpoint**; it is **not implemented** (Phase 8), which must first resolve `ADR-013` D7's
+  `Host` and plain-HTTP constraints.
 - **Repairing the orientation of evidence the backend already holds.** Servora presents a photo the way the
   file's own EXIF orientation says it should be, and it never rewrites bytes it has already stored or sent,
   so evidence recorded from a re-encoded photo stays as it is and is **historical** (`D7b`'s option (c) was

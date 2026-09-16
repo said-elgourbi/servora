@@ -2,6 +2,16 @@
 
 **Status:** Accepted (product-owner decision, 2026-09-15; implemented by `docs/tracker/029-photo-evidence-phases.md` Phase 4e)
 
+**Amended — presentation only, 2026-09-16.** The viewer's chrome was refined afterwards
+(`docs/tracker/031-android-photo-viewer-ui.md`, the product owner's Phase 4f): the photo is drawn on the
+viewer's **own black ground with white ink** instead of the theme's `surface`, the top row became a minimal
+**overlay bar** (close · position · Save/Share icons) with the phase badge moved over the photo, the note
+gained a **Notes** label and a **More** expansion, and the report of a save, a share or a refusal is drawn
+**inside the viewer's own window** instead of by the screen behind it — the defect this amendment exists for,
+because the viewer is a full-screen dialog and the screen's `SnackbarHost` is beneath it. **Nothing decided
+below changed:** `D11`'s sequence, its order and the swipe-only-at-fit rule, `D12`'s `Servora` album and its
+permission, `D13`'s share sheet, and the evidence capability that draws both actions are exactly as recorded.
+
 Date: 2026-09-15
 Tracker: `docs/tracker/029-photo-evidence-phases.md` (Phase 0 D11, D12, D13; Phase 4e implements them)
 Contract: **none.** The API, its routes, its answers and `docs/api/job-photos.md` are unchanged: nothing

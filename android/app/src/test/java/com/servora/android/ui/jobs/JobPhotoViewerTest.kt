@@ -1,5 +1,7 @@
 package com.servora.android.ui.jobs
 
+import com.servora.android.data.jobs.JobPhotoBytesUnavailable
+import com.servora.android.data.jobs.JobPhotoBytesUnavailableException
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobPhotoPhase
@@ -11,17 +13,40 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Which photo the full-size viewer draws, which photos it pages through, and where its bytes come from
- * (`D4`, `D11`).
+ * Which photo the full-size viewer draws, which photos it pages through, where its bytes come from, and
+ * what it says when they cannot be produced (`D4`, `D5`, `D11`).
  *
  * The viewer holds only a photo id and resolves the rest from the records that already state it, so
  * these pin the answers that matter: the device's own copy while it still holds the photo, and the
  * backend's evidence once it does not — and nothing at all when neither holds it, because a photo the
  * viewer cannot place must not be replaced by another picture (`BR-042`). They also pin the order the
- * viewer pages in — the order Job Details presents the same photos in (`D11`) — and the rule that
- * decides whether a swipe pages or pans.
+ * viewer pages in — the order Job Details presents the same photos in (`D11`) — the rule that decides
+ * whether a swipe pages or pans, and the rule that tells a photo which is only missing because this
+ * device is offline from one that cannot be shown at all (`D5`, `BR-013`).
  */
 class JobPhotoViewerTest {
+
+    @Test
+    fun `reads a failed photo read as offline only when the read said the backend could not be reached`() {
+        assertEquals(
+            JobPhotoBytesUnavailable.OFFLINE,
+            jobPhotoUnavailableReason(JobPhotoBytesUnavailableException(JobPhotoBytesUnavailable.OFFLINE)),
+        )
+    }
+
+    @Test
+    fun `reads every other failure as a photo that could not be shown`() {
+        // A refusal, a photo this device no longer holds, and a failure this build did not raise are all
+        // "could not be shown": none of them is fixed by reconnecting (`BR-042`).
+        assertEquals(
+            JobPhotoBytesUnavailable.UNAVAILABLE,
+            jobPhotoUnavailableReason(
+                JobPhotoBytesUnavailableException(JobPhotoBytesUnavailable.UNAVAILABLE),
+            ),
+        )
+        assertEquals(JobPhotoBytesUnavailable.UNAVAILABLE, jobPhotoUnavailableReason(null))
+        assertEquals(JobPhotoBytesUnavailable.UNAVAILABLE, jobPhotoUnavailableReason(IllegalStateException()))
+    }
 
     @Test
     fun `shows the bytes this device still holds with the phase and note they were recorded with`() {

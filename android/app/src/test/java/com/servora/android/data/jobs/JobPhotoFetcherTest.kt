@@ -19,6 +19,7 @@ import okio.Path.Companion.toOkioPath
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -31,11 +32,14 @@ import retrofit2.Response
  * The reads are asserted where they happen: a pending photo comes from the file the device holds and
  * never from the API, evidence comes from this session's own cached copy once it has one (which is
  * `D4`'s measurement — full-resolution bytes per photo *once*, rather than once per cold start), a
- * session the API refuses is renewed once exactly as every other read of evidence renews, and a photo
- * that cannot be read answers with nothing to draw rather than with an exception (`BR-042`).
+ * session the API refuses is renewed once exactly as every other read of evidence renews, and a read
+ * that cannot deliver the bytes reports **why** — which is what lets a surface say a photo is not
+ * available offline rather than that it failed (`D5`, `BR-042`).
  *
  * The cache is the library's own, built in a directory this test owns, because the entry the fetcher
- * writes and reads back is the behaviour under test (`qa.md` §6.1).
+ * writes and reads back is the behaviour under test (`qa.md` §6.1), and the key the fetcher is handed
+ * is built by the same rule the port builds it with ([jobPhotoImageDiskCacheKey]) — so the policy that
+ * a photo this device holds is never a cache entry is asserted here rather than assumed (`D5`, `§9`).
  */
 class JobPhotoFetcherTest {
 
@@ -61,10 +65,11 @@ class JobPhotoFetcherTest {
     }
 
     @Test
-    fun `answers nothing for a photo the device no longer holds`() = runTest {
-        val result = fetcher(image = JobPhotoImage.Local(PENDING_PATH)).fetch()
+    fun `reports a photo this device no longer holds as unreadable`() = runTest {
+        val failure = failureOf { fetcher(image = JobPhotoImage.Local(PENDING_PATH)).fetch() }
 
-        assertNull(result)
+        // It is not an offline photo: a `Local` photo is never cache, so nothing evicted it (`§9`).
+        assertEquals(JobPhotoBytesUnavailable.UNAVAILABLE, failure.reason)
     }
 
     @Test
@@ -150,25 +155,44 @@ class JobPhotoFetcherTest {
     }
 
     @Test
-    fun `answers nothing for evidence a refused session cannot read`() = runTest {
+    fun `reports evidence a refused session cannot read as unreadable`() = runTest {
         val api = PhotoUploadApi()
         api.contentAnswer = { throw HttpException(Response.error<ResponseBody>(401, REFUSED_BODY)) }
         val authenticator =
             FakePhotoSessionAuthenticator(accessToken = "stale-token", renewal = SessionRenewal.Rejected)
 
-        assertNull(fetcher(image = EVIDENCE, api = api, sessionAuthenticator = authenticator).fetch())
+        val failure = failureOf {
+            fetcher(image = EVIDENCE, api = api, sessionAuthenticator = authenticator).fetch()
+        }
+
+        // The backend answered — it refused — so this is not a connectivity problem (`BR-007`).
+        assertEquals(JobPhotoBytesUnavailable.UNAVAILABLE, failure.reason)
     }
 
     @Test
-    fun `answers nothing when the backend cannot be reached`() = runTest {
+    fun `reports evidence it cannot get offline as unavailable offline`() = runTest {
         val api = PhotoUploadApi()
         api.contentAnswer = { throw IOException("offline") }
 
-        assertNull(fetcher(image = EVIDENCE, api = api).fetch())
+        val failure = failureOf { fetcher(image = EVIDENCE, api = api).fetch() }
+
+        // This is the state `D5` names: the bytes are neither on this device nor in the cache, and the
+        // backend could not be reached, so the technician is told to reconnect (`BR-013`).
+        assertEquals(JobPhotoBytesUnavailable.OFFLINE, failure.reason)
     }
 
     @Test
-    fun `answers nothing, and does not renew, for a refusal that is not a 401`() = runTest {
+    fun `reports a backend that answered with a server failure as offline too`() = runTest {
+        val api = PhotoUploadApi()
+        api.contentAnswer = { throw HttpException(Response.error<ResponseBody>(503, REFUSED_BODY)) }
+
+        val failure = failureOf { fetcher(image = EVIDENCE, api = api).fetch() }
+
+        assertEquals(JobPhotoBytesUnavailable.OFFLINE, failure.reason)
+    }
+
+    @Test
+    fun `reports a refusal that is not a 401 as unreadable, and does not renew`() = runTest {
         val api = PhotoUploadApi()
         api.contentAnswer = { throw HttpException(Response.error<ResponseBody>(403, REFUSED_BODY)) }
         val authenticator = FakePhotoSessionAuthenticator(
@@ -176,8 +200,44 @@ class JobPhotoFetcherTest {
             renewal = SessionRenewal.Renewed("fresh-token"),
         )
 
-        assertNull(fetcher(image = EVIDENCE, api = api, sessionAuthenticator = authenticator).fetch())
+        val failure = failureOf {
+            fetcher(image = EVIDENCE, api = api, sessionAuthenticator = authenticator).fetch()
+        }
+
+        assertEquals(JobPhotoBytesUnavailable.UNAVAILABLE, failure.reason)
         assertEquals(1, api.contentCalls)
+    }
+
+    @Test
+    fun `writes nothing to the cache when the read did not deliver the photo`() = runTest {
+        val api = PhotoUploadApi()
+        api.contentAnswer = { throw IOException("offline") }
+        val cache = diskCache()
+
+        failureOf { fetcher(image = EVIDENCE, api = api, diskCache = cache).fetch() }
+
+        // A failure must not leave anything behind: the cache only ever holds bytes a session read, so a
+        // failed read cannot evict a photo that is in it (`D5`, `§9`).
+        assertEquals(0L, cache.size)
+    }
+
+    @Test
+    fun `never puts a photo this device holds into the cache`() = runTest {
+        val photo = File(temporaryFolder.root, "photo-2.jpg")
+        photo.writeBytes(FakeJobPhotoFiles.JPEG_BYTES)
+        val files = FakeJobPhotoFiles().apply { writeCapture(photo.path, FakeJobPhotoFiles.JPEG_BYTES) }
+        val cache = diskCache()
+
+        val result = fetcher(
+            image = JobPhotoImage.Local(photo.path),
+            files = files,
+            diskCache = cache,
+        ).fetch()
+
+        assertEquals(DataSource.DISK, (result as SourceFetchResult).dataSource)
+        // The file *is* the copy: a pending upload's bytes are app-private and no size policy evicts
+        // them, which is what `BR-014` requires (`jobPhotoImageDiskCacheKey`).
+        assertEquals(0L, cache.size)
     }
 
     /** The fetcher one read is asserted through, with everything a device would supply replaced. */
@@ -193,7 +253,8 @@ class JobPhotoFetcherTest {
     ): JobPhotoFetcher = JobPhotoFetcher(
         image = image,
         diskCache = diskCache,
-        diskCacheKey = subjectId?.let { jobPhotoImageCacheKey(it, image) },
+        // The port's own rule, so a photo this device holds is handed no disk key here either.
+        diskCacheKey = subjectId?.let { jobPhotoImageDiskCacheKey(it, image) },
         diskCachePolicy = CachePolicy.ENABLED,
         fileSystem = FileSystem.SYSTEM,
         releaseCaches = releaseCaches,
@@ -202,6 +263,15 @@ class JobPhotoFetcherTest {
         subject = FakeAuthenticatedSubject(subjectId),
         cacheScope = cacheScope,
     )
+
+    /** The failure a read reported, so the reason it carried out of the read can be asserted. */
+    private suspend fun failureOf(
+        read: suspend () -> Any?,
+    ): JobPhotoBytesUnavailableException {
+        val failure = runCatching { read() }.exceptionOrNull()
+        assertTrue("expected a photo failure, got $failure", failure is JobPhotoBytesUnavailableException)
+        return failure as JobPhotoBytesUnavailableException
+    }
 
     /** The library's disk cache, in a directory this test owns and removes (`D4b`). */
     private fun diskCache(): DiskCache =

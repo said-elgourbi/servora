@@ -6,24 +6,36 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -31,10 +43,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 import com.servora.android.R
+import com.servora.android.data.jobs.JobPhotoBytesUnavailable
+import com.servora.android.data.jobs.JobPhotoBytesUnavailableException
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
@@ -60,8 +75,29 @@ fun jobPhotoPhaseOptionTag(phase: JobPhotoPhase): String = "job-photo-phase-${ph
 /** Identifies the gallery of photos the backend accepted, at the head of Job Activity. */
 const val JobPhotoGalleryTag = "job-photo-gallery"
 
+/**
+ * Identifies the gallery's heading, which is also the control that shows and hides its photos.
+ *
+ * It is one target rather than a chevron beside a label, so a tap anywhere on the row folds the
+ * gallery (`BR-012`).
+ */
+const val JobPhotoGalleryToggleTag = "job-photo-gallery-toggle"
+
+/** Identifies the compact preview the folded gallery draws beside its heading. */
+const val JobPhotoGalleryPreviewTag = "job-photo-gallery-preview"
+
 /** Identifies one photo in the gallery. */
 fun jobPhotoGalleryTileTag(photoId: String): String = "job-photo-gallery-$photoId"
+
+/** Identifies the photo one Job Activity entry carries as its own evidence (`BR-015`, `BR-080`). */
+fun jobPhotoActivityPhotoTag(photoId: String): String = "job-activity-photo-$photoId"
+
+/** Identifies that photo's note inside its Job Activity entry (`BR-027`). */
+fun jobPhotoActivityNoteTag(photoId: String): String = "job-activity-photo-note-$photoId"
+
+/** Identifies the action that expands a note too long to read at once inside its entry (`BR-027`). */
+fun jobPhotoActivityNoteActionTag(photoId: String): String =
+    "job-activity-photo-note-action-$photoId"
 
 
 /**
@@ -129,18 +165,29 @@ internal fun JobPhotoPhaseSelector(
  * The preview is the stack's own draw of the request this feature answered with
  * ([JobPhotoImages]): the library decodes it at the size it is drawn, turns it by the photo's own EXIF
  * orientation and caches the result, so the same photo is neither downloaded nor decoded twice
- * (`D4b`). Until it is there — and when it cannot be drawn at all — the camera glyph is shown instead:
- * a tile's phase, note and state are what the technician acts on, and a missing preview must never be
- * presented as a different photo (`BR-042`).
+ * (`D4b`). Until it is there — and when it cannot be drawn at all — the tile draws its own state
+ * instead: a tile's phase, note and synchronization state are what the technician acts on, and a
+ * missing preview must never be presented as a different photo (`BR-042`).
  *
- * [image] is `null` when there is nothing to draw, which is the same state a photo that fails to load
- * reaches.
+ * A tile that cannot get its photo for want of connectivity says **that**, because offline the bytes are
+ * only there when the device already holds them or the stack cached them (`D5`, `JobPhotoThumbnail`'s
+ * [JobPhotoUnavailableTile]).
+ *
+ * [image] is `null` when there is nothing to draw, which is the state a preview shows while no request
+ * was built at all.
+ *
+ * `contentScale` is the one thing the call sites decide, because how much of the photo is drawn is
+ * what the surface is for and not a property of the stack: a **tile** crops, being a square summary of
+ * the photo it stands for, while the **review panel** fits, because the technician is checking the
+ * photo they are about to add and a cropped preview would hide part of what they are accepting
+ * (`BR-012`, `BR-015`).
  */
 @Composable
 internal fun JobPhotoThumbnail(
     image: ImageRequest?,
     contentDescription: String?,
     modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
 ) {
     Box(
         modifier = modifier
@@ -154,14 +201,54 @@ internal fun JobPhotoThumbnail(
             SubcomposeAsyncImage(
                 model = image,
                 contentDescription = contentDescription,
-                contentScale = ContentScale.Crop,
+                contentScale = contentScale,
                 modifier = Modifier.fillMaxSize(),
                 loading = { JobPhotoMissingPreview(contentDescription) },
-                error = { JobPhotoMissingPreview(contentDescription) },
+                error = { errorState ->
+                    JobPhotoUnavailableTile(
+                        reason = jobPhotoUnavailableReason(errorState.result.throwable),
+                        contentDescription = contentDescription,
+                    )
+                },
             )
         }
     }
 }
+
+/**
+ * What a tile draws when its photo could not be produced (`D5`, `BR-042`).
+ *
+ * Offline is the state worth naming: the technician can act on it, because connecting is what makes the
+ * photo readable again. Everything else — a refusal, a photo this device no longer holds — keeps the
+ * camera glyph, which is also what a tile draws while its photo is still arriving; the full-size viewer
+ * is where either is spelled out.
+ */
+@Composable
+private fun JobPhotoUnavailableTile(
+    reason: JobPhotoBytesUnavailable,
+    contentDescription: String?,
+) {
+    if (reason == JobPhotoBytesUnavailable.OFFLINE) {
+        Icon(
+            painter = painterResource(R.drawable.ic_cloud_off),
+            contentDescription = stringResource(R.string.job_photo_offline_description),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(28.dp),
+        )
+    } else {
+        JobPhotoMissingPreview(contentDescription)
+    }
+}
+
+/**
+ * Why the image stack could not produce a photo (`D5`, `BR-042`).
+ *
+ * The stack hands the failure back to the surface that asked for it, carrying the reason the read gave
+ * ([JobPhotoBytesUnavailableException]); a failure this build did not raise is not offline, because
+ * anything that did reach the backend is not a connectivity problem.
+ */
+internal fun jobPhotoUnavailableReason(throwable: Throwable?): JobPhotoBytesUnavailable =
+    (throwable as? JobPhotoBytesUnavailableException)?.reason ?: JobPhotoBytesUnavailable.UNAVAILABLE
 
 /** The camera glyph a tile draws while its photo is not there, and when it cannot be drawn. */
 @Composable
@@ -195,17 +282,172 @@ internal fun JobPhotoPhaseBadge(phase: JobPhotoPhase?, modifier: Modifier = Modi
 
 internal val JobPhotoPhaseButtonHeight = 56.dp
 internal val JobPhotoTileSize = 132.dp
+
+/** The height the gallery's heading keeps, so its whole row is a comfortable target (`BR-012`). */
+internal val JobPhotoGalleryHeadingHeight = 48.dp
+
+/** How large a photo is drawn in the folded gallery's compact preview. */
+internal val JobPhotoGalleryPreviewSize = 32.dp
+
+/**
+ * How many photos the folded gallery previews.
+ *
+ * Enough to say evidence exists without turning the heading into a second strip (`BR-012`).
+ */
+internal const val JobPhotoGalleryPreviewCount = 3
+
+/**
+ * The size one photo is drawn at inside a Job Activity entry.
+ *
+ * It crops, being a summary that stands for the photo rather than the photo itself, and it is
+ * deliberately smaller than the viewer: a Job with dozens of photo entries must stay a chronological
+ * account a reader scans rather than a wall of full-width pictures (`BR-012`, `BR-080`).
+ */
+internal val JobPhotoActivityPhotoWidth = 176.dp
+internal val JobPhotoActivityPhotoHeight = 132.dp
+
+/** How much of a photo's note is read before the technician asks for the rest (`BR-012`). */
+internal const val JobPhotoNoteCollapsedLines = 3
+
 private val JobPhotoBadgeSpacing = 6.dp
 private const val JobPhotoNoteLength = 60
 
 /**
- * The gallery of photos the backend accepted, in the order Job Activity reports them (`BR-080`).
+ * The photos the backend accepted, as a collapsible gallery at the head of Job Activity (`BR-080`).
  *
  * It is a projection of the timeline, never a second list: the photos it draws are exactly the
  * `JOB_PHOTO_ADDED` entries the API returned, so no client can disagree with the backend about which
- * evidence exists (`BR-001`). A tile is a preview that opens the photo full size when it is tapped
- * (`D4`), which is where the design puts an attachment's viewer (`Figma/…/servora-job-details-spec.md`
- * §11).
+ * evidence exists (`BR-001`). Its heading says how many there are and the whole heading is the
+ * control that folds the strip away, so a Job with a dozen photos does not have to push the account of
+ * what happened off the screen to prove they exist (`BR-012`).
+ *
+ * The gallery starts folded, because the timeline draws each photo inside the entry that recorded it:
+ * the section above it is for browsing the whole collection, which is a deliberate act rather than the
+ * default reading order (`BR-080`). While it is folded the heading still previews its first few
+ * photos, so evidence stays visible without opening anything.
+ *
+ * The state is presentation and belongs to this section: it survives recomposition and a configuration
+ * change, and it is not persisted beyond the Job on screen (`BR-042`).
+ *
+ * A tile is a preview that opens the photo full size when it is tapped (`D4`), which is where the
+ * design puts an attachment's viewer (`Figma/…/servora-job-details-spec.md` §11).
+ */
+@Composable
+internal fun JobPhotoGallerySection(
+    photos: List<JobActivityEvent>,
+    jobId: String,
+    photoImages: JobPhotoImages,
+    onOpenPhoto: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Held for the Job on screen: looking at another Job starts its own gallery folded, and nothing
+    // about the choice outlives the screen.
+    var expanded by rememberSaveable(jobId) { mutableStateOf(false) }
+
+    Column(modifier = modifier.fillMaxWidth().testTag(JobPhotoGalleryTag)) {
+        JobPhotoGalleryHeading(
+            count = photos.size,
+            preview = if (expanded) emptyList() else jobPhotoGalleryPreview(photos),
+            jobId = jobId,
+            photoImages = photoImages,
+            expanded = expanded,
+            onToggle = { expanded = !expanded },
+        )
+
+        if (expanded) {
+            JobPhotoGallery(
+                photos = photos,
+                jobId = jobId,
+                photoImages = photoImages,
+                onOpenPhoto = onOpenPhoto,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The gallery's heading: how many photos the Job has, a compact preview while it is folded, and the
+ * chevron that says the strip opens.
+ *
+ * Its label comes from the same `section_count_format` string every other section heading uses, so the
+ * headings cannot drift apart (`BR-041`), and the chevron turns a quarter turn while the strip is
+ * shown — the affordance the manager home's and the customer detail's disclosures already use
+ * (`docs/design/android-design-system.md`). Its content description names the action, never the state.
+ */
+@Composable
+private fun JobPhotoGalleryHeading(
+    count: Int,
+    preview: List<JobActivityEvent>,
+    jobId: String,
+    photoImages: JobPhotoImages,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(JobPhotoGalleryToggleTag)
+            .heightIn(min = JobPhotoGalleryHeadingHeight)
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            modifier = Modifier.weight(1f),
+            text = stringResource(
+                R.string.section_count_format,
+                stringResource(R.string.job_photo_gallery_label),
+                count,
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        if (preview.isNotEmpty()) {
+            Row(
+                modifier = Modifier.testTag(JobPhotoGalleryPreviewTag),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                preview.forEach { event ->
+                    JobPhotoThumbnail(
+                        image = photoImages.jobPhotoThumbnail(jobId, event.photoId ?: event.id),
+                        // The preview stands for photos the heading already counts, and the row it sits
+                        // in is the control: announcing an unlabelled copy of each would say the same
+                        // thing three times (`BR-028`).
+                        contentDescription = null,
+                        modifier = Modifier.size(JobPhotoGalleryPreviewSize),
+                    )
+                }
+            }
+        }
+
+        Icon(
+            painter = painterResource(R.drawable.ic_chevron_right),
+            contentDescription = stringResource(
+                if (expanded) {
+                    R.string.job_photo_gallery_collapse
+                } else {
+                    R.string.job_photo_gallery_expand
+                },
+            ),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .size(18.dp)
+                .rotate(if (expanded) 90f else 0f),
+        )
+    }
+}
+
+/**
+ * The horizontal strip of photos the backend accepted, in the order Job Activity reports them.
+ *
+ * A tile is a preview that opens the photo full size when it is tapped (`D4`). The strip scrolls, so a
+ * Job with more photos than fit says so by continuing rather than by shrinking its tiles.
  */
 @Composable
 internal fun JobPhotoGallery(
@@ -216,7 +458,7 @@ internal fun JobPhotoGallery(
     modifier: Modifier = Modifier,
 ) {
     LazyRow(
-        modifier = modifier.fillMaxWidth().testTag(JobPhotoGalleryTag),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(items = photos, key = { event -> event.id }) { event ->
@@ -279,11 +521,99 @@ private fun JobPhotoGalleryTile(
     }
 }
 
+/**
+ * A photo's note, with the action a note that does not fit needs (`BR-012`, `BR-027`).
+ *
+ * Whether a note needs it is answered by the layout it is actually drawn in — its language, its own
+ * length and the font scale all decide it — rather than by a character count a different device would
+ * get wrong, and a note that fits draws no action at all, so a short one reserves no room. The action
+ * is a text action rather than a filled button: it is a small, secondary control under the note, and
+ * Material keeps its target at 48 dp even at this size (`BR-012`).
+ *
+ * [maxExpandedHeight] bounds the whole note where something else has to keep its room — the viewer's
+ * photo, which must not be pushed off the screen — and is `null` where the note simply grows inside
+ * something that already scrolls, as a Job Activity entry does.
+ *
+ * The expansion belongs to the photo it was asked for ([collapseKey]), so paging on or looking at
+ * another entry's photo starts the next note collapsed.
+ */
+@Composable
+internal fun JobPhotoNote(
+    note: String,
+    collapseKey: Any?,
+    textColor: Color,
+    actionColor: Color,
+    modifier: Modifier = Modifier,
+    maxExpandedHeight: Dp? = null,
+    textTag: String? = null,
+    actionTag: String? = null,
+) {
+    var expanded by remember(collapseKey) { mutableStateOf(false) }
+    // Whether this note has more to read. It is kept while expanded, which is what leaves the note's
+    // own action available to collapse it again.
+    var hasMore by remember(collapseKey) { mutableStateOf(false) }
+
+    Column(modifier = modifier) {
+        Text(
+            text = note,
+            style = MaterialTheme.typography.bodyMedium,
+            color = textColor,
+            maxLines = if (expanded) Int.MAX_VALUE else JobPhotoNoteCollapsedLines,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { layout -> if (!expanded) hasMore = layout.hasVisualOverflow },
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (expanded && maxExpandedHeight != null) {
+                        Modifier
+                            .heightIn(max = maxExpandedHeight)
+                            .verticalScroll(rememberScrollState())
+                    } else {
+                        Modifier
+                    },
+                )
+                .testTagOrNone(textTag),
+        )
+        if (hasMore) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.testTagOrNone(actionTag),
+            ) {
+                Text(
+                    text = stringResource(
+                        if (expanded) {
+                            R.string.job_photo_notes_less
+                        } else {
+                            R.string.job_photo_notes_more
+                        },
+                    ),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = actionColor,
+                )
+            }
+        }
+    }
+}
+
+/** [tag] as a test tag, or nothing when the call site does not label the node. */
+private fun Modifier.testTagOrNone(tag: String?): Modifier =
+    if (tag == null) this else testTag(tag)
+
 /** The photos Job Activity reports, as the gallery draws them (`BR-080`). */
 internal fun jobActivityPhotos(activity: List<JobActivityEvent>?): List<JobActivityEvent> =
     activity.orEmpty().filter { event ->
         event.kind == JobActivityKind.JOB_PHOTO_ADDED && event.photoId != null
     }
+
+/**
+ * The few photos the folded gallery previews.
+ *
+ * It is the same collection in the same order, only shortened: the preview exists so evidence stays
+ * visible while the section is folded away, and it is never a second list (`BR-001`, `BR-080`).
+ */
+internal fun jobPhotoGalleryPreview(photos: List<JobActivityEvent>): List<JobActivityEvent> =
+    photos.take(JobPhotoGalleryPreviewCount)
 
 /** The phase code the API reported, or `null` when this build cannot read it (`BR-042`). */
 internal fun jobPhotoPhaseOrNull(code: String?): JobPhotoPhase? =

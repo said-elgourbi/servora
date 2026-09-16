@@ -10,7 +10,10 @@ Servora is a monorepo built feature by feature as controlled vertical slices.
   management actions), customers, the customer Property surface, and technician photo evidence
   (capture, offline upload, gallery, viewer, zoom). Photo evidence is drawn by **Coil 3** behind the
   feature's own `JobPhotoImages` port, and the full-size viewer zooms and pans through **Telephoto**
-  over that same stack (`docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
+  over that same stack (`docs/decisions/016-android-image-stack-and-viewer-zoom.md`). The Job and its
+  Activity — and so the evidence it holds — are readable offline through the working set, and a photo
+  that is on neither the device nor the image stack's cache is reported as not available offline
+  (`docs/tracker/029-photo-evidence-phases.md`, Phase 5).
 - **Angular** — management/office client. *Not yet implemented.*
 
 Initial supported languages are **English** and **French**. Development rules live in
@@ -61,15 +64,30 @@ Initial supported languages are **English** and **French**. Development rules li
 > permission gate, Phase 4, the full-size viewer, Phase 4b, which turns a re-encoded photo's pixels so
 > what Servora stores is upright, Phase 4c, the image stack (Coil 3 behind the existing
 > `JobPhotoImages` port, with a per-session memory and disk cache), Phase 4d, the viewer's pinch-zoom and
-> pan, and Phase 4e, which makes the viewer page through the Job's photos and lets a photo be saved on the
-> device or shared with another application, are implemented**, with the capability
+> pan, Phase 4e, which makes the viewer page through the Job's photos and lets a photo be saved on the
+> device or shared with another application, and **Phase 5, which makes the Job and its Activity readable
+> offline through the working set** — with the evidence a Job holds (which photos, with their phase, note
+> and time) marked on screen as the last answer the backend reported, the photo-byte cache stated as one
+> rule (a pending upload's bytes are never a cache entry, accepted evidence is a bounded, evictable LRU,
+> and nothing is prefetched), and a photo that is on neither the device nor that cache reported as **not
+> available offline** — are implemented**, with the capability
 > decision in
 > `docs/decisions/015-evidence-capabilities.md`. **Phase 0's remaining questions were decided on
 > 2026-09-15**: the image stack is Coil 3 behind the existing `JobPhotoImages` port (D4b,
 > `docs/decisions/016-android-image-stack-and-viewer-zoom.md`), the viewer gains pinch-zoom and pan (D9,
 > Telephoto), evidence is Job-level (D2), a re-encoded photo is stored upright (D7b), a refused photo
-> becomes discardable (D6c), and the device's media library is not read (D10). **Phase 6a (a refused
-> photo is explicitly discardable) is next; Phase 5 stays blocked because D5 was deferred.**
+> becomes discardable (D6c), and the device's media library is not read (D10).
+> **Phase 0 is now answered in full (2026-09-16)** — the evidence lifecycle, metadata, audio, the evidence
+> entry point and the object store's read model are all decided and recorded as business rules `BR-088` –
+> `BR-091`: accepted evidence is **immutable** (no overwrite, no edit route, and removal only through an
+> explicit, audited, Manager-level `evidence.photo.remove` that soft-removes it), its **metadata is readable
+> offline** with its bytes cached best-effort, **retention is indefinite for the life of the tenant**,
+> archiving a Job never deletes evidence, **GPS/location EXIF is stripped** from what is uploaded, `phase`
+> stays the only structured classification, **audio notes are in scope** as their own evidence kind while
+> generic files are out, and the store gains **no derived thumbnails** — reads move to short-lived
+> presigned URLs issued by the API. **Phase 5 (offline visibility of accepted evidence) is implemented
+> (2026-09-16); the phase to run is Phase 6a (refused photos), and Phases 6b, 6c, 8 and 9 are startable
+> behind it.**
 
 ## Layout
 
@@ -219,13 +237,31 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
   position and its note, and two actions read evidence on `evidence.view`: **Save to device** (a `Servora`
   album in the device's own gallery; no permission from Android 10, and `WRITE_EXTERNAL_STORAGE` capped
   at API 28 for Android 8–9, asked for when a save needs it) and **Share** (the platform's own chooser,
-  through one added `FileProvider` path). **Phase 6a (refused photos are explicitly discardable) is
+  through one added `FileProvider` path). **Phase 4f (the viewer's chrome) landed on 2026-09-16**: the viewer
+  is a media surface of its own — a black ground and white ink rather than the theme's `surface`, the photo
+  filling the screen under a minimal overlay top bar (close · `1 / 4` · Save/Share icons), the phase as a
+  badge over the photo, a **Notes** section with **More**, progress on the action that is running, and the
+  report of a save, a share or a refusal drawn **inside the viewer** rather than behind it — which is the
+  defect it fixes, since the viewer is a window of its own and the screen's Snackbar was under it.
+  **The review panel was fixed on 2026-09-16**: its content **scrolls**, so the note stays reachable while
+  the keyboard is up instead of being left underneath it, and its preview draws the **whole** photo rather
+  than a crop of it — the tray and gallery tiles still crop, a tile being a square that stands for a photo.
+  **Phase 6a (refused photos are explicitly discardable) is
   next**; Phase 5 (offline evidence) stays blocked on the deferred D5.**
   `docs/tracker/029-photo-evidence-phases.md`
   (decisions: `docs/decisions/015-evidence-capabilities.md`,
   `docs/decisions/016-android-image-stack-and-viewer-zoom.md`,
   `docs/decisions/017-viewer-paging-save-and-share.md`).
+- The photo viewer's chrome — the media-viewer surface, its top bar, the phase badge over the photo, the
+  Notes section with **More**, the in-flight evidence action and the report drawn inside the viewer:
+  `docs/tracker/031-android-photo-viewer-ui.md`.
+- Job Activity's photo UX — the collapsible **Photos · n** gallery (folded by default, compact preview,
+  whole heading a target) and each photo drawn inside its own timeline entry, opening the same viewer:
+  `docs/tracker/032-android-job-activity-photo-ux.md`.
 - Development-environment hygiene — the Gradle/Kotlin build daemons Android verification leaves
   behind, and the `make android-stop` / `make tidy` targets that release them:
   `docs/tracker/030-development-environment-hygiene.md`.
+- The manager's Job status workflow — any permitted destination in one operation and one record, the
+  completion invariant, and the confirmation before closing or reopening:
+  `docs/tracker/034-manager-job-status-workflow.md`.
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.

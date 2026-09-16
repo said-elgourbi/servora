@@ -98,13 +98,23 @@ are still guarded by `customers.view` and the Job and Visit actions by `JOB_UPDA
 
 Recorded rather than guessed (`BR-042`); tracker 029 carries them with the phases that depend on them.
 
-1. Audio and file evidence, and the model behind them (D8).
+1. Audio and file evidence, and the model behind them (D8). **Answered 2026-09-16:** audio is in scope as
+   an evidence kind of its own and generic files are **out of scope in v1**. Audio's capability
+   `evidence.audio.add` is therefore **created when the audio feature is implemented** (tracker 029
+   Phase 9), not before — a capability for a kind nothing can add is still invented behaviour.
 2. Evidence scope — Job versus Visit (D2). **Decided 2026-09-15: Job-level; the domain document is corrected
    with it** (`docs/tracker/029-photo-evidence-phases.md` D2).
-3. A viewer, and any thumbnail or derived-object strategy (D4). **Partly decided:** the viewer landed in
-   tracker 029 Phase 4, the preview/caching strategy is `docs/decisions/016-android-image-stack-and-viewer-zoom.md`
-   (D4b ✓, Coil 3), and server-derived thumbnails stay open there.
-4. Offline visibility of accepted evidence (D5). **Deferred 2026-09-15** — still open, and Phase 5 with it.
-5. Retention, deletion and lifecycle of evidence (D6), which `BR-027` and `BR-033` leave open. **Partly
-   decided:** a refused photo may be explicitly discarded (`D6c` ✓, tracker 029 Phase 6a); delete/edit,
-   retention and Job-deletion objects stay open.
+3. A viewer, and any thumbnail or derived-object strategy (D4). **Decided:** the viewer landed in tracker 029
+   Phase 4, the preview/caching strategy is `docs/decisions/016-android-image-stack-and-viewer-zoom.md`
+   (D4b ✓, Coil 3), and server-derived thumbnails are **not built in v1** — `ADR-013` open question 3,
+   answered 2026-09-16.
+4. Offline visibility of accepted evidence (D5). **Answered 2026-09-16** — accepted evidence's metadata
+   must be readable offline and its bytes are cached best-effort (tracker 029 Phase 5); see
+   `docs/architecture/offline-first-architecture.md` §9, §12.
+5. Retention, removal and lifecycle of evidence (D6), which `BR-027` and `BR-033` leave open. **Answered
+   2026-09-16**: a refused photo is explicitly discardable (D6c ✓, Phase 6a); accepted evidence is
+   immutable and is removed only by an audited, Manager-level `evidence.photo.remove` (D6a/D6b ✓, Phase 6b);
+   retention is indefinite for the life of the tenant and Job deletion does not exist in normal flows (D6d,
+   D6e ✓) — `BR-088` – `BR-090`. That removal capability is the **second** addition this ADR anticipates:
+   `evidence.photo.remove` is created when the removal route is implemented, in the same per-kind shape as
+   the two capabilities above.

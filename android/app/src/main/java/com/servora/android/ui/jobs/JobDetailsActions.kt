@@ -28,6 +28,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -137,6 +141,15 @@ const val JobDetailsConflictListTag = "job-details-conflict-list"
 const val JobDetailsConflictConfirmTag = "job-details-conflict-confirm"
 
 /**
+ * Identifies the confirmation a consequential Job status change is asked for (`BR-058`, `BR-062`).
+ *
+ * It is a dialog the user answers, not a report: closing a Job or reopening a closed one is sent only
+ * once the user has confirmed it.
+ */
+const val JobDetailsStatusConfirmDialogTag = "job-details-status-confirm-dialog"
+const val JobDetailsStatusConfirmButtonTag = "job-details-status-confirm"
+
+/**
  * One compact contextual action (`BR-066`).
  *
  * An action is drawn with the data it affects — the Job's status action beside the Job's status, the
@@ -174,22 +187,31 @@ internal fun JobContextualAction(
  * control, and its trailing chevron says it opens something.
  *
  * The menu is the control's own and stays compact: it opens at the chip, states where the Job is now,
- * and then lists exactly the transitions the backend reported for that status (`BR-041`, `BR-058`).
- * The client holds no second copy of the lifecycle, so no arbitrary status is offered and a Job with
- * no permitted transition is not drawn with this control at all. Cancellation is absent from that list
- * while `BR-064`'s reason catalogue is an open question, so no destructive action is folded into the
- * status control: Job cancellation stays a separate, explicitly confirmed action, which is also what
- * `BR-064` requires of it (`docs/api/job-actions.md` §3).
+ * and then lists exactly the destinations the backend reported for that status (`BR-041`, `BR-058`).
+ * The client holds no second copy of the lifecycle, so no arbitrary status is offered — and a
+ * destination the Job does not currently qualify for is still offered, because the API answers that
+ * question with its own refusal (`BR-061`, `BR-062`) rather than the control guessing.
+ *
+ * A consequential destination is confirmed before it is sent ([requiresJobStatusConfirmation]), so
+ * closing a Job or reopening a closed one is the user's explicit decision and is sent as **one**
+ * request, never as a series of transitions walked through by the client. Cancellation is absent from
+ * that list while `BR-064`'s reason catalogue is an open question, so no destructive action is folded
+ * into the status control: Job cancellation stays a separate, explicitly confirmed action, which is
+ * also what `BR-064` requires of it (`docs/api/job-actions.md` §3).
  */
 @Composable
 internal fun JobStatusAction(
     currentStatus: JobStatus,
+    jobNumber: Int,
     allowedTransitions: List<JobStatus>,
     enabled: Boolean,
     onSelect: (JobStatus) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    // The chosen destination the user has still to confirm, if any. Confirming sends it and dismisses
+    // the dialog without asking again; dismissing leaves the Job exactly as it was (`BR-067`).
+    var confirming by rememberSaveable { mutableStateOf<JobStatus?>(null) }
     Box(modifier = modifier) {
         JobStatusPill(
             status = currentStatus,
@@ -215,11 +237,49 @@ internal fun JobStatusAction(
             allowedTransitions.forEach { status ->
                 JobStatusTransitionItem(status = status) {
                     expanded = false
-                    onSelect(status)
+                    if (requiresJobStatusConfirmation(currentStatus, status)) {
+                        confirming = status
+                    } else {
+                        onSelect(status)
+                    }
                 }
             }
         }
     }
+
+    confirming?.let { target ->
+        JobStatusConfirmDialog(
+            jobNumber = jobNumber,
+            currentStatus = currentStatus,
+            enabled = enabled,
+            onConfirm = {
+                confirming = null
+                onSelect(target)
+            },
+            onDismiss = { confirming = null },
+        )
+    }
+}
+
+/**
+ * Whether a destination is consequential enough to confirm before it is sent (`BR-058`).
+ *
+ * Two destinations change what the record means rather than where it is in the work: **closing** a
+ * Job ends its field work and makes its Visit outcomes final (`BR-062`, `BR-079`), and **reopening** a
+ * closed one returns it to the scheduling workflow (`BR-063`). Both are asked about; every other
+ * destination is the ordinary correction the control exists for and is sent as it is chosen, because a
+ * confirmation on each one would only make the menu slower to use.
+ *
+ * This decides an affordance, never authorization or eligibility: whether the change is allowed at all
+ * is the API's answer (`BR-007`, `BR-061`, `BR-062`), and confirming the dialog cannot override it.
+ */
+internal fun requiresJobStatusConfirmation(
+    currentStatus: JobStatus,
+    targetStatus: JobStatus,
+): Boolean {
+    val isReopen =
+        currentStatus == JobStatus.COMPLETED || currentStatus == JobStatus.CANCELED
+    return targetStatus == JobStatus.COMPLETED || isReopen
 }
 
 /** The width every row of the status menu shares, so the menu stays a compact control menu. */
@@ -285,6 +345,70 @@ private fun JobStatusTransitionItem(status: JobStatus, onClick: () -> Unit) {
 }
 
 /**
+ * The confirmation a consequential Job status change is asked for (`BR-058`, `BR-062`, `BR-063`).
+ *
+ * Closing a Job and reopening a closed one are decisions about what the record means, so they are put
+ * to the user in the terms they decide in — which Job, and what the change does — rather than being
+ * sent from a tap that closes a menu. Confirming sends the change; dismissing leaves the Job exactly
+ * as it stands (`BR-067`).
+ *
+ * The dialog asks; it never grants. Whether the Job may actually move is the API's answer, and a
+ * refusal it returns is reported the same way as any other refused action (`BR-007`, `BR-042`).
+ */
+@Composable
+private fun JobStatusConfirmDialog(
+    jobNumber: Int,
+    currentStatus: JobStatus,
+    enabled: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val isReopen =
+        currentStatus == JobStatus.COMPLETED || currentStatus == JobStatus.CANCELED
+    AlertDialog(
+        modifier = Modifier.testTag(JobDetailsStatusConfirmDialogTag),
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(
+                    if (isReopen) {
+                        R.string.job_status_confirm_reopen_title
+                    } else {
+                        R.string.job_status_confirm_close_title
+                    },
+                ),
+            )
+        },
+        text = {
+            Text(
+                stringResource(
+                    if (isReopen) {
+                        R.string.job_status_confirm_reopen_message
+                    } else {
+                        R.string.job_status_confirm_close_message
+                    },
+                    jobNumber,
+                ),
+            )
+        },
+        confirmButton = {
+            Button(
+                modifier = Modifier.testTag(JobDetailsStatusConfirmButtonTag),
+                enabled = enabled,
+                onClick = onConfirm,
+            ) {
+                Text(stringResource(R.string.job_status_confirm_accept))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.job_action_cancel))
+            }
+        },
+    )
+}
+
+/**
  * What the screen reports about the last action, as a transient Snackbar (`BR-042`).
  *
  * The report does not stay in the layout: the Job the API answered with already presents the change,
@@ -292,6 +416,11 @@ private fun JobStatusTransitionItem(status: JobStatus, onClick: () -> Unit) {
  * (`BR-001`). A completed action is therefore shown briefly and released. A refusal is kept until the
  * user dismisses it, because nothing on screen reflects a change that did not happen — the refusal is
  * the action's only report.
+ *
+ * The appearance travels with the message rather than being recomputed where it is drawn
+ * ([JobActionSnackbarVisuals]), because the same report is drawn by whichever window is on screen: the
+ * screen's own host normally, and the full-size photo viewer's host while the viewer is open
+ * (`docs/tracker/031-android-photo-viewer-ui.md`). One report therefore reads identically in both.
  */
 @Composable
 internal fun JobActionSnackbar(
@@ -337,6 +466,41 @@ internal fun JobActionSnackbar(
     }
 }
 
+/**
+ * The report of an action, and the appearance it must be drawn with (`BR-042`).
+ *
+ * The flag is part of the message rather than something the drawing site recalculates, because the
+ * same report is drawn by whichever window is on screen — the screen's host, or the full-size photo
+ * viewer's own host — and both must render it the same way (`BR-041`).
+ */
+internal class JobActionSnackbarVisuals(
+    override val message: String,
+    val isError: Boolean,
+    override val actionLabel: String? = null,
+    override val withDismissAction: Boolean = false,
+    override val duration: SnackbarDuration,
+) : SnackbarVisuals
+
+/**
+ * Hosts the report of what the last action did (`BR-042`).
+ *
+ * It is one composable rather than a block repeated per call site, so a report is never drawn two
+ * different ways: the screen shows it at the bottom of its own layout, and the photo viewer shows it
+ * inside its full-screen dialog while that is open
+ * (`docs/tracker/031-android-photo-viewer-ui.md`).
+ */
+@Composable
+internal fun JobActionSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier) {
+    SnackbarHost(hostState = hostState, modifier = modifier) { data ->
+        JobActionSnackbar(
+            message = data.visuals.message,
+            isError = (data.visuals as? JobActionSnackbarVisuals)?.isError == true,
+            actionLabel = data.visuals.actionLabel,
+            onAction = { data.performAction() },
+        )
+    }
+}
+
 /** The localized message a refused action is reported with (`BR-028`, `BR-041`). */
 internal fun jobActionFailureMessage(
     failure: com.servora.android.data.jobs.JobActionFailure,
@@ -361,6 +525,9 @@ internal fun jobActionFailureMessage(
 
         com.servora.android.data.jobs.JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET ->
             R.string.job_action_error_review_condition
+
+        com.servora.android.data.jobs.JobActionFailure.JOB_COMPLETION_BLOCKED ->
+            R.string.job_action_error_completion_blocked
 
         com.servora.android.data.jobs.JobActionFailure.JOB_CANCELLATION_UNAVAILABLE ->
             R.string.job_action_error_cancellation_unavailable

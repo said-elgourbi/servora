@@ -656,6 +656,51 @@ class JobPhotoCaptureViewModelTest {
             viewModel.uiState.value.photoFailure,
         )
     }
+
+    @Test
+    fun `reports the evidence action that is running until it lands`() = runTest(dispatcher) {
+        val photos = PhotoCollaborators()
+        val exporter = FakeJobPhotoExporter()
+        val viewModel = startedViewModel(photos, exporter = exporter)
+        val capture = requireNotNull(viewModel.beginPhotoCapture())
+        photos.files.writeCapture(capture.localPath)
+        viewModel.photoCaptured(capture)
+        advanceUntilIdle()
+
+        viewModel.savePhotoToDevice(capture.photoId)
+
+        // The save is reported as running the moment it is asked for, because the viewer draws that:
+        // reading a photo's bytes — here a file, on the API a download — is not instant, and a control
+        // that shows nothing until it lands reads as a tap that did nothing (`BR-042`).
+        assertEquals(JobPhotoExportAction.SAVE, viewModel.uiState.value.photoExport)
+        assertNull("nothing is claimed before it lands", viewModel.uiState.value.photoMessage)
+
+        advanceUntilIdle()
+
+        assertNull("the action is over", viewModel.uiState.value.photoExport)
+        assertEquals(JobPhotoMessage.SAVED_TO_DEVICE, viewModel.uiState.value.photoMessage)
+    }
+
+    @Test
+    fun `does not start a second evidence action while one is running`() = runTest(dispatcher) {
+        val photos = PhotoCollaborators()
+        val exporter = FakeJobPhotoExporter()
+        val viewModel = startedViewModel(photos, exporter = exporter)
+        val capture = requireNotNull(viewModel.beginPhotoCapture())
+        photos.files.writeCapture(capture.localPath)
+        viewModel.photoCaptured(capture)
+        advanceUntilIdle()
+
+        viewModel.savePhotoToDevice(capture.photoId)
+        viewModel.sharePhoto(capture.photoId, chooserTitle = "Share photo")
+        advanceUntilIdle()
+
+        // One evidence action at a time: the second is not started, so two reports cannot race and the
+        // copy the technician asked for is the copy that is written (`D12`, `D13`).
+        assertEquals(1, exporter.saved.size)
+        assertTrue("a share started while a save runs is not begun", exporter.shared.isEmpty())
+        assertEquals(JobPhotoMessage.SAVED_TO_DEVICE, viewModel.uiState.value.photoMessage)
+    }
 }
 
 

@@ -3,6 +3,7 @@ package com.servora.android.ui.jobs
 import androidx.compose.runtime.Immutable
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobDetails
@@ -86,6 +87,21 @@ enum class JobPhotoMessage {
     SHARED,
 }
 
+/**
+ * The evidence action the viewer is carrying out, or `null` when none is running (`D12`, `D13`).
+ *
+ * Reading a photo's bytes — from the file this device holds, or from the API — is not instant, so the
+ * action that was asked for says it is running rather than leaving the technician with a tap that
+ * appears to have done nothing until it lands (`BR-042`).
+ */
+enum class JobPhotoExportAction {
+    /** The photo is being written into the device's own gallery. */
+    SAVE,
+
+    /** The photo is being handed to another application. */
+    SHARE,
+}
+
 /** The management action the screen last completed, so its confirmation names what happened. */
 enum class JobActionKind {
     /** The Job's lifecycle status changed (`BR-058`). */
@@ -148,6 +164,13 @@ data class JobDetailsUiState(
     val jobId: String = "",
     /** The state the backend last reported, or `null` when nothing readable is held. */
     val details: JobDetails? = null,
+    /**
+     * Where [details] was served from (`offline-first-architecture.md` §2, §7).
+     *
+     * A value from the working set is the last answer the backend reported, not a current one, so the
+     * screen says so instead of presenting a local copy as up to date (`D5`).
+     */
+    val detailsSource: ReadSource = ReadSource.BACKEND,
     /** Whether a read is in flight. */
     val isLoading: Boolean = false,
     /** Why the last read failed, or `null` when it succeeded. */
@@ -166,6 +189,13 @@ data class JobDetailsUiState(
     val assignableFailure: JobActionFailure? = null,
     /** The Job's chronological activity, newest first; `null` while it has not been read. */
     val activity: List<JobActivityEvent>? = null,
+    /**
+     * Where [activity] was served from (`offline-first-architecture.md` §2, §7).
+     *
+     * The timeline a device answered is the last one the backend reported, so it says that rather than
+     * looking like a fresh read (`D5`, `BR-080`).
+     */
+    val activitySource: ReadSource = ReadSource.BACKEND,
     /** Why the activity could not be read, or `null`. */
     val activityFailure: CustomersFailureReason? = null,
     /**
@@ -189,6 +219,8 @@ data class JobDetailsUiState(
     val photoFailureItem: PhotoItemPosition? = null,
     /** What the last photo action did, until the screen acknowledges it. */
     val photoMessage: JobPhotoMessage? = null,
+    /** The evidence action running right now, or `null` when none is (`D12`, `D13`). */
+    val photoExport: JobPhotoExportAction? = null,
     /**
      * The photo whose save is waiting for the storage permission Android 8–9 needs (`D12`).
      *

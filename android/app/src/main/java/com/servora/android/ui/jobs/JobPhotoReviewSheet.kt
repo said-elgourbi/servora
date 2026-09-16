@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -21,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +43,14 @@ import com.servora.android.domain.model.PendingJobPhoto
  *
  * The photo is already recorded on the device when this panel opens, so dismissing it does not lose
  * the capture: discarding is the explicit action that removes it (`BR-014`).
+ *
+ * The panel is taller than the space a phone leaves once the keyboard is up, so its content scrolls.
+ * The sheet itself already lifts with the keyboard — Material 3's sheet applies the IME inset inside
+ * its own window, which the signed-in shell's inset (`docs/design/android-design-system.md`) cannot
+ * reach, because the sheet is a window of its own. What the panel has to provide is a content area
+ * that can shrink, because that is the resize Compose answers by bringing the focused field back into
+ * view (`docs/tracker/014-android-add-customer.md`); without it the note field was the part of the
+ * panel left underneath the keyboard. The customer filter sheet scrolls for the same reason.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +76,7 @@ internal fun JobPhotoReviewSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -75,9 +87,12 @@ internal fun JobPhotoReviewSheet(
                 fontWeight = FontWeight.SemiBold,
             )
 
+            // The whole photo, not a crop of it: what is being confirmed is the photograph, and a
+            // preview that cut its edges off would not be one (`BR-015`).
             JobPhotoThumbnail(
                 image = photoImages.localThumbnail(photo.localPath),
                 contentDescription = stringResource(R.string.job_photo_image_description),
+                contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(JobPhotoReviewPreviewHeight)

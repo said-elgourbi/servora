@@ -66,6 +66,20 @@ internal object JobPhotoImageModule {
      * The reader is what tells the stack where evidence lives, and it releases the stack's own caches
      * when another session reads — so this provider is what makes that release the app's stack rather
      * than a second one (`JobPhotoImageCacheScope`).
+     *
+     * **The byte-cache policy (`D5`).** Accepted evidence's bytes are held here and nowhere else, and
+     * the cache is bounded by size and evicted least-recently-used by the library's own journal:
+     *
+     * - It is a **cache**, not a store and not a retention rule. Nothing may be read from it that the
+     *   session could not have read through the API, and nothing is promised to survive — an entry the
+     *   platform or the library drops costs a re-download (`D5`, §9). The partition by session subject
+     *   is the fetcher's, not this bound.
+     * - It is the **only** place a photo the backend holds may be kept on the device, so what this
+     *   bound covers is exactly the evidence that may be reproduced by downloading it again.
+     * - A photo this device **holds** is never written here at all: its app-private file is its only
+     *   copy, so a pending upload's bytes can never be evicted (`jobPhotoImageDiskCacheKey`, `BR-014`).
+     * - Nothing in the app prefetches: a photo is read because a surface is drawing it, never to fill
+     *   this cache ahead of time, so opening a Job never downloads its historical photos (`D5`).
      */
     @Provides
     @Singleton
@@ -77,9 +91,10 @@ internal object JobPhotoImageModule {
         .diskCache {
             DiskCache.Builder()
                 .directory(context.cacheDir.resolve(DISK_CACHE_DIRECTORY).toOkioPath())
-                // The share of the cache directory the library keeps for its own disk cache, matching
-                // its default: it is a cache, so the platform may reclaim all of it (`D4b`).
-                .maxSizePercent(DISK_CACHE_PERCENT)
+                // The share of the cache directory kept for evidence bytes, matching the library's own
+                // default: the bound is a size, so the platform may still reclaim all of it (`D4b`,
+                // `D5`).
+                .maxSizePercent(DISK_CACHE_SIZE_PERCENT)
                 .build()
         }
         .build()
@@ -87,7 +102,8 @@ internal object JobPhotoImageModule {
     /** The feature's own cache directory name, so nothing else in the app writes into it. */
     private const val DISK_CACHE_DIRECTORY = "job-photo-cache"
 
-    private const val DISK_CACHE_PERCENT = 0.02
+    /** How much of the cache directory's usable space the evidence cache may occupy (`D5`). */
+    private const val DISK_CACHE_SIZE_PERCENT = 0.02
 }
 
 /** Binds the photo-evidence feature's local stores to their implementations. */

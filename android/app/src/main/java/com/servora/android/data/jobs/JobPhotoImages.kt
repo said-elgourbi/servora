@@ -112,24 +112,27 @@ class DefaultJobPhotoImages @Inject constructor(
      * session that cannot be read is a session the bytes cannot be attributed to: no request is built
      * rather than one that could be served from another member's cache (`BR-007`).
      *
+     * The disk cache key is decided by one rule ([jobPhotoImageDiskCacheKey]): accepted evidence may be
+     * held in the bounded cache, a photo this device holds may not — its own app-private file is its
+     * only copy, which is what keeps a pending upload's bytes from being evictable (`D5`, §9,
+     * `BR-014`).
+     *
      * `Precision.INEXACT` is deliberate: the library samples the decode and the composable scales what
      * it received to the size it is drawn at, so a photo is never upscaled into a larger bitmap than
      * the bytes it came from — the sampling the retired hand-rolled rules did for themselves
-     * (`JobPhotoSampling`, `D4b`). The disk cache is keyed for evidence only: a photo still in
-     * app-private storage is read from the file that already holds it, so caching those bytes a second
-     * time would add nothing (§9).
+     * (`JobPhotoSampling`, `D4b`).
      */
     private fun request(image: JobPhotoImage, edgePx: Int): ImageRequest? {
         val subjectId = subject.current() ?: return null
-        val cacheKey = jobPhotoImageCacheKey(subjectId, image)
+        val diskCacheKey = jobPhotoImageDiskCacheKey(subjectId, image)
         val builder = ImageRequest.Builder(context)
             .data(image)
             .size(edgePx)
             .scale(Scale.FIT)
             .precision(Precision.INEXACT)
-            .memoryCacheKey(cacheKey)
-        if (image is JobPhotoImage.Backend) {
-            builder.diskCacheKey(cacheKey)
+            .memoryCacheKey(jobPhotoImageCacheKey(subjectId, image))
+        if (diskCacheKey != null) {
+            builder.diskCacheKey(diskCacheKey)
         }
         return builder.build()
     }

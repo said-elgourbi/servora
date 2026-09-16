@@ -17,6 +17,7 @@ import com.servora.android.data.jobs.JobPhotoRecordResult
 import com.servora.android.data.jobs.JobPhotoRefusal
 import com.servora.android.data.jobs.JobPhotoSession
 import com.servora.android.data.jobs.VisitNoteResult
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CapturedJobPhoto
 import com.servora.android.domain.model.JobPhotoPhase
 import com.servora.android.domain.model.JobStatus
@@ -58,9 +59,13 @@ import kotlinx.coroutines.launch
  * picker (`D3`); the picker's items are taken one at a time, each becoming its own draft, so a photo
  * that cannot be taken is reported while the rest are recorded (`BR-014`).
  *
- * The work is transient: this screen holds no offline working set yet, because the offline
- * architecture's local store (Room) is the single mechanism that will hold business data on the
- * device (`docs/architecture/offline-first-architecture.md`). Until then an action is online-only.
+ * The two **reads** follow the offline standard (`offline-first-architecture.md` §12, §13): the Job and
+ * its activity are kept as the last answer the backend reported and re-read from there when the API
+ * cannot be reached, so the evidence a Job holds — which photos, with their phase, note and time — and
+ * the Activity around it stay readable without connectivity (`D5`, `BR-013`). The state says which
+ * answer it is holding, so the screen presents a local copy as the last reported answer rather than as
+ * a current one (`§7`). An **action** stays online-only: the backend's answer is the only outcome
+ * reported (`BR-001`).
  */
 @HiltViewModel
 class JobDetailsViewModel @Inject constructor(
@@ -230,6 +235,9 @@ class JobDetailsViewModel @Inject constructor(
                         current.copy(
                             isSubmitting = false,
                             activity = result.events,
+                            // The write's own answer is the backend's, so the timeline is current
+                            // again (`§7`).
+                            activitySource = ReadSource.BACKEND,
                             activityFailure = null,
                             completedAction = JobActionKind.ACTIVITY_TEXT,
                         )
@@ -341,6 +349,9 @@ class JobDetailsViewModel @Inject constructor(
                         current.copy(
                             isSubmitting = false,
                             details = result.details,
+                            // An action's answer is the backend's own state, so what the screen now
+                            // shows is current rather than the last answer it reported (`§7`).
+                            detailsSource = ReadSource.BACKEND,
                             completedAction = request.kind,
                             actionFailure = null,
                             pendingConfirmation = null,
@@ -659,23 +670,27 @@ class JobDetailsViewModel @Inject constructor(
             return
         }
         exportInFlight = true
+        // The action says it is running as soon as it is asked for: the viewer draws this as its own
+        // progress, so a save that takes a moment does not read as a tap that did nothing (`BR-042`).
+        _uiState.update { it.copy(photoExport = JobPhotoExportAction.SAVE) }
         viewModelScope.launch {
             val outcome = exporter.saveToDevice(source)
             exportInFlight = false
             _uiState.update { current ->
+                val reported = current.copy(photoExport = null)
                 when (outcome) {
                     JobPhotoExportOutcome.SAVED ->
-                        current.copy(
+                        reported.copy(
                             photoMessage = JobPhotoMessage.SAVED_TO_DEVICE,
                             photoFailure = null,
                             photoSaveAwaitingPermission = null,
                         )
 
                     JobPhotoExportOutcome.PERMISSION_REQUIRED ->
-                        current.copy(photoFailure = null, photoSaveAwaitingPermission = photoId)
+                        reported.copy(photoFailure = null, photoSaveAwaitingPermission = photoId)
 
                     JobPhotoExportOutcome.UNREADABLE ->
-                        current.copy(
+                        reported.copy(
                             photoFailure = JobPhotoFailure.EXPORT_UNREADABLE,
                             photoFailureItem = null,
                         )
@@ -686,7 +701,10 @@ class JobDetailsViewModel @Inject constructor(
                     JobPhotoExportOutcome.SHARED,
                     JobPhotoExportOutcome.NO_SHARE_TARGET,
                     ->
-                        current.copy(photoFailure = JobPhotoFailure.EXPORT_FAILED, photoFailureItem = null)
+                        reported.copy(
+                            photoFailure = JobPhotoFailure.EXPORT_FAILED,
+                            photoFailureItem = null,
+                        )
                 }
             }
         }
@@ -710,22 +728,25 @@ class JobDetailsViewModel @Inject constructor(
             return
         }
         exportInFlight = true
+        // As with a save, the action is reported as running until it lands (`D13`, `BR-042`).
+        _uiState.update { it.copy(photoExport = JobPhotoExportAction.SHARE) }
         viewModelScope.launch {
             val outcome = exporter.share(source, chooserTitle)
             exportInFlight = false
             _uiState.update { current ->
+                val reported = current.copy(photoExport = null)
                 when (outcome) {
                     JobPhotoExportOutcome.SHARED ->
-                        current.copy(photoMessage = JobPhotoMessage.SHARED, photoFailure = null)
+                        reported.copy(photoMessage = JobPhotoMessage.SHARED, photoFailure = null)
 
                     JobPhotoExportOutcome.UNREADABLE ->
-                        current.copy(
+                        reported.copy(
                             photoFailure = JobPhotoFailure.EXPORT_UNREADABLE,
                             photoFailureItem = null,
                         )
 
                     JobPhotoExportOutcome.NO_SHARE_TARGET ->
-                        current.copy(
+                        reported.copy(
                             photoFailure = JobPhotoFailure.SHARE_UNAVAILABLE,
                             photoFailureItem = null,
                         )
@@ -736,7 +757,10 @@ class JobDetailsViewModel @Inject constructor(
                     JobPhotoExportOutcome.SAVED,
                     JobPhotoExportOutcome.PERMISSION_REQUIRED,
                     ->
-                        current.copy(photoFailure = JobPhotoFailure.EXPORT_FAILED, photoFailureItem = null)
+                        reported.copy(
+                            photoFailure = JobPhotoFailure.EXPORT_FAILED,
+                            photoFailureItem = null,
+                        )
                 }
             }
         }
@@ -911,11 +935,15 @@ class JobDetailsViewModel @Inject constructor(
                             current.copy(
                                 isLoading = false,
                                 details = result.details,
+                                // The screen says whether this Job is the backend's current answer or
+                                // the last one it reported (`§2`, `§7`).
+                                detailsSource = result.source,
                                 failureReason = null,
                                 // A fresh Job read re-asks for that Job's activity rather than
                                 // carrying the previous Job's (`BR-001`).
                                 activity = null,
                                 activityFailure = null,
+                                activitySource = ReadSource.BACKEND,
                             )
 
                         is JobDetailsResult.Failure ->
@@ -924,9 +952,11 @@ class JobDetailsViewModel @Inject constructor(
                                 // A failed read must not leave a Job on screen: it would be a
                                 // different record than the one the screen says it is showing.
                                 details = null,
+                                detailsSource = ReadSource.BACKEND,
                                 failureReason = result.reason,
                                 activity = null,
                                 activityFailure = null,
+                                activitySource = ReadSource.BACKEND,
                             )
                     }
                 }
@@ -948,10 +978,20 @@ class JobDetailsViewModel @Inject constructor(
                 } else {
                     when (result) {
                         is JobActivityResult.Success ->
-                            current.copy(activity = result.events, activityFailure = null)
+                            current.copy(
+                                activity = result.events,
+                                // A timeline the device answered is the last one the backend reported,
+                                // and it is presented as that (`§7`, `D5`).
+                                activitySource = result.source,
+                                activityFailure = null,
+                            )
 
                         is JobActivityResult.Failure ->
-                            current.copy(activity = null, activityFailure = result.reason)
+                            current.copy(
+                                activity = null,
+                                activitySource = ReadSource.BACKEND,
+                                activityFailure = result.reason,
+                            )
                     }
                 }
             }

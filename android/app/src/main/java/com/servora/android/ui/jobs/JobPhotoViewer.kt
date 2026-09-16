@@ -1,29 +1,22 @@
 package com.servora.android.ui.jobs
 
 import androidx.compose.animation.core.SnapSpec
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -43,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.servora.android.R
+import com.servora.android.data.jobs.JobPhotoBytesUnavailable
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobPhotoPhase
@@ -57,8 +52,12 @@ import me.saket.telephoto.zoomable.rememberZoomableImageState
  *
  * The tiles are previews and the design asks an attachment to open an appropriate preview when it is
  * tapped (`Figma/src/imports/pasted_text/servora-job-details-spec.md` §11), so this is where the
- * technician actually reads the evidence they recorded: one photo at a time, at the resolution the
- * screen can hold, with the phase it was taken in and the note they wrote.
+ * technician actually reads the evidence they recorded: one photo at a time, full size, with the phase
+ * it was taken in and the note they wrote.
+ *
+ * It is a dedicated media surface rather than another form screen: a black ground that is the same in
+ * both appearances, the photo filling it, and the smallest chrome that still says which photo this is
+ * and what can be done with it (`docs/tracker/031-android-photo-viewer-ui.md`).
  *
  * It is presentation only. It decides nothing about the photo — not whether the session may read it
  * (the API answers that, `BR-007`), not what a photo is, and not what its phase means.
@@ -76,6 +75,15 @@ const val JobPhotoViewerLoadingTag = "job-photo-viewer-loading"
 /** Identifies the report shown when the photo could not be read (`BR-042`). */
 const val JobPhotoViewerUnavailableTag = "job-photo-viewer-unavailable"
 
+/**
+ * Identifies the report shown when the photo is not on this device and cannot be read without
+ * connectivity (`D5`, `BR-013`).
+ *
+ * It has its own tag because it is its own statement: the technician can act on it by reconnecting,
+ * which is not true of the generic failure.
+ */
+const val JobPhotoViewerOfflineTag = "job-photo-viewer-offline"
+
 /** Identifies the action that closes the viewer. */
 const val JobPhotoViewerCloseTag = "job-photo-viewer-close"
 
@@ -91,6 +99,15 @@ const val JobPhotoViewerSaveTag = "job-photo-viewer-save"
 /** Identifies the action that hands the photo to another application (`D13`). */
 const val JobPhotoViewerShareTag = "job-photo-viewer-share"
 
+/** Identifies the label above the photo's note (`BR-027`). */
+const val JobPhotoViewerNoteLabelTag = "job-photo-viewer-note-label"
+
+/** Identifies the photo's note itself (`BR-027`). */
+const val JobPhotoViewerNoteTag = "job-photo-viewer-note"
+
+/** Identifies the action that expands or collapses a note too long to read at once (`BR-027`). */
+const val JobPhotoViewerNoteMoreTag = "job-photo-viewer-note-more"
+
 /**
  * Identifies the upload state a pending photo reports inside the viewer (`§7`).
  *
@@ -98,6 +115,29 @@ const val JobPhotoViewerShareTag = "job-photo-viewer-share"
  * same photo can be on screen in both, and one tag would name two nodes.
  */
 fun jobPhotoViewerStateTag(photoId: String): String = "job-photo-viewer-state-$photoId"
+
+/*
+ * The viewer's own ground and ink. They are deliberately not theme colours: the viewer is a media
+ * surface, so a photo is read as the photo rather than as a card of the light or dark screen it was
+ * opened from, and the chrome keeps its contrast over any photo underneath it (`BR-028`, `BR-042`).
+ */
+private val JobPhotoViewerBackground = Color.Black
+private val JobPhotoViewerContent = Color.White
+private val JobPhotoViewerMutedContent = Color.White.copy(alpha = 0.72f)
+
+/**
+ * The band the top bar is drawn on.
+ *
+ * A flat translucent black rather than a gradient, so the contrast the controls have over the photo is
+ * a property of the viewer and not of whichever photo happens to be under them (`BR-042`).
+ */
+private val JobPhotoViewerBarScrim = Color.Black.copy(alpha = 0.62f)
+
+/** The target every top-bar control is drawn at, so the close action and the evidence actions match. */
+private val JobPhotoViewerControlSize = 48.dp
+
+/** The most of the screen an expanded note may take before it scrolls, so the photo keeps its room. */
+private val JobPhotoViewerNoteMaxHeight = 160.dp
 
 /**
  * The photo the viewer draws, and where that photo's bytes are.
@@ -215,8 +255,8 @@ private const val VIEWER_ZOOM_PAGING_MAX = 0.1f
  * What the viewer is showing for the photo it asked for (`BR-042`).
  *
  * The gesture layer draws the photo but does not report how its read ended, so the viewer keeps its
- * own three states rather than inferring one from pixels: the photo is being read, it is on screen, or
- * it cannot be shown at all.
+ * own states rather than inferring one from pixels: the photo is being read, it is on screen, it could
+ * not be shown at all, or it is not available without connectivity (`D5`).
  */
 private enum class JobPhotoViewerImageState {
     /** The stack is still reading the photo. */
@@ -227,6 +267,12 @@ private enum class JobPhotoViewerImageState {
 
     /** The photo could not be read, so the viewer says so instead of drawing something else. */
     UNAVAILABLE,
+
+    /**
+     * The photo is not on this device and the backend could not be reached, so it cannot be read
+     * offline (`D5`, `BR-013`).
+     */
+    UNAVAILABLE_OFFLINE,
 }
 
 /**
@@ -239,19 +285,34 @@ private enum class JobPhotoViewerImageState {
  * by another picture (`BR-007`, `BR-042`). Because the stack keeps what it decoded, opening the same
  * photo again is drawn from memory rather than read a second time (`D4b`).
  *
+ * The photo is the screen. It is drawn on the viewer's own black ground — the same in both appearances,
+ * because this is a media surface rather than a form — and fills everything between the system bars and
+ * the note; the top bar and the badge are drawn **over** it rather than around it, so they cost the photo
+ * nothing (`docs/tracker/031-android-photo-viewer-ui.md`).
+ *
+ * The chrome is three small things, each where it belongs rather than in one bar: the photo's phase
+ * badge over the photo's own bottom-left corner, a top bar whose close action is on the left, the
+ * position (`1 / 4`) in the centre and the two evidence actions on the right, and — under the photo —
+ * the note the photo was recorded with (`BR-027`, `BR-028`). Every control is drawn in the viewer's own
+ * ink over a scrim, so its contrast comes from the viewer rather than from the photo beneath it, and
+ * every one of them is a 48 dp target (`BR-012`).
+ *
  * Since Phase 4d the photo is **zoomable and pannable** (`D9`): a pinch zooms, a drag pans within the
  * photo's bounds, a double-tap goes to the library's zoom ceiling and no scale goes below "fit".
  * Since Phase 4e the viewer also **pages** (`D11`): the photos it was handed are swiped left and right
  * in the order Job Details presents them, and a swipe pages only while the photo on screen is at fit —
- * a zoomed photo pans, which is what keeps the two gestures unambiguous. The gesture surface is still
- * the photo's own area, so the phase badge, the position, the note and the close action are outside
- * it, and closing is unchanged: this viewer's own action or the platform's back gesture.
+ * a zoomed photo pans, which is what keeps the two gestures unambiguous. The gesture surface is the
+ * photo's own area, so the badge, the top bar and the note stay outside it, and closing is unchanged:
+ * this viewer's own action or the platform's back gesture.
  *
- * The note belongs to the photo it describes and pages with it. The badge, the position and the two
- * evidence actions follow whichever photo is on screen, and saving a photo on the device or handing it
- * to another application are the technician's own explicit actions (`D12`, `D13`, `BR-027`).
+ * The badge, the position, the note and the pending-upload state follow whichever photo is on screen.
+ * Saving a photo on the device or handing it to another application are the technician's own explicit
+ * actions (`D12`, `D13`, `BR-027`), and what one of them is doing or did is reported here, over the
+ * photo: this viewer is a window of its own, so a report the screen hosted would be drawn behind it
+ * (`BR-042`).
  *
  * [photos] is never empty: the caller opens the viewer only for a photo the sequence holds.
+ * [reportHostState] is the screen's own, so one report is presented by whichever window is on screen.
  */
 @Composable
 internal fun JobPhotoViewer(
@@ -259,9 +320,11 @@ internal fun JobPhotoViewer(
     initialPage: Int,
     uploads: Map<String, JobPhotoSyncState>,
     canExportEvidence: Boolean,
+    export: JobPhotoExportAction?,
     onSave: (String) -> Unit,
     onShare: (String) -> Unit,
     photoImages: JobPhotoImages,
+    reportHostState: SnackbarHostState,
     onDismiss: () -> Unit,
 ) {
     val pagerState = rememberPagerState(initialPage = initialPage) { photos.size }
@@ -283,79 +346,106 @@ internal fun JobPhotoViewer(
         // (`D4`).
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxSize().testTag(JobPhotoViewerTag),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(JobPhotoViewerBackground)
+                .testTag(JobPhotoViewerTag),
         ) {
             Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    JobPhotoPhaseBadge(phase = currentPhoto.phase)
-                    if (photos.size > 1) {
-                        // The position says which of the Job's photos is on screen, which is what makes
-                        // the swipe legible (`D11`).
-                        Text(
-                            text = stringResource(
+                // The photo's own area: the page fills it, and the chrome that belongs to the photo
+                // itself is drawn over it rather than taking room from it.
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    HorizontalPager(
+                        state = pagerState,
+                        // A zoomed photo pans within its own bounds; only a photo at fit is swiped on
+                        // to the next one (`D11`).
+                        userScrollEnabled = jobPhotoViewerPagingEnabled(zoomFraction),
+                        modifier = Modifier.fillMaxSize().testTag(JobPhotoViewerPagerTag),
+                    ) { page ->
+                        JobPhotoViewerPage(
+                            photo = photos[page],
+                            isSettledPage = page == pagerState.settledPage,
+                            photoImages = photoImages,
+                            onZoomFraction = { fraction -> zoomFraction = fraction },
+                        )
+                    }
+
+                    JobPhotoViewerTopBar(
+                        // The position says which of the Job's photos is on screen, which is what
+                        // makes the swipe legible (`D11`). A single photo has nothing to be positioned
+                        // among, so it is not drawn at all.
+                        position = if (photos.size > 1) {
+                            stringResource(
                                 R.string.job_photo_viewer_position,
                                 currentPage + 1,
                                 photos.size,
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            modifier = Modifier
-                                .padding(start = 12.dp)
-                                .testTag(JobPhotoViewerPositionTag),
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(48.dp).testTag(JobPhotoViewerCloseTag),
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_close),
-                            contentDescription = stringResource(R.string.job_photo_viewer_close),
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-                }
-
-                HorizontalPager(
-                    state = pagerState,
-                    // A zoomed photo pans within its own bounds; only a photo at fit is swiped on to
-                    // the next one (`D11`).
-                    userScrollEnabled = jobPhotoViewerPagingEnabled(zoomFraction),
-                    modifier = Modifier.weight(1f).fillMaxWidth().testTag(JobPhotoViewerPagerTag),
-                ) { page ->
-                    JobPhotoViewerPage(
-                        photo = photos[page],
-                        isSettledPage = page == pagerState.settledPage,
-                        uploadState = uploads[photos[page].photoId],
-                        photoImages = photoImages,
-                        onZoomFraction = { fraction -> zoomFraction = fraction },
-                    )
-                }
-
-                if (canExportEvidence) {
-                    JobPhotoViewerExportActions(
+                            )
+                        } else {
+                            null
+                        },
+                        canExportEvidence = canExportEvidence,
+                        export = export,
                         onSave = { onSave(currentPhoto.photoId) },
                         onShare = { onShare(currentPhoto.photoId) },
+                        onClose = onDismiss,
+                        modifier = Modifier.align(Alignment.TopCenter),
+                    )
+
+                    JobPhotoPhaseBadge(
+                        phase = currentPhoto.phase,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp),
                     )
                 }
+
+                // A note belongs to the photo on screen: it is drawn under the photo rather than over
+                // it, and a photo with no note reserves nothing (`BR-012`, `BR-027`).
+                currentPhoto.note?.let { note ->
+                    JobPhotoViewerNote(note = note, photoId = currentPhoto.photoId)
+                }
+
+                // A photo the backend has not accepted yet says so, as its tray tile does (`§7`), so
+                // evidence the office holds is never confused with a photo that is only on this device.
+                if (currentPhoto is ViewedJobPhoto.Pending) {
+                    val uploadState = uploads[currentPhoto.photoId]
+                    if (uploadState != null) {
+                        Text(
+                            text = stringResource(jobPhotoStateLabel(uploadState)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = JobPhotoViewerMutedContent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                                .padding(bottom = 12.dp)
+                                .testTag(jobPhotoViewerStateTag(currentPhoto.photoId)),
+                        )
+                    }
+                }
             }
+
+            // What an evidence action is doing, or what it did, is drawn over the photo in this window:
+            // the viewer is on top of the screen, so a report the screen hosted would be a save the
+            // technician never saw (`BR-042`).
+            JobActionSnackbarHost(
+                hostState = reportHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp),
+            )
         }
     }
 }
 
 /**
- * One page of the viewer: one photo with its own gesture surface, the note it was recorded with, and —
- * for a photo the backend has not accepted yet — the state its upload is in (`D11`, `D9`, `§7`).
+ * One page of the viewer: one photo, filling the page, with its own gesture surface (`D11`, `D9`).
+ *
+ * The page is the photo and nothing else: the phase badge, the top bar and the note belong to the photo
+ * on screen and are drawn by the viewer around it, so nothing is laid out over the evidence or competes
+ * with the gestures for a touch.
  *
  * The settled page reports its own zoom to the chrome, and a page the pager has left forgets it rather
  * than reappearing magnified — the library's own recipe for a pager.
@@ -364,7 +454,6 @@ internal fun JobPhotoViewer(
 private fun JobPhotoViewerPage(
     photo: ViewedJobPhoto,
     isSettledPage: Boolean,
-    uploadState: JobPhotoSyncState?,
     photoImages: JobPhotoImages,
     onZoomFraction: (Float?) -> Unit,
 ) {
@@ -376,12 +465,22 @@ private fun JobPhotoViewerPage(
     // The reading / shown / cannot-be-shown state, observed from the stack's own result: the gesture
     // layer has no slot for it, and the request it executes is the one the port answered with, so a
     // photo that comes back from the memory or disk cache still leaves the reading state (`BR-042`).
+    // The failure itself carries *why* it failed, which is what tells a photo that is only missing
+    // because this device is offline from one that cannot be shown at all (`D5`, `BR-013`).
     var imageState by remember(image) { mutableStateOf(JobPhotoViewerImageState.READING) }
     val request = remember(image) {
         image?.newBuilder()
             ?.listener(
                 onSuccess = { _, _ -> imageState = JobPhotoViewerImageState.SHOWN },
-                onError = { _, _ -> imageState = JobPhotoViewerImageState.UNAVAILABLE },
+                onError = { _, result ->
+                    imageState = when (jobPhotoUnavailableReason(result.throwable)) {
+                        JobPhotoBytesUnavailable.OFFLINE ->
+                            JobPhotoViewerImageState.UNAVAILABLE_OFFLINE
+
+                        JobPhotoBytesUnavailable.UNAVAILABLE ->
+                            JobPhotoViewerImageState.UNAVAILABLE
+                    }
+                },
             )
             ?.build()
     }
@@ -406,80 +505,47 @@ private fun JobPhotoViewerPage(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (request == null) {
-                // Nothing to draw at all: no session to read the photo under, or an implementation that
-                // draws none (`BR-042`).
-                JobPhotoViewerUnavailable()
-            } else {
-                ZoomableAsyncImage(
-                    model = request,
-                    state = zoomableState,
-                    contentDescription = stringResource(R.string.job_photo_image_description),
-                    contentScale = ContentScale.Fit,
-                    // The photo's own area is the gesture surface: a pinch zooms, a drag pans within
-                    // bounds and a double-tap goes to the zoom ceiling (`D9`). The badge, the position,
-                    // the note and the two actions are outside it, and closing is unaffected. The tag
-                    // marks the photo only once the stack has drawn it.
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (request == null) {
+            // Nothing to draw at all: no session to read the photo under, or an implementation that
+            // draws none (`BR-042`).
+            JobPhotoViewerUnavailable()
+        } else {
+            ZoomableAsyncImage(
+                model = request,
+                state = zoomableState,
+                contentDescription = stringResource(R.string.job_photo_image_description),
+                contentScale = ContentScale.Fit,
+                // The photo's own area is the gesture surface: a pinch zooms, a drag pans within
+                // bounds and a double-tap goes to the zoom ceiling (`D9`). The badge, the top bar and
+                // the note are outside it, and closing is unaffected. The tag marks the photo only
+                // once the stack has drawn it.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (imageState == JobPhotoViewerImageState.SHOWN) {
+                            Modifier.testTag(JobPhotoViewerImageTag)
+                        } else {
+                            Modifier
+                        },
+                    ),
+            )
+            when (imageState) {
+                JobPhotoViewerImageState.READING -> CircularProgressIndicator(
+                    color = JobPhotoViewerContent,
+                    strokeWidth = 2.dp,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .then(
-                            if (imageState == JobPhotoViewerImageState.SHOWN) {
-                                Modifier.testTag(JobPhotoViewerImageTag)
-                            } else {
-                                Modifier
-                            },
-                        ),
+                        .size(32.dp)
+                        .testTag(JobPhotoViewerLoadingTag),
                 )
-                when (imageState) {
-                    JobPhotoViewerImageState.READING -> CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .testTag(JobPhotoViewerLoadingTag),
-                    )
 
-                    JobPhotoViewerImageState.UNAVAILABLE -> JobPhotoViewerUnavailable()
-                    JobPhotoViewerImageState.SHOWN -> Unit
-                }
+                JobPhotoViewerImageState.UNAVAILABLE -> JobPhotoViewerUnavailable()
+                JobPhotoViewerImageState.UNAVAILABLE_OFFLINE -> JobPhotoViewerUnavailableOffline()
+                JobPhotoViewerImageState.SHOWN -> Unit
             }
-        }
-
-        val note = photo.note
-        if (note != null) {
-            // The note pages with its photo, and a long one scrolls inside a bounded area rather than
-            // pushing the photo out of the viewer (`BR-012`).
-            Text(
-                text = note,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = JobPhotoViewerNoteMaxHeight)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 8.dp),
-            )
-        }
-
-        // A photo the backend has not accepted yet says so, as its tray tile does (`§7`), so evidence
-        // the office holds is never confused with a photo that is only on this device.
-        if (photo is ViewedJobPhoto.Pending && uploadState != null) {
-            Text(
-                text = stringResource(jobPhotoStateLabel(uploadState)),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 4.dp)
-                    .testTag(jobPhotoViewerStateTag(photo.photoId)),
-            )
         }
     }
 }
@@ -494,75 +560,191 @@ private fun JobPhotoViewerPage(
  */
 @Composable
 private fun JobPhotoViewerUnavailable() {
-    Text(
-        text = stringResource(R.string.job_photo_viewer_unavailable),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
-            .padding(horizontal = 24.dp)
-            .testTag(JobPhotoViewerUnavailableTag),
+    JobPhotoViewerReport(
+        message = stringResource(R.string.job_photo_viewer_unavailable),
+        tag = JobPhotoViewerUnavailableTag,
     )
 }
 
 /**
- * The two ways a photo leaves Servora: it is saved into the device's own gallery, or handed to another
- * application through the platform's share sheet (`D12`, `D13`).
+ * The report that the photo is not readable **offline** (`D5`, `BR-013`).
  *
- * Both are the technician's explicit actions, and both are drawn only when the session holds the
- * capability the API enforces for reading evidence (`BR-006`, `BR-011`, `BR-015`). Nothing here
- * records, edits or deletes a photo (`BR-027`).
+ * Offline, evidence is only on the device when the technician captured it here or has already opened
+ * it, so a photo that is in neither place is a state they can act on — connecting makes it readable
+ * again — rather than a failure of the record. It is its own report, with its own tag, because it says
+ * something the generic one does not (`BR-042`).
  */
 @Composable
-private fun JobPhotoViewerExportActions(onSave: () -> Unit, onShare: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+private fun JobPhotoViewerUnavailableOffline() {
+    JobPhotoViewerReport(
+        message = stringResource(R.string.job_photo_viewer_unavailable_offline),
+        tag = JobPhotoViewerOfflineTag,
+    )
+}
+
+/** One report the viewer draws over the photo area, in the muted ink its chrome uses (`BR-028`). */
+@Composable
+private fun JobPhotoViewerReport(message: String, tag: String) {
+    Text(
+        text = message,
+        style = MaterialTheme.typography.bodyMedium,
+        color = JobPhotoViewerMutedContent,
+        modifier = Modifier
+            .padding(horizontal = 24.dp)
+            .testTag(tag),
+    )
+}
+
+/**
+ * The viewer's top bar: the close action, the photo's position, and the two evidence actions (`D11`,
+ * `D12`, `D13`).
+ *
+ * It is an overlay on the photo rather than a row above it, so the photo keeps the whole screen; what
+ * makes it readable over any photo is [JobPhotoViewerBarScrim], and the position is centred in the
+ * screen rather than between the two groups, so it reads as a position and not as a label of either.
+ *
+ * The evidence actions are drawn only for a session the API would let read the evidence (`BR-006`,
+ * `BR-007`, `BR-011`, `BR-015`). While one of them is running it reports that it is working, so a slow
+ * read cannot be asked for twice and a tap still in progress does not look like a tap that did nothing
+ * (`BR-042`).
+ */
+@Composable
+private fun JobPhotoViewerTopBar(
+    position: String?,
+    canExportEvidence: Boolean,
+    export: JobPhotoExportAction?,
+    onSave: () -> Unit,
+    onShare: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(JobPhotoViewerBarScrim)
+            .padding(horizontal = 4.dp),
     ) {
-        JobPhotoViewerExportAction(
-            tag = JobPhotoViewerSaveTag,
-            icon = R.drawable.ic_download,
-            label = R.string.job_photo_viewer_save,
-            onClick = onSave,
+        JobPhotoViewerControl(
+            tag = JobPhotoViewerCloseTag,
+            icon = R.drawable.ic_close,
+            label = R.string.job_photo_viewer_close,
+            working = false,
+            enabled = true,
+            onClick = onClose,
+            modifier = Modifier.align(Alignment.CenterStart),
         )
-        JobPhotoViewerExportAction(
-            tag = JobPhotoViewerShareTag,
-            icon = R.drawable.ic_share,
-            label = R.string.job_photo_viewer_share,
-            onClick = onShare,
-        )
+
+        if (position != null) {
+            Text(
+                text = position,
+                style = MaterialTheme.typography.titleSmall,
+                color = JobPhotoViewerContent,
+                maxLines = 1,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .testTag(JobPhotoViewerPositionTag),
+            )
+        }
+
+        if (canExportEvidence) {
+            Row(modifier = Modifier.align(Alignment.CenterEnd)) {
+                JobPhotoViewerControl(
+                    tag = JobPhotoViewerSaveTag,
+                    icon = R.drawable.ic_download,
+                    label = R.string.job_photo_viewer_save,
+                    working = export == JobPhotoExportAction.SAVE,
+                    enabled = export == null,
+                    onClick = onSave,
+                )
+                JobPhotoViewerControl(
+                    tag = JobPhotoViewerShareTag,
+                    icon = R.drawable.ic_share,
+                    label = R.string.job_photo_viewer_share,
+                    working = export == JobPhotoExportAction.SHARE,
+                    enabled = export == null,
+                    onClick = onShare,
+                )
+            }
+        }
     }
 }
 
-/** One evidence action: a target the height of the close action, with its glyph beside its label. */
+/**
+ * One control of the top bar: its glyph, or the progress of the action it started.
+ *
+ * The action's own localized name is carried as the content description, because the glyph tells a
+ * sighted technician what the action is and must tell a screen reader the same thing (`BR-028`).
+ */
 @Composable
-private fun RowScope.JobPhotoViewerExportAction(
+private fun JobPhotoViewerControl(
     tag: String,
     icon: Int,
     label: Int,
+    working: Boolean,
+    enabled: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    OutlinedButton(
+    IconButton(
         onClick = onClick,
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.weight(1f).height(JobPhotoViewerActionHeight).testTag(tag),
+        enabled = enabled && !working,
+        modifier = modifier.size(JobPhotoViewerControlSize).testTag(tag),
     ) {
-        Icon(
-            painter = painterResource(icon),
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-        )
-        Text(
-            text = stringResource(label),
-            modifier = Modifier.padding(start = 8.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (working) {
+            CircularProgressIndicator(
+                color = JobPhotoViewerContent,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(20.dp),
+            )
+        } else {
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = stringResource(label),
+                tint = JobPhotoViewerContent,
+                modifier = Modifier.size(24.dp),
+            )
+        }
     }
 }
 
-/** The height the viewer's evidence actions are drawn at, so both match the close action's target. */
-internal val JobPhotoViewerActionHeight = 48.dp
-
-/** The most of the screen a note may take before it scrolls, so the photo keeps the room it needs. */
-private val JobPhotoViewerNoteMaxHeight = 160.dp
+/**
+ * The note the photo on screen was recorded with (`BR-027`).
+ *
+ * It is labelled, so a paragraph under a photo reads as the technician's note rather than as more photo
+ * chrome, and it is under the photo rather than over it, so nothing is written across the evidence.
+ *
+ * A note that does not fit is read a few lines at a time with an explicit **More**, and a very long one
+ * scrolls inside its own bounded area rather than pushing the photo out: the photo is the subject of
+ * this screen (`BR-012`, `BR-015`). How a note is read — when it needs the action, how much of it is
+ * shown at once — is the shared photo-note piece (`JobPhotoNote`), so this viewer and the timeline read
+ * a note the same way.
+ *
+ * The expansion belongs to the photo it was asked for: paging on starts the next note collapsed.
+ */
+@Composable
+private fun JobPhotoViewerNote(note: String, photoId: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .padding(top = 12.dp, bottom = 8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.job_photo_viewer_notes_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = JobPhotoViewerMutedContent,
+            modifier = Modifier.testTag(JobPhotoViewerNoteLabelTag),
+        )
+        JobPhotoNote(
+            note = note,
+            collapseKey = photoId,
+            textColor = JobPhotoViewerContent,
+            actionColor = JobPhotoViewerContent,
+            maxExpandedHeight = JobPhotoViewerNoteMaxHeight,
+            modifier = Modifier.padding(top = 4.dp),
+            textTag = JobPhotoViewerNoteTag,
+            actionTag = JobPhotoViewerNoteMoreTag,
+        )
+    }
+}
 

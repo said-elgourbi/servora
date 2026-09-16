@@ -50,4 +50,16 @@ object WorkingSetEntityTypes {
 
     /** One Property's lifecycle detail. */
     const val PROPERTY_DETAIL = "property.detail"
+
+    /**
+     * One Job as its details screen reads it (`GET /jobs/:id`).
+     *
+     * It is what makes a Job readable without connectivity, and with it the evidence that Job holds:
+     * the Job's activity names its photo ids with their phase, note and time (`D5`, `BR-013`, `BR-080`).
+     * The bytes are a separate question and are never held here (`§9`).
+     */
+    const val JOB_DETAILS = "job.details"
+
+    /** One Job's chronological activity (`GET /jobs/:id/activity`, `BR-080`). */
+    const val JOB_ACTIVITY = "job.activity"
 }

@@ -2,15 +2,17 @@ package com.servora.android.data.jobs
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The key the image stack caches a photo under (`D4b`, `BR-007`).
+ * The key the image stack caches a photo under (`D4b`, `D5`, `BR-007`).
  *
  * The partition is the point: what one session cached can never be found by another, whatever the two
  * photos are. The key is built here as the port builds it, and read here as the stack reads it, so this
- * pins the rule the whole cache rests on.
+ * pins the rule the whole cache rests on — and it pins the other half of the policy too: which photos
+ * may be a **cache** entry at all, since a photo this device holds must never be one (`§9`, `BR-014`).
  */
 class JobPhotoImageCacheKeyTest {
 
@@ -38,6 +40,22 @@ class JobPhotoImageCacheKeyTest {
         val evidence = jobPhotoImageCacheKey(SUBJECT_ID, JobPhotoImage.Backend(JOB_ID, "photo-1"))
 
         assertNotEquals(pending, evidence)
+    }
+
+    @Test
+    fun `gives a pending photo no disk cache key, so its bytes can never be evicted`() {
+        // A photo this device holds is not a cache entry: its app-private file is its only copy, and
+        // `BR-014` forbids losing a pending upload (`D5`, §9).
+        assertNull(jobPhotoImageDiskCacheKey(SUBJECT_ID, JobPhotoImage.Local("/photo-1.jpg")))
+    }
+
+    @Test
+    fun `keys accepted evidence for the disk cache exactly as the memory cache is keyed`() {
+        // Evidence's bytes *are* cached, in the stack's own bounded cache (`D5`).
+        assertEquals(
+            jobPhotoImageCacheKey(SUBJECT_ID, JobPhotoImage.Backend(JOB_ID, PHOTO_ID)),
+            jobPhotoImageDiskCacheKey(SUBJECT_ID, JobPhotoImage.Backend(JOB_ID, PHOTO_ID)),
+        )
     }
 
     @Test

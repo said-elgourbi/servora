@@ -1,10 +1,10 @@
 # Servora — Offline-First Architecture Standard (Android)
 
 > **Status: IMPLEMENTED for the operations that adopt it.** The store, the outbox, the replay engine
-> and the triggers exist, and four adopters use them: **Property archive and restore** (`BR-086`), the
-> **Customer Detail read**, the **Customers list read**, and the **Job photo upload** (`BR-015`,
-> `BR-027`). Everything else is still online-only, and §11 keeps the questions the standard
-> deliberately does not answer.
+> and the triggers exist, and five adopters use them: **Property archive and restore** (`BR-086`), the
+> **Customer Detail read**, the **Customers list read**, the **Job photo upload** (`BR-015`,
+> `BR-027`) and the **Job Details and Job Activity reads** (`D5`, tracker 029 Phase 5). Everything else
+> is still online-only, and §11 keeps the questions the standard deliberately does not answer.
 >
 > Decision records: `docs/decisions/012-property-lifecycle-and-permissions.md` (D7, which defined this
 > standard) and `docs/decisions/014-android-offline-engine.md` (the engine as built).
@@ -191,6 +191,20 @@ Photos, audio and files are business evidence (`BR-015`, `BR-027`).
   blocking the technician.
 - A local file is removed only after the backend confirms it owns the evidence, or by an explicit
   user action.
+- **The pending copy is not cache.** Until the backend confirms it owns the evidence, the local file is
+  guaranteed to survive until synchronization succeeds: no cache pressure and no eviction may remove it
+  (`BR-014`, `BR-015`).
+- **After the backend has accepted the evidence, the local copy is cache, not the record.** It is
+  evictable and is managed on a **size-based LRU** basis by the app and the platform rather than kept for
+  a fixed retention period, so reading it again is best-effort and may require the backend
+  (`BR-088`, `BR-090`). A cache entry is never evidence the API can be asked about.
+- **Evidence metadata is readable offline** — the phase, the note, the time and which photos the Job has
+  — while the bytes themselves are best-effort (`BR-013`, `BR-015`; tracker 029 Phase 5).
+- **The Android image stack expresses this as one rule.** A photo this device holds is given **no
+  disk-cache key at all** (`jobPhotoImageDiskCacheKey`), so a pending upload's bytes can never become a
+  cache entry and no size policy can evict them; a photo the backend holds is given the session's own key,
+  so accepted evidence is exactly what the bounded cache holds (`D5`). Nothing in the app prefetches: a
+  photo is read because a surface is drawing it, never to fill the cache ahead of time.
 
 ---
 
@@ -214,13 +228,19 @@ Photos, audio and files are business evidence (`BR-015`, `BR-027`).
 These remain **OPEN QUESTION** and must not be invented:
 
 1. Which operations are offline-capable, per feature (`BR-032`). **Adopted so far:** Property archive
-   and restore (`BR-086`), and two reads — the Customer Detail and the Customers list. Job and Visit
-   actions cannot be queued until their routes accept an idempotency key (§5).
+   and restore (`BR-086`), and four reads — the Customer Detail, the Customers list, and the **Job Details
+   and Job Activity** reads. Job and Visit actions cannot be queued until their routes accept an
+   idempotency key (§5).
+   **Implemented 2026-09-16 (`D5` ✓, tracker 029 Phase 5):** the Job Details and Job Activity
+   **metadata** reads are served from the working set when the API cannot be reached, and photo bytes
+   are cached best-effort by the image stack (§9, §12).
 2. The concrete conflict strategy per operation (§8). **Decided for the Property lifecycle only:**
    read the version the API reports now, then apply with it (`docs/decisions/014-android-offline-engine.md` D5).
 3. The disposition of a non-empty outbox at sign-out (§10). Pending work is kept; what should happen
    to it is undecided.
-4. Local data retention for the working set.
+4. Local data retention for the working set. **Decided for evidence bytes only** (2026-09-16, `D5` ✓): a
+   size-based LRU cache, evictable, with no fixed retention period — while a **pending** upload is
+   guaranteed until it is synchronized (§9). The rest of the working set's retention is still undecided.
 5. Whether a rejected operation can be discarded by the user, and the audit trail for that
    (`BR-014`).
 
@@ -248,18 +268,28 @@ These remain **OPEN QUESTION** and must not be invented:
    photos the technician has **not** submitted yet — a draft is removable and must survive process
    death, which is neither a working-set answer nor a queued mutation — and that table holds paths and
    metadata, never image bytes (§9). Recorded in `docs/tracker/027-android-job-photo-updates.md`.
+5. **The Job Details and Job Activity reads** (`D5`, `BR-013`, `BR-080`) — served from the working set
+   when the API cannot be reached, so the Job and the Activity that projects its evidence are readable
+   without connectivity: which photos the Job holds, with each one's phase, note and time. They follow
+   the same terms as the read adopters above — the wire response is kept and mapped on the way out, and
+   only a failure that could not reach the backend falls back — and they are the two halves of one
+   screen, so a Job read offline is followed by an activity read that falls back the same way. The
+   screen marks both as the last reported answer (§7). Photo **bytes** are not held here: accepted
+   evidence's bytes are the image stack's evictable cache, and a pending upload's bytes are its own
+   app-private file (§9). Recorded in `docs/tracker/029-photo-evidence-phases.md` (Phase 5).
 
-What is still **online-only** on Android: Manager Home, Job Details and Job Activity reads, the Job photo
-reads (the Activity gallery's previews, the tray's previews and the full-size viewer, all through
-`GET /jobs/:id/photos/:photoId/content`), technician assignment, scheduling and rescheduling, Job and
+What is still **online-only** on Android: Manager Home, the Job photo reads (the Activity gallery's
+previews, the tray's previews and the full-size viewer, all through
+`GET /jobs/:id/photos/:photoId/content` **when the bytes are on neither the device nor the image
+stack's cache**), technician assignment, scheduling and rescheduling, Job and
 Visit status actions, notes, Customer and Property writes, and every form. Their routes accept no
 idempotency key yet, or their mutation conflict policy is undecided (§8, §11.1), so they must not be
-queued or invented; whether accepted evidence must also be readable without connectivity is the `D5`
-question, **deferred by product ownership on 2026-09-15** (`docs/tracker/029-photo-evidence-phases.md`
-D5), so these reads stay online-only for now. The photo evidence that **is** offline-capable is the
-draft: capture, preparation and upload are queued through the outbox (§9), and the pending tray and the
-review preview draw the technician's own app-private bytes, which is why they visibly survive a loss of
-connectivity while the gallery does not.
+queued or invented. The `D5` question about accepted evidence **was answered on 2026-09-16 and
+implemented by tracker 029 Phase 5**: accepted evidence's **metadata** is readable offline through the
+working set (adopter 5) and its **bytes** are cached best-effort by the image stack (§9). The photo
+evidence that **is** offline-capable is also the draft: capture, preparation and upload are queued
+through the outbox (§9), and the pending tray and the review preview draw the technician's own
+app-private bytes, which is why they visibly survive a loss of connectivity.
 
 ---
 

@@ -1,6 +1,7 @@
 package com.servora.android.ui.jobs
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -29,10 +31,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
 import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.VisitStatus
+import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
 import com.servora.android.ui.components.initials
 import com.servora.android.ui.components.jobStatusLabel
@@ -51,14 +55,20 @@ const val JobActivityEmptyTag = "job-activity-empty"
 /** Identifies the state shown when the activity could not be read. */
 const val JobActivityFailureTag = "job-activity-failure"
 
+/**
+ * Identifies the notice that the timeline on screen is the last one the backend reported, not a
+ * current answer (`offline-first-architecture.md` §7, `D5`).
+ */
+const val JobActivityLastReportedTag = "job-activity-last-reported"
+
 /** Identifies one activity entry. */
 fun jobActivityEventTag(eventId: String): String = "job-activity-event-$eventId"
 
-private val ActivityRailWidth = 32.dp
-private val ActivityMarkerSize = 32.dp
+private val ActivityRailWidth = 28.dp
+private val ActivityMarkerSize = 28.dp
 private val ActivityDotSize = 8.dp
 private val ActivityLineWidth = 2.dp
-private val ActivityRailSpacing = 12.dp
+private val ActivityRailSpacing = 8.dp
 private val ActivityRowSpacing = 20.dp
 
 /*
@@ -83,9 +93,13 @@ private val ActivityRowSpacing = 20.dp
  * a database id. Each entry is a title/action, with the member, time and Visit context as secondary
  * metadata, and a marker on a connecting vertical line (`Figma/src/screens/JobDetails.tsx`).
  *
- * Photos the backend accepted are gathered into a gallery above the timeline (`BR-015`), because a
- * photo is read as an image rather than as a line of text; their entries stay in the timeline, since
- * the Activity is the account of what happened (`BR-080`).
+ * The rail is deliberately quiet and narrow: it organizes the entries rather than competing with
+ * them, and the content it introduces keeps the width a phone can read (`BR-012`).
+ *
+ * Photos the backend accepted are gathered into a collapsible gallery above the timeline, because a
+ * photo is browsed as a collection (`BR-015`); each photo's entry also draws the photo itself, since
+ * the Activity is the account of what happened and an entry that only said "Added a photo" would
+ * leave the technician's evidence out of it (`BR-080`, `BR-027`). Both are the same records.
  */
 @Composable
 internal fun JobActivitySection(
@@ -101,6 +115,17 @@ internal fun JobActivitySection(
             count = state.activity?.takeIf { it.isNotEmpty() }?.size,
         )
 
+        if (state.activitySource == ReadSource.WORKING_SET && state.activity != null) {
+            // The photos this timeline shows, and the entries that name them, are the last the backend
+            // reported: the section says so rather than letting a local copy read as a fresh answer
+            // (`offline-first-architecture.md` §7, `D5`).
+            OfflineNotice(
+                message = stringResource(R.string.offline_last_reported),
+                tag = JobActivityLastReportedTag,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
         when {
             state.showsActivityLoading -> ActivityLoading()
             state.activityFailure != null -> ActivityFailure(onRetry = onRetry)
@@ -111,18 +136,23 @@ internal fun JobActivitySection(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    // The photos the backend accepted, read as images rather than as lines of text.
-                    // Their entries stay in the timeline below, because the Activity is the account of
-                    // what happened (`BR-080`).
+                    // The photos the backend accepted, read as a collection above the account of what
+                    // happened (`BR-080`). Photos still held by this device are the tray's, because the
+                    // backend has not accepted them yet (`BR-001`).
                     if (photos.isNotEmpty()) {
-                        JobPhotoGallery(
+                        JobPhotoGallerySection(
                             photos = photos,
                             jobId = state.jobId,
                             photoImages = photoImages,
                             onOpenPhoto = onOpenPhoto,
                         )
                     }
-                    ActivityTimeline(state.activity)
+                    ActivityTimeline(
+                        events = state.activity,
+                        jobId = state.jobId,
+                        photoImages = photoImages,
+                        onOpenPhoto = onOpenPhoto,
+                    )
                 }
             }
         }
@@ -173,16 +203,33 @@ private fun ActivityEmpty() {
 }
 /** The timeline itself: one marker and connecting line per entry, newest first. */
 @Composable
-private fun ActivityTimeline(events: List<JobActivityEvent>) {
+private fun ActivityTimeline(
+    events: List<JobActivityEvent>,
+    jobId: String,
+    photoImages: JobPhotoImages,
+    onOpenPhoto: (String) -> Unit,
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
         events.forEachIndexed { index, event ->
-            ActivityEventRow(event = event, isLast = index == events.lastIndex)
+            ActivityEventRow(
+                event = event,
+                isLast = index == events.lastIndex,
+                jobId = jobId,
+                photoImages = photoImages,
+                onOpenPhoto = onOpenPhoto,
+            )
         }
     }
 }
 
 @Composable
-private fun ActivityEventRow(event: JobActivityEvent, isLast: Boolean) {
+private fun ActivityEventRow(
+    event: JobActivityEvent,
+    isLast: Boolean,
+    jobId: String,
+    photoImages: JobPhotoImages,
+    onOpenPhoto: (String) -> Unit,
+) {
     Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         // The rail draws the connecting line behind the marker, so the line runs marker to marker
         // rather than being a separate list decoration (`Figma/src/screens/JobDetails.tsx`).
@@ -218,13 +265,89 @@ private fun ActivityEventRow(event: JobActivityEvent, isLast: Boolean) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            activityContent(event)?.let { content ->
-                Text(
-                    text = content,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // A photo is evidence, so it is drawn in the entry that recorded it rather than described
+            // by it (`BR-015`, `BR-080`); every other entry carries its own text.
+            if (event.kind == JobActivityKind.JOB_PHOTO_ADDED) {
+                ActivityPhotoEvidence(
+                    event = event,
+                    jobId = jobId,
+                    photoImages = photoImages,
+                    onOpenPhoto = onOpenPhoto,
                 )
+            } else {
+                activityContent(event)?.let { content ->
+                    Text(
+                        text = content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
+        }
+    }
+}
+
+/**
+ * The photo one Activity entry carries (`BR-015`, `BR-027`, `BR-080`).
+ *
+ * The entry states what happened; this is the evidence it happened to, drawn in that entry rather than
+ * only in the gallery above the timeline. It is the same photo the gallery and the viewer draw, read
+ * through the same image stack and its cache, so nothing is fetched twice — and tapping it opens the
+ * same viewer on the same page a tap on a gallery tile does (`D4`, `D11`).
+ *
+ * The thumbnail crops, being a summary that stands for the photo, and it is fixed at a size a reader
+ * recognizes without one entry taking the screen (`BR-012`). Its phase is the badge the gallery, the
+ * tray and the viewer already draw, so no two surfaces can read differently (`BR-028`), and the note
+ * is read under the photo it belongs to — with the rest behind an explicit action when it does not
+ * fit, so one entry cannot push the account of what happened out of sight.
+ */
+@Composable
+private fun ActivityPhotoEvidence(
+    event: JobActivityEvent,
+    jobId: String,
+    photoImages: JobPhotoImages,
+    onOpenPhoto: (String) -> Unit,
+) {
+    // A photo whose id this build cannot read is left undescribed rather than drawn as some other
+    // photo: the entry still says what it recorded (`BR-042`).
+    val photoId = event.photoId ?: return
+
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(JobPhotoActivityPhotoWidth)
+                .height(JobPhotoActivityPhotoHeight)
+                .testTag(jobPhotoActivityPhotoTag(photoId))
+                // The photo is the target, and the label names the action for a screen reader: the
+                // photo's own description says what it is, not what tapping it does (`BR-028`).
+                .clickable(onClickLabel = stringResource(R.string.job_photo_viewer_open)) {
+                    onOpenPhoto(photoId)
+                },
+        ) {
+            JobPhotoThumbnail(
+                image = photoImages.jobPhotoThumbnail(jobId, photoId),
+                contentDescription = stringResource(R.string.job_photo_image_description),
+                modifier = Modifier.fillMaxSize(),
+            )
+            JobPhotoPhaseBadge(
+                phase = jobPhotoPhaseOrNull(event.photoPhase),
+                modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
+            )
+        }
+
+        val note = event.body?.takeIf { it.isNotBlank() }
+        if (note != null) {
+            JobPhotoNote(
+                note = note,
+                collapseKey = photoId,
+                textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                actionColor = MaterialTheme.colorScheme.primary,
+                textTag = jobPhotoActivityNoteTag(photoId),
+                actionTag = jobPhotoActivityNoteActionTag(photoId),
+            )
         }
     }
 }
@@ -324,28 +447,22 @@ private fun activityTitle(event: JobActivityEvent): String =
 
         JobActivityKind.VISIT_NOTE_ADDED -> event.body.orEmpty()
 
-        // A photo is evidence (`BR-015`): the entry names the phase it was taken in, and its own note
-        // (when there is one) is the entry's text — the same place a text update's body appears.
-        JobActivityKind.JOB_PHOTO_ADDED -> {
-            val label = jobPhotoPhaseOrNull(event.photoPhase)
-            if (label == null) {
-                stringResource(R.string.job_photo_activity_added_generic)
-            } else {
-                stringResource(R.string.job_photo_activity_added, stringResource(
-                    jobPhotoPhaseLabel(label),
-                ))
-            }
-        }
+        // A photo is evidence (`BR-015`): the entry names what happened, and the photo it recorded is
+        // drawn under it with the phase it was taken in as its own badge — so the phase is stated once,
+        // on the photo, rather than twice (`BR-012`, `BR-028`). Its note belongs to the photo and is
+        // read there.
+        JobActivityKind.JOB_PHOTO_ADDED -> stringResource(R.string.job_photo_activity_added)
     }
 
-/** The optional secondary text an entry carries: an outcome's summary, or a photo's note. */
+/** The optional secondary text an entry carries: an outcome's summary. */
 @Composable
 private fun activityContent(event: JobActivityEvent): String? =
     when (event.kind) {
         JobActivityKind.VISIT_OUTCOME_RECORDED ->
             event.outcomeSummary?.takeIf { it.isNotBlank() }
 
-        JobActivityKind.JOB_PHOTO_ADDED -> event.body?.takeIf { it.isNotBlank() }
+        // A photo's note is drawn under the photo itself (`ActivityPhotoEvidence`).
+        JobActivityKind.JOB_PHOTO_ADDED -> null
 
         else -> null
     }

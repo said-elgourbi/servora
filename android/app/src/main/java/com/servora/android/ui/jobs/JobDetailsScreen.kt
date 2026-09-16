@@ -26,7 +26,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -48,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
 import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
@@ -57,6 +57,7 @@ import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.ui.components.InfoCard
 import com.servora.android.ui.components.JobStatusPill
+import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
 import com.servora.android.ui.components.StatusDot
 import com.servora.android.ui.components.VisitStatusPill
@@ -84,6 +85,12 @@ const val JobDetailsFailureTag = "job-details-failure"
 
 /** Identifies the retry action of the failure state. */
 const val JobDetailsRetryTag = "job-details-retry"
+
+/**
+ * Identifies the notice that the Job on screen is the last one the backend reported, not a current
+ * answer (`offline-first-architecture.md` §7, `D5`).
+ */
+const val JobDetailsLastReportedTag = "job-details-last-reported"
 
 /** Identifies the represented Visit's schedule row. */
 const val JobDetailsScheduleTag = "job-details-schedule"
@@ -207,6 +214,10 @@ fun JobDetailsScreen(
         jobPhotoViewerInitialPage(viewedPhotos, photoId)
     }
     val shareChooserTitle = stringResource(R.string.job_photo_viewer_share_title)
+    // The viewer is a full-screen dialog in a window of its own, so it — and not the screen behind it —
+    // is where a report about a photo action has to be drawn while it is open
+    // (`docs/tracker/031-android-photo-viewer-ui.md`).
+    val isViewerOpen = viewedPhotoPage != null
 
     // Android 8-9 guards a write into shared storage with a permission (`D12`). The screen asks for it
     // when a save says it needs one, and the answer goes back to that same save.
@@ -256,13 +267,16 @@ fun JobDetailsScreen(
         val isFailure = actionFailure != null || photoFailure != null
         try {
             snackbarHostState.showSnackbar(
-                message = actionMessage,
-                actionLabel = if (isFailure) dismissLabel else null,
-                duration = if (isFailure) {
-                    SnackbarDuration.Indefinite
-                } else {
-                    SnackbarDuration.Short
-                },
+                visuals = JobActionSnackbarVisuals(
+                    message = actionMessage,
+                    isError = isFailure,
+                    actionLabel = if (isFailure) dismissLabel else null,
+                    duration = if (isFailure) {
+                        SnackbarDuration.Indefinite
+                    } else {
+                        SnackbarDuration.Short
+                    },
+                ),
             )
         } finally {
             // Released once it has been shown, so re-entering the screen does not report an action the
@@ -299,20 +313,18 @@ fun JobDetailsScreen(
             else -> JobDetailsLoading()
         }
 
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 8.dp),
-            snackbar = { data ->
-                JobActionSnackbar(
-                    message = data.visuals.message,
-                    isError = actionFailure != null || photoFailure != null,
-                    actionLabel = data.visuals.actionLabel,
-                    onAction = { data.performAction() },
-                )
-            },
-        )
+        // The report of what an action did is drawn by whichever window is on screen: normally here,
+        // and by the photo viewer's own host while its full-screen dialog is open — otherwise a save
+        // made from the viewer would report itself behind the viewer, where nobody can see it
+        // (`BR-042`, `docs/tracker/031-android-photo-viewer-ui.md`).
+        if (!isViewerOpen) {
+            JobActionSnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp),
+            )
+        }
 
         // One action adds anything to the Job's Activity: it opens the sheet that states what kind
         // of update it is (`BR-012`, `BR-027`). It needs no represented Visit, because a photo is
@@ -373,6 +385,11 @@ fun JobDetailsScreen(
             // A photo is authorized by the evidence capability, which the technician who records the
             // field evidence holds (`BR-006`, `BR-009`).
             canAddPhoto = canAddEvidencePhoto,
+            // Audio is a first-class kind of update in the sheet's hierarchy, and no session may add one
+            // yet: the API's capability for it is reserved and not created (`evidence.audio.add`,
+            // `ADR-015` D2), so no kind is offered for it and no recorder is drawn (`BR-042`). When that
+            // capability exists, this reads it — the sheet's own structure does not change.
+            canAddAudio = false,
             isSubmitting = state.isSubmitting,
             onConfirmNote = { body ->
                 showAddActivity = false
@@ -457,9 +474,11 @@ fun JobDetailsScreen(
             initialPage = viewedPhotoPage,
             uploads = state.photoUploads,
             canExportEvidence = canViewEvidence,
+            export = state.photoExport,
             onSave = onSavePhoto,
             onShare = { photoId -> onSharePhoto(photoId, shareChooserTitle) },
             photoImages = photoImages,
+            reportHostState = snackbarHostState,
             onDismiss = { viewedPhotoId = null },
         )
     }
@@ -556,6 +575,15 @@ private fun JobDetailsContent(
             canChangeStatus = canUpdateJob && state.canAct,
             onChangeStatus = onChangeJobStatus,
         )
+        if (state.detailsSource == ReadSource.WORKING_SET) {
+            // Offline, the Job on screen is the last one the backend reported rather than a current
+            // answer, and the screen says so instead of presenting a local copy as up to date
+            // (`offline-first-architecture.md` §2, §7, `D5`).
+            OfflineNotice(
+                message = stringResource(R.string.offline_last_reported),
+                tag = JobDetailsLastReportedTag,
+            )
+        }
         JobVisitCard(
             details = details,
             canReschedule = canUpdateJob && state.canReschedule,
@@ -648,6 +676,7 @@ private fun JobIdentitySection(
             if (canChangeStatus && details.allowedStatusTransitions.isNotEmpty()) {
                 JobStatusAction(
                     currentStatus = details.status,
+                    jobNumber = details.jobNumber,
                     allowedTransitions = details.allowedStatusTransitions,
                     enabled = canChangeStatus,
                     onSelect = onChangeStatus,

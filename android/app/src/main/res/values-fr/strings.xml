@@ -415,7 +415,13 @@
     <string name="job_activity_empty_message">Les mises à jour de l\'équipe apparaîtront ici.</string>
     <string name="job_activity_error_message">Impossible de charger l\'activité.</string>
     <string name="job_activity_add_update">Ajouter une mise à jour</string>
+    <!--
+      Les types de mise à jour que la feuille propose, à titre de choix unique, et les commandes
+      propres à chacun. L'étiquette énonce ce qui est choisi (`BR-012`, `BR-027`).
+    -->
+    <string name="job_activity_update_type_label">Type de mise à jour</string>
     <string name="job_activity_update_note">Écrire une note</string>
+    <string name="job_activity_update_audio">Ajouter un audio</string>
     <string name="job_activity_text_label">Mise à jour</string>
     <string name="job_activity_text_placeholder">Saisir une mise à jour texte…</string>
     <string name="job_activity_save_update">Enregistrer</string>
@@ -458,8 +464,21 @@
     <string name="job_photo_remove">Retirer la photo</string>
     <string name="job_photo_image_description">Photo de l’intervention</string>
     <string name="job_photo_viewer_open">Voir la photo</string>
+    <string name="job_photo_gallery_label">Photos</string>
+    <string name="job_photo_gallery_expand">Afficher les photos</string>
+    <string name="job_photo_gallery_collapse">Masquer les photos</string>
     <string name="job_photo_viewer_close">Fermer la photo</string>
     <string name="job_photo_viewer_unavailable">Cette photo n’a pas pu être affichée.</string>
+    <!--
+      Une photo absente de cet appareil et illisible sans connectivité (`D5`, `BR-013`). Le technicien
+      peut agir sur cet état, c’est pourquoi il diffère de l’échec générique ci-dessus ; la forme courte
+      est celle que dessine une vignette (`BR-028`).
+    -->
+    <string name="job_photo_viewer_unavailable_offline">Cette photo n’est pas disponible hors ligne. Connectez-vous pour la voir.</string>
+    <string name="job_photo_offline_description">Non disponible hors ligne</string>
+    <string name="job_photo_viewer_notes_label">Notes</string>
+    <string name="job_photo_notes_more">Plus</string>
+    <string name="job_photo_notes_less">Moins</string>
     <string name="job_photo_tray_title">Photos à enregistrer</string>
     <string name="job_photo_tray_unsaved">%1$d non enregistrée(s)</string>
     <string name="job_photo_tray_capture">Prendre une autre</string>
@@ -483,7 +502,7 @@
       chacune rapporte (`D11`, `D12`, `D13`). Les deux lisent une preuve que l’API autorise ; rien ici
       n’enregistre ni ne modifie une photo (`BR-027`).
     -->
-    <string name="job_photo_viewer_position">%1$d sur %2$d</string>
+    <string name="job_photo_viewer_position">%1$d / %2$d</string>
     <string name="job_photo_viewer_save">Enregistrer sur l’appareil</string>
     <string name="job_photo_viewer_share">Partager</string>
     <string name="job_photo_viewer_share_title">Partager la photo</string>
@@ -494,10 +513,10 @@
     <string name="job_photo_error_share_unavailable">Aucune application de cet appareil ne peut partager la photo.</string>
     <string name="job_photo_error_save_permission">Servora a besoin de la permission d’enregistrer des photos sur cet appareil.</string>
     <string name="job_photo_error_item">Photo %1$d sur %2$d : %3$s</string>
+    <string name="job_update_photo_sources_label">Ajouter des photos depuis</string>
     <string name="job_update_photo_camera">Prendre une photo</string>
-    <string name="job_update_photo_library">Choisir des photos</string>
-    <string name="job_photo_activity_added">Photo ajoutée (%1$s)</string>
-    <string name="job_photo_activity_added_generic">Photo ajoutée</string>
+    <string name="job_update_photo_library">Choisir sur l\'appareil</string>
+    <string name="job_photo_activity_added">Photo ajoutée</string>
 
     <!-- Actions sur l'intervention (`BR-058`, `BR-066`, `BR-068`, `BR-070`, `BR-073`). -->
     <string name="job_action_change_status">Changer le statut</string>
@@ -518,6 +537,7 @@
     <string name="job_action_error_version_conflict">L’intervention a changé depuis son ouverture. Rouvrez-la et réessayez.</string>
     <string name="job_action_error_transition">L’intervention ne peut pas passer à ce statut depuis le statut actuel.</string>
     <string name="job_action_error_review_condition">L’intervention ne peut pas encore être en révision : du travail est toujours ouvert ou la dernière visite ne l’a pas résolue.</string>
+    <string name="job_action_error_completion_blocked">Cette intervention ne peut pas être terminée tant qu’elle a des visites en cours.</string>
     <string name="job_action_error_cancellation_unavailable">L’annulation d’une intervention n’est pas encore disponible.</string>
     <string name="job_action_error_visit_not_reschedulable">Seule une visite planifiée peut être replanifiée.</string>
     <string name="job_action_error_technicians_not_assignable">Un ou plusieurs techniciens ne peuvent pas être assignés.</string>
@@ -546,4 +566,15 @@
     <string name="job_conflict_title">Cette plage horaire chevauche une autre visite</string>
     <string name="job_conflict_message">Le même technicien est déjà occupé. Vous pouvez tout de même planifier cette visite.</string>
     <string name="job_conflict_confirm">Planifier quand même</string>
+
+    <!--
+      Les changements de statut conséquents que l’utilisateur confirme avant l’envoi (`BR-058`,
+      `BR-062`, `BR-063`). Terminer une intervention met fin à son travail terrain et la rouvrir la
+      renvoie dans le flux de planification : ni l’un ni l’autre ne se produit sur une seule touche.
+    -->
+    <string name="job_status_confirm_close_title">Terminer cette intervention ?</string>
+    <string name="job_status_confirm_close_message">L’intervention n° %1$d sera terminée. Cela met fin à son travail terrain et rend ses résultats de visite définitifs.</string>
+    <string name="job_status_confirm_reopen_title">Rouvrir cette intervention ?</string>
+    <string name="job_status_confirm_reopen_message">L’intervention n° %1$d reviendra au statut Nouveau. Ses visites terminées et annulées restent telles quelles.</string>
+    <string name="job_status_confirm_accept">Confirmer</string>
 </resources>

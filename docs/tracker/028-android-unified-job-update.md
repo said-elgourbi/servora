@@ -23,6 +23,12 @@ This slice replaces both with **one** floating action that opens one sheet stati
 is. It adds no endpoint, no table, no capability and no business rule; it removes an entry point, adds a
 kind to the one that remains, and fixes a refresh gap the photo slice left.
 
+> **The sheet's hierarchy was restructured by
+> `docs/tracker/033-android-add-update-hierarchy.md` (2026-09-16).** The one action, the one sheet and the
+> kinds are as this slice left them; what changed is inside the sheet — the kinds are peers in one
+> selector, and the photo sources are the photo kind's own subordinate rows rather than a second row of
+> kind-sized targets. This document stays the record of why the sheet is one action.
+
 | Item                                                                        | Status      |
 | --------------------------------------------------------------------------- | ----------- |
 | One floating **Add update** action, for a Job with or without a Visit         | Implemented |
@@ -63,6 +69,11 @@ kind to the one that remains, and fixes a refresh gap the photo slice left.
 5. **Audio is not drawn.** Voice notes are not modelled (`BR-027`, `027`), so the sheet presents no audio
    action at all rather than a control that cannot work (`BR-042`). The kind row is where it will appear
    once the product decision and the API exist.
+   **Extended by `docs/tracker/033-android-add-update-hierarchy.md` (2026-09-16):** audio is a
+   first-class kind of the sheet — with its glyph, its label and the composable its recorder lands in —
+   and it is still not offered, because `docs/decisions/015-evidence-capabilities.md` D2 reserves its
+   capability and deliberately does not create it. The **kind selector** replaced the kind row this
+   entry names.
 
 6. **An accepted upload re-reads the Activity.** The upload is written by the outbox rather than by an
    action on this screen, so nothing re-read the timeline when the API accepted the evidence: the photo

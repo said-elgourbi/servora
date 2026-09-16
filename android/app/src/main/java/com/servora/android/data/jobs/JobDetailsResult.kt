@@ -1,6 +1,7 @@
 package com.servora.android.data.jobs
 
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobDetails
@@ -8,8 +9,17 @@ import com.servora.android.domain.model.ScheduleConflict
 
 /** Outcome of the Job Details read. */
 sealed interface JobDetailsResult {
-    /** The backend answered with the Job. */
-    data class Success(val details: JobDetails) : JobDetailsResult
+    /**
+     * The backend answered with the Job, or — when the API could not be reached — the last Job it
+     * reported.
+     *
+     * [source] says which of the two, so the screen presents a local copy as the last reported answer
+     * rather than as a current one (`offline-first-architecture.md` §2, §7, `D5`).
+     */
+    data class Success(
+        val details: JobDetails,
+        val source: ReadSource = ReadSource.BACKEND,
+    ) : JobDetailsResult
 
     /** The read failed; [reason] decides what the screen reports. */
     data class Failure(val reason: CustomersFailureReason) : JobDetailsResult
@@ -17,8 +27,17 @@ sealed interface JobDetailsResult {
 
 /** Outcome of the Job Activity read (`BR-080`). */
 sealed interface JobActivityResult {
-    /** The backend answered with the Job's chronological activity, newest first. */
-    data class Success(val events: List<JobActivityEvent>) : JobActivityResult
+    /**
+     * The backend answered with the Job's chronological activity, newest first, or — when the API
+     * could not be reached — the last activity it reported.
+     *
+     * [source] says which of the two, so a timeline served from the device says so instead of
+     * presenting itself as current (`offline-first-architecture.md` §7, `D5`).
+     */
+    data class Success(
+        val events: List<JobActivityEvent>,
+        val source: ReadSource = ReadSource.BACKEND,
+    ) : JobActivityResult
 
     /** The read failed; [reason] decides what the section reports. */
     data class Failure(val reason: CustomersFailureReason) : JobActivityResult
@@ -95,6 +114,15 @@ enum class JobActionFailure {
 
     /** `BR-061`'s entry conditions for `PENDING_REVIEW` are not met. */
     JOB_REVIEW_CONDITION_NOT_MET,
+
+    /**
+     * `BR-062` does not allow the Job to be completed while it has an open Visit.
+     *
+     * The destination is structurally permitted (`BR-058`), so this is not a transition refusal: the
+     * Job's own field work is unfinished, and the Visit has to reach a historical status first
+     * (`BR-074`).
+     */
+    JOB_COMPLETION_BLOCKED,
 
     /**
      * `BR-064` requires a structured cancellation reason whose catalogue product ownership has not

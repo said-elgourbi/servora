@@ -34,3 +34,29 @@ internal fun jobPhotoImageCacheKey(subjectId: String, image: JobPhotoImage): Str
         is JobPhotoImage.Local -> "$subjectId/local/${image.path}"
         is JobPhotoImage.Backend -> "$subjectId/evidence/${image.jobId}/${image.photoId}"
     }
+
+/**
+ * The key the image stack may keep [image]'s bytes under **on disk**, or `null` when those bytes must
+ * never enter a cache (`D5`, §9).
+ *
+ * This is the whole byte-cache policy in one rule, and it is what makes the two promises of `D5` true
+ * rather than merely intended:
+ *
+ * - **A photo this device holds is not cached.** The file *is* the copy: it is app-private, no size
+ *   policy evicts it, and it is deleted only once the backend has accepted the photo
+ *   (`JobPhotoSession`, `BR-014`). Writing those bytes into a bounded, evictable cache would introduce
+ *   a way for a **pending** upload's bytes to disappear, which `BR-014` and `BR-015` forbid outright —
+ *   so a `Local` photo is given no disk key at all.
+ * - **Accepted evidence is cached, and only cached.** A photo the backend holds is not otherwise on the
+ *   device, so its bytes are kept in the stack's own bounded disk cache and read from there while they
+ *   last. That copy is a cache in the strict sense: it may be evicted at any time, and losing it costs a
+ *   re-download rather than any evidence (`D5` — offline bytes are best-effort).
+ *
+ * A pending photo is therefore never evicted, and accepted evidence never becomes a second source of
+ * truth: exactly one of the two is ever a cache entry.
+ */
+internal fun jobPhotoImageDiskCacheKey(subjectId: String, image: JobPhotoImage): String? =
+    when (image) {
+        is JobPhotoImage.Local -> null
+        is JobPhotoImage.Backend -> jobPhotoImageCacheKey(subjectId, image)
+    }

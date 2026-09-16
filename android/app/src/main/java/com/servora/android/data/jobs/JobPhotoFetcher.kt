@@ -31,9 +31,9 @@ import okio.Path.Companion.toPath
  * Before anything is read, the first read of a session releases the bytes cached for the session before
  * it (`JobPhotoImageCacheScope`), so what one member's session cached is never served to another's.
  *
- * A photo that cannot be read is answered with no result rather than with an exception: the tile then
- * draws its own state without a preview, and the viewer reports that the photo could not be shown
- * (`BR-042`).
+ * A photo that cannot be read is answered by a failure that says **why** ([JobPhotoBytesUnavailable]):
+ * the stack reports it to the surface that asked, which then says the photo is not readable without
+ * connectivity rather than showing a broken control, and never a different picture (`D5`, `BR-042`).
  */
 @Singleton
 class JobPhotoFetcherFactory @Inject constructor(
@@ -105,12 +105,18 @@ internal class JobPhotoFetcher(
                 dataSource = DataSource.DISK,
             )
         } else {
-            null
+            // A pending photo whose bytes are gone: a `Local` photo is never cache, so nothing evicted
+            // it — it is reported as unreadable rather than as an offline photo, which would name the
+            // wrong cause (`BR-014`, `BR-042`).
+            throw JobPhotoBytesUnavailableException(JobPhotoBytesUnavailable.UNAVAILABLE)
         }
 
     /**
      * Evidence the backend holds: this session's cached copy when it has one, the API when it does not
      * (`BR-015`, `BR-031`).
+     *
+     * The cached copy is what makes a photo the technician has already opened readable offline; a photo
+     * this device holds neither way is reported as such, with the reason the read gave (`D5`).
      */
     private suspend fun evidence(photo: JobPhotoImage.Backend): FetchResult? {
         val cache = diskCache
@@ -130,7 +136,18 @@ internal class JobPhotoFetcher(
             }
         }
 
-        val bytes = reader.read(photo.jobId, photo.photoId)?.bytes ?: return null
+        val read = reader.read(photo.jobId, photo.photoId)
+        val bytes = when (read) {
+            is JobPhotoContentRead.Bytes -> read.bytes
+            // The bytes are not here and the backend did not deliver them: which of the two it was is
+            // what the technician is told, so it is carried out of the read rather than flattened
+            // (`D5`, `BR-042`).
+            JobPhotoContentRead.Unreachable ->
+                throw JobPhotoBytesUnavailableException(JobPhotoBytesUnavailable.OFFLINE)
+
+            JobPhotoContentRead.Unavailable ->
+                throw JobPhotoBytesUnavailableException(JobPhotoBytesUnavailable.UNAVAILABLE)
+        }
         if (cache != null && cacheKey != null && diskCachePolicy.writeEnabled) {
             writeToCache(cache, cacheKey, bytes)
         }

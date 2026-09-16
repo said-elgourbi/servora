@@ -18,6 +18,7 @@ import com.servora.android.data.jobs.FakeJobPhotoPickedItems
 import com.servora.android.data.jobs.FakeOfflineSync
 import com.servora.android.data.jobs.InMemoryPendingJobPhotoStore
 import com.servora.android.data.offline.InMemoryOutboxStore
+import com.servora.android.data.offline.ReadSource
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.jobs.VisitNoteResult
 import com.servora.android.domain.model.AssignableTechnician
@@ -97,6 +98,76 @@ class JobDetailsViewModelTest {
         )
         assertTrue(state.details?.technicians?.first()?.isLead == true)
         assertFalse(state.showsFailure)
+    }
+
+    @Test
+    fun `reports a Job the device answered as the last reported one`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            JobDetailsResult.Success(job(), ReadSource.WORKING_SET),
+        )
+        val viewModel = viewModel(repository)
+
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        // Offline, the Job is the last one the backend reported, and the screen is told so rather than
+        // being left to present a local copy as current (`offline-first-architecture.md` §2, §7, `D5`).
+        assertEquals(ReadSource.WORKING_SET, viewModel.uiState.value.detailsSource)
+    }
+
+    @Test
+    fun `reports a Job the backend answered as current`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
+        val viewModel = viewModel(repository)
+
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        assertEquals(ReadSource.BACKEND, viewModel.uiState.value.detailsSource)
+    }
+
+    @Test
+    fun `reports an activity the device answered as the last reported one`() = runTest(dispatcher) {
+        // A photo entry, because the projection is what makes the Job's evidence readable offline
+        // (`D5`, `BR-080`).
+        val event = activityEvent(
+            kind = JobActivityKind.JOB_PHOTO_ADDED,
+            photoId = "photo-1",
+            photoPhase = "DURING_WORK",
+            body = null,
+        )
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(
+                JobActivityResult.Success(listOf(event), ReadSource.WORKING_SET),
+            ),
+        )
+        val viewModel = viewModel(repository)
+
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf(event), state.activity)
+        assertEquals(ReadSource.WORKING_SET, state.activitySource)
+    }
+
+    @Test
+    fun `reports a failed read as having no answer from the device at all`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            JobDetailsResult.Failure(CustomersFailureReason.NETWORK),
+        )
+        val viewModel = viewModel(repository)
+
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        // A failure leaves nothing to describe, so there is no "last reported" answer either (`BR-042`).
+        val state = viewModel.uiState.value
+        assertEquals(ReadSource.BACKEND, state.detailsSource)
+        assertEquals(ReadSource.BACKEND, state.activitySource)
+        assertNull(state.details)
+        assertNull(state.activity)
     }
 
     @Test

@@ -15,7 +15,10 @@ References: `BR-001`, `BR-006`, `BR-007`, `BR-009`, `BR-012`, `BR-014`, `BR-015`
 
 A photo is **evidence a technician attached to a Job** (`BR-015`, `BR-027`), not a Job field and not a
 Visit status. It is recorded on the **Job**, so it can be captured whether or not the Job has a Visit
-(`BR-051`), and it is appended only: nothing in this contract edits or deletes a photo (`BR-067`).
+(`BR-051`), and it is **appended only**: nothing in this contract edits a photo, and there is no
+edit-evidence operation in Servora at all (`BR-067`, `BR-088`). A photo is draft material until this API
+records it and immutable historical evidence from that moment; an explicit, audited **remove** operation
+is decided (`BR-089`, tracker 029 Phase 6b) and is **not** part of this contract yet.
 
 What the API stores per photo:
 
@@ -150,6 +153,11 @@ Streams the stored bytes with the stored content type.
   record** and is never supplied by the client (`ADR-013` D6.5).
 - No presigned URL is issued, so a device needs no storage endpoint, bucket or signature host
   (`ADR-013` D7). Moving from MinIO to an S3-compatible provider stays an API configuration change.
+- **Decided direction, not implemented:** reads move to **short-lived presigned GET URLs issued by this
+  API after authorization**, with the bucket kept private and uploads staying on the API port
+  (`ADR-013`, update of 2026-09-16; tracker 029 Phase 8). The phase must first state how a device reaches
+  such a URL, because `ADR-013` D7 records that a signature is bound to its `Host` and that a plain-HTTP
+  URL is debug-build-only. Until it lands, the behaviour above is what the API does.
 - If the record exists but the store no longer holds the object, the route answers `404` rather than an
   empty `200`: the API never reports success for bytes it does not have.
 
@@ -199,16 +207,23 @@ Recorded rather than guessed (`BR-042`).
    `customers.view`, and the Job and Visit actions by `JOB_UPDATE` — the Jobs feature has not defined
    its own set. **Closed for evidence only**: the Job photo routes use the evidence capabilities in §2
    (`ADR-015`, tracker 029 Phase 1).
-2. **Photo retention, visibility and audit** (`BR-027`, `BR-033`, `BR-015`): nothing deletes a photo, and
-   no retention rule exists. The `BR-082` deletion model is the Property lifecycle's and was not extended
-   to evidence.
-3. **Thumbnails and derived objects** (`ADR-013`): the client decodes a thumbnail from the stored bytes;
-   no derived object is generated or stored.
-4. **Audio and other evidence** (`BR-027`): not modelled. Audio needs its own product decision about
-   types, size limits and playback before it can follow this shape. Its capability is already reserved as
-   `evidence.audio.add` (D1b) and is deliberately not created until then (`BR-042`).
+2. **Photo retention, visibility and audit** (`BR-027`, `BR-033`, `BR-015`): **decided 2026-09-16** —
+   evidence is immutable once accepted (`BR-088`), may be removed only by an audited, Manager-level
+   `evidence.photo.remove` (`BR-089`, tracker 029 Phase 6b — not implemented), retention is indefinite for
+   the life of the tenant, and normal product flows never hard-delete a Job (`BR-090`).
+3. **Thumbnails and derived objects** (`ADR-013`): **decided 2026-09-16** — none in v1. The stored object
+   is the normalized original and the client renders from it; a derived pipeline is revisited only when
+   performance proves it necessary.
+4. **Audio and other evidence** (`BR-027`): **decided 2026-09-16** — audio notes are evidence of their own
+   kind, following this shape with the same storage, outbox, upload, authorization and immutability rules
+   (`BR-091`). Its capability `evidence.audio.add` is created when the audio feature is implemented
+   (tracker 029 Phase 9), and generic file attachments are out of scope in v1.
 5. **Whether evidence may be attached to a Visit rather than the Job.** This slice records photos on the
    Job, because that is where Job Activity projects them (`BR-080`) and because a Job need not have a
    Visit (`BR-051`). A Visit-scoped photo stream would be a product decision.
+6. **The metadata written into evidence.** **Decided 2026-09-16** (`BR-091`, tracker 029 Phase 6c):
+   GPS/location EXIF and metadata Servora does not need are stripped from uploaded evidence by default,
+   and only what the application needs is kept — normalized orientation and dimensions, plus Servora's own
+   capture/upload timestamps. **Not implemented**: this API still stores the bytes it accepts as they are.
 
 (`BR-001`).

@@ -112,7 +112,12 @@ internal class JobPhotoExportContent @Inject constructor(
             }
 
             is JobPhotoExportSource.Evidence -> {
-                val content = reader.read(source.jobId, source.photoId) ?: return null
+                // An export is an online-only action: a photo this device does not hold and cannot be
+                // read from the API is unreadable, whatever the reason was (`D5`, `BR-042`).
+                val content = reader.read(source.jobId, source.photoId)
+                if (content !is JobPhotoContentRead.Bytes) {
+                    return null
+                }
                 bytes = content.bytes
                 contentType = JobPhotoContentType.ofBytes(bytes) ?: content.contentType
             }
