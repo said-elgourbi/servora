@@ -197,6 +197,31 @@ class JobDetailsScreenTest {
         composeTestRule.onNodeWithText("Waiting to upload").assertIsDisplayed()
         // The backend may already hold it, so the device no longer offers to delete it (`BR-014`).
         composeTestRule.onNodeWithTag(jobPhotoPendingRemoveTag("photo-1")).assertDoesNotExist()
+        // The API may still accept it, so it is not the technician's to discard either (`D6c`).
+        composeTestRule.onNodeWithTag(jobPhotoRefusedDiscardTag("photo-1")).assertDoesNotExist()
+    }
+
+    @Test
+    fun offersTheDiscardAPhotoTheBackendRefusedIsLeftWith() {
+        var discarded: String? = null
+        render(
+            details = job(),
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                pendingPhotos = listOf(pendingPhoto(submitted = true)),
+                photoUploads = mapOf("photo-1" to JobPhotoSyncState.REFUSED),
+            ),
+            onRemovePendingPhoto = { photoId -> discarded = photoId },
+        )
+
+        // The refusal is what the action is offered beside, and what says why it exists (`D6c`).
+        composeTestRule.onNodeWithText("Refused by the server").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobPhotoRefusedDiscardTag("photo-1")).performClick()
+
+        assertEquals("photo-1", discarded)
+        // The refusal is terminal, so the X a draft carries is not drawn as well: one action clears it.
+        composeTestRule.onNodeWithTag(jobPhotoPendingRemoveTag("photo-1")).assertDoesNotExist()
     }
 
     @Test

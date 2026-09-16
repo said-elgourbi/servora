@@ -24,6 +24,7 @@ import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.isRefusedUpload
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Clock
 import java.time.Instant
@@ -94,6 +95,15 @@ class JobDetailsViewModel @Inject constructor(
     /** Whether a photo is being saved or shared right now, so one export runs at a time. */
     private var exportInFlight = false
     private var photoCollection: Job? = null
+
+    /**
+     * Photos this screen removed locally, so the tray losing one of them is not read as the API
+     * accepting its upload (`§9`, `D6c`).
+     *
+     * Only a **refused** photo is ever put here: it is the one removal the screen performs on a photo
+     * that was submitted, and the backend holds nothing new when it goes.
+     */
+    private val discardedLocally = mutableSetOf<String>()
 
     /**
      * The photos of a pick this screen has still to take, in the order the technician chose them.
@@ -629,13 +639,22 @@ class JobDetailsViewModel @Inject constructor(
     }
 
     /**
-     * Removes a pending photo the technician no longer wants.
+     * Removes a photo the technician no longer wants from this device.
      *
-     * This is offered only while the photo is unsaved: once its upload is queued the backend may
-     * already hold the evidence, so removing it is not a local decision (`BR-014`, `BR-027`).
+     * A photo that has not been submitted is theirs to remove, and so is one whose upload the backend
+     * permanently refused: that upload is finished, so nothing is being decided about evidence the API
+     * might hold (`D6c`, `BR-014`). A queued or retrying upload is refused by the session and reported
+     * instead, because the backend may still accept it (`BR-014`, `BR-027`).
      */
     fun removePendingPhoto(photoId: String) {
         val photo = _uiState.value.pendingPhotos.firstOrNull { it.photoId == photoId } ?: return
+        // A refused photo the technician is about to discard is remembered **before** its row leaves,
+        // so the tray losing it is not read as the API accepting the upload (`D6c`, §9). Nothing else
+        // is remembered: a queued photo cannot be removed, and it must still be read as an acceptance
+        // if it leaves the tray later.
+        if (photo.isRefusedUpload(_uiState.value.photoUploads[photoId])) {
+            discardedLocally += photoId
+        }
         viewModelScope.launch {
             val removed = photos.discard(photo)
             _uiState.update { current ->
@@ -878,6 +897,11 @@ class JobDetailsViewModel @Inject constructor(
                 }
                 val accepted = anUploadWasAccepted(previous, pending)
                 previous = pending
+                // A removal this screen performed is remembered only until the tray has reported it, so
+                // the set cannot grow over a long session (`D6c`).
+                discardedLocally.removeAll { photoId ->
+                    pending.none { photo -> photo.photoId == photoId }
+                }
                 if (accepted) {
                     // The API holds evidence it did not hold before, so the Activity that projects it
                     // is read again rather than left showing a Job without the photo the technician
@@ -893,9 +917,9 @@ class JobDetailsViewModel @Inject constructor(
      * Whether an upload left the tray because the API accepted it.
      *
      * A queued photo is removed from the tray by exactly one thing: the upload handler, once the
-     * backend has confirmed it holds the bytes (`JobPhotoUploadHandler`, `§9`). A photo the
-     * technician discarded locally was never submitted, so nothing was recorded for it and there is
-     * nothing new to read (`BR-014`).
+     * backend has confirmed it holds the bytes (`JobPhotoUploadHandler`, `§9`). A photo the technician
+     * removed locally was either never submitted, or a refusal this screen discarded — the backend holds
+     * nothing new in either case, so nothing is read again (`BR-014`, `D6c`).
      */
     private fun anUploadWasAccepted(
         previous: List<PendingJobPhoto>?,
@@ -903,7 +927,9 @@ class JobDetailsViewModel @Inject constructor(
     ): Boolean {
         val before = previous ?: return false
         val inTray = pending.mapTo(mutableSetOf()) { it.photoId }
-        return before.any { photo -> photo.submitted && photo.photoId !in inTray }
+        return before.any { photo ->
+            photo.submitted && photo.photoId !in inTray && photo.photoId !in discardedLocally
+        }
     }
 
     /** Reads what the queue holds for the Job's photos, which is what the tray reports (`§7`). */

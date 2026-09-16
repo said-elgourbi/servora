@@ -71,6 +71,15 @@ internal interface OutboxDao {
     )
     suspend fun rejected(subjectId: String, rejected: String): List<OutboxOperationEntity>
 
+    /**
+     * Removes a refused operation the user discarded (§11 item 5).
+     *
+     * The state is part of the predicate, not a check the caller performs: a replayable row can never
+     * be deleted through this route, whatever a caller passes (`BR-014`).
+     */
+    @Query("delete from outbox_operations where operationId = :operationId and state = :rejected")
+    suspend fun deleteRefused(operationId: String, rejected: String)
+
     /** The queued operations of one entity, oldest first, for the pending overlay (§7). */
     @Query(
         "select * from outbox_operations where subjectId = :subjectId and targetId = :targetId " +

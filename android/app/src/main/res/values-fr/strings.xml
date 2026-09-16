@@ -483,6 +483,12 @@
     <string name="job_photo_tray_unsaved">%1$d non enregistrée(s)</string>
     <string name="job_photo_tray_capture">Prendre une autre</string>
     <string name="job_photo_tray_submit">Enregistrer les photos</string>
+    <!--
+      La seule action qu’un téléversement définitivement refusé laisse au technicien (`D6c`). Elle
+      retire la photo de cet appareil — son fichier et son refus en file d’attente ensemble — et elle
+      est toujours dessinée à côté du refus que la corbeille annonce.
+    -->
+    <string name="job_photo_tray_discard">Supprimer</string>
     <string name="job_photo_state_queued">En attente de téléversement</string>
     <string name="job_photo_state_uploading">Téléversement…</string>
     <string name="job_photo_state_retrying">Nouvelle tentative</string>

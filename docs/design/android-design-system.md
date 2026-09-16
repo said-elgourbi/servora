@@ -326,6 +326,18 @@ screen reader by a localized `onClickLabel`, because the photo's own content des
 and not what tapping it does (`BR-028`). A photo that cannot be read is reported in the viewer instead of
 being replaced by another picture (`BR-042`).
 
+**A refused tray tile is the one tile with an action of its own** (`D6c`,
+`docs/tracker/029-photo-evidence-phases.md` Phase 6a). While a tile reports an upload state, its own
+controls are absent — the X belongs to a photo that has not been submitted, and it is not drawn once the
+upload is queued (`BR-014`) — **except** when the state is **Refused by the server**: that upload is
+finished and can never be replayed, so the tile adds a **Discard** `TextButton` under the reason it
+reports, and that button is the tile's only control (no X beside it). It is a plain `TextButton` — a
+`labelMedium` label on the tile's width, the `primary` ink every other tray action uses, with Material's
+own 48 dp touch target rather than a second filled button competing with **Save photos** — and it performs
+the same local removal the X performs before submission, because the two are one action on the device's
+own copy of a photo the backend does not hold (`BR-041`). A queued or retrying upload draws neither
+control: the API may still accept it.
+
 ## Appearance controls (sign-in top bar)
 
 The sign-in screen's top bar carries the two app-level appearance controls — the language pill and

@@ -191,6 +191,10 @@ Photos, audio and files are business evidence (`BR-015`, `BR-027`).
   blocking the technician.
 - A local file is removed only after the backend confirms it owns the evidence, or by an explicit
   user action.
+- **A refused upload's file and its queued row are removed together** when the technician discards it
+  (`D6c`, tracker 029 Phase 6a, `BR-014`): a partial failure is not left behind in either direction — no
+  file without its record and no record without its file — and the refusal, which is terminal, is removed
+  from the queue in the same action, so it can never be replayed (`§6`).
 - **The pending copy is not cache.** Until the backend confirms it owns the evidence, the local file is
   guaranteed to survive until synchronization succeeds: no cache pressure and no eviction may remove it
   (`BR-014`, `BR-015`).
@@ -242,7 +246,13 @@ These remain **OPEN QUESTION** and must not be invented:
    size-based LRU cache, evictable, with no fixed retention period — while a **pending** upload is
    guaranteed until it is synchronized (§9). The rest of the working set's retention is still undecided.
 5. Whether a rejected operation can be discarded by the user, and the audit trail for that
-   (`BR-014`).
+   (`BR-014`). **Answered for evidence (2026-09-16, `D6c` ✓, tracker 029 Phase 6a):** a photo whose upload
+   the backend permanently refused is discarded by the technician — the local file, the pending record and
+   the queued refusal go together — and the rejection itself leaves no audit trail beyond the app's own
+   record of the refusal, because the API never held those bytes. The answer is the evidence slice's own,
+   and it is expressed as one primitive the engine offers (`OutboxStore.discardRefused`, which only a
+   terminal refusal can be removed through) rather than as a general policy: what a discard means for
+   another feature's rejected work, and its audit trail, stays undecided.
 
 ---
 
@@ -267,7 +277,11 @@ These remain **OPEN QUESTION** and must not be invented:
    only once the API has answered that it holds the photo. The feature keeps its own local table for
    photos the technician has **not** submitted yet — a draft is removable and must survive process
    death, which is neither a working-set answer nor a queued mutation — and that table holds paths and
-   metadata, never image bytes (§9). Recorded in `docs/tracker/027-android-job-photo-updates.md`.
+   metadata, never image bytes (§9). **Since tracker 029 Phase 6a (`D6c` ✓, 2026-09-16)** an upload the
+   backend **permanently refused** is discardable by the technician: the file, the draft row and the
+   queued refusal go together, the refusal being terminal and never replayed, while a queued or
+   retrying upload stays exactly as it is (`BR-014`). Recorded in
+   `docs/tracker/027-android-job-photo-updates.md` and `docs/tracker/029-photo-evidence-phases.md`.
 5. **The Job Details and Job Activity reads** (`D5`, `BR-013`, `BR-080`) — served from the working set
    when the API cannot be reached, so the Job and the Activity that projects its evidence are readable
    without connectivity: which photos the Job holds, with each one's phase, note and time. They follow

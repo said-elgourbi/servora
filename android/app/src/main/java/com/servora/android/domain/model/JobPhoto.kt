@@ -71,6 +71,37 @@ enum class JobPhotoSyncState {
 }
 
 /**
+ * Whether the photo is still the technician's to remove because it has not been submitted
+ * (`BR-014`, `BR-027`, offline standard §9).
+ *
+ * Before submission nothing has been recorded and nothing is evidence yet, so the draft is entirely
+ * the technician's own (`BR-088`).
+ */
+fun PendingJobPhoto.isRemovable(): Boolean = !submitted
+
+/**
+ * Whether the photo's upload is finished because the backend **permanently refused** it (`D6c`).
+ *
+ * A refusal is terminal: the upload is never replayed (offline standard §6), so what is left on the
+ * device is the technician's own draft rather than evidence the API might hold. The tray reports the
+ * refusal, which is the reason the discard exists.
+ */
+fun PendingJobPhoto.isRefusedUpload(upload: JobPhotoSyncState?): Boolean =
+    submitted && upload == JobPhotoSyncState.REFUSED
+
+/**
+ * Whether the technician may remove this photo from the device (`BR-014`, `BR-027`, §9).
+ *
+ * A photo that has not been submitted is theirs to remove. Once its upload is queued the backend may
+ * already hold the evidence, so the only submitted photo that may still be discarded is one the
+ * backend **refused** (`D6c`, `BR-031`): the removal is then the technician's explicit action on their
+ * own file rather than a decision about accepted evidence — and it is never a silent loss, because a
+ * queued or retrying upload stays exactly as it was.
+ */
+fun PendingJobPhoto.isDiscardable(upload: JobPhotoSyncState?): Boolean =
+    isRemovable() || isRefusedUpload(upload)
+
+/**
  * One photo's upload state, derived from the outbox row that carries it.
  *
  * It is derived, never stored: the tray presents exactly what the queue holds, and the API remains

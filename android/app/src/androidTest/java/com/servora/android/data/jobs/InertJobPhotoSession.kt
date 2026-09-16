@@ -88,6 +88,8 @@ private object InertOutboxStore : OutboxStore {
         at: Long,
     ) = Unit
 
+    override suspend fun discardRefused(operationId: String) = Unit
+
     override suspend fun recoverInFlight() = Unit
 
     override suspend fun awaitingCount(subjectId: String): Int = 0

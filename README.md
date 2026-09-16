@@ -85,9 +85,9 @@ Initial supported languages are **English** and **French**. Development rules li
 > archiving a Job never deletes evidence, **GPS/location EXIF is stripped** from what is uploaded, `phase`
 > stays the only structured classification, **audio notes are in scope** as their own evidence kind while
 > generic files are out, and the store gains **no derived thumbnails** — reads move to short-lived
-> presigned URLs issued by the API. **Phase 5 (offline visibility of accepted evidence) is implemented
-> (2026-09-16); the phase to run is Phase 6a (refused photos), and Phases 6b, 6c, 8 and 9 are startable
-> behind it.**
+> presigned URLs issued by the API. **Phase 5 (offline visibility of accepted evidence) and Phase 6a (a
+> refused photo is explicitly discardable) are implemented (2026-09-16); the phase to run is Phase 6b
+> (removing accepted evidence), and Phases 6c, 8 and 9 are startable behind it.**
 
 ## Layout
 
@@ -246,8 +246,11 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
   **The review panel was fixed on 2026-09-16**: its content **scrolls**, so the note stays reachable while
   the keyboard is up instead of being left underneath it, and its preview draws the **whole** photo rather
   than a crop of it — the tray and gallery tiles still crop, a tile being a square that stands for a photo.
-  **Phase 6a (refused photos are explicitly discardable) is
-  next**; Phase 5 (offline evidence) stays blocked on the deferred D5.**
+  **Phase 6a (refused photos are explicitly discardable) landed on 2026-09-16**: a photo whose upload the
+  backend permanently refused carries a **Discard** action beside the reason the tray reports, and one
+  action removes its file, its pending record and its queued refusal together — the refusal is terminal and
+  never replayed, so it stops occupying the device, while a queued or retrying upload is left exactly as it
+  is (`BR-014`). **Phase 6b (removing accepted evidence) is next.**
   `docs/tracker/029-photo-evidence-phases.md`
   (decisions: `docs/decisions/015-evidence-capabilities.md`,
   `docs/decisions/016-android-image-stack-and-viewer-zoom.md`,

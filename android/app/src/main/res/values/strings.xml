@@ -527,6 +527,12 @@
     <string name="job_photo_tray_unsaved">%1$d not saved</string>
     <string name="job_photo_tray_capture">Take another</string>
     <string name="job_photo_tray_submit">Save photos</string>
+    <!--
+      The one action a permanently refused upload leaves the technician (`D6c`). It clears the photo
+      from this device — its file and its queued refusal together — and it is drawn beside the refusal
+      the tray reports, never on its own.
+    -->
+    <string name="job_photo_tray_discard">Discard</string>
     <string name="job_photo_state_queued">Waiting to upload</string>
     <string name="job_photo_state_uploading">Uploading…</string>
     <string name="job_photo_state_retrying">Will retry</string>

@@ -8,6 +8,7 @@ import com.servora.android.domain.model.CapturedJobPhoto
 import com.servora.android.domain.model.JobPhotoPhase
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.PendingJobPhoto
+import com.servora.android.domain.model.isDiscardable
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -248,15 +249,25 @@ class JobPhotoSession @Inject constructor(
     /**
      * Removes a photo the technician decided not to keep, and its bytes with it.
      *
-     * Only a photo that has not been submitted may be discarded: once the upload is queued the backend
-     * may already hold the evidence, so removing it is no longer a local decision (`BR-014`,
-     * `BR-027`).
+     * A photo that has not been submitted is theirs to remove. So is one whose upload the backend
+     * **permanently refused**: that upload is finished — it is never replayed — and what is left is the
+     * technician's own draft rather than evidence the API might hold (`D6c`, `BR-014`, `BR-031`).
+     *
+     * A queued or retrying upload is **not** removable: the backend may still accept it, so removing it
+     * would be a local decision about evidence that may already exist (`BR-014`, `BR-027`).
+     *
+     * A discarded refusal leaves nothing behind: its queue row goes with the file, so no row is left
+     * pointing at bytes that are gone and nothing can replay what the technician finished with (`§9`).
      */
     suspend fun discard(photo: PendingJobPhoto): Boolean {
-        if (photo.submitted) {
+        val upload = uploadState(photo)
+        if (!photo.isDiscardable(upload)) {
             return false
         }
         files.delete(photo.localPath)
+        if (upload == JobPhotoSyncState.REFUSED) {
+            outbox.discardRefused(photo.photoId)
+        }
         pending.remove(photo.photoId)
         return true
     }
@@ -286,6 +297,15 @@ class JobPhotoSession @Inject constructor(
                 operation.operationId to operation.state.toSyncState()
             }
     }
+
+    /**
+     * How far this photo's own upload has got, or `null` when nothing is queued for it (`§7`).
+     *
+     * The queue row is what decides whether a photo the technician submitted is finished — a refused
+     * upload may be discarded, a waiting one may not (`D6c`).
+     */
+    private suspend fun uploadState(photo: PendingJobPhoto): JobPhotoSyncState? =
+        uploadStates(photo.jobId)[photo.photoId]
 }
 
 /**

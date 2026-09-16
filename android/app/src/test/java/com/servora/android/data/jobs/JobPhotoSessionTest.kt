@@ -1,23 +1,29 @@
 package com.servora.android.data.jobs
 
+import com.servora.android.data.offline.OutboxFailureReason
 import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.PendingJobPhoto
 import java.time.Instant
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Recording a photo: the type and size pipeline both sources go through before a draft exists
- * (`BR-014`, `BR-015`, `BR-027`, tracker 029 D3b/D3c).
+ * What Servora does with a photo before the backend owns it: the type and size pipeline both sources go
+ * through before a draft exists (`BR-014`, `BR-015`, `BR-027`, tracker 029 D3b/D3c), and the local
+ * removal that clears a photo the API permanently refused (`D6c`).
  *
  * What is asserted is the decision the phase implements: a photo the API already accepts keeps its own
  * type, one it does not is converted, one over the limit is resized to fit, and a photo either step
- * cannot deliver is refused **with nothing recorded** — no row, and no bytes left behind. The device's
- * decoder and encoder are replaced by a fake, because the rules around them are what this slice decides
- * (`qa.md` §6.1).
+ * cannot deliver is refused **with nothing recorded** — no row, and no bytes left behind. It is also
+ * asserted that only a photo the technician has not submitted — or one whose upload is finished because
+ * the backend refused it — may be removed, and that a refusal goes with its file rather than being left
+ * to occupy the device (`BR-014`). The device's decoder and encoder are replaced by a fake, because the
+ * rules around them are what this slice decides (`qa.md` §6.1).
  */
 class JobPhotoSessionTest {
 
@@ -203,9 +209,55 @@ class JobPhotoSessionTest {
         assertNotEquals(capture.localPath, photo.localPath)
     }
 
-    /** A capture the camera wrote as a JPEG too large for the API, as a high-resolution photo can be. */
+    /**
+     * A capture the camera wrote as a JPEG too large for the API, as a high-resolution photo can be.
+     */
     private fun oversizedJpeg(): ByteArray =
         FakeJobPhotoFiles.JPEG_BYTES + ByteArray(MAX_JOB_PHOTO_BYTES)
+
+    /**
+     * A photo the technician recorded and saved, as the store now holds it — `submitted = true`, with
+     * its upload waiting in the outbox.
+     */
+    private suspend fun PhotoCollaborators.submittedPhoto(): PendingJobPhoto {
+        val capture = requireNotNull(session.beginCapture())
+        files.writeCapture(capture.localPath, FakeJobPhotoFiles.PNG_BYTES)
+        val recorded = session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT).photo()
+        session.submit(listOf(recorded))
+        return requireNotNull(store.find(recorded.photoId))
+    }
+
+    @Test
+    fun `discards a refused photo with its file, its row and its queued refusal`() = runTest {
+        val photos = PhotoCollaborators()
+        val photo = photos.submittedPhoto()
+        // The backend permanently refused the upload, which is what makes it the technician's to clear
+        // (`D6c`).
+        photos.outbox.markRejected(photo.photoId, OutboxFailureReason.NOT_AUTHORIZED, TEST_CLOCK.millis())
+
+        val discarded = photos.session.discard(photo)
+
+        assertTrue("A refused photo must be discardable", discarded)
+        assertTrue(photos.files.storedPaths.isEmpty())
+        assertNull(photos.store.find(photo.photoId))
+        // The refusal is finished, not pending: nothing is left that could be replayed (`BR-031`, §9).
+        assertTrue(photos.outbox.stored.isEmpty())
+        assertNull(photos.outbox.head(SUBJECT_ID))
+    }
+
+    @Test
+    fun `keeps a photo whose upload is still waiting, because the API may still accept it`() = runTest {
+        val photos = PhotoCollaborators()
+        val photo = photos.submittedPhoto()
+
+        val discarded = photos.session.discard(photo)
+
+        assertEquals(false, discarded)
+        // Nothing was removed: a queued upload is not the technician's to abandon (`BR-014`, §9).
+        assertEquals(setOf(photo.localPath), photos.files.storedPaths)
+        assertNotNull(photos.store.find(photo.photoId))
+        assertEquals(1, photos.outbox.stored.size)
+    }
 
     /** Asserts a refused photo left nothing on the device (`BR-014`, offline standard §9). */
     private fun assertNothingRecorded(photos: PhotoCollaborators) {
@@ -215,6 +267,9 @@ class JobPhotoSessionTest {
 
     private companion object {
         const val JOB_ID = "job-1"
+
+        /** The subject every photo in this file is recorded under (`PhotoCollaborators`' default). */
+        const val SUBJECT_ID = "user-1"
         val PHASE = JobPhotoPhase.DURING_WORK
         val CAPTURED_AT: Instant = Instant.parse("2026-09-15T13:04:05Z")
     }

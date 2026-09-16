@@ -21,14 +21,17 @@ import com.servora.android.data.jobs.MAX_JOB_PHOTO_BYTES
 import com.servora.android.data.jobs.PhotoCollaborators
 import com.servora.android.data.jobs.TEST_CLOCK
 import com.servora.android.data.jobs.VisitNoteResult
+import com.servora.android.data.offline.OutboxFailureReason
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.isRemovable
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -50,8 +53,9 @@ import org.junit.Test
  *
  * What is asserted is the whole point of the slice: a photo becomes durable before it is confirmed,
  * the phase the technician chose is remembered for the next photo, a note is optional, an unsaved
- * photo can be removed, and saving queues the upload through the existing outbox rather than claiming
- * the backend accepted anything (`BR-001`, `BR-014`). Both sources are covered — the camera, and the
+ * photo can be removed, a photo whose upload the backend permanently refused can be discarded while a
+ * queued one cannot, and saving queues the upload through the existing outbox rather than claiming the
+ * backend accepted anything (`BR-001`, `BR-014`, `D6c`). Both sources are covered — the camera, and the
  * device's own photo picker, whose items are taken one at a time so a photo that cannot be taken never
  * stops the others (`D3`).
  */
@@ -240,7 +244,8 @@ class JobPhotoCaptureViewModelTest {
     @Test
     fun `follows the tray when the backend accepts a queued photo`() = runTest(dispatcher) {
         val photos = PhotoCollaborators()
-        val viewModel = startedViewModel(photos)
+        val repository = PhotoJobRepository()
+        val viewModel = startedViewModel(photos, repository = repository)
 
         val capture = requireNotNull(viewModel.beginPhotoCapture())
         photos.files.writeCapture(capture.localPath)
@@ -250,6 +255,7 @@ class JobPhotoCaptureViewModelTest {
         viewModel.submitPendingPhotos()
         advanceUntilIdle()
         assertEquals(1, viewModel.uiState.value.pendingPhotos.size)
+        val readsBeforeAcceptance = repository.activityReads
 
         // What the upload handler does once the API accepts the photo (`JobPhotoUploadHandler`).
         photos.store.remove(capture.photoId)
@@ -257,7 +263,75 @@ class JobPhotoCaptureViewModelTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.pendingPhotos.isEmpty())
+        // The API holds evidence it did not hold before, so the Activity that projects it is read
+        // again (`BR-001`, `BR-080`).
+        assertEquals(readsBeforeAcceptance + 1, repository.activityReads)
     }
+
+    @Test
+    fun `discards a refused photo the tray reports, without re-reading the timeline`() =
+        runTest(dispatcher) {
+            val photos = PhotoCollaborators()
+            val first = startedViewModel(photos)
+            val capture = requireNotNull(first.beginPhotoCapture())
+            photos.files.writeCapture(capture.localPath)
+            first.photoCaptured(capture)
+            advanceUntilIdle()
+            first.submitPendingPhotos()
+            advanceUntilIdle()
+            // The backend permanently refused the upload (`403`): the operation is finished and is
+            // never replayed (`§6`, `D6c`).
+            photos.outbox.markRejected(capture.photoId, OutboxFailureReason.NOT_AUTHORIZED, 0L)
+
+            // Opening the Job is where a refusal becomes visible: the tray reports what the queue
+            // holds (`§7`).
+            val repository = PhotoJobRepository()
+            val viewModel = startedViewModel(photos, repository = repository)
+            assertEquals(
+                JobPhotoSyncState.REFUSED,
+                viewModel.uiState.value.photoUploads[capture.photoId],
+            )
+            val readsWhenOpened = repository.activityReads
+
+            viewModel.removePendingPhoto(capture.photoId)
+            advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.pendingPhotos.isEmpty())
+            assertNull(viewModel.uiState.value.photoFailure)
+            assertTrue(photos.files.storedPaths.isEmpty())
+            assertTrue(photos.outbox.stored.isEmpty())
+            assertNull(photos.store.find(capture.photoId))
+            // What went was the device's own refused draft, not evidence the API accepted, so the
+            // timeline is not read for it (`BR-001`, §9).
+            assertEquals(readsWhenOpened, repository.activityReads)
+        }
+
+    @Test
+    fun `keeps a queued photo the screen was asked to remove, and reports why`() =
+        runTest(dispatcher) {
+            val photos = PhotoCollaborators()
+            val viewModel = startedViewModel(photos)
+
+            val capture = requireNotNull(viewModel.beginPhotoCapture())
+            photos.files.writeCapture(capture.localPath)
+            viewModel.photoCaptured(capture)
+            advanceUntilIdle()
+            viewModel.submitPendingPhotos()
+            advanceUntilIdle()
+
+            viewModel.removePendingPhoto(capture.photoId)
+            advanceUntilIdle()
+
+            // The API may still accept it, so nothing is removed and the refusal is reported rather
+            // than leaving the technician to think the photo had gone (`BR-014`, `BR-042`).
+            assertEquals(
+                listOf(capture.photoId),
+                viewModel.uiState.value.pendingPhotos.map { it.photoId },
+            )
+            assertEquals(JobPhotoFailure.ALREADY_SUBMITTED, viewModel.uiState.value.photoFailure)
+            assertEquals(setOf(capture.localPath), photos.files.storedPaths)
+            assertEquals(1, photos.outbox.stored.size)
+        }
 
     @Test
     fun `keeps the photo when the review panel is closed without a decision`() =
@@ -770,6 +844,13 @@ private class PhotoJobRepository(
     private val activity: List<JobActivityEvent> = emptyList(),
 ) : JobDetailsRepository {
 
+    /**
+     * How many times the timeline was read, so a test can tell the re-read an accepted upload earns
+     * from the one a refusal the technician discarded must not cause (`BR-001`, `BR-080`, `D6c`).
+     */
+    var activityReads = 0
+        private set
+
     override suspend fun loadJobDetails(jobId: String): JobDetailsResult =
         JobDetailsResult.Success(
             JobDetails(
@@ -788,8 +869,10 @@ private class PhotoJobRepository(
             ),
         )
 
-    override suspend fun loadJobActivity(jobId: String): JobActivityResult =
-        JobActivityResult.Success(activity)
+    override suspend fun loadJobActivity(jobId: String): JobActivityResult {
+        activityReads += 1
+        return JobActivityResult.Success(activity)
+    }
 
     override suspend fun addVisitNote(
         jobId: String,

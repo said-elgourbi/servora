@@ -55,7 +55,6 @@ import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobPhotoPhase
 import com.servora.android.domain.model.JobPhotoSyncState
-import com.servora.android.domain.model.PendingJobPhoto
 
 /*
  * The photo-evidence pieces the Job Details screen and the Job Activity section draw
@@ -648,9 +647,6 @@ internal fun jobPhotoStateLabel(state: JobPhotoSyncState): Int =
         JobPhotoSyncState.RETRYING -> R.string.job_photo_state_retrying
         JobPhotoSyncState.REFUSED -> R.string.job_photo_state_refused
     }
-
-/** Whether the technician may still remove the photo locally (`BR-027`, §9). */
-internal fun PendingJobPhoto.isRemovable(): Boolean = !submitted
 
 /** The localized reason a photo action did not complete (`BR-042`). */
 internal fun jobPhotoFailureMessage(failure: JobPhotoFailure): Int =

@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,8 @@ import com.servora.android.R
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.PendingJobPhoto
+import com.servora.android.domain.model.isRemovable
+import com.servora.android.domain.model.isRefusedUpload
 
 /*
  * The capture tray (`BR-015`, `BR-027`).
@@ -42,7 +45,8 @@ import com.servora.android.domain.model.PendingJobPhoto
  * after every photo, and a photo can be removed until the moment it is submitted.
  *
  * An entry that has been submitted stops offering removal and reports the upload's own state instead,
- * because from that point on the backend may already hold the evidence (`BR-014`, §9).
+ * because from that point on the backend may already hold the evidence (`BR-014`, §9) — except an entry
+ * the backend **refused**, which is finished and offers the discard that clears it (`D6c`).
  */
 
 /** Identifies the tray that holds the photos not yet accepted by the backend. */
@@ -65,6 +69,14 @@ fun jobPhotoPendingRemoveTag(photoId: String): String = "job-photo-pending-remov
 
 /** Identifies the upload state a submitted photo reports. */
 fun jobPhotoPendingStateTag(photoId: String): String = "job-photo-pending-state-$photoId"
+
+/**
+ * Identifies the discard a photo whose upload the backend refused offers (`D6c`).
+ *
+ * The control is the refused photo's own: it is the one action a permanent refusal leaves the
+ * technician, and it is drawn beside the reason the tray already reports.
+ */
+fun jobPhotoRefusedDiscardTag(photoId: String): String = "job-photo-refused-discard-$photoId"
 
 /** Identifies the review panel and its parts. */
 const val JobPhotoReviewSheetTag = "job-photo-review-sheet"
@@ -191,8 +203,9 @@ internal fun JobPhotoTray(
 }
 
 /**
- * One pending photo: its bytes, the phase it was taken in, its note, and either the X that removes it
- * or the upload state the queue reports for it (`§7`).
+ * One pending photo: its bytes, the phase it was taken in, its note, and what the technician may do
+ * with it — the X that removes a draft, the discard a refused upload is left with, and the upload state
+ * the queue reports in the meantime (`§7`, `D6c`).
  */
 @Composable
 private fun JobPhotoPendingTile(
@@ -265,6 +278,26 @@ private fun JobPhotoPendingTile(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.testTag(jobPhotoPendingStateTag(photo.photoId)),
             )
+        }
+
+        // A permanent refusal is terminal, so without this the photo would stay on the device for
+        // good: the technician is offered the one action that ends it, beside the reason just reported
+        // (`D6c`, `BR-014`). It is the same local removal the X performs before submission — the
+        // session decides whether it may happen — so one action is asking for it, not two.
+        if (photo.isRefusedUpload(state)) {
+            TextButton(
+                onClick = onRemove,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(jobPhotoRefusedDiscardTag(photo.photoId)),
+            ) {
+                Text(
+                    text = stringResource(R.string.job_photo_tray_discard),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
