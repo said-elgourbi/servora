@@ -5,16 +5,21 @@ import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobPhotoPhase
 import com.servora.android.domain.model.PendingJobPhoto
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Which photo the full-size viewer draws, and where its bytes come from (`D4`).
+ * Which photo the full-size viewer draws, which photos it pages through, and where its bytes come from
+ * (`D4`, `D11`).
  *
  * The viewer holds only a photo id and resolves the rest from the records that already state it, so
- * these pin the two answers that matter: the device's own copy while it still holds the photo, and the
+ * these pin the answers that matter: the device's own copy while it still holds the photo, and the
  * backend's evidence once it does not — and nothing at all when neither holds it, because a photo the
- * viewer cannot place must not be replaced by another picture (`BR-042`).
+ * viewer cannot place must not be replaced by another picture (`BR-042`). They also pin the order the
+ * viewer pages in — the order Job Details presents the same photos in (`D11`) — and the rule that
+ * decides whether a swipe pages or pans.
  */
 class JobPhotoViewerTest {
 
@@ -116,6 +121,64 @@ class JobPhotoViewerTest {
 
         assertNull(noNote?.note)
         assertNull(blankNote?.note)
+    }
+
+    @Test
+    fun `pages through the evidence the backend holds before the photos this device holds`() {
+        val sequence = viewedJobPhotoSequence(
+            jobId = JOB_ID,
+            pendingPhotos = listOf(pendingPhoto(photoId = "pending-1")),
+            activity = listOf(photoEvent(photoId = "stored-1"), photoEvent(photoId = "stored-2")),
+        )
+
+        assertEquals(listOf("stored-1", "stored-2", "pending-1"), sequence.map { it.photoId })
+    }
+
+    @Test
+    fun `lists a photo both records hold once, read from the copy the device holds`() {
+        // An upload in flight can leave both copies in place; the id is the device's own operation id,
+        // so a swipe must not land on the same photo twice (`§5`, `§9`).
+        val sequence = viewedJobPhotoSequence(
+            jobId = JOB_ID,
+            pendingPhotos = listOf(pendingPhoto(photoId = "photo-1")),
+            activity = listOf(photoEvent(photoId = "photo-1")),
+        )
+
+        assertEquals(listOf("photo-1"), sequence.map { it.photoId })
+        assertTrue(sequence.single() is ViewedJobPhoto.Pending)
+    }
+
+    @Test
+    fun `leaves out a photo neither record can place rather than paging onto something else`() {
+        val sequence = viewedJobPhotoSequence(
+            jobId = JOB_ID,
+            pendingPhotos = emptyList(),
+            activity = listOf(photoEvent(photoId = "photo-1").copy(photoId = null)),
+        )
+
+        assertTrue(sequence.isEmpty())
+    }
+
+    @Test
+    fun `opens on the page the tapped photo is on`() {
+        val sequence = viewedJobPhotoSequence(
+            jobId = JOB_ID,
+            pendingPhotos = listOf(pendingPhoto(photoId = "pending-1")),
+            activity = listOf(photoEvent(photoId = "stored-1")),
+        )
+
+        assertEquals(0, jobPhotoViewerInitialPage(sequence, "stored-1"))
+        assertEquals(1, jobPhotoViewerInitialPage(sequence, "pending-1"))
+        assertNull(jobPhotoViewerInitialPage(sequence, "photo-9"))
+    }
+
+    @Test
+    fun `pages while the photo is at fit and pans once it is zoomed`() {
+        assertTrue("a photo not laid out yet has nothing to pan", jobPhotoViewerPagingEnabled(null))
+        assertTrue(jobPhotoViewerPagingEnabled(0f))
+        assertTrue("a negligible zoom is still fit", jobPhotoViewerPagingEnabled(0.1f))
+        assertFalse("a zoomed photo pans instead (`D9`, `D11`)", jobPhotoViewerPagingEnabled(0.5f))
+        assertFalse(jobPhotoViewerPagingEnabled(1f))
     }
 
     private companion object {

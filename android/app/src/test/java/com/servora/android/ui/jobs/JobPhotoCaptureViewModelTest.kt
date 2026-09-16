@@ -2,6 +2,7 @@ package com.servora.android.ui.jobs
 
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.AssignableTechniciansResult
+import com.servora.android.data.jobs.FakeJobPhotoExporter
 import com.servora.android.data.jobs.FakeJobPhotoFiles
 import com.servora.android.data.jobs.FakeJobPhotoPickedItems
 import com.servora.android.data.jobs.JobActionFailure
@@ -9,6 +10,9 @@ import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsResult
+import com.servora.android.data.jobs.JobPhotoExportOutcome
+import com.servora.android.data.jobs.JobPhotoExportSource
+import com.servora.android.data.jobs.JobPhotoExporter
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.data.jobs.JobPhotoOperations
 import com.servora.android.data.jobs.JobPhotoPickedItems
@@ -20,6 +24,7 @@ import com.servora.android.data.jobs.VisitNoteResult
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobActivityEvent
+import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobPhotoPhase
 import com.servora.android.domain.model.JobStatus
@@ -479,6 +484,178 @@ class JobPhotoCaptureViewModelTest {
         assertEquals(JobPhotoFailure.PICKER_UNAVAILABLE, viewModel.uiState.value.photoFailure)
         assertNull(viewModel.uiState.value.photoFailureItem)
     }
+
+    @Test
+    fun `saves the photo from the bytes this device still holds`() = runTest(dispatcher) {
+        val photos = PhotoCollaborators()
+        val exporter = FakeJobPhotoExporter()
+        val viewModel = startedViewModel(photos, exporter = exporter)
+        val capture = requireNotNull(viewModel.beginPhotoCapture())
+        photos.files.writeCapture(capture.localPath)
+        viewModel.photoCaptured(capture)
+        advanceUntilIdle()
+
+        viewModel.savePhotoToDevice(capture.photoId)
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(JobPhotoExportSource.Local(capture.photoId, capture.localPath)),
+            exporter.saved,
+        )
+        assertEquals(JobPhotoMessage.SAVED_TO_DEVICE, viewModel.uiState.value.photoMessage)
+        assertNull(viewModel.uiState.value.photoFailure)
+    }
+
+    @Test
+    fun `saves evidence the backend holds from the API`() = runTest(dispatcher) {
+        val photos = PhotoCollaborators()
+        val exporter = FakeJobPhotoExporter()
+        val viewModel = startedViewModel(
+            photos,
+            exporter = exporter,
+            repository = PhotoJobRepository(activity = listOf(photoActivityEvent("photo-9"))),
+        )
+
+        viewModel.savePhotoToDevice("photo-9")
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(JobPhotoExportSource.Evidence(photoId = "photo-9", jobId = JOB_ID)),
+            exporter.saved,
+        )
+        assertEquals(JobPhotoMessage.SAVED_TO_DEVICE, viewModel.uiState.value.photoMessage)
+    }
+
+    @Test
+    fun `asks for the storage permission a save needs and retries it once it is granted`() =
+        runTest(dispatcher) {
+            val photos = PhotoCollaborators()
+            val exporter = FakeJobPhotoExporter(
+                saveOutcome = JobPhotoExportOutcome.PERMISSION_REQUIRED,
+            )
+            val viewModel = startedViewModel(photos, exporter = exporter)
+            val capture = requireNotNull(viewModel.beginPhotoCapture())
+            photos.files.writeCapture(capture.localPath)
+            viewModel.photoCaptured(capture)
+            advanceUntilIdle()
+
+            viewModel.savePhotoToDevice(capture.photoId)
+            advanceUntilIdle()
+
+            assertEquals(capture.photoId, viewModel.uiState.value.photoSaveAwaitingPermission)
+            assertNull(
+                "a save waiting on a permission is not a failure yet",
+                viewModel.uiState.value.photoFailure,
+            )
+
+            exporter.saveOutcome = JobPhotoExportOutcome.SAVED
+            viewModel.onSavePermissionResult(granted = true)
+            advanceUntilIdle()
+
+            assertNull(viewModel.uiState.value.photoSaveAwaitingPermission)
+            assertEquals("the same save is retried", 2, exporter.saved.size)
+            assertEquals(JobPhotoMessage.SAVED_TO_DEVICE, viewModel.uiState.value.photoMessage)
+        }
+
+    @Test
+    fun `reports a declined storage permission rather than leaving the save looking done`() =
+        runTest(dispatcher) {
+            val photos = PhotoCollaborators()
+            val exporter = FakeJobPhotoExporter(
+                saveOutcome = JobPhotoExportOutcome.PERMISSION_REQUIRED,
+            )
+            val viewModel = startedViewModel(photos, exporter = exporter)
+            val capture = requireNotNull(viewModel.beginPhotoCapture())
+            photos.files.writeCapture(capture.localPath)
+            viewModel.photoCaptured(capture)
+            advanceUntilIdle()
+
+            viewModel.savePhotoToDevice(capture.photoId)
+            advanceUntilIdle()
+            viewModel.onSavePermissionResult(granted = false)
+            advanceUntilIdle()
+
+            assertEquals(JobPhotoFailure.SAVE_PERMISSION_DENIED, viewModel.uiState.value.photoFailure)
+            assertNull(viewModel.uiState.value.photoSaveAwaitingPermission)
+            assertEquals("a declined permission saves nothing", 1, exporter.saved.size)
+        }
+
+    @Test
+    fun `shares the photo with the application the technician chooses`() = runTest(dispatcher) {
+        val photos = PhotoCollaborators()
+        val exporter = FakeJobPhotoExporter()
+        val viewModel = startedViewModel(photos, exporter = exporter)
+        val capture = requireNotNull(viewModel.beginPhotoCapture())
+        photos.files.writeCapture(capture.localPath)
+        viewModel.photoCaptured(capture)
+        advanceUntilIdle()
+
+        viewModel.sharePhoto(capture.photoId, chooserTitle = "Share photo")
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(JobPhotoExportSource.Local(capture.photoId, capture.localPath)),
+            exporter.shared,
+        )
+        assertEquals(
+            "the chooser's title comes from the screen, not from here (`BR-028`)",
+            "Share photo",
+            exporter.lastChooserTitle,
+        )
+        assertEquals(JobPhotoMessage.SHARED, viewModel.uiState.value.photoMessage)
+        assertNull(viewModel.uiState.value.photoFailure)
+    }
+
+    @Test
+    fun `reports a photo that cannot be read rather than writing an empty file`() =
+        runTest(dispatcher) {
+            val photos = PhotoCollaborators()
+            val exporter = FakeJobPhotoExporter(saveOutcome = JobPhotoExportOutcome.UNREADABLE)
+            val viewModel = startedViewModel(photos, exporter = exporter)
+            val capture = requireNotNull(viewModel.beginPhotoCapture())
+            photos.files.writeCapture(capture.localPath)
+            viewModel.photoCaptured(capture)
+            advanceUntilIdle()
+
+            viewModel.savePhotoToDevice(capture.photoId)
+            advanceUntilIdle()
+
+            assertEquals(JobPhotoFailure.EXPORT_UNREADABLE, viewModel.uiState.value.photoFailure)
+            assertNull(viewModel.uiState.value.photoMessage)
+        }
+
+    @Test
+    fun `reports a device with nothing to share the photo with`() = runTest(dispatcher) {
+        val photos = PhotoCollaborators()
+        val exporter = FakeJobPhotoExporter(shareOutcome = JobPhotoExportOutcome.NO_SHARE_TARGET)
+        val viewModel = startedViewModel(photos, exporter = exporter)
+        val capture = requireNotNull(viewModel.beginPhotoCapture())
+        photos.files.writeCapture(capture.localPath)
+        viewModel.photoCaptured(capture)
+        advanceUntilIdle()
+
+        viewModel.sharePhoto(capture.photoId, chooserTitle = "Share photo")
+        advanceUntilIdle()
+
+        assertEquals(JobPhotoFailure.SHARE_UNAVAILABLE, viewModel.uiState.value.photoFailure)
+    }
+
+    @Test
+    fun `does not export a photo the Job no longer holds`() = runTest(dispatcher) {
+        val photos = PhotoCollaborators()
+        val exporter = FakeJobPhotoExporter()
+        val viewModel = startedViewModel(photos, exporter = exporter)
+
+        viewModel.savePhotoToDevice("photo-9")
+        advanceUntilIdle()
+
+        assertTrue("nothing is written for a photo no record holds", exporter.saved.isEmpty())
+        assertEquals(
+            "a tap that can write nothing says so rather than doing nothing",
+            JobPhotoFailure.EXPORT_UNREADABLE,
+            viewModel.uiState.value.photoFailure,
+        )
+    }
 }
 
 
@@ -487,12 +664,15 @@ class JobPhotoCaptureViewModelTest {
 private fun viewModel(
     photos: PhotoCollaborators,
     pickedItems: JobPhotoPickedItems = FakeJobPhotoPickedItems(emptyMap()),
+    exporter: JobPhotoExporter = FakeJobPhotoExporter(),
+    repository: JobDetailsRepository = PhotoJobRepository(),
 ): JobDetailsViewModel =
     JobDetailsViewModel(
-        repository = PhotoJobRepository(),
+        repository = repository,
         photos = photos.session,
         jobPhotoImages = JobPhotoImages.None,
         pickedItems = pickedItems,
+        exporter = exporter,
         clock = TEST_CLOCK,
     )
 
@@ -503,12 +683,33 @@ private fun viewModel(
 private suspend fun TestScope.startedViewModel(
     photos: PhotoCollaborators,
     pickedItems: JobPhotoPickedItems = FakeJobPhotoPickedItems(emptyMap()),
+    exporter: JobPhotoExporter = FakeJobPhotoExporter(),
+    repository: JobDetailsRepository = PhotoJobRepository(),
 ): JobDetailsViewModel {
-    val viewModel = viewModel(photos, pickedItems)
+    val viewModel = viewModel(photos, pickedItems, exporter, repository)
     viewModel.start(JOB_ID)
     advanceUntilIdle()
     return viewModel
 }
+
+/** One photo entry of the Job's Activity, as the API reports it (`BR-080`). */
+private fun photoActivityEvent(photoId: String) = JobActivityEvent(
+    id = photoId,
+    kind = JobActivityKind.JOB_PHOTO_ADDED,
+    recordedAt = "2026-09-15T13:05:00.000Z",
+    actorName = "Mike Lead",
+    visitSequence = null,
+    fromStatus = null,
+    toStatus = null,
+    technicianName = null,
+    roleCode = null,
+    previousRoleCode = null,
+    outcomeCode = null,
+    outcomeSummary = null,
+    body = null,
+    photoId = photoId,
+    photoPhase = "DURING_WORK",
+)
 
 /** The Job every test in this file works on. */
 private const val JOB_ID = "job-1"
@@ -520,7 +721,9 @@ private const val JOB_ID = "job-1"
  * repository offers is exercised; a call to it would mean the test is asserting the wrong thing
  * (`qa.md` §6.1).
  */
-private class PhotoJobRepository : JobDetailsRepository {
+private class PhotoJobRepository(
+    private val activity: List<JobActivityEvent> = emptyList(),
+) : JobDetailsRepository {
 
     override suspend fun loadJobDetails(jobId: String): JobDetailsResult =
         JobDetailsResult.Success(
@@ -541,7 +744,7 @@ private class PhotoJobRepository : JobDetailsRepository {
         )
 
     override suspend fun loadJobActivity(jobId: String): JobActivityResult =
-        JobActivityResult.Success(emptyList())
+        JobActivityResult.Success(activity)
 
     override suspend fun addVisitNote(
         jobId: String,

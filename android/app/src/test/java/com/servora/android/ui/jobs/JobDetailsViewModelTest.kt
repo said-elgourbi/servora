@@ -5,8 +5,10 @@ import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
 import com.servora.android.data.jobs.AssignableTechniciansResult
+import com.servora.android.data.jobs.FakeJobPhotoExporter
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsResult
+import com.servora.android.data.jobs.JobPhotoExporter
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.data.jobs.JobPhotoSession
 import com.servora.android.data.jobs.PhotoCollaborators
@@ -810,11 +812,13 @@ private class ScriptedJobDetailsRepository(
 private fun viewModel(
     repository: JobDetailsRepository,
     session: JobPhotoSession = PhotoCollaborators().session,
+    exporter: JobPhotoExporter = FakeJobPhotoExporter(),
 ) = JobDetailsViewModel(
     repository = repository,
     photos = session,
     jobPhotoImages = JobPhotoImages.None,
     // These tests are about the Job's own actions, so no photo source hands over anything.
     pickedItems = FakeJobPhotoPickedItems(emptyMap()),
+    exporter = exporter,
     clock = TEST_CLOCK,
 )

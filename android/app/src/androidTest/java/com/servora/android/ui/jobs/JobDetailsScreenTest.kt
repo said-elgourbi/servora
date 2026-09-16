@@ -294,6 +294,99 @@ class JobDetailsScreenTest {
     }
 
     @Test
+    fun showsWhichPhotoOfTheJobIsOnScreenAndTheTwoEvidenceActions() {
+        var savedPhotoId: String? = null
+        var sharedPhotoId: String? = null
+        var sharedTitle: String? = null
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(
+                    activityEvent(
+                        id = "photo-1",
+                        kind = JobActivityKind.JOB_PHOTO_ADDED,
+                        visitSequence = null,
+                        body = "Panel before the repair",
+                        photoId = "photo-1",
+                        photoPhase = "BEFORE_WORK",
+                    ),
+                ),
+                pendingPhotos = listOf(pendingPhoto(photoId = "photo-5")),
+            ),
+            canViewEvidence = true,
+            onSavePhoto = { photoId -> savedPhotoId = photoId },
+            onSharePhoto = { photoId, title ->
+                sharedPhotoId = photoId
+                sharedTitle = title
+            },
+        )
+
+        // The photo the backend holds is the sequence's first page, so the position says so and the two
+        // actions act on the photo the technician is looking at (`D11`).
+        composeTestRule.onNodeWithTag(jobPhotoGalleryTileTag("photo-1")).performClick()
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText("1 of 2").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag(JobPhotoViewerSaveTag).performClick()
+        assertEquals("photo-1", savedPhotoId)
+
+        composeTestRule.onNodeWithTag(JobPhotoViewerShareTag).performClick()
+        assertEquals("photo-1", sharedPhotoId)
+        assertEquals("Share photo", sharedTitle)
+
+        composeTestRule.onNodeWithTag(JobPhotoViewerCloseTag).performClick()
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun opensATappedPhotoOnItsOwnPageOfTheJobsPhotos() {
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(
+                    activityEvent(
+                        id = "photo-1",
+                        kind = JobActivityKind.JOB_PHOTO_ADDED,
+                        visitSequence = null,
+                        photoId = "photo-1",
+                        photoPhase = "BEFORE_WORK",
+                    ),
+                ),
+                pendingPhotos = listOf(pendingPhoto(photoId = "photo-5")),
+            ),
+            canViewEvidence = true,
+        )
+
+        composeTestRule.onNodeWithTag(jobPhotoPendingTileTag("photo-5")).performClick()
+
+        // The tray's photo is the second page of that same sequence, so a swipe either way continues
+        // through what the screen shows around the photo that was tapped (`D11`).
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText("2 of 2").assertIsDisplayed()
+    }
+
+    @Test
+    fun drawsNoEvidenceActionsForASessionThatMayNotReadEvidence() {
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                pendingPhotos = listOf(pendingPhoto()),
+            ),
+            canViewEvidence = false,
+        )
+
+        composeTestRule.onNodeWithTag(jobPhotoPendingTileTag("photo-1")).performClick()
+
+        // The photo is still shown; only the two actions that read it back are withheld (`BR-011`).
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoViewerSaveTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobPhotoViewerShareTag).assertDoesNotExist()
+    }
+
+    @Test
     fun opensATappedPendingPhotoFromTheBytesTheDeviceStillHolds() {
         val images = RecordingJobPhotoImages(ApplicationProvider.getApplicationContext())
         render(
@@ -472,6 +565,10 @@ class JobDetailsScreenTest {
         onRemovePendingPhoto: (String) -> Unit = {},
         onSubmitPendingPhotos: () -> Unit = {},
         onDismissPhotoMessage: () -> Unit = {},
+        onSavePhoto: (String) -> Unit = {},
+        onSharePhoto: (String, String) -> Unit = { _, _ -> },
+        onSavePermissionResult: (Boolean) -> Unit = {},
+        canViewEvidence: Boolean = false,
         photoImages: JobPhotoImages = JobPhotoImages.None,
     ) {
         val screenState = state ?: JobDetailsUiState(jobId = JOB_ID, details = details)
@@ -502,6 +599,10 @@ class JobDetailsScreenTest {
                     onRemovePendingPhoto = onRemovePendingPhoto,
                     onSubmitPendingPhotos = onSubmitPendingPhotos,
                     onDismissPhotoMessage = onDismissPhotoMessage,
+                    onSavePhoto = onSavePhoto,
+                    onSharePhoto = onSharePhoto,
+                    onSavePermissionResult = onSavePermissionResult,
+                    canViewEvidence = canViewEvidence,
                     photoImages = photoImages,
                 )
             }

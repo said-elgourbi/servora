@@ -8,6 +8,9 @@ import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsResult
+import com.servora.android.data.jobs.JobPhotoExportOutcome
+import com.servora.android.data.jobs.JobPhotoExportSource
+import com.servora.android.data.jobs.JobPhotoExporter
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.data.jobs.JobPhotoPickedItems
 import com.servora.android.data.jobs.JobPhotoRecordResult
@@ -65,6 +68,7 @@ class JobDetailsViewModel @Inject constructor(
     private val photos: JobPhotoSession,
     private val jobPhotoImages: JobPhotoImages,
     private val pickedItems: JobPhotoPickedItems,
+    private val exporter: JobPhotoExporter,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -82,6 +86,8 @@ class JobDetailsViewModel @Inject constructor(
     private var readInFlight = false
     private var actionInFlight = false
     private var photoInFlight = false
+    /** Whether a photo is being saved or shared right now, so one export runs at a time. */
+    private var exportInFlight = false
     private var photoCollection: Job? = null
 
     /**
@@ -627,6 +633,163 @@ class JobDetailsViewModel @Inject constructor(
                     photoFailureItem = null,
                 )
             }
+        }
+    }
+
+    /**
+     * Saves one of the Job's photos on this device, into the gallery the user's own applications show
+     * (`D12`).
+     *
+     * The bytes are read from wherever they are — the file this device holds, or the API — so the photo
+     * that is saved is exactly the evidence the technician is looking at, and one whose bytes cannot be
+     * read writes nothing and is reported (`BR-042`). On Android 8–9 the write needs a storage
+     * permission: the screen is told which photo is waiting so it can ask, and the same save is retried
+     * when it is granted.
+     */
+    fun savePhotoToDevice(photoId: String) {
+        val source = photoExportSource(photoId)
+        if (source == null) {
+            // The Job no longer holds that photo — a row the tray has since dropped, or an Activity the
+            // backend has re-reported — so nothing is written and the technician is told rather than
+            // left with a tap that appears to do nothing (`BR-042`).
+            reportUnreadablePhoto()
+            return
+        }
+        if (exportInFlight) {
+            return
+        }
+        exportInFlight = true
+        viewModelScope.launch {
+            val outcome = exporter.saveToDevice(source)
+            exportInFlight = false
+            _uiState.update { current ->
+                when (outcome) {
+                    JobPhotoExportOutcome.SAVED ->
+                        current.copy(
+                            photoMessage = JobPhotoMessage.SAVED_TO_DEVICE,
+                            photoFailure = null,
+                            photoSaveAwaitingPermission = null,
+                        )
+
+                    JobPhotoExportOutcome.PERMISSION_REQUIRED ->
+                        current.copy(photoFailure = null, photoSaveAwaitingPermission = photoId)
+
+                    JobPhotoExportOutcome.UNREADABLE ->
+                        current.copy(
+                            photoFailure = JobPhotoFailure.EXPORT_UNREADABLE,
+                            photoFailureItem = null,
+                        )
+
+                    // A save can only reach the two outcomes above; anything else is the device
+                    // refusing the write, which is reported as such rather than assumed to have worked.
+                    JobPhotoExportOutcome.FAILED,
+                    JobPhotoExportOutcome.SHARED,
+                    JobPhotoExportOutcome.NO_SHARE_TARGET,
+                    ->
+                        current.copy(photoFailure = JobPhotoFailure.EXPORT_FAILED, photoFailureItem = null)
+                }
+            }
+        }
+    }
+
+    /**
+     * Hands one of the Job's photos to another application, through the platform's own share sheet
+     * (`D13`).
+     *
+     * [chooserTitle] is the localized title the chooser shows; the screen resolves it, so no
+     * user-facing text is built here (`BR-028`). Nothing is claimed about the receiving application:
+     * the chooser is the platform's, and WhatsApp or anything else on the device is the user's choice.
+     */
+    fun sharePhoto(photoId: String, chooserTitle: String) {
+        val source = photoExportSource(photoId)
+        if (source == null) {
+            reportUnreadablePhoto()
+            return
+        }
+        if (exportInFlight) {
+            return
+        }
+        exportInFlight = true
+        viewModelScope.launch {
+            val outcome = exporter.share(source, chooserTitle)
+            exportInFlight = false
+            _uiState.update { current ->
+                when (outcome) {
+                    JobPhotoExportOutcome.SHARED ->
+                        current.copy(photoMessage = JobPhotoMessage.SHARED, photoFailure = null)
+
+                    JobPhotoExportOutcome.UNREADABLE ->
+                        current.copy(
+                            photoFailure = JobPhotoFailure.EXPORT_UNREADABLE,
+                            photoFailureItem = null,
+                        )
+
+                    JobPhotoExportOutcome.NO_SHARE_TARGET ->
+                        current.copy(
+                            photoFailure = JobPhotoFailure.SHARE_UNAVAILABLE,
+                            photoFailureItem = null,
+                        )
+
+                    // A share can only reach the three outcomes above; anything else is the device
+                    // refusing the write or the chooser, reported rather than assumed to have worked.
+                    JobPhotoExportOutcome.FAILED,
+                    JobPhotoExportOutcome.SAVED,
+                    JobPhotoExportOutcome.PERMISSION_REQUIRED,
+                    ->
+                        current.copy(photoFailure = JobPhotoFailure.EXPORT_FAILED, photoFailureItem = null)
+                }
+            }
+        }
+    }
+
+    /**
+     * Answers the screen's storage-permission request for a save that was waiting on it (`D12`).
+     *
+     * A granted permission retries exactly the save that was waiting, so the technician's action
+     * completes without them having to find the photo again; a declined one is reported rather than
+     * left looking as though nothing happened, and the photo is untouched.
+     */
+    fun onSavePermissionResult(granted: Boolean) {
+        val photoId = _uiState.value.photoSaveAwaitingPermission ?: return
+        _uiState.update { it.copy(photoSaveAwaitingPermission = null) }
+        if (granted) {
+            savePhotoToDevice(photoId)
+        } else {
+            _uiState.update {
+                it.copy(photoFailure = JobPhotoFailure.SAVE_PERMISSION_DENIED, photoFailureItem = null)
+            }
+        }
+    }
+
+    /**
+     * Where one of the Job's photos is read from for an export, or `null` when the Job no longer holds
+     * it: a photo neither the device nor the Activity reports is not written anywhere (`BR-042`).
+     */
+    private fun photoExportSource(photoId: String): JobPhotoExportSource? {
+        val state = _uiState.value
+        val photo = viewedJobPhoto(
+            jobId = state.jobId,
+            photoId = photoId,
+            pendingPhotos = state.pendingPhotos,
+            activity = state.activity,
+        )
+        return when (photo) {
+            // The device's own bytes while it still holds them (`§9`).
+            is ViewedJobPhoto.Pending ->
+                JobPhotoExportSource.Local(photoId = photo.photoId, path = photo.localPath)
+
+            // Evidence the backend holds, read through the API (`BR-015`).
+            is ViewedJobPhoto.Stored ->
+                JobPhotoExportSource.Evidence(photoId = photo.photoId, jobId = photo.jobId)
+
+            null -> null
+        }
+    }
+
+    /** Reports a photo neither the device nor the Activity can place any more (`BR-042`). */
+    private fun reportUnreadablePhoto() {
+        _uiState.update {
+            it.copy(photoFailure = JobPhotoFailure.EXPORT_UNREADABLE, photoFailureItem = null)
         }
     }
 

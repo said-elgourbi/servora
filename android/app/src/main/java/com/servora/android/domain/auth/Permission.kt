@@ -24,6 +24,11 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     // neither `JOB_UPDATE` nor `customers.view` (`BR-009`). A capability named here is a UI gate only:
     // the backend remains the authority (`BR-007`, `BR-011`).
     EVIDENCE_PHOTO_ADD("evidence.photo.add"),
+    // Reading evidence back is its own capability, exactly as the API enforces it
+    // (`docs/decisions/015-evidence-capabilities.md` D2). Saving a photo on the device and sharing it
+    // with another application both read the photo's bytes, so both are drawn on this capability and
+    // not on the one that recorded the photo (`BR-006`, `BR-007`, `BR-011`).
+    EVIDENCE_VIEW("evidence.view"),
 }
 
 class PermissionChecker(granted: Set<String>) {

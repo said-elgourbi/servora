@@ -334,11 +334,17 @@ internal fun jobPhotoFailureMessage(failure: JobPhotoFailure): Int =
         JobPhotoFailure.PHOTO_NOT_SAVED -> R.string.job_photo_error_not_saved
         JobPhotoFailure.PHOTO_NOT_READ -> R.string.job_photo_error_not_read
         JobPhotoFailure.PICKER_UNAVAILABLE -> R.string.job_photo_error_picker_unavailable
+        JobPhotoFailure.EXPORT_UNREADABLE -> R.string.job_photo_error_export_unreadable
+        JobPhotoFailure.EXPORT_FAILED -> R.string.job_photo_error_export_failed
+        JobPhotoFailure.SHARE_UNAVAILABLE -> R.string.job_photo_error_share_unavailable
+        JobPhotoFailure.SAVE_PERMISSION_DENIED -> R.string.job_photo_error_save_permission
     }
 
 /** The localized report of what the last photo action did (`§7`). */
 internal fun jobPhotoMessageText(message: JobPhotoMessage): Int =
     when (message) {
         JobPhotoMessage.QUEUED -> R.string.job_photo_saved_message
+        JobPhotoMessage.SAVED_TO_DEVICE -> R.string.job_photo_saved_to_device_message
+        JobPhotoMessage.SHARED -> R.string.job_photo_shared_message
     }
 

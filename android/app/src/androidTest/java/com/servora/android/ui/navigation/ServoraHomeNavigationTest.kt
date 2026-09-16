@@ -80,6 +80,7 @@ import com.servora.android.ui.customers.customerDetailJobTag
 import com.servora.android.ui.customers.customerRowTag
 import com.servora.android.ui.home.ManagerHomeViewModel
 import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.jobs.inertJobPhotoExporter
 import com.servora.android.data.jobs.inertJobPhotoPickedItems
 import com.servora.android.data.jobs.inertJobPhotoSession
 import com.servora.android.ui.jobs.JobDetailsViewModel
@@ -330,6 +331,7 @@ class ServoraHomeNavigationTest {
             photos = inertJobPhotoSession(),
             jobPhotoImages = JobPhotoImages.None,
             pickedItems = inertJobPhotoPickedItems(),
+            exporter = inertJobPhotoExporter(),
             clock = Clock.systemUTC(),
         )
         composeTestRule.setContent {

@@ -46,6 +46,18 @@ enum class JobPhotoFailure {
 
     /** The device's own photo picker could not be opened, so no photo could be chosen (`D3`). */
     PICKER_UNAVAILABLE,
+
+    /** The photo's bytes could not be read, so saving or sharing it wrote nothing anywhere (`D12`). */
+    EXPORT_UNREADABLE,
+
+    /** The device refused the write, so the photo was not saved (`D12`). */
+    EXPORT_FAILED,
+
+    /** No application on this device accepts a shared photo (`D13`). */
+    SHARE_UNAVAILABLE,
+
+    /** Saving on this device needs a storage permission the technician has not granted (`D12`). */
+    SAVE_PERMISSION_DENIED,
 }
 
 /**
@@ -66,6 +78,12 @@ data class PhotoItemPosition(
 enum class JobPhotoMessage {
     /** The photos are queued on the device and will upload when the API can be reached (`§7`). */
     QUEUED,
+
+    /** The photo is in the device's own gallery (`D12`). */
+    SAVED_TO_DEVICE,
+
+    /** The photo was handed to another application (`D13`). */
+    SHARED,
 }
 
 /** The management action the screen last completed, so its confirmation names what happened. */
@@ -171,6 +189,13 @@ data class JobDetailsUiState(
     val photoFailureItem: PhotoItemPosition? = null,
     /** What the last photo action did, until the screen acknowledges it. */
     val photoMessage: JobPhotoMessage? = null,
+    /**
+     * The photo whose save is waiting for the storage permission Android 8–9 needs (`D12`).
+     *
+     * It is the photo id, not a flag, so the screen can ask for the permission and the same save is
+     * retried when it is granted — and so a save that needs no permission never waits for anything.
+     */
+    val photoSaveAwaitingPermission: String? = null,
 ) {
     /** Nothing has been read yet: the screen shows its first-load state. */
     val showsInitialLoading: Boolean

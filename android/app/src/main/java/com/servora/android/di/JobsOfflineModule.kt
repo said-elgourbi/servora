@@ -4,8 +4,12 @@ import android.content.Context
 import coil3.ImageLoader
 import coil3.disk.DiskCache
 import com.servora.android.data.jobs.ContentResolverJobPhotoPickedItems
+import com.servora.android.data.jobs.AndroidJobPhotoExportTarget
+import com.servora.android.data.jobs.DefaultJobPhotoExporter
 import com.servora.android.data.jobs.DefaultJobPhotoImages
 import com.servora.android.data.jobs.DefaultJobPhotoProcessing
+import com.servora.android.data.jobs.JobPhotoExportTarget
+import com.servora.android.data.jobs.JobPhotoExporter
 import com.servora.android.data.jobs.JobPhotoFetcherFactory
 import com.servora.android.data.jobs.JobPhotoFiles
 import com.servora.android.data.jobs.JobPhotoImages
@@ -123,4 +127,19 @@ internal abstract class JobsOfflineBindingsModule {
     abstract fun bindJobPhotoPickedItems(
         implementation: ContentResolverJobPhotoPickedItems,
     ): JobPhotoPickedItems
+
+    /**
+     * Taking a photo out of Servora: saving it into the device's own gallery, or handing it to another
+     * application through the platform's share sheet (`D12`, `D13`).
+     */
+    @Binds
+    @Singleton
+    abstract fun bindJobPhotoExporter(implementation: DefaultJobPhotoExporter): JobPhotoExporter
+
+    /** Where an export writes on a device: the shared gallery and the platform's share sheet. */
+    @Binds
+    @Singleton
+    abstract fun bindJobPhotoExportTarget(
+        implementation: AndroidJobPhotoExportTarget,
+    ): JobPhotoExportTarget
 }

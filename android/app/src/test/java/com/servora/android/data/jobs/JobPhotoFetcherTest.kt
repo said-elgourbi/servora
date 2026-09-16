@@ -198,8 +198,7 @@ class JobPhotoFetcherTest {
         fileSystem = FileSystem.SYSTEM,
         releaseCaches = releaseCaches,
         files = files,
-        api = api,
-        sessionAuthenticator = sessionAuthenticator,
+        reader = JobPhotoContentReader(api, sessionAuthenticator),
         subject = FakeAuthenticatedSubject(subjectId),
         cacheScope = cacheScope,
     )

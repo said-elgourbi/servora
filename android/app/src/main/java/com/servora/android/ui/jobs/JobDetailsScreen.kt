@@ -1,5 +1,8 @@
 package com.servora.android.ui.jobs
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -175,6 +178,10 @@ fun JobDetailsScreen(
     onRemovePendingPhoto: (String) -> Unit,
     onSubmitPendingPhotos: () -> Unit,
     onDismissPhotoMessage: () -> Unit,
+    onSavePhoto: (String) -> Unit,
+    onSharePhoto: (String, String) -> Unit,
+    onSavePermissionResult: (Boolean) -> Unit,
+    canViewEvidence: Boolean,
     photoImages: JobPhotoImages = JobPhotoImages.None,
     modifier: Modifier = Modifier,
 ) {
@@ -183,18 +190,34 @@ fun JobDetailsScreen(
     var showAssign by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAddActivity by rememberSaveable(state.jobId) { mutableStateOf(false) }
 
-    // The photo the viewer is showing, if any. Only its identity is held: the phase, the note and the
+    // The photo the viewer opens on, if any. Only its identity is held: the phase, the note and the
     // bytes are resolved from the records that already state them, so the viewer is never a second
     // copy of the evidence (`BR-001`), and a photo neither the device nor the Activity holds any more
     // closes the viewer rather than letting it show something else (`BR-042`).
     var viewedPhotoId by rememberSaveable(state.jobId) { mutableStateOf<String?>(null) }
-    val viewedPhoto = viewedPhotoId?.let { photoId ->
-        viewedJobPhoto(
-            jobId = state.jobId,
-            photoId = photoId,
-            pendingPhotos = state.pendingPhotos,
-            activity = state.activity,
-        )
+    // Every photo the viewer pages through (`D11`), in the order this screen presents them, and the page
+    // the tapped photo is on — so a swipe continues through exactly what the technician sees around the
+    // photo they opened.
+    val viewedPhotos = viewedJobPhotoSequence(
+        jobId = state.jobId,
+        pendingPhotos = state.pendingPhotos,
+        activity = state.activity,
+    )
+    val viewedPhotoPage = viewedPhotoId?.let { photoId ->
+        jobPhotoViewerInitialPage(viewedPhotos, photoId)
+    }
+    val shareChooserTitle = stringResource(R.string.job_photo_viewer_share_title)
+
+    // Android 8-9 guards a write into shared storage with a permission (`D12`). The screen asks for it
+    // when a save says it needs one, and the answer goes back to that same save.
+    val savePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = onSavePermissionResult,
+    )
+    LaunchedEffect(state.photoSaveAwaitingPermission) {
+        if (state.photoSaveAwaitingPermission != null) {
+            savePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
     }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -425,11 +448,17 @@ fun JobDetailsScreen(
     }
 
     // A photo the technician taps opens full size, whether the backend already holds it or the device
-    // still does (`D4`). The viewer is drawn over everything else, and closing it only forgets which
-    // photo it was: nothing about the photo changes (`BR-001`, `BR-067`).
-    viewedPhoto?.let { photo ->
+    // still does (`D4`), and the viewer pages through the Job's other photos from there (`D11`). The
+    // viewer is drawn over everything else, and closing it only forgets which photo it was: nothing
+    // about the photo changes (`BR-001`, `BR-067`).
+    if (viewedPhotoPage != null) {
         JobPhotoViewer(
-            photo = photo,
+            photos = viewedPhotos,
+            initialPage = viewedPhotoPage,
+            uploads = state.photoUploads,
+            canExportEvidence = canViewEvidence,
+            onSave = onSavePhoto,
+            onShare = { photoId -> onSharePhoto(photoId, shareChooserTitle) },
             photoImages = photoImages,
             onDismiss = { viewedPhotoId = null },
         )

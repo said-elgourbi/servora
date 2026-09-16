@@ -478,6 +478,21 @@
     <string name="job_photo_error_not_saved">La photo n’a pas pu être enregistrée sur cet appareil.</string>
     <string name="job_photo_error_not_read">Cette photo n’a pas pu être lue sur cet appareil.</string>
     <string name="job_photo_error_picker_unavailable">Le sélecteur de photos de l’appareil n’a pas pu être ouvert.</string>
+    <!--
+      Sortir une photo de Servora : la position dans le visionneur et ses deux actions, ainsi que ce que
+      chacune rapporte (`D11`, `D12`, `D13`). Les deux lisent une preuve que l’API autorise ; rien ici
+      n’enregistre ni ne modifie une photo (`BR-027`).
+    -->
+    <string name="job_photo_viewer_position">%1$d sur %2$d</string>
+    <string name="job_photo_viewer_save">Enregistrer sur l’appareil</string>
+    <string name="job_photo_viewer_share">Partager</string>
+    <string name="job_photo_viewer_share_title">Partager la photo</string>
+    <string name="job_photo_saved_to_device_message">Photo enregistrée sur cet appareil.</string>
+    <string name="job_photo_shared_message">Photo transmise à l’application choisie.</string>
+    <string name="job_photo_error_export_unreadable">Cette photo n’a pas pu être lue : elle n’a donc été ni enregistrée ni partagée.</string>
+    <string name="job_photo_error_export_failed">La photo n’a pas pu être enregistrée sur cet appareil.</string>
+    <string name="job_photo_error_share_unavailable">Aucune application de cet appareil ne peut partager la photo.</string>
+    <string name="job_photo_error_save_permission">Servora a besoin de la permission d’enregistrer des photos sur cet appareil.</string>
     <string name="job_photo_error_item">Photo %1$d sur %2$d : %3$s</string>
     <string name="job_update_photo_camera">Prendre une photo</string>
     <string name="job_update_photo_library">Choisir des photos</string>

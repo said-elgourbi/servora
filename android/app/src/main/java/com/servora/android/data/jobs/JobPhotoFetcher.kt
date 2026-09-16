@@ -10,15 +10,11 @@ import coil3.fetch.SourceFetchResult
 import coil3.request.CachePolicy
 import coil3.request.Options
 import com.servora.android.data.session.AuthenticatedSubject
-import com.servora.android.data.session.SessionAuthenticator
-import com.servora.android.data.session.SessionRenewal
-import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toPath
-import retrofit2.HttpException
 
 /**
  * Reads one photo's bytes for the image stack (`D4b`, `BR-015`, `BR-027`).
@@ -42,8 +38,7 @@ import retrofit2.HttpException
 @Singleton
 class JobPhotoFetcherFactory @Inject constructor(
     private val files: JobPhotoFiles,
-    private val api: JobDetailsApi,
-    private val sessionAuthenticator: SessionAuthenticator,
+    private val reader: JobPhotoContentReader,
     private val subject: AuthenticatedSubject,
     private val cacheScope: JobPhotoImageCacheScope,
 ) : Fetcher.Factory<JobPhotoImage> {
@@ -60,8 +55,7 @@ class JobPhotoFetcherFactory @Inject constructor(
                 imageLoader.diskCache?.clear()
             },
             files = files,
-            api = api,
-            sessionAuthenticator = sessionAuthenticator,
+            reader = reader,
             subject = subject,
             cacheScope = cacheScope,
         )
@@ -84,8 +78,7 @@ internal class JobPhotoFetcher(
     private val fileSystem: FileSystem,
     private val releaseCaches: () -> Unit,
     private val files: JobPhotoFiles,
-    private val api: JobDetailsApi,
-    private val sessionAuthenticator: SessionAuthenticator,
+    private val reader: JobPhotoContentReader,
     private val subject: AuthenticatedSubject,
     private val cacheScope: JobPhotoImageCacheScope,
 ) : Fetcher {
@@ -137,7 +130,7 @@ internal class JobPhotoFetcher(
             }
         }
 
-        val bytes = download(photo) ?: return null
+        val bytes = reader.read(photo.jobId, photo.photoId)?.bytes ?: return null
         if (cache != null && cacheKey != null && diskCachePolicy.writeEnabled) {
             writeToCache(cache, cacheKey, bytes)
         }
@@ -166,44 +159,5 @@ internal class JobPhotoFetcher(
                 editor.commit()
             }
         }
-    }
-
-    /**
-     * Reads the photo's bytes from the API, renewing the session once when the backend refuses it.
-     *
-     * The renewal is the same one every other read of evidence uses ([SessionAuthenticator]), and a
-     * photo that still cannot be read — a refusal, or a backend that could not be reached — is answered
-     * with nothing to draw rather than with an exception (`BR-018`, `BR-042`).
-     */
-    private suspend fun download(photo: JobPhotoImage.Backend): ByteArray? {
-        val accessToken = sessionAuthenticator.accessToken() ?: return null
-        return try {
-            read(photo, accessToken)
-        } catch (failure: HttpException) {
-            if (failure.code() != HTTP_UNAUTHORIZED) {
-                return null
-            }
-            when (val renewal = sessionAuthenticator.renew(accessToken)) {
-                is SessionRenewal.Renewed ->
-                    try {
-                        read(photo, renewal.accessToken)
-                    } catch (failure: HttpException) {
-                        null
-                    } catch (failure: IOException) {
-                        null
-                    }
-
-                SessionRenewal.Rejected, SessionRenewal.Unavailable -> null
-            }
-        } catch (failure: IOException) {
-            null
-        }
-    }
-
-    private suspend fun read(photo: JobPhotoImage.Backend, accessToken: String): ByteArray =
-        api.jobPhotoContent("Bearer $accessToken", photo.jobId, photo.photoId).use { it.bytes() }
-
-    private companion object {
-        const val HTTP_UNAUTHORIZED = 401
     }
 }

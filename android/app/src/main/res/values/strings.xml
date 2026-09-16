@@ -522,6 +522,21 @@
     <string name="job_photo_error_not_saved">The photo could not be saved on this device.</string>
     <string name="job_photo_error_not_read">That photo could not be read from this device.</string>
     <string name="job_photo_error_picker_unavailable">The device\'s photo picker could not be opened.</string>
+    <!--
+      Taking a photo out of Servora: the viewer's position and its two evidence actions, and what each
+      reports (`D11`, `D12`, `D13`). Both actions read evidence the API authorizes; nothing here records
+      or changes a photo (`BR-027`).
+    -->
+    <string name="job_photo_viewer_position">%1$d of %2$d</string>
+    <string name="job_photo_viewer_save">Save to device</string>
+    <string name="job_photo_viewer_share">Share</string>
+    <string name="job_photo_viewer_share_title">Share photo</string>
+    <string name="job_photo_saved_to_device_message">Photo saved on this device.</string>
+    <string name="job_photo_shared_message">Photo handed to the application you chose.</string>
+    <string name="job_photo_error_export_unreadable">That photo could not be read, so it was not saved or shared.</string>
+    <string name="job_photo_error_export_failed">The photo could not be saved on this device.</string>
+    <string name="job_photo_error_share_unavailable">No application on this device can share the photo.</string>
+    <string name="job_photo_error_save_permission">Servora needs permission to save photos on this device.</string>
     <string name="job_photo_error_item">Photo %1$d of %2$d: %3$s</string>
     <string name="job_update_photo_camera">Take photo</string>
     <string name="job_update_photo_library">Choose photos</string>

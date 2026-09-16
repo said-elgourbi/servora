@@ -18,6 +18,17 @@
          an operation is queued whenever the API is unreachable. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!--
+      Saving a photo into the device's own gallery needs no permission from Android 10 on, and Servora
+      asks for none there. Android 8-9 still guards a write into shared storage with
+      `WRITE_EXTERNAL_STORAGE`, so it is declared for those two releases only (`D12`); the technician
+      is asked for it when they save a photo, and is told if they decline. Nothing here reads the
+      device's media library - a source photo still comes from the device's own picker (`D10`).
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <application
         android:name=".ServoraApplication"
         android:allowBackup="false"

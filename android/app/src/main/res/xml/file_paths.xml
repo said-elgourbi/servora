@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The one directory the app's `FileProvider` exposes, so the device's camera application can write a
-  captured photo into app-private storage (BR-015, offline standard §9).
+  The two directories the app's `FileProvider` exposes, and nothing else.
 
-  The path is the feature's own `job-photos` directory: no other application, and no other part of
-  the app, is given access to anything outside it.
+  `job-photos` is the feature's own evidence directory, which the device's camera application writes a
+  capture into (BR-015, offline standard §9). `evidence-share` is the app-private cache directory a
+  photo is staged in when the technician shares it with another application, so that application is
+  granted read access to that one file and to nothing else (`D13`).
 -->
 <paths>
     <files-path
         name="job-photos"
         path="job-photos/" />
+    <cache-path
+        name="evidence-share"
+        path="evidence-share/" />
 </paths>

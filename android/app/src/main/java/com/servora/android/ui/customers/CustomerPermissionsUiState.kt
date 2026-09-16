@@ -27,6 +27,10 @@ data class CustomerPermissionsUiState(
     // action even though the default Technician role holds no Job update capability
     // (`docs/decisions/015-evidence-capabilities.md`).
     val canAddEvidencePhoto: Boolean = false,
+    // Reading evidence back is the capability the API enforces on the content route, and the one the
+    // viewer's two export actions are drawn on: saving a photo on the device and sharing it with
+    // another application both read it (`D12`, `D13`, `BR-011`, `BR-015`).
+    val canViewEvidence: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -47,4 +51,5 @@ fun customerPermissionsUiState(
         canUpdateJob = permissionChecker.has(Permission.JOB_UPDATE),
         canViewTechnicians = permissionChecker.has(Permission.TECHNICIAN_VIEW),
         canAddEvidencePhoto = permissionChecker.has(Permission.EVIDENCE_PHOTO_ADD),
+        canViewEvidence = permissionChecker.has(Permission.EVIDENCE_VIEW),
     )

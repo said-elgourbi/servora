@@ -105,3 +105,20 @@ private object InertSubject : AuthenticatedSubject {
 private object InertOfflineSync : OfflineSync {
     override fun requestSync() = Unit
 }
+
+/**
+ * An exporter that writes nothing, for instrumented tests about something else.
+ *
+ * The Job Details destination is wired with one, so a test about where navigation goes has nothing to
+ * export: every call answers the smallest honest thing — the photo's bytes could not be read, which is
+ * what a device with no evidence and no session would reach (`qa.md` §6.2).
+ */
+fun inertJobPhotoExporter(): JobPhotoExporter = object : JobPhotoExporter {
+    override suspend fun saveToDevice(source: JobPhotoExportSource): JobPhotoExportOutcome =
+        JobPhotoExportOutcome.UNREADABLE
+
+    override suspend fun share(
+        source: JobPhotoExportSource,
+        chooserTitle: String,
+    ): JobPhotoExportOutcome = JobPhotoExportOutcome.UNREADABLE
+}
