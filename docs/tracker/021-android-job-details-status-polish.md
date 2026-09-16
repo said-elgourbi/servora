@@ -2,6 +2,11 @@
 
 **Status: COMPLETE for the Android implementation; physical-device QA is the product owner's**
 
+**Refined by `docs/tracker/034-manager-job-status-workflow.md`:** the menu still lists exactly what the
+API reports, but that list is now every structurally permitted destination, and the two consequential
+ones (close, reopen) are confirmed by a dialog before the change is sent. This slice's presentation —
+the dot, the label, the compact menu and the current-status row — is unchanged.
+
 **Supersedes in part `docs/tracker/020-android-job-details-status-control.md`:** the status control is
 still the Job's status chip, but it now carries a leading status dot and a labelled **Job status**
 heading, and its menu is a compact list of the permitted transitions rather than a second row of chips.

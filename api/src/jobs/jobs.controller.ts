@@ -52,6 +52,7 @@ import {
 import type { ScheduleConflict } from './jobs.service.js';
 import {
   JobCancellationUnavailableError,
+  JobCompletionBlockedError,
   JobNotFoundError,
   JobReviewConditionNotMetError,
   JobStatusTransitionNotAllowedError,
@@ -441,6 +442,9 @@ function mapActionError(error: unknown): unknown {
   if (error instanceof JobReviewConditionNotMetError) {
     return reviewConditionNotMet(error);
   }
+  if (error instanceof JobCompletionBlockedError) {
+    return completionBlocked();
+  }
   if (error instanceof VisitNotReschedulableError) {
     return visitNotReschedulable(error);
   }
@@ -512,6 +516,24 @@ function reviewConditionNotMet(
           ? 'The job still has an active visit.'
           : 'The latest completed visit does not resolve the job.',
       details: { reason: error.reason },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+/**
+ * `BR-062`: a Job must not be completed while it has an open Visit.
+ *
+ * The refusal is its own code rather than a `JOB_STATUS_TRANSITION_NOT_ALLOWED`: the destination is
+ * structurally permitted (`BR-058`), and what refuses it is the state of the Job's field work. A
+ * client can therefore tell the two apart and say which one happened.
+ */
+function completionBlocked(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'JOB_COMPLETION_BLOCKED',
+      message: 'The job still has an open visit.',
     },
     HttpStatus.CONFLICT,
   );

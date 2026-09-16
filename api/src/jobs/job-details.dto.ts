@@ -63,9 +63,12 @@ export interface JobDetailsDto {
   /**
    * The statuses this Job may move to (`BR-058`).
    *
-   * The client draws its status actions from this list rather than holding a second copy of the
-   * lifecycle (`BR-041`), and `CANCELED` is absent while `BR-064`'s cancellation-reason catalogue
-   * remains an open question.
+   * The list is **structural**: the destinations `BR-058` permits for the Job's current status, from
+   * which the client draws its status actions rather than holding a second copy of the lifecycle
+   * (`BR-041`). Whether the Job qualifies for one of them *now* is its own rule's answer — `BR-061`
+   * for `PENDING_REVIEW` and `BR-062` for `COMPLETED` — so those destinations stay listed and the API
+   * refuses an attempt the Job does not support with that rule's error. `CANCELED` is absent while
+   * `BR-064`'s cancellation-reason catalogue remains an open question.
    */
   allowedStatusTransitions: JobStatus[];
   /** The Job's version, echoed back when its status changes (`BR-086`). */

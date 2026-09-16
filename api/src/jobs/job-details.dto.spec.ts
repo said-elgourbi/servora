@@ -73,8 +73,10 @@ describe('job details projection', () => {
       description: 'Annual inspection.',
       status: 'SCHEDULED',
       // The client draws its status actions from the server's own lifecycle table (`BR-058`,
-      // `BR-041`), and cancellation is absent while its reason catalogue is open (`BR-064`).
-      allowedStatusTransitions: ['IN_PROGRESS'],
+      // `BR-041`): every structurally permitted destination for the Job's status, whether or not the
+      // Job qualifies for it right now, and cancellation is absent while its reason catalogue is open
+      // (`BR-061`, `BR-062`, `BR-064`).
+      allowedStatusTransitions: ['IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED'],
       version: 1,
       customerId: CUSTOMER_ID,
       customerName: 'Martha Reynolds',

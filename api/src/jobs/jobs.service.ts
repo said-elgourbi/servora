@@ -11,6 +11,7 @@ import {
   isNull,
   lt,
   ne,
+  notInArray,
   sql,
 } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
@@ -38,6 +39,7 @@ import type {
 } from './job-action.dto.js';
 import {
   ACTIVE_VISIT_STATUSES,
+  TERMINAL_VISIT_STATUSES,
   applicableJobStatusTransitions,
   isPermittedJobStatusTransition,
   isReschedulableVisitStatus,
@@ -97,6 +99,32 @@ export class JobReviewConditionNotMetError extends Error {
     this.name = 'JobReviewConditionNotMetError';
   }
 }
+
+/**
+ * `BR-062`'s completion invariant is not met: the Job still has an open Visit.
+ *
+ * A Visit is open while its status is not historical (`BR-074`, `BR-083`). Closing a Job is the
+ * office's decision about *its* lifecycle (`BR-059`), so the refusal never touches the Visit: the
+ * Visit must reach a historical status through its own field lifecycle, and the Job may be closed
+ * then.
+ */
+export class JobCompletionBlockedError extends Error {
+  constructor() {
+    super('The job cannot be completed while it has an open visit.');
+    this.name = 'JobCompletionBlockedError';
+  }
+}
+
+/**
+ * The client a Job mutation reads and writes through: the pool itself, or the transaction it opened.
+ *
+ * Drizzle's transaction shares the query-builder surface with the database, so a condition a
+ * transition must satisfy can be evaluated through the very transaction that applies it.
+ */
+type JobMutationClient = Pick<
+  DatabaseService['db'],
+  'select' | 'insert' | 'update'
+>;
 
 /** `BR-073` only permits rescheduling a Visit that is `SCHEDULED`. */
 export class VisitNotReschedulableError extends Error {
@@ -273,10 +301,19 @@ export class JobsService {
   /**
    * Moves a Job through its lifecycle (`BR-058`).
    *
-   * The transition is validated against the shared table, so a status a client invents, a status
-   * that is already current and a transition `BR-058` does not permit are all refused. `BR-061`'s
-   * entry conditions are checked before `PENDING_REVIEW` is entered, and the change is recorded as
-   * an append-only `job_status_history` row (`BR-067`).
+   * The destination is validated against the shared structural table first, so a status a client
+   * invents, a status that is already current and a destination `BR-058` does not list are all
+   * refused — including an attempt to leave a terminal Job by anything other than its reopen.
+   *
+   * A structurally valid destination may still be one the Job does not currently qualify for, and
+   * that is its own rule's answer rather than a gap in the table: `BR-061` decides whether the Job may
+   * enter `PENDING_REVIEW`, and `BR-062` decides whether it may be closed. Both conditions are
+   * evaluated **inside the transaction that applies the change**, through the same client that writes
+   * it, so a Job is never moved on a picture of its Visits that has already changed underneath.
+   *
+   * The change is recorded as one append-only `job_status_history` row (`BR-033`, `BR-067`). It never
+   * writes a Visit's status or history: the Job's business lifecycle and the field execution lifecycle
+   * are two state machines (`BR-059`), and the Job moving is not a Visit moving.
    */
   async changeJobStatus(
     scope: OrganizationScope,
@@ -303,11 +340,15 @@ export class JobsService {
         applicableJobStatusTransitions(from),
       );
     }
-    if (input.status === 'PENDING_REVIEW') {
-      await this.assertJobMayAwaitReview(scope, jobId);
-    }
 
     await this.db.transaction(async (tx) => {
+      if (input.status === 'PENDING_REVIEW') {
+        await this.assertJobMayAwaitReview(tx, scope, jobId);
+      }
+      if (input.status === 'COMPLETED') {
+        await this.assertJobHasNoOpenVisit(tx, scope, jobId);
+      }
+
       await tx
         .update(jobs)
         .set({
@@ -602,12 +643,17 @@ export class JobsService {
    * Only `RESOLVED` says that (`BR-078`: every other outcome expects follow-up). The effect of
    * `NEEDS_QUOTE_APPROVAL` is an **OPEN QUESTION**, so it is not treated as resolvable here rather
    * than being decided by the implementation (`BR-042`).
+   *
+   * This is runtime eligibility, not a structural limit: `NEW` → `PENDING_REVIEW` is a permitted
+   * transition (`BR-058`) that this rule refuses when the field work does not support it, and the
+   * refusal names which of the two conditions failed.
    */
   private async assertJobMayAwaitReview(
+    client: JobMutationClient,
     scope: OrganizationScope,
     jobId: string,
   ): Promise<void> {
-    const [active] = await this.db
+    const [active] = await client
       .select({ id: visits.id })
       .from(visits)
       .where(
@@ -622,7 +668,7 @@ export class JobsService {
       throw new JobReviewConditionNotMetError('ACTIVE_VISIT');
     }
 
-    const [latestCompleted] = await this.db
+    const [latestCompleted] = await client
       .select({ outcomeCode: visits.outcomeCode })
       .from(visits)
       .where(
@@ -636,6 +682,40 @@ export class JobsService {
       .limit(1);
     if (latestCompleted?.outcomeCode !== 'RESOLVED') {
       throw new JobReviewConditionNotMetError('OUTCOME');
+    }
+  }
+
+  /**
+   * `BR-062`: a Job must not be completed while it has an open Visit.
+   *
+   * A Visit is open while its status is not historical — `COMPLETED`, `CANCELED` or `NO_SHOW`
+   * (`BR-074`, `BR-083`). A Job whose Visits are all historical may be closed, and a Job with no Visit
+   * at all may be closed administratively; a `DRAFT` Visit is a field attempt that has not happened
+   * yet, so it is remaining work and keeps the Job open.
+   *
+   * This is the governing condition `BR-062` states ("no remaining work requires another Visit") made
+   * checkable, so completion is refused rather than performed on a Job whose field work is unfinished.
+   * Nothing here changes a Visit: a Job reaching a terminal status must not carry a Visit with it
+   * (`BR-059`, `BR-067`).
+   */
+  private async assertJobHasNoOpenVisit(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    jobId: string,
+  ): Promise<void> {
+    const [open] = await client
+      .select({ id: visits.id })
+      .from(visits)
+      .where(
+        and(
+          eq(visits.organizationId, scope.organizationId),
+          eq(visits.jobId, jobId),
+          notInArray(visits.status, [...TERMINAL_VISIT_STATUSES]),
+        ),
+      )
+      .limit(1);
+    if (open !== undefined) {
+      throw new JobCompletionBlockedError();
     }
   }
 

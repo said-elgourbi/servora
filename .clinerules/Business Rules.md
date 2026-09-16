@@ -405,11 +405,12 @@ Offline-capable workflows may include:
 - Capturing photos/evidence
 - Recording relevant timestamps
 - Recording relevant field/location information
+- Viewing evidence already recorded on the technician's work: its **metadata** (phase, note, time) is required to be readable offline, and its **bytes** are available on a best-effort basis (`BR-015`, `BR-088`)
 
 Offline work is stored locally and synchronized with the backend when connectivity becomes available.
 
 **Exceptions:**
-Operations that fundamentally require current server information may require connectivity.
+Operations that fundamentally require current server information may require connectivity, except that accepted evidence's **metadata** must be readable offline while its bytes are best-effort (`BR-015`).
 
 **Status:**
 **CONFIRMED**
@@ -459,6 +460,9 @@ Android, API
 
 **Exceptions:**
 None.
+
+**Notes:**
+A photo is **draft material** until the backend accepts it and **immutable historical evidence** from that moment; the whole evidence lifecycle — immutability, removal, retention, metadata and kinds — is defined by `BR-088` – `BR-091`. The metadata of accepted evidence must be readable offline, with its bytes available best-effort (`BR-013`).
 
 **Status:**
 **CONFIRMED**
@@ -1159,8 +1163,20 @@ Permitted transitions:
 
 ```text
 NEW             → SCHEDULED
+NEW             → IN_PROGRESS
+NEW             → PENDING_REVIEW
+NEW             → COMPLETED
+
 SCHEDULED       → IN_PROGRESS
+SCHEDULED       → PENDING_REVIEW
+SCHEDULED       → COMPLETED
+
+IN_PROGRESS     → SCHEDULED
 IN_PROGRESS     → PENDING_REVIEW
+IN_PROGRESS     → COMPLETED
+
+PENDING_REVIEW  → SCHEDULED
+PENDING_REVIEW  → IN_PROGRESS
 PENDING_REVIEW  → COMPLETED
 
 NEW             → CANCELED
@@ -1172,8 +1188,15 @@ COMPLETED       → NEW
 CANCELED        → NEW
 ```
 
-- Reopening never produces `IN_PROGRESS` directly (BR-063).
-- Job status advances as a consequence of Visit lifecycle events (BR-074) and the conditions in BR-060 and BR-061; the backend applies and validates the transition.
+- **Any structurally permitted destination may be selected directly.** While a Job is open (`NEW`, `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW`) an authorized user may select **any other open status, forwards or backwards**, or `COMPLETED`. The Job reaches that status in **one** business operation, and that operation records **one** transition; a client must not reach a destination by issuing a series of transitions.
+- A Job is therefore never forced through the lifecycle one step at a time. `SCHEDULED → COMPLETED` and `IN_PROGRESS → SCHEDULED` are each one permitted transition.
+- A Job may not "change" to the status it already holds; that is not a transition.
+- `NEW` is not a destination for an open Job. It is reached only by reopening a terminal Job (BR-063).
+- `COMPLETED` and `CANCELED` are terminal. The **only** destination from either is `NEW`, through the explicit reopen (BR-063). No other destination is reachable from a terminal status.
+- The transition list is **structural**. Whether a listed destination may be entered right now is a runtime eligibility question owned by its own rule: BR-061 for `PENDING_REVIEW` and BR-062 for `COMPLETED`. A destination is therefore offered even when the Job does not currently qualify for it, and the operation is refused with that rule's own outcome. Eligibility must never be expressed by removing a structurally valid destination from the list.
+- Every status change records, in append-only history, the previous status, the new status, the user who made the change and the timestamp (BR-033, BR-067, BR-080).
+- Changing a Job's status **never** changes a Visit's status and never rewrites Visit history. The Job's business lifecycle and the field execution lifecycle are separate state machines (BR-059).
+- Job status advances as a consequence of Visit lifecycle events (BR-074) and the conditions in BR-060 and BR-061, and by the explicit authorized action above; the backend applies and validates the transition either way.
 - `COMPLETED`, `CANCELED` and reopening are explicit authorized actions (BR-062, BR-064, BR-063).
 - Clients must not invent their own Job status vocabulary (BR-041).
 
@@ -1181,7 +1204,9 @@ CANCELED        → NEW
 None.
 
 **Notes:**
-This rule defines the lifecycle required by BR-022.
+This rule defines the lifecycle required by BR-022. Job cancellation appears above as a permitted transition but is not applied while BR-064's structured reason catalogue is undefined.
+
+**Changed decision (recorded under BR-040):** the transition list previously permitted only the next step forward, so a manager had to move a Job through every status in order and could not move one backwards. Product ownership confirmed that an authorized user selects any permitted destination in one operation, and that `NEW` is not a destination for an open Job. BR-061 and BR-062 remain runtime eligibility conditions over this list, and BR-062 now carries the completion invariant.
 
 **Status:**
 **CONFIRMED**
@@ -1261,6 +1286,7 @@ A Job may enter `PENDING_REVIEW` only when:
   because no further Visit is required, that decision resolves the follow-up requirement for the
   purpose of review entry (BR-FV-004, BR-FV-007).
 - `PENDING_REVIEW` is a review state and does not itself complete the Job (BR-062).
+- These conditions apply to **every** transition into `PENDING_REVIEW`, whatever status the Job moves from (BR-058). They are runtime eligibility, not a structural limit: `PENDING_REVIEW` remains a permitted destination and is offered to authorized users even when the Job does not currently qualify.
 
 **Exceptions:**
 None.
@@ -1285,10 +1311,19 @@ Android, Angular, API, Database
 **Expected behavior:**
 
 - Only a Manager/authorized office user can close a Job.
-- Closing is `PENDING_REVIEW → COMPLETED` (BR-058) and requires an explicit business action.
+- Closing requires an explicit business action and is a transition **into** `COMPLETED` (BR-058). `PENDING_REVIEW → COMPLETED` remains the normal path, and an open Job may also be closed directly from `SCHEDULED`, `IN_PROGRESS` or `NEW`, in one operation.
+- A consequential transition such as closing a Job requires the user to confirm it explicitly before it is applied; a confirmation is a presentation of the decision, never a substitute for the rules below.
+- **A Job must not transition to `COMPLETED` while it has any open Visit.** A Visit is open while its status is not historical — that is, while it is anything other than `COMPLETED`, `CANCELED` or `NO_SHOW` (BR-074; the same classification BR-083 uses for an active Visit). The check is enforced by the backend as part of applying the transition and cannot be overridden by a client confirmation.
+  - `IN_PROGRESS` Job with an `IN_PROGRESS` Visit → refused.
+  - `SCHEDULED` Job with a `SCHEDULED` Visit → refused.
+  - A `DRAFT` Visit is a field attempt that has not happened yet, so it is remaining work and the Job cannot be closed while it exists.
+  - `SCHEDULED` Job whose Visits are all `COMPLETED`, `CANCELED` or `NO_SHOW` → permitted.
+  - A Job with no Visit at all → permitted (administrative closure).
+  - The refusal is reported as its own outcome so a client can say why, and it is not a transition refusal: the destination is structurally permitted by BR-058.
+- Closing a Job changes only the Job. It never changes or reopens a Visit's status and never rewrites Visit history (BR-059).
 - `final_outcome` is an optional Job field recording the overall result of the Job, set when the Job is closed; it must never be copied automatically from the latest Visit outcome.
-- Historical `CANCELED` or `NO_SHOW` Visits do not prevent Job completion.
-- The governing condition is that no remaining work requires another Visit.
+- Historical `CANCELED`, `NO_SHOW` or `COMPLETED` Visits do not prevent Job completion.
+- The governing condition is that no remaining work requires another Visit, which the open-Visit invariant above makes checkable.
 - Once completed:
   - the Job's terminal business history is preserved;
   - Visit outcomes become immutable (BR-079);
@@ -1318,6 +1353,7 @@ Android, Angular, API, Database
 **Expected behavior:**
 
 - Reopening transitions `COMPLETED → NEW` or `CANCELED → NEW` (BR-058).
+- Reopening is the **only** way a Job reaches `NEW`: an open Job is never moved back to `NEW` (BR-058).
 - Reopening never produces `IN_PROGRESS`; it does not imply that work is currently underway.
 - Reopening does not modify or reopen historical completed or canceled Visits.
 - Reopening does not create a Visit automatically; a new Visit represents the new field attempt (BR-051).
@@ -1344,6 +1380,7 @@ Android, Angular, API, Database
 **Expected behavior:**
 
 - A Job may be canceled from `NEW`, `SCHEDULED`, `IN_PROGRESS` or `PENDING_REVIEW`, including after field work has started.
+- Cancellation is a separate explicit action with its own requirements. It is not folded into the ordinary status selector, and it is not applied as a plain destination while the structured reason catalogue remains undefined.
 - Every Job cancellation requires a structured cancellation reason and a mandatory explanation.
 - The explanation is especially important when field work has already occurred.
 - When a Job is canceled:
@@ -2480,14 +2517,14 @@ Android, Angular, API, Database
 - Retention and audit behavior must be defined explicitly rather than inferred.
 
 **Exceptions:**
-Specific retention, deletion, visibility, and audit rules remain open.
+None — retention, removal, visibility and audit of evidence are defined by `BR-088` – `BR-091`.
 
 **Notes:**
-Photos, audio and files are optional Visit evidence in v1 unless a future business workflow explicitly requires them (BR-077). Job Activity is a derived read model over the authoritative records (BR-080).
+Photos, audio and files are optional Visit evidence in v1 unless a future business workflow explicitly requires them (BR-077). Job Activity is a derived read model over the authoritative records (BR-080). The evidence lifecycle — what makes evidence immutable, how it may be removed, how long it is kept, and what metadata it carries — is defined by `BR-088` – `BR-091`.
 
 **Status:**
 **CONFIRMED** — evidence-preservation principle
-**OPEN QUESTION** — detailed retention/audit rules
+**CONFIRMED** — retention, removal, visibility and audit defined by `BR-088` – `BR-091`
 
 ---
 
@@ -2587,6 +2624,124 @@ None.
 
 **Status:**
 **CONFIRMED**
+
+---
+
+## BR-088 — Evidence is immutable once it is accepted
+
+**Description:**
+A captured photo or audio recording is **draft material** until the update it belongs to is submitted and the backend accepts it. From the moment the backend has recorded it, evidence is **immutable historical evidence**. Servora's guiding position for evidence is: append-only once accepted, offline-first for the technician, and a storage lifecycle that follows the Job/evidence lifecycle rather than UI convenience.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Before submission evidence is draft material: the technician may discard it, re-take it, change its phase and change its note. Nothing has been recorded and nothing is evidence yet.
+- **Acceptance is the boundary.** Evidence becomes immutable when the API has recorded it (BR-001). A client's own confirmation is not the boundary; the backend's acceptance is.
+- After acceptance, no operation may overwrite the evidence, replace its bytes, change its phase, edit its note in place, or silently delete it.
+- Servora provides **no edit-evidence operation**. A correction is a new, explicit, audited action — a new update, or a removal under BR-089 — never a mutation of what was recorded.
+- A note or caption correction is recorded as new Activity, so the original remains readable (BR-067, BR-080).
+- The API is the authority for both the acceptance boundary and the immutability that follows it (BR-007).
+
+**Exceptions:**
+None.
+
+**Notes:**
+Discarding a draft is not a removal: a photo the technician discards before submitting was never evidence, and BR-014 governs it while it is pending. Job Activity is a derived read model (BR-080) and never the record it derives from.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-089 — Removing accepted evidence is explicit, authorized and audited
+
+**Description:**
+Accepted evidence may be taken out of ordinary use, but only through an explicit, authorized, recorded action. A removal never rewrites history.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- A Technician cannot remove accepted evidence. A technician may only discard their own unsubmitted draft (BR-088).
+- Removing accepted evidence requires the dedicated capability `evidence.photo.remove`, which follows BR-006's `resource.action` convention and is a **Manager-level** capability: it is granted to the default Manager role and not to the default Technician role.
+- Removal is **soft**: the evidence disappears from ordinary views — technician field views in particular — while its record and its history are preserved.
+- The removal records the actor, the timestamp and the reason (BR-033, BR-067).
+- The record stays append-only: a removal is added history, never a deletion of the record or of what it previously held.
+- Soft-removed evidence remains visible in an audit/history context to authorized managers.
+- Physically purging the stored object is a retention concern (BR-090) and is separate from the removal itself.
+- The API enforces the capability; a hidden or disabled control is never the boundary (BR-007).
+
+**Exceptions:**
+None.
+
+**Notes:**
+The exact default-role grant and the bilingual capability name and description (BR-005) are recorded when the capability is created. A structured removal-reason catalogue is not defined; if one is required it is a product decision, not something an implementation invents (BR-042).
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-090 — Evidence retention and visibility follow the Job's lifecycle
+
+**Description:**
+Evidence belongs to the historical Job record, and its retention follows that record rather than UI convenience.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Archiving or canceling a Job **never deletes its evidence**.
+- Archived Jobs and their evidence remain readable to members whose permissions allow viewing archived Jobs (BR-082, BR-083).
+- In v1 retention is **indefinite for as long as the tenant/account exists**. Servora does not invent a regulatory retention period it cannot universally justify.
+- Configurable retention is a later capability for tenants with their own compliance requirements; it is not implemented in v1.
+- Servora does **not** support hard Job deletion in normal product flows: a Job is archived or canceled, not deleted. Evidence objects therefore never become orphaned through Job deletion.
+- If a future administrative or GDPR-style hard purge is introduced, it is a deliberate **cascading purge** — Job → Visits → evidence records → storage objects and derived objects — with object deletion performed asynchronously and idempotently.
+- A storage object must never outlive its database record accidentally.
+
+**Exceptions:**
+None.
+
+**Notes:**
+Job deletion itself remains an open question (BR-021). This rule confirms only that normal product flows do not hard-delete Jobs, and defines the shape any future purge must take.
+
+**Status:**
+**CONFIRMED**
+**OPEN QUESTION** — configurable per-tenant retention, and the administrative purge workflow itself
+
+---
+
+## BR-091 — Evidence classification, metadata and evidence kinds
+
+**Description:**
+Evidence carries only the classification and metadata Servora needs, and the kinds of evidence are explicit.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- `phase` — `BEFORE_WORK`, `DURING_WORK`, `AFTER_WORK` — is the **only** structured classification of a photo in v1. No tags or categories are introduced; the technician's note covers anything further.
+- The selected phase is **draft state for the update in progress**: it survives a sheet or process recreation while that update is unfinished, and it must not become a global preference that leaks into another Job or another update.
+- Servora strips **GPS/location EXIF and other metadata it does not need** from uploaded evidence by default. Only what the application explicitly needs is preserved — normalized orientation and dimensions, and Servora's own capture/upload timestamps.
+- EXIF GPS is **never** treated as Job-location evidence. Location would require an explicit product feature with clear disclosure (BR-038).
+- **Audio notes are evidence** of their own kind, using the same storage abstraction, offline outbox, upload lifecycle, authorization and immutable-history rules as photos. Audio's capability (`evidence.audio.add`) is activated when the audio feature is implemented.
+- **Generic file attachments** — documents, PDFs, arbitrary files — are **out of scope in v1**.
+- A kind's capability and affordance are not exposed in any client before the kind actually works (BR-042).
+
+**Exceptions:**
+None.
+
+**Notes:**
+How audio is modelled (a kind on one evidence model versus a parallel structure), its content-type and size vocabulary, and its playback surfaces are that feature's design decisions, recorded in an ADR when it lands. Label localization is unchanged (BR-028).
+
+**Status:**
+**CONFIRMED** — `phase` is the only photo classification, phase as draft state, metadata stripping, audio is evidence, generic files out of scope
+**OPEN QUESTION** — the audio evidence data model, its content types and its size limits
 
 ---
 

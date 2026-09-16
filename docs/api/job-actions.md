@@ -6,10 +6,11 @@ These routes are the explicit, authorized actions `BR-058` – `BR-079` define. 
 an authenticated member as a deliberate decision, each one is recorded in append-only history
 (`BR-067`), and the API is the authority for whether the action is allowed at all (`BR-001`, `BR-007`).
 
-References: `BR-001`, `BR-006`, `BR-007`, `BR-008`, `BR-041`, `BR-042`, `BR-047`, `BR-058`, `BR-060`,
-`BR-061`, `BR-062`, `BR-063`, `BR-066`, `BR-067`, `BR-068`, `BR-069`, `BR-070`, `BR-072`, `BR-073`,
-`BR-077`, `BR-079`, `BR-086`, `dev.md` §7, `Project.md` §15,
-`docs/domain/job-visit-domain-model.md` §6 – §7, `docs/tracker/018-android-job-actions.md`.
+References: `BR-001`, `BR-006`, `BR-007`, `BR-008`, `BR-041`, `BR-042`, `BR-047`, `BR-058`, `BR-059`,
+`BR-060`, `BR-061`, `BR-062`, `BR-063`, `BR-066`, `BR-067`, `BR-068`, `BR-069`, `BR-070`, `BR-072`,
+`BR-073`, `BR-074`, `BR-077`, `BR-079`, `BR-083`, `BR-086`, `dev.md` §7, `Project.md` §15,
+`docs/domain/job-visit-domain-model.md` §6 – §7, `docs/tracker/018-android-job-actions.md`,
+`docs/tracker/034-manager-job-status-workflow.md`.
 
 ## 1. Conventions
 
@@ -75,26 +76,46 @@ Moves a Job through its lifecycle (`BR-058`).
 
 ### 3.2 What the API enforces
 
-- **Only `BR-058`'s permitted transitions.** Anything else is `409`
-  `JOB_STATUS_TRANSITION_NOT_ALLOWED`, and the response carries the transitions the Job *may* make, so
-  a client can offer the allowed action instead of guessing.
+- **Only `BR-058`'s structurally permitted destinations.** A destination the table does not list is
+  `409 JOB_STATUS_TRANSITION_NOT_ALLOWED`, and the response carries the destinations the Job *may*
+  move to, so a client can offer an allowed action instead of guessing.
+- **Any permitted destination is one operation.** An open Job moves directly to any other open status
+  — forwards or backwards — or to `COMPLETED`, in a single request and a single recorded transition.
+  A client never reaches a destination by issuing a series of transitions.
+- **`COMPLETED` and `CANCELED` are terminal.** Their only destination is `NEW`, the explicit reopen
+  (`BR-063`). `NEW` is not a destination for an open Job.
 - **`BR-061` before `PENDING_REVIEW`.** The Job may await review only when no Visit is active
   (`SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`) and the latest completed Visit's outcome is
   `RESOLVED`. Otherwise `409 JOB_REVIEW_CONDITION_NOT_MET` with `details.reason` either `ACTIVE_VISIT`
-  or `OUTCOME`.
+  or `OUTCOME`. This is **runtime eligibility, not a structural limit**: `PENDING_REVIEW` stays in
+  `allowedStatusTransitions`, a client offers it, and the API answers the attempt.
+- **`BR-062` before `COMPLETED`.** The Job must have no open Visit — no Visit whose status is anything
+  other than `COMPLETED`, `CANCELED` or `NO_SHOW` (`BR-074`; the classification `BR-083` uses). A Job
+  whose Visits are all historical, or that has no Visit at all, may be closed; a `SCHEDULED`,
+  `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS` or `DRAFT` Visit blocks it. Otherwise `409
+  JOB_COMPLETION_BLOCKED`. Like `BR-061` this is runtime eligibility, so `COMPLETED` stays in
+  `allowedStatusTransitions`; a client never infers the Visit state and hides the destination itself.
+- **The eligibility conditions are evaluated inside the transaction that applies the change**, through
+  the same client, so a Job is never moved on a picture of its Visits that has already changed
+  underneath.
 - **`BR-064` is not applied.** Cancellation is a transition `BR-058` permits, but `BR-064` requires a
   **structured** cancellation reason whose catalogue product ownership has not defined. The API
   refuses it with `409 JOB_CANCELLATION_UNAVAILABLE` rather than inventing the reason vocabulary
   (`BR-042`). Cancellation is also absent from the read's `allowedStatusTransitions`, so a client does
   not draw an action the API would refuse.
 - **Closing a Job is an explicit office action** (`BR-062`): `PENDING_REVIEW` → `COMPLETED` is applied
-  as asked, and Visit outcomes become immutable from then on (`BR-079`).
+  as asked, Visit outcomes become immutable from then on (`BR-079`), and a client confirms a
+  consequential change with the user before sending it — a confirmation is never a substitute for the
+  open-Visit invariant above.
 - **Reopening never produces `IN_PROGRESS`** (`BR-063`): `COMPLETED`/`CANCELED` → `NEW`.
+- **A Job status change moves the Job alone.** It never writes a Visit's status, a Visit's history or
+  any other Visit record (`BR-059`, `BR-067`).
 
 ### 3.3 Recorded
 
 One append-only `job_status_history` row: previous status, new status, the optional note, the actor and
-the timestamp. The Job's `version` is incremented in the same transaction.
+the timestamp. A direct move records **one** row, however many statuses it skipped. The Job's `version`
+is incremented in the same transaction.
 
 ## 4. `PATCH /jobs/:id/visits/:visitId/schedule`
 
@@ -204,9 +225,10 @@ QUESTION** (`BR-024`) and are not modelled here.
 | `403`  | `FORBIDDEN`                         | The caller does not hold the capability the route requires.            |
 | `404`  | `JOB_NOT_FOUND`                     | The Job does not exist in the caller's organization.                   |
 | `404`  | `VISIT_NOT_FOUND`                   | The Visit does not belong to that Job in the caller's organization.    |
-| `409`  | `JOB_STATUS_TRANSITION_NOT_ALLOWED` | `BR-058` does not permit that transition.                              |
+| `409`  | `JOB_STATUS_TRANSITION_NOT_ALLOWED` | `BR-058` does not permit that destination.                             |
 | `409`  | `JOB_CANCELLATION_UNAVAILABLE`      | `BR-064`'s cancellation reason catalogue is not defined.               |
 | `409`  | `JOB_REVIEW_CONDITION_NOT_MET`      | `BR-061`'s entry conditions for `PENDING_REVIEW` are not met.          |
+| `409`  | `JOB_COMPLETION_BLOCKED`            | `BR-062` does not allow completion: the Job still has an open Visit.   |
 | `409`  | `VISIT_NOT_RESCHEDULABLE`           | `BR-073` only permits rescheduling a `SCHEDULED` Visit.                |
 | `409`  | `SCHEDULE_CONFLICT`                 | `BR-070` conflicts were detected and have not been confirmed.          |
 | `409`  | `VERSION_CONFLICT`                  | The Job or Visit moved past the version the client supplied (`BR-086`).|
@@ -217,10 +239,16 @@ QUESTION** (`BR-024`) and are not modelled here.
 - Nothing outside the caller's organization: every query is scoped by `organization_id` (`BR-001`).
 - Nothing for a Job whose Customer the organization has deleted: `BR-023` hides a deleted customer's
   Jobs, so the action answers `404`.
-- No Visit status transition. Advancing a Visit's field status, recording its outcome and adding notes
-  are the technician's field lifecycle (`BR-074`, `BR-077`) and are not part of the office actions
-  these routes perform.
+- No Visit status transition, and no Visit write of any kind. Advancing a Visit's field status,
+  recording its outcome and adding notes are the technician's field lifecycle (`BR-074`, `BR-077`) and
+  are not part of the office actions these routes perform. A Job status change therefore leaves every
+  Visit — its status, its schedule, its outcome and its history — exactly as it was (`BR-059`, `BR-067`).
 - No Job cancellation while `BR-064`'s reason catalogue is undefined.
+- No step-by-step walk of the lifecycle: a status route either applies the destination it was given or
+  refuses it, and never applies an intermediate status on the way (`BR-058`, `BR-067`).
+- No client-side eligibility: whether a structurally permitted destination may be entered is decided
+  by `BR-061` and `BR-062` at the API, and a client that hides or offers a destination does not change
+  that answer (`BR-007`).
 
 ## 9. Open questions
 

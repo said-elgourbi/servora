@@ -2,6 +2,12 @@
 
 **Status: COMPLETE for API and Android implementation; physical-device QA is the product owner's**
 
+**Refined by `docs/tracker/034-manager-job-status-workflow.md`:** the status route now accepts any
+structurally permitted destination (forwards, backwards or straight to `COMPLETED`) as one operation,
+`BR-062` gained the invariant that blocks completion while an open Visit exists, and the client confirms
+a close or a reopen. The routes, the permissions and the rest of this slice's contract are unchanged;
+the manual QA below describes the transition list as it was built **by this slice**.
+
 **Continued by `docs/tracker/019-android-job-details-hierarchy.md`**, which moves these actions from the
 screen's global action row to the record each one affects, replaces **Reassign** with
 **Manage technicians**, and replaces the standing action banner with a transient Snackbar. The actions

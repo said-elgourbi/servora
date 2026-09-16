@@ -52,20 +52,31 @@ export const ASSIGNMENT_ROLE_CODES = ['LEAD', 'TECHNICIAN'] as const;
 export type AssignmentRoleCode = (typeof ASSIGNMENT_ROLE_CODES)[number];
 
 /**
- * The Job lifecycle's permitted transitions (`BR-058`).
+ * The Job lifecycle's **structurally** permitted transitions (`BR-058`).
  *
- * This is the authoritative validation contract: a transition the table does not list is not a
- * business transition and the API refuses it. The table is declared once here and is projected to
- * clients through the Job read (`allowedStatusTransitions`), so a client never holds a second copy of
- * the same rule (`BR-041`).
+ * This is the authoritative structural validation contract: a destination the table does not list is
+ * not a business transition and the API refuses it with `JOB_STATUS_TRANSITION_NOT_ALLOWED`. The
+ * table is declared once here and is projected to clients through the Job read
+ * (`allowedStatusTransitions`), so a client never holds a second copy of the same rule (`BR-041`).
+ *
+ * The table answers *which destinations exist*; it does not answer *whether a listed destination may
+ * be entered right now*. That is a runtime eligibility question owned by its own rule — `BR-061` for
+ * `PENDING_REVIEW` and `BR-062` for `COMPLETED` — and the API answers it with the rule's own error
+ * rather than by hiding a structurally valid destination from the read. A client may therefore offer
+ * a destination the Job does not currently qualify for and present the refusal (`BR-042`).
+ *
+ * An open Job may be moved **directly** to any other open status — backwards included, so
+ * `IN_PROGRESS` → `SCHEDULED` is one transition, not a walk through the lifecycle — or closed, in one
+ * operation. `NEW` is not a destination for an open Job: it is reached only by the explicit reopen
+ * (`BR-063`). `COMPLETED` and `CANCELED` are terminal and offer exactly that one destination.
  */
 export const JOB_STATUS_TRANSITIONS: Readonly<
   Record<JobStatus, readonly JobStatus[]>
 > = {
-  NEW: ['SCHEDULED', 'CANCELED'],
-  SCHEDULED: ['IN_PROGRESS', 'CANCELED'],
-  IN_PROGRESS: ['PENDING_REVIEW', 'CANCELED'],
-  PENDING_REVIEW: ['COMPLETED', 'CANCELED'],
+  NEW: ['SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED'],
+  SCHEDULED: ['IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED'],
+  IN_PROGRESS: ['SCHEDULED', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED'],
+  PENDING_REVIEW: ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELED'],
   COMPLETED: ['NEW'],
   CANCELED: ['NEW'],
 };
@@ -87,11 +98,38 @@ export function isPermittedJobStatusTransition(
  * stays unavailable until product ownership defines that catalogue, and the read tells clients so by
  * leaving `CANCELED` out of `allowedStatusTransitions` rather than drawing an action the API would
  * have to refuse.
+ *
+ * The list is **structural**: every other destination `BR-058` permits for the Job's status, whether
+ * or not the Job currently qualifies for it. `PENDING_REVIEW` (`BR-061`) and `COMPLETED` (`BR-062`)
+ * keep their runtime eligibility checks at the API, so a client offers the destination and presents
+ * the API's refusal rather than holding a second, staler copy of the rule (`BR-041`, `BR-042`).
  */
 export function applicableJobStatusTransitions(
   status: JobStatus,
 ): readonly JobStatus[] {
   return JOB_STATUS_TRANSITIONS[status].filter((to) => to !== 'CANCELED');
+}
+
+/**
+ * The Visit statuses that are **historical** — the field attempt is over (`BR-074`).
+ *
+ * `BR-083` classifies an active Visit by exactly this set, and `BR-062`'s completion invariant does
+ * too: a Visit that is not historical is open work and keeps its Job from being closed.
+ *
+ * It is deliberately **not** `ACTIVE_VISIT_STATUSES`. A `DRAFT` Visit is not scheduled work for the
+ * derived "Needs Scheduling" signal (`BR-060`), but it is a field attempt that has not happened yet,
+ * so it is remaining work for completion. The two named sets answer different questions and neither
+ * replaces the other (`BR-060`, `BR-083` Notes).
+ */
+export const TERMINAL_VISIT_STATUSES = [
+  'COMPLETED',
+  'CANCELED',
+  'NO_SHOW',
+] as const;
+
+/** Whether a Visit in [status] is historical, i.e. no longer open work (`BR-074`, `BR-083`). */
+export function isTerminalVisitStatus(status: VisitStatus): boolean {
+  return (TERMINAL_VISIT_STATUSES as readonly VisitStatus[]).includes(status);
 }
 
 /**
