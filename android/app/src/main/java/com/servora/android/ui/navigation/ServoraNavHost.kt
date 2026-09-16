@@ -346,10 +346,13 @@ fun ServoraNavHost(
                 onSubmitPendingPhotos = jobDetailsViewModel::submitPendingPhotos,
                 onSavePhoto = jobDetailsViewModel::savePhotoToDevice,
                 onSharePhoto = jobDetailsViewModel::sharePhoto,
+                onRemoveEvidencePhoto = jobDetailsViewModel::removeEvidencePhoto,
                 onSavePermissionResult = jobDetailsViewModel::onSavePermissionResult,
                 // Reading evidence is its own capability, so the viewer's save and share actions are
-                // drawn only for a session that may read the photo back (`BR-006`, `BR-011`).
+                // drawn only for a session that may read the photo back (`BR-006`, `BR-011`), while
+                // removing recorded evidence is a Manager-level capability of its own (`BR-089`).
                 canViewEvidence = permissions.canViewEvidence,
+                canRemoveEvidence = permissions.canRemoveEvidence,
                 onDismissPhotoMessage = jobDetailsViewModel::dismissPhotoMessage,
                 photoImages = jobDetailsViewModel.photoImages,
             )

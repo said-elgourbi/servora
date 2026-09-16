@@ -69,6 +69,31 @@ class CustomerPermissionsUiStateTest {
     }
 
     @Test
+    fun `maps the evidence capabilities to their own UI capabilities`() {
+        // Recording, reading and removing evidence are three separate capabilities (`BR-006`, `BR-015`,
+        // `BR-089`): a session is told which of them it holds, and no one implies another.
+        val state = customerPermissionsUiState(
+            setOf("evidence.photo.add", "evidence.view").asPermissionChecker(),
+        )
+
+        assertTrue(state.canAddEvidencePhoto)
+        assertTrue(state.canViewEvidence)
+        assertFalse(state.canRemoveEvidence)
+    }
+
+    @Test
+    fun `maps the removal capability on its own`() {
+        val state = customerPermissionsUiState(
+            setOf("evidence.photo.remove").asPermissionChecker(),
+        )
+
+        assertTrue(state.canRemoveEvidence)
+        // Removing accepted evidence is not adding or reading it: the capability is its own.
+        assertFalse(state.canAddEvidencePhoto)
+        assertFalse(state.canViewEvidence)
+    }
+
+    @Test
     fun `does not infer capabilities from missing permissions`() {
         val state = customerPermissionsUiState(emptySet<String>().asPermissionChecker())
 

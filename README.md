@@ -85,9 +85,16 @@ Initial supported languages are **English** and **French**. Development rules li
 > archiving a Job never deletes evidence, **GPS/location EXIF is stripped** from what is uploaded, `phase`
 > stays the only structured classification, **audio notes are in scope** as their own evidence kind while
 > generic files are out, and the store gains **no derived thumbnails** — reads move to short-lived
-> presigned URLs issued by the API. **Phase 5 (offline visibility of accepted evidence) and Phase 6a (a
-> refused photo is explicitly discardable) are implemented (2026-09-16); the phase to run is Phase 6b
-> (removing accepted evidence), and Phases 6c, 8 and 9 are startable behind it.**
+> presigned URLs issued by the API. **Phase 5 (offline visibility of accepted evidence), Phase 6a (a
+> refused photo is explicitly discardable) and Phase 6b (removing accepted evidence) are implemented
+> (2026-09-16); the phase to run is Phase 6c (evidence metadata: GPS/EXIF stripping and the phase as draft
+> state), and Phase 8 is startable behind it.** **Phase 9 (audio evidence) now has its own tracker**: the
+> model, the vocabulary and the capability are decided in `docs/decisions/018-audio-evidence.md` (A1–A10)
+> and its **API half landed on 2026-09-16** — `job_audio_notes` + `job_audio_note_removals`,
+> `evidence.audio.add`/`evidence.audio.remove`, the three `/jobs/:id/audio-notes` routes and the
+> `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED` Activity kinds, contracted in `docs/api/job-audio.md`
+> (`docs/tracker/035-android-audio-evidence.md`). The Android recorder, the offline upload and playback are
+> that tracker's Phases 9b/9c, so the *Add audio* kind stays unoffered in the client until then.
 
 ## Layout
 
@@ -250,7 +257,16 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
   backend permanently refused carries a **Discard** action beside the reason the tray reports, and one
   action removes its file, its pending record and its queued refusal together — the refusal is terminal and
   never replayed, so it stops occupying the device, while a queued or retrying upload is left exactly as it
-  is (`BR-014`). **Phase 6b (removing accepted evidence) is next.**
+  is (`BR-014`). **Phase 6b (removing accepted evidence) landed on 2026-09-16**: accepted evidence is
+  immutable, so the API gained no edit route and only the one operation `BR-089` defines —
+  `POST /jobs/:id/photos/:photoId/removal`, authorized by the new Manager-level `evidence.photo.remove`,
+  appends a `job_photo_removals` record carrying **who** removed the photo, **when** and **why** while
+  `job_photos` stays append-only. The removal takes the evidence out of ordinary use — it leaves the Activity's
+  photos, every gallery drawn from them, and its bytes answer `404` — while the removal itself stays in the
+  timeline as `JOB_PHOTO_REMOVED`, and `includeRemovedEvidence=true` is the audit/history context that shows
+  the removed record with its actor, instant and reason. The removal is **online-only** (no idempotency key,
+  no decided conflict policy), and Android offers it in the viewer only to a session holding the capability,
+  behind a confirmation that requires a reason. **Phase 6c (evidence metadata) is next.**
   `docs/tracker/029-photo-evidence-phases.md`
   (decisions: `docs/decisions/015-evidence-capabilities.md`,
   `docs/decisions/016-android-image-stack-and-viewer-zoom.md`,
@@ -261,6 +277,10 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
 - Job Activity's photo UX — the collapsible **Photos · n** gallery (folded by default, compact preview,
   whole heading a target) and each photo drawn inside its own timeline entry, opening the same viewer:
   `docs/tracker/032-android-job-activity-photo-ux.md`.
+- Audio evidence — the model, the container and length vocabulary, the per-kind capabilities, the
+  Activity kinds, playback and the offline rules (`docs/decisions/018-audio-evidence.md`), the contract
+  (`docs/api/job-audio.md`), and the Android phases still to come:
+  `docs/tracker/035-android-audio-evidence.md`.
 - Development-environment hygiene — the Gradle/Kotlin build daemons Android verification leaves
   behind, and the `make android-stop` / `make tidy` targets that release them:
   `docs/tracker/030-development-environment-hygiene.md`.

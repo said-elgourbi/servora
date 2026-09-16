@@ -144,14 +144,15 @@ above is the hand-off.
 
 ## Open questions preserved (not implemented)
 
-1. **Audio evidence** (`BR-027`, tracker 029 D8) — unchanged and still open: the storage, content types,
-   size limits, Activity kind and playback an audio update needs. This slice gives it a kind, a glyph, a
-   label and a composable to land in, and stops there.
-2. **Whether the audio kind will also have two sources.** The photo kind has two (camera, picker),
-   because a photo can already exist on the device. Whether an audio update will likewise offer *record*
-   and *choose an existing audio file* — and if so, what capability covers reading an existing file — is
-   a product decision for that slice, not something this sheet's structure should assume. It is recorded
-   here as a question this shape raises, not as a decision (`Project.md` §29, `BR-042`).
+1. **Audio evidence** (`BR-027`, tracker 029 D8) — **answered 2026-09-16** and now tracked by
+   `docs/tracker/035-android-audio-evidence.md`: the storage, the content type and size vocabulary, the
+   length limits, the Activity kind and playback are decided in `docs/decisions/018-audio-evidence.md`
+   (A1–A10) and the API half is implemented (`docs/api/job-audio.md`). This slice's kind, glyph, label and
+   composable are the seam that lands in that tracker's Phase 9b — which is what it was built for.
+2. **Whether the audio kind will also have two sources.** **Answered 2026-09-16** (`ADR-018` A8): the
+   audio kind offers **record only**. The design specifies record, stop, playback/review,
+   delete/re-record and attach, and no picker; choosing an existing audio file is out of scope for v1, so
+   no capability for reading a file from the device is introduced (`BR-042`).
 3. **The update action while the tray holds unsaved photos** (`BR-012`) — still open as tracker 028 left
    it. The tray still takes the bottom of the screen and the action is still not drawn while it holds
    anything, so a technician who saved photos offline still cannot add a note until the uploads are

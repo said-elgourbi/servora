@@ -102,6 +102,24 @@ interface JobDetailsApi {
     ): JobActivityDto
 
     /**
+     * `POST /jobs/{jobId}/photos/{photoId}/removal` — takes accepted evidence out of ordinary use
+     * (`BR-088`, `BR-089`).
+     *
+     * It is not a delete: nothing here edits or deletes a recorded photo. The API appends a removal
+     * record carrying the actor, the instant and the reason, and answers with the refreshed timeline,
+     * so the evidence stops appearing in ordinary views while its record and history are preserved
+     * (`BR-067`). `evidence.photo.remove` authorizes it, and the API enforces that whatever this client
+     * draws (`BR-007`).
+     */
+    @POST("jobs/{jobId}/photos/{photoId}/removal")
+    suspend fun removeJobPhoto(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("photoId") photoId: String,
+        @Body request: RemoveJobPhotoRequestDto,
+    ): JobActivityDto
+
+    /**
      * `GET /jobs/{jobId}/photos/{photoId}/content` — the photo's bytes (`BR-015`).
      *
      * Evidence is read through the API on the API port, so no storage endpoint, bucket or signature

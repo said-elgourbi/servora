@@ -43,13 +43,19 @@ sealed interface JobActivityResult {
     data class Failure(val reason: CustomersFailureReason) : JobActivityResult
 }
 
-/** Outcome of writing one text Activity update to the represented Visit. */
-sealed interface VisitNoteResult {
+/**
+ * Outcome of a write that answers with the refreshed Job Activity timeline (`BR-080`).
+ *
+ * Two writes answer that way — adding a text update to a Visit and removing accepted photo evidence —
+ * because both change what the Job's Activity projects, so the client is handed the timeline the
+ * backend now reports rather than a locally patched copy (`BR-001`).
+ */
+sealed interface ActivityWriteResult {
     /** The backend answered with the refreshed Job Activity timeline. */
-    data class Success(val events: List<JobActivityEvent>) : VisitNoteResult
+    data class Success(val events: List<JobActivityEvent>) : ActivityWriteResult
 
-    /** Why the text update could not be recorded. */
-    data class Failure(val reason: JobActionFailure) : VisitNoteResult
+    /** Why the write could not be recorded. */
+    data class Failure(val reason: JobActionFailure) : ActivityWriteResult
 }
 
 /** Outcome of a Job or Visit management action (`BR-058` – `BR-079`). */
@@ -129,6 +135,15 @@ enum class JobActionFailure {
      * defined, so the API does not cancel a Job yet.
      */
     JOB_CANCELLATION_UNAVAILABLE,
+
+    /**
+     * The photo has already been removed from ordinary use (`BR-089`).
+     *
+     * One photo has one removal and no restore is defined, so a repeat is a conflict with the
+     * evidence's own state: the evidence is out of use, and the screen says so rather than reporting a
+     * failure it cannot explain (`BR-067`).
+     */
+    PHOTO_ALREADY_REMOVED,
 
     /** `BR-073` only permits rescheduling a Visit that is `SCHEDULED`. */
     VISIT_NOT_RESCHEDULABLE,

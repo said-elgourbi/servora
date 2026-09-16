@@ -514,6 +514,24 @@
     <string name="job_photo_viewer_share_title">Partager la photo</string>
     <string name="job_photo_saved_to_device_message">Photo enregistrée sur cet appareil.</string>
     <string name="job_photo_shared_message">Photo transmise à l’application choisie.</string>
+    <!--
+      Retirer une preuve acceptée de l’usage courant (`BR-088`, `BR-089`). C’est une action de
+      gestionnaire sur une photo enregistrée : elle est confirmée et une raison est donnée avant toute
+      application ; la photo n’est pas supprimée, son enregistrement et son historique sont conservés,
+      et le retrait lui-même est consigné.
+    -->
+    <string name="job_photo_viewer_remove">Retirer la preuve</string>
+    <string name="job_photo_removal_title">Retirer cette photo ?</string>
+    <string name="job_photo_removal_message">Cette photo a été enregistrée comme preuve et ne peut donc pas être supprimée. Elle sera retirée des photos de l’intervention et des vues courantes, et la raison que vous indiquez est conservée avec l’enregistrement.</string>
+    <string name="job_photo_removal_reason_label">Pourquoi ce retrait ?</string>
+    <string name="job_photo_removal_confirm">Retirer</string>
+    <string name="job_photo_removal_cancel">Annuler</string>
+    <string name="job_photo_removed_message">Preuve photo retirée. L’enregistrement et son historique ont été conservés.</string>
+    <string name="job_photo_activity_removed">Photo retirée de l’usage courant</string>
+    <string name="job_photo_error_removal_not_permitted">Votre rôle ne permet pas de retirer une preuve. Demandez à un gestionnaire.</string>
+    <string name="job_photo_error_removal_unavailable">Cette photo n’est plus disponible pour un retrait.</string>
+    <string name="job_photo_error_removal_unreachable">Retirer une preuve exige le serveur. Connectez-vous et réessayez.</string>
+    <string name="job_photo_error_removal_failed">La photo n’a pas pu être retirée : rien n’a changé.</string>
     <string name="job_photo_error_export_unreadable">Cette photo n’a pas pu être lue : elle n’a donc été ni enregistrée ni partagée.</string>
     <string name="job_photo_error_export_failed">La photo n’a pas pu être enregistrée sur cet appareil.</string>
     <string name="job_photo_error_share_unavailable">Aucune application de cet appareil ne peut partager la photo.</string>

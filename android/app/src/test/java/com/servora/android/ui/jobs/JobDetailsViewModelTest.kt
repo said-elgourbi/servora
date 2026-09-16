@@ -20,7 +20,7 @@ import com.servora.android.data.jobs.InMemoryPendingJobPhotoStore
 import com.servora.android.data.offline.InMemoryOutboxStore
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.data.session.FakeAuthenticatedSubject
-import com.servora.android.data.jobs.VisitNoteResult
+import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.AssignmentRole
 import com.servora.android.domain.model.CustomerJobAddress
@@ -465,7 +465,7 @@ class JobDetailsViewModelTest {
         val note = activityEvent(id = "note-1", body = "Replaced the filter.")
         val repository = RecordingJobDetailsRepository(
             result = JobDetailsResult.Success(job()),
-            noteResult = VisitNoteResult.Success(listOf(note)),
+            noteResult = ActivityWriteResult.Success(listOf(note)),
         )
         val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
@@ -646,6 +646,133 @@ class JobDetailsViewModelTest {
             assertEquals(listOf(JOB_ID), repository.requestedActivityJobIds)
         }
 
+    @Test
+    fun `removes accepted evidence through the API and takes the timeline from its answer`() =
+        runTest(dispatcher) {
+            val photo = activityEvent(
+                id = "photo-1",
+                kind = JobActivityKind.JOB_PHOTO_ADDED,
+                visitSequence = null,
+                body = null,
+                photoId = "photo-1",
+                photoPhase = "DURING_WORK",
+            )
+            val removal = activityEvent(
+                id = "removal-1",
+                kind = JobActivityKind.JOB_PHOTO_REMOVED,
+                visitSequence = null,
+                body = null,
+                photoId = "photo-1",
+                photoRemovalReason = "Photographed the wrong property",
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(listOf(photo))),
+                noteResult = ActivityWriteResult.Success(listOf(removal)),
+            )
+            val viewModel = viewModel(repository)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.removeEvidencePhoto("photo-1", "  Photographed the wrong property  ")
+            advanceUntilIdle()
+
+            // The reason is stated, trimmed, and the photo is named by the id it is already known by
+            // (`BR-089`).
+            assertEquals(
+                listOf("removal:photo-1:Photographed the wrong property"),
+                repository.actions,
+            )
+            val state = viewModel.uiState.value
+            // The answer to the write is the backend's, so the evidence the Job holds is current again
+            // (`BR-001`, `BR-080`, `§7`).
+            assertEquals(listOf("removal-1"), state.activity?.map { it.id })
+            assertEquals(ReadSource.BACKEND, state.activitySource)
+            assertEquals(JobPhotoMessage.EVIDENCE_REMOVED, state.photoMessage)
+            assertNull(state.photoFailure)
+            assertNull(state.photoRemoval)
+        }
+
+    @Test
+    fun `reports a refused removal as the reason it names, and changes nothing`() =
+        runTest(dispatcher) {
+            val photo = activityEvent(
+                id = "photo-1",
+                kind = JobActivityKind.JOB_PHOTO_ADDED,
+                visitSequence = null,
+                body = null,
+                photoId = "photo-1",
+                photoPhase = "DURING_WORK",
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(listOf(photo))),
+                noteResult = ActivityWriteResult.Failure(JobActionFailure.FORBIDDEN),
+            )
+            val viewModel = viewModel(repository)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.removeEvidencePhoto("photo-1", "Wrong property")
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            // A refusal is reported as what happened, and the timeline is left as the backend last
+            // reported it rather than being patched locally (`BR-001`, `BR-042`, `BR-067`).
+            assertEquals(JobPhotoFailure.REMOVAL_NOT_PERMITTED, state.photoFailure)
+            assertEquals(listOf("photo-1"), state.activity?.map { it.id })
+            assertNull(state.photoRemoval)
+            assertNull(state.photoMessage)
+        }
+
+    @Test
+    fun `sends no removal without a reason`() = runTest(dispatcher) {
+        val photo = activityEvent(
+            id = "photo-1",
+            kind = JobActivityKind.JOB_PHOTO_ADDED,
+            visitSequence = null,
+            body = null,
+            photoId = "photo-1",
+            photoPhase = "DURING_WORK",
+        )
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(listOf(photo))),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.removeEvidencePhoto("photo-1", "   ")
+        advanceUntilIdle()
+
+        // `BR-089` records the reason, so the screen requires one before it asks the API to apply
+        // anything: nothing is sent without it.
+        assertEquals(emptyList<String>(), repository.actions)
+    }
+
+    @Test
+    fun `reports a removal of a photo this screen does not hold as evidence`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.removeEvidencePhoto("photo-1", "Wrong property")
+        advanceUntilIdle()
+
+        // A photo neither the device nor the Activity reports is not evidence this screen can act on, so
+        // nothing is sent and the manager is told rather than left with a tap that did nothing
+        // (`BR-042`, `BR-088`).
+        assertEquals(emptyList<String>(), repository.actions)
+        assertEquals(
+            JobPhotoFailure.EXPORT_UNREADABLE,
+            viewModel.uiState.value.photoFailure,
+        )
+    }
 }
 
 private const val JOB_ID = "job-1"
@@ -704,6 +831,7 @@ private fun activityEvent(
     body: String? = "Found a damaged capacitor.",
     photoId: String? = null,
     photoPhase: String? = null,
+    photoRemovalReason: String? = null,
 ) = JobActivityEvent(
     id = id,
     kind = kind,
@@ -720,6 +848,7 @@ private fun activityEvent(
     body = body,
     photoId = photoId,
     photoPhase = photoPhase,
+    photoRemovalReason = photoRemovalReason,
 )
 
 /** Records every Job it is asked for, and every action it is asked to send. */
@@ -728,7 +857,7 @@ private class RecordingJobDetailsRepository(
     actionResults: ArrayDeque<JobActionResult> = ArrayDeque(),
     private val assignable: List<AssignableTechnician>? = null,
     activityResults: List<JobActivityResult> = listOf(JobActivityResult.Success(emptyList())),
-    private val noteResult: VisitNoteResult = VisitNoteResult.Success(emptyList()),
+    private val noteResult: ActivityWriteResult = ActivityWriteResult.Success(emptyList()),
 ) : JobDetailsRepository {
 
     val requestedJobIds = mutableListOf<String>()
@@ -762,8 +891,24 @@ private class RecordingJobDetailsRepository(
         jobId: String,
         visitId: String,
         body: String,
-    ): VisitNoteResult {
+    ): ActivityWriteResult {
         actions += "note:$visitId:$body"
+        return noteResult
+    }
+
+    /**
+     * Records a removal and answers with the scripted write result.
+     *
+     * The removal is a write like a note: it answers with the refreshed timeline, so a test scripts its
+     * answer the same way and asserts that the screen asked for the removal it was told to
+     * (`BR-089`).
+     */
+    override suspend fun removeJobPhoto(
+        jobId: String,
+        photoId: String,
+        reason: String,
+    ): ActivityWriteResult {
+        actions += "removal:$photoId:$reason"
         return noteResult
     }
 
@@ -839,7 +984,13 @@ private class ScriptedJobDetailsRepository(
         jobId: String,
         visitId: String,
         body: String,
-    ): VisitNoteResult = unsupported()
+    ): ActivityWriteResult = unsupported()
+
+    override suspend fun removeJobPhoto(
+        jobId: String,
+        photoId: String,
+        reason: String,
+    ): ActivityWriteResult = unsupported()
 
     override suspend fun changeJobStatus(
         jobId: String,

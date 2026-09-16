@@ -43,6 +43,15 @@ enum class JobActivityKind {
 
     /** A photo was added to the Job as field evidence (`BR-015`, `BR-027`). */
     JOB_PHOTO_ADDED,
+
+    /**
+     * Accepted photo evidence was taken out of ordinary use (`BR-088`, `BR-089`).
+     *
+     * It is history in its own right: the entry states that evidence was removed, and the reason
+     * travels in [JobActivityEvent.photoRemovalReason]. The photo itself leaves the ordinary timeline,
+     * so a client draws no photo for this kind.
+     */
+    JOB_PHOTO_REMOVED,
 }
 
 /**
@@ -87,4 +96,12 @@ data class JobActivityEvent(
     val photoId: String? = null,
     /** The field-work phase a photo was taken in (`JOB_PHOTO_ADDED`), as the API's stable code. */
     val photoPhase: String? = null,
+    /**
+     * Why accepted photo evidence was removed (`JOB_PHOTO_REMOVED`, `BR-089`), or `null`.
+     *
+     * It is its own field rather than [body], because the two say different things: `body` is the text
+     * an author recorded with a record, while this is the reason a Manager gave for taking evidence out
+     * of ordinary use (`BR-028`).
+     */
+    val photoRemovalReason: String? = null,
 )

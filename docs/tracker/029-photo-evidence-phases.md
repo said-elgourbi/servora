@@ -1,13 +1,15 @@
 # Tracker 029 — Photo evidence after 028: permissions, picker, viewer, offline and lifecycle
 
 **Status: PHASE 0 ANSWERED IN FULL (2026-09-16) — `D5`, `D6a`–`D6e`, `D7`, `D8`, `D14` and `D15` are
-decided; no question in this tracker is awaiting an answer.** Phases 1, 2, 3, 4, 4b, 4c, 4d, 4e and **5**
-are implemented, and the viewer's **chrome** (2026-09-16,
+decided; no question in this tracker is awaiting an answer.** Phases 1, 2, 3, 4, 4b, 4c, 4d, 4e, **5**,
+**6a**, **6b** and **the API half of 9** are implemented, and the viewer's **chrome** (2026-09-16,
 `docs/tracker/031-android-photo-viewer-ui.md`) and
 **Job Activity's photo UX** (2026-09-16, `docs/tracker/032-android-job-activity-photo-ux.md`) were refined
-without changing a decision or a contract. **Phase 6a (refused photos) is the phase to run**; **Phases 6b**
-(removing accepted evidence), **6c** (metadata: GPS/EXIF stripping and phase draft state), **8** (presigned
-reads) and **9** (audio evidence) follow from the same round.
+without changing a decision or a contract. **Phase 6c (metadata: GPS/EXIF stripping and phase draft state)
+is the phase to run**; **Phase 8** (presigned reads) follows from the same round. **Phase 9 (audio
+evidence) is now tracked in its own tracker**, `docs/tracker/035-android-audio-evidence.md`, whose Phase 9a
+landed the API half on 2026-09-16 and whose Phases 9b/9c carry the Android recorder, offline upload and
+playback.
 
 Date: 2026-09-15
 Predecessors: `docs/tracker/027-android-job-photo-updates.md` (capture, offline upload, Activity gallery),
@@ -42,9 +44,19 @@ Design reference that is **not** yet implemented: `Figma/src/imports/pasted_text
 
 ## Current phase
 
-**Phase 6b — removing accepted evidence (`D6a`, `D6b`, `D6d` ✓). Phase 6a landed on 2026-09-16, so this is
-the earliest phase whose decisions are answered; Phases 6c, 8 and 9 follow from the same 2026-09-16
-decision round.**
+**Phase 6c — evidence metadata: no location metadata, phase as draft state (`D7` ✓). Phase 6b landed on
+2026-09-16, so this is the earliest phase whose decisions are answered; Phases 8 and 9 follow from the
+same 2026-09-16 decision round.**
+
+**Phase 6b (2026-09-16) — removing accepted evidence (`D6a`, `D6b`, `D6d` ✓) is implemented.** Accepted
+evidence is immutable, so the API gained no way to edit it: what it gained is the one operation `BR-089`
+defines. A new `job_photo_removals` table records **who** removed a photo, **when** and **why**, `job_photos`
+stays append-only, and the removal is what takes the evidence out of ordinary use — the photo leaves the Job
+Activity's photos, its bytes answer `404`, and the removal itself is history Activity always states
+(`JOB_PHOTO_REMOVED`). It is authorized by the new Manager-level `evidence.photo.remove` (the default
+Technician role does not hold it) and it is **online-only**, because its route takes no idempotency key and no
+conflict policy is decided. The Android viewer offers the action on that capability, confirms it and requires
+a reason. Recorded below and in `## Phase log`.
 
 **Phase 6a (2026-09-16) — a photo the API permanently refused is explicitly discardable (`D6c` ✓) is
 implemented.** The tray offers the action the refusal leaves behind, beside the reason it reports: a photo
@@ -290,7 +302,7 @@ repository**, so there is no web photo surface and no reporting over evidence.
 | Preparation | both sources go through one pipeline before a draft exists: the bytes are brought to a type Servora accepts (`D3b`, mirrored magic-number sniffer, JPEG conversion when the bytes are neither JPEG nor PNG nor WebP) and under the API's 15 MiB limit (`D3c`, resized/re-compressed as JPEG); a photo either step cannot deliver is refused with **nothing** recorded. **Since Phase 4b** each step also **turns the decoded pixels** by the orientation the source bytes declare, before scaling and encoding, so the JPEG it writes is upright: `Bitmap.compress` writes no orientation tag, and a photo whose pixels were not turned would be stored sideways with nothing to say otherwise (`D7b`) | `android/.../data/jobs/JobPhotoContentType.kt`, `JobPhotoProcessing.kt`, `JobPhotoExifOrientation.kt`, `JobPhotoSession.kt`, `JobPhotoRecording.kt` |
 | Local metadata | Room `pending_job_photos` (draft, survives process death, `submitted` flag) | `android/.../data/jobs/PendingJobPhotoEntity.kt`, `PendingJobPhotoStore.kt`, `data/offline/OfflineMigrations.kt` |
 | Upload | queued through the existing outbox (`job.photo.add`, `operationId` = photo id), replayed by the existing engine; the part declares the recorded type and its own file name; local file and row deleted **only** on `201` | `android/.../data/jobs/JobPhotoSession.kt`, `JobPhotoUploadHandler.kt`, `JobPhotoOperations.kt`, `data/offline/OutboxReplayEngine.kt` |
-| API | `POST /jobs/:id/photos` (`evidence.photo.add`), `GET /jobs/:id/photos/:photoId/content` (`evidence.view`). **Decided (`D15` ✓, 2026-09-16) and not implemented:** reads answer with a **short-lived presigned GET URL** instead of the bytes (Phase 8), uploads stay on the API port | `api/src/jobs/jobs.controller.ts`, `job-photos.service.ts`, `job-photo.dto.ts` |
+| API | `POST /jobs/:id/photos` (`evidence.photo.add`), `GET /jobs/:id/photos/:photoId/content` (`evidence.view`), `POST /jobs/:id/photos/:photoId/removal` (`evidence.photo.remove`, and the read's `includeRemovedEvidence` audit context). **Decided (`D15` ✓, 2026-09-16) and not implemented:** reads answer with a **short-lived presigned GET URL** instead of the bytes (Phase 8), uploads stay on the API port | `api/src/jobs/jobs.controller.ts`, `job-photos.service.ts`, `job-photo.dto.ts`, `job-activity.ts` |
 | Storage | S3-compatible store behind the `ObjectStorage` port; key `evidence/job-photos/{organizationId}/{jobId}/{photoId}.{ext}`; provider selected by `STORAGE_PROVIDER` (`noop` by default, so an upload is refused with `503`). **No derived object is stored** (`D15` ✓, 2026-09-16), and **no store lifecycle rule exists**: retention is indefinite for the life of the tenant (`BR-090`) | `api/src/storage/object-storage.ts`, `s3-object-storage.ts`, `storage.module.ts`, `storage-config.ts`, `ADR-013` |
 | Database | `job_photos` (`phase` CHECK, content-type CHECK, byte-size CHECK, idempotency unique index) | `api/drizzle/migrations/0009_job_photos.sql`, `api/src/database/schema.ts` |
 | Timeline | one Activity projection, newest-first; `JOB_PHOTO_ADDED` is Job-level and carries `photoId`, `photoPhase`, `body` (the note). **Since 2026-09-16** a photo entry reads *Added a photo* and draws the photo itself (176 × 132 dp thumbnail, the phase badge over it, the note under it, the rest of a long note behind **More**), opening the same viewer on the same page a gallery tile does | `api/src/jobs/job-activity.ts`, `docs/api/job-activity.md` §3.2, `android/.../ui/jobs/JobActivitySection.kt`, `docs/tracker/032-android-job-activity-photo-ux.md` |
@@ -318,12 +330,12 @@ repository**, so there is no web photo surface and no reporting over evidence.
 | **4e** | **Viewer paging, save and share** | **D11 ✓, D12 ✓, D13 ✓**, Phase 4d (landed) | Android, tests, `docs/decisions/`, docs | **Landed (2026-09-15)** — the viewer pages through the Job's photos in the order the screen presents them, paging only while the photo is at fit; the chrome carries the photo's phase, a localized position and its note, and two actions read evidence on `evidence.view`: **Save to device** (a `Servora` album in the shared gallery; `WRITE_EXTERNAL_STORAGE` capped at API 28 and asked for when needed) and **Share** (the platform's chooser, through one added `FileProvider` cache path) |
 | 5 | Offline visibility of accepted evidence | **D5 ✓** | Android, `offline-first-architecture.md` | **Landed (2026-09-16)** — the Job Details and Job Activity reads adopt the working set (wire responses, mapped on the way out, refuses never masked) and both are marked as the last reported answer; the photo-byte cache is stated as one rule (a pending photo gets no disk key, accepted evidence is cached), nothing prefetches, and a photo that is neither held nor cached is reported as **not available offline** |
 | 6a | Refused photos are explicitly discardable | **D6c ✓** | Android, tests, docs | **Landed (2026-09-16)** — the tray's refused tile carries the refusal's own **Discard** action, and one action removes the device's file, the draft row and the queued refusal together (`§9`, `BR-014`) |
-| **6b** | **Removing accepted evidence (soft, audited, Manager-level)** | **D6a ✓, D6b ✓, D6d ✓, D1 ✓** | API, database, Android, permissions, docs | Startable after 6a |
+| **6b** | **Removing accepted evidence (soft, audited, Manager-level)** | **D6a ✓, D6b ✓, D6d ✓, D1 ✓** | API, database, Android, permissions, docs | **Landed (2026-09-16)** — `job_photo_removals` + `evidence.photo.remove` (Manager only), `POST /jobs/:id/photos/:photoId/removal` recording actor/time/reason, ordinary reads excluding the evidence while `JOB_PHOTO_REMOVED` stays in the timeline, the `includeRemovedEvidence` audit context, and the viewer's confirmed removal |
 | **6c** | **Evidence metadata: strip GPS/EXIF, phase as draft state** | **D7 ✓, D7b ✓** | Android, API (validation), tests, docs | Startable |
 | 6 | The rest of the evidence lifecycle | **D6 answered in full; `D6e` ✓** | — | **Closed** — no hard Job deletion in normal flows, so there is no orphaned object to fix; what remains is carried by 6b and 6c |
 | 7 | Angular parity and reporting over evidence | D1–D15, Phases 5/6b/6c/8/9, an Angular application | Angular, API | Blocked on the Angular application, which does not exist in this repository |
 | 8 | Evidence reads through short-lived presigned URLs | **D15 ✓**, Phase 5 (the read path it changes) | API, Android, `docs/decisions/`, `docs/api/` | Startable once the design states the resolution `ADR-013` D7 requires |
-| 9 | Audio evidence (`evidence.audio.add`) | **D8 ✓**, Phase 1 | API, database, Android, offline, localization, tests, docs | Startable — the largest slice |
+| 9 | Audio evidence (`evidence.audio.add`) | **D8 ✓**, Phase 1 | API, database, Android, offline, localization, tests, docs | **API half landed (2026-09-16)** — see `docs/tracker/035-android-audio-evidence.md` (Phase 9a): `job_audio_notes` + `job_audio_note_removals`, `evidence.audio.add`/`evidence.audio.remove`, the three `/jobs/:id/audio-notes` routes and `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED`, decided by `ADR-018`. Android (record, draft, queue, playback) is Phases 9b/9c of that tracker |
 
 ## Phase 0 — decisions requested
 
@@ -1646,7 +1658,8 @@ deletion and orphaned objects (`D6e` — answered 2026-09-16: no hard Job deleti
 
 ## Phase 6b — Removing accepted evidence (D6a, D6b, D6d)
 
-**Status: STARTABLE after Phase 6a.**
+**Status: LANDED 2026-09-16 (`D6a` ✓, `D6b` ✓, `D6d` ✓).** Recorded in `## Phase log`; the runbook is
+`## Manual QA runbook — Phase 6b`.
 
 **Goal.** Accepted evidence stays immutable, and taking it out of ordinary use is an explicit, authorized,
 audited action instead of a mutation — with no edit path at all.
@@ -1692,6 +1705,48 @@ compiled and **NOT RUN — device QA is the product owner's** (`qa.md` §7.3).
 
 **Not in this phase.** Any edit of accepted evidence (excluded by `D6a`/`D6b`); physical purge of the stored
 object (`BR-090`); a structured removal-reason catalogue, which is not defined.
+
+**Landed (2026-09-16).** The slice is the API's first operation on a **recorded** photo, and it adds no way
+to change one. **The capability**: `EVIDENCE_PERMISSIONS.PHOTO_REMOVE` (`evidence.photo.remove`) with a
+bilingual name and description, added by the new migration `0011_job_photo_removals.sql`, which grants it to
+the default **Manager** system role and **not** to **Technician** — the same additive shape `0010` used
+(`BR-005`, `BR-089`). **The record**: `job_photo_removals` (`organization_id`, `job_photo_id`,
+`actor_membership_id`, `reason`, `recorded_at`) with a non-empty-reason CHECK and a unique index on
+`(organization_id, job_photo_id)`, so one photo has at most one removal; `job_photos` is untouched and stays
+append-only, and the removal is **added history** (`BR-067`, `BR-089`). **The route**:
+`POST /jobs/:id/photos/:photoId/removal`, guarded by `evidence.photo.remove`, taking `{ reason }` (required,
+≤2000 characters, free text — no catalogue is invented, `BR-042`) and answering with the refreshed Job
+Activity projection exactly as the add-photo and add-note writes do (`BR-001`, `BR-080`). A second removal is
+refused with its own outcome, `409 JOB_PHOTO_ALREADY_REMOVED`, rather than recorded as a state change that did
+not happen. **Reads respect it**: the photo leaves the Activity's `JOB_PHOTO_ADDED` events, so it leaves every
+gallery drawn from them, and the content route answers `404 JOB_PHOTO_NOT_FOUND` for it — while
+`JOB_PHOTO_REMOVED`, a new activity kind carrying `photoId` and `photoRemovalReason`, is part of **every** read,
+because Activity must not silently drop the fact (`BR-080`). The **audit/history context** `D6d` requires is
+the read's own `includeRemovedEvidence=true` value: it adds the removed record back — with the removal's actor,
+instant and reason — and it is authorized by `evidence.photo.remove` in addition to the route's
+`customers.view`, so a technician who may read the timeline is refused rather than quietly answered with the
+ordinary projection (`BR-007`, `BR-089`). The value is a closed vocabulary of `true`/`false`, so a caller can
+never be silently answered with the ordinary read. **Online-only, decided rather than assumed**: the route
+takes no client-generated idempotency key and no conflict policy is decided for it, so it is never queued
+(`offline-first-architecture.md` §5, §8, §13.2). **Android**: `Permission.EVIDENCE_PHOTO_REMOVE` and
+`canRemoveEvidence` gate a **Remove evidence** action in the viewer's top bar (its own `ic_trash` glyph, drawn
+after Save and Share so it is never under the technician's thumb on the way to them), a **confirmation dialog**
+that requires a reason before it can be applied (`BR-067`, `BR-089`), a progress state on the control that
+started it, and honest reports: not permitted, no longer available, needs the server, failed. A refused removal
+is reported through the same channel a save or a share is, inside the viewer, and changes nothing on screen.
+The new activity kind is labelled in both languages and its reason is drawn as the entry's secondary text.
+**The local copy follows the write**: a successful activity write now replaces the working set's activity row
+with the answer the backend gave, exactly as a successful read does (`offline-first-architecture.md` §2,
+`BR-041`) — a device that removed evidence and then lost connectivity would otherwise serve an activity that
+predates its own change and still lists the photo. Nothing in the slice rewrites a byte: the stored object
+stays where it is (`BR-090`), and the photo's row is unchanged. The `ActivityWriteResult` rename
+(`VisitNoteResult` before it) records that two writes now answer with the refreshed timeline.
+
+**What this phase does *not* do, recorded so it is not assumed:** it does **not** purge the stored object, and
+it does **not** evict the device's image cache — a photo that was removed may still have bytes in the bounded,
+evictable Coil disk cache until the LRU drops them (`D5`), which is not a view of the evidence and can never be
+re-drawn because nothing asks for it and the content route answers `404`. It does not restore removed evidence
+(no restore is defined) and it does not add a removal-reason catalogue.
 
 ## Phase 6c — Evidence metadata: no location metadata, phase as draft state (D7)
 
@@ -1894,7 +1949,8 @@ must not step on.
 | A picked original may be a **HEIC/HEIF** or exceed the API's 15 MiB limit | The API accepts only JPEG/PNG/WebP and refuses oversized bodies. **Both halves decided** (D3b: converted on device; D3c: resized to fit) — the risk is now a Phase 2 implementation duty, not an open question | 2 (D3b ✓, D3c ✓) |
 | EXIF/GPS inside a photo is stored and served verbatim | Location policy (`BR-038`) is open. **Answered (`D7` ✓, 2026-09-16)**: GPS/location EXIF and other unneeded metadata are **stripped from uploaded evidence by default**, keeping only what the application needs; `BR-038` stays open for any deliberate *product* use of location | **6c (`D7` ✓)** |
 | The decode ignored a photo's EXIF orientation tag | Every portrait capture drew rotated 90° in the review preview, the tray, the gallery tiles and the viewer. **Fixed 2026-09-15 on the display path** (`JobPhotoImages` applies `JobPhotoOrientation` to what it decodes). **Landed for the stored half by Phase 4b (2026-09-15, `D7b` ✓)**: the preparation steps turn what they re-encode — through the shared `JobPhotoExifOrientation` read and turn the display path uses — so what Servora stores from now on is upright. Evidence already stored or uploaded stays historical and is **not** repaired | fixed (display, 2026-09-15) / fixed for new evidence (stored, Phase 4b 2026-09-15) |
-| Accepted evidence cannot be removed at all | A manager who must take an accepted photo out of ordinary use — a wrong photo, a customer request — has no operation, and improvising one would mutate history. **Answered (`D6a`/`D6b` ✓, 2026-09-16)**: an audited, Manager-level `evidence.photo.remove` soft-removes it with actor, time and reason, the audit record is preserved, and **no edit route is built** | **6b (`D6a`/`D6b` ✓)** |
+| Accepted evidence cannot be removed at all | A manager who must take an accepted photo out of ordinary use — a wrong photo, a customer request — has no operation, and improvising one would mutate history. **Answered (`D6a`/`D6b` ✓, 2026-09-16) and implemented by Phase 6b (landed 2026-09-16)**: an audited, Manager-level `evidence.photo.remove` soft-removes it with actor, time and reason, the audit record is preserved, and **no edit route is built** | closed (`BR-089`) |
+| A removed photo's bytes are not purged | A removal takes evidence out of ordinary use; it does not shred it. The object stays in the bucket (`BR-090`: physical purge is a retention concern, and nothing implements one) and the device's bounded image cache may keep a copy until the LRU evicts it (`D5`). Neither is a view: the photo is never drawn again and the content route answers `404` for it (`docs/api/job-photos.md` §4.1). If a tenant's compliance rule ever needs shredding, that is a deliberate retention capability, not a silent purge here | accepted (`BR-089`, `BR-090`, `D6d`) |
 | Every read of evidence streams bytes through the API | Bandwidth and API load grow with the gallery, and the client cannot read at the edge. **Answered (`D15` ✓, 2026-09-16)**: reads move to **short-lived presigned GET URLs** issued after authorization, with the bucket private and no derived objects. The phase must first resolve the `Host`/plain-HTTP constraint `ADR-013` D7 records | **8 (`D15` ✓)** |
 | The Add update sheet draws an audio kind no session can reach | A kind with no capability, no record and no playback could be mistaken for a working feature. **Answered (`D8` ✓, 2026-09-16)**: audio is implemented as its own evidence kind and `evidence.audio.add` is created **with** it; until then the kind is not offered anywhere (`canAddAudio = false`) | **9 (`D8` ✓)** |
 
@@ -1923,6 +1979,9 @@ must not step on.
 
 | 029 — Phase 5 landed | 2026-09-16 | **The Job and its evidence are readable offline (`D5` ✓).**  **New** `data/jobs/JobEvidenceCache.kt` — the Job read's use of the working set: two rows (`WorkingSetEntityTypes.JOB_DETAILS`, `JOB_ACTIVITY`) holding the backend's own **wire response**, written by every successful read and mapped on the way out, so an offline answer runs the same mapper the online one ran (`BR-041`).  **`data/jobs/JobDetailsRepository.kt`** now reports the reason of each read through private `JobRead`/`ActivityRead` (the DTO is kept while the mapped object is returned) and falls back **only** when the failure could not reach the backend (`couldNotReachBackend()`: `NETWORK`/`SERVER`); a refusal is never replaced, and a read nothing has been reported for still reports its failure. `JobDetailsResult.Success`/`JobActivityResult.Success` carry a `ReadSource`, the ViewModel keeps `detailsSource`/`activitySource` (reset to `BACKEND` by an action's own answer, a write's refreshed timeline, or a failed read), and the screen marks both halves with the existing `OfflineNotice` (`JobDetailsLastReportedTag`, `JobActivityLastReportedTag`).  **The byte-cache policy is now one rule**: `jobPhotoImageDiskCacheKey` (new, pure, JVM-tested) answers `null` for a photo this device holds — so a pending upload's bytes can never be a cache entry and no size policy can evict them (`BR-014`, `BR-015`) — and the session's own key for accepted evidence, which is what the bounded, size-based LRU over the Coil disk cache holds (`JobPhotoImageModule` documents the constants and that nothing in the app prefetches).  **A photo that is neither held nor cached says why**: `JobPhotoContentReader.read` returns `JobPhotoContentRead` (`Bytes`/`Unreachable`/`Unavailable`, with an `IOException`, a `5xx` and an unanswered renewal classed as unreachable — the offline standard's own §13 rule, and `Unreachable` never used for a `401`/`403`/`404`/`422`), the fetcher carries it out as `JobPhotoBytesUnavailableException`, the viewer has its own report (`job_photo_viewer_unavailable_offline`, `JobPhotoViewerOfflineTag`) and a tile draws `ic_cloud_off` with a localized description — never a different picture; a photo this device no longer holds still reports the generic "could not be shown", since reconnecting would not fix it.  **No wire change**: no API, database, permission or contract was touched, so no API command was run. Docs: `offline-first-architecture.md` §9 (the one rule), §11 items 1/4, §12's adopters and online-only list, and its header; this tracker's status, `Current phase`, phase table, state table (new **Offline visibility** row), risk table, the Phase 5 section, and the Phase 5 runbook; `README.md`.  | **Android** — unit: PASS (`make android-test`: **505 tests, 0 failures**, with the new coverage: **8** cases in `data/jobs/JobDetailsRepositoryTest` — the Job and the activity each served from the last reported answer on an unreachable backend **and** on a `5xx`, a `403`/`404`/`422` never replaced, nothing reported yet, the newest answer replacing the older one, and another subject's row never served; **6** in `data/jobs/JobPhotoFetcherTest` — the reason carried out of a failed read (offline, a `5xx`, a refused session, a refusal that is not a `401`, a photo this device no longer holds), a failed read writing **nothing** to the cache, and a photo this device holds never entering it; **2** in `data/jobs/JobPhotoImageCacheKeyTest` — a `Local` photo given no disk key and evidence's disk key equal to its memory key; **4** in `ui/jobs/JobDetailsViewModelTest` — both sources reported, and a failure reporting neither; **2** in `ui/jobs/JobPhotoViewerTest` — the offline reason read back from the failure and everything else read as "could not be shown"). Device-test sources compile: PASS (`./gradlew assembleDebugAndroidTest`, with **2** new Compose cases in `ui/jobs/JobDetailsScreenTest`: both last-reported notices drawn for a device answer, and neither drawn for a backend answer). Lint: PASS (`make android-lint`, 46 findings, all pre-existing categories — **the first run crashed inside lint itself**, `Unexpected failure during lint analysis … this is a bug in lint or one of the libraries it depends on` while analysing `JobActivitySection.kt`; the identical re-run completed, and the compiled classes are newer than every source, so the report describes this build). Debug build: PASS (`make android-build`). **No device or emulator command was run and no `adb` was used (`qa.md` §7.3)**, so every on-device step is **NOT RUN — device QA is the product owner's**; the runbook above is the hand-off. |
 | 029 — Phase 6a landed | 2026-09-16 | **A photo the API permanently refused is explicitly discardable (`D6c` ✓).**  `ui/jobs/JobPhotoTray.kt`: `JobPhotoPendingTile` draws a **Discard** `TextButton` (`jobPhotoRefusedDiscardTag`) exactly when the tray's upload state is `REFUSED`, under the `Refused by the server` reason it already reports — and the X a draft carries is **not** drawn as well, so one control clears the photo; the upload-state text and the count are unchanged.  `domain/model/JobPhoto.kt` now owns the three rules the data layer and the UI must share (`BR-041`): `isRemovable()` (`!submitted`), `isRefusedUpload(upload)` (`submitted && REFUSED`) and `isDiscardable(upload)` (`isRemovable() || isRefusedUpload(…)`), moved there from `ui/jobs/JobPhotoComponents.kt`, which no longer defines the photo's local-removal rule.  `data/jobs/JobPhotoSession.discard` decides from the **queue** instead of the caller's own record: it reads the photo's own upload state through a new private `uploadState(photo)` (over `uploadStates`), applies `isDiscardable`, deletes the file, removes the queued refusal when the upload was refused, and removes the draft row — so a refused photo loses file, row and queue row together, a queued or retrying one loses nothing, and a stale caller-supplied `submitted` flag cannot change the outcome.  `data/offline/OutboxStore.kt` gains `discardRefused(operationId)`: `RoomOutboxStore` deletes through the new `OutboxDao.deleteRefused(operationId, rejected)`, whose predicate carries the state, and `InMemoryOutboxStore` mirrors it — so only a terminal refusal can be removed through that route and waiting work can never be dropped by it (`BR-014`, offline standard §11 item 5).  `ui/jobs/JobDetailsViewModel.kt` stops reading the tray's loss of a refused photo as an acceptance: `discardedLocally` records it **before** the row leaves and only for a photo the tray reports as refused, is pruned once the tray has reported it, and is consulted by `anUploadWasAccepted` — so the Activity is not re-read for evidence the backend never accepted, while an accepted upload still is (`BR-001`, `BR-080`).  **Localization**: `job_photo_tray_discard` (EN *Discard* / FR *Supprimer*).  **No API, database, permission, contract or submitted byte changed** — the photo was never accepted, so there is no server-side object, route or capability to touch, and nothing removes evidence (that is Phase 6b).  Docs: this tracker's `Current phase`, phases-at-a-glance table, state table (**Pending tray / review**), risk table (the trapped-photo risk closed), Phase 6a section, phase log and the new runbook; `docs/design/android-design-system.md` (a refused tray tile's own action); `docs/architecture/offline-first-architecture.md` §9 (the file and the row go together), §11 item 5 (answered for evidence) and §12 adopter 4; `README.md`. | **Android** — unit: PASS (`make android-test`: **509 tests, 0 failures**, up from 505: **2** new cases in `data/jobs/JobPhotoSessionTest` — a refused photo discarded with its file, its draft row and its queued refusal, with nothing left replayable, and a photo whose upload is still waiting kept with nothing removed; **2** in `ui/jobs/JobPhotoCaptureViewModelTest` — a refusal the tray reports discarded without re-reading the timeline, and a queued photo the screen was asked to remove kept and reported. `PhotoJobRepository` now counts its timeline reads, so the accepted-upload case asserts the one re-read it earns while the discard case asserts none). Device-test sources compile: PASS (`./gradlew assembleDebugAndroidTest`, with one new Compose case in `ui/jobs/JobDetailsScreenTest`: the discard offered only for a refused photo and asking for that photo's removal, and neither control for a queued one). Lint: PASS (`make android-lint`: 47 findings, every one of a pre-existing category and none in a file this phase touched). Debug build: PASS (`make android-build`). **No device or emulator command was run and no `adb` was used (`qa.md` §7.3)**, so the Compose case is **NOT RUN — device QA is the product owner's**; the runbook above is the hand-off. Nothing was changed in `api/`, so no API command was run. |
+| 029 — Phase 6b landed | 2026-09-16 | **Accepted evidence can be taken out of ordinary use, audited and without an edit route (`D6a` ✓, `D6b` ✓, `D6d` ✓).**  **Database**: `job_photo_removals` (`organization_id`, `job_photo_id`, `actor_membership_id`, `reason`, `recorded_at`; non-empty-reason CHECK; unique `(organization_id, job_photo_id)`) — the removal is **added history**, so `job_photos` stays append-only and holds every value it held (`BR-067`, `BR-089`). Migration `0011_job_photo_removals.sql` creates the table (regenerated `meta/0011_snapshot.json`), adds `evidence.photo.remove` with its bilingual name and description and grants it to the default **MANAGER** role **only**; `run-development-seed.ts` seeds the same row and grant.  **`auth/permissions.ts`**: `EVIDENCE_PERMISSIONS.PHOTO_REMOVE`.  **`jobs/job-photo.dto.ts`**: `parseRemoveJobPhotoDto` + `MAX_JOB_PHOTO_REMOVAL_REASON_LENGTH` (2000) — the reason is **required** (`BR-089` records it) and free text, because no catalogue is defined (`BR-042`).  **`jobs/job-photos.service.ts`**: `removeJobPhoto` resolves the Job and the photo through one left-joined `findPhoto`, refuses a photo that is gone (`JOB_PHOTO_NOT_FOUND`) or already removed (`JOB_PHOTO_ALREADY_REMOVED`, also on the unique-violation race), appends the removal row and answers `readJobActivity`; `readJobPhotoContent` left-joins the removal and answers `404` for removed evidence, so an ordinary read never discloses it.  **`jobs/job-activity.ts`**: the `JOB_PHOTO_REMOVED` kind, `JobActivityOptions.includeRemovedEvidence`, the removal rows read by joining `job_photos` (so a removal is bounded to the Job), `photoRows` filtered by the removed set for an ordinary read, and `photoRemovalReason` as the removal's own response field (normalized to `null` on every other event).  **`jobs/job-activity-query.dto.ts`** (new): `parseJobActivityOptions` — a closed `true`/`false` vocabulary, refused otherwise.  **`jobs/jobs.controller.ts`**: `POST :id/photos/:photoId/removal` on `evidence.photo.remove` answering the refreshed timeline (`BR-001`, `BR-080`), the activity route's audit-context gate (`403` when `includeRemovedEvidence=true` without `evidence.photo.remove`), and `photoAlreadyRemoved()` → `409 JOB_PHOTO_ALREADY_REMOVED`.  **Android**: `Permission.EVIDENCE_PHOTO_REMOVE` + `canRemoveEvidence`; `JobActivityKind.JOB_PHOTO_REMOVED`, `JobActivityEvent.photoRemovalReason`, the DTO field and the timeline label (its reason drawn as the entry's secondary text); `ActivityWriteResult` (renamed from `VisitNoteResult`) with `JobDetailsApi.removeJobPhoto`, the repository's `removeJobPhoto` and the `JOB_PHOTO_ALREADY_REMOVED` classification; `JobDetailsViewModel.removeEvidencePhoto` (refused without a reason, refused for a photo the screen does not hold as evidence, online-only) with `photoRemoval` in-flight state, `JobPhotoMessage.EVIDENCE_REMOVED` and the removal failures (`REMOVAL_NOT_PERMITTED`, `REMOVAL_NO_LONGER_AVAILABLE`, `REMOVAL_UNREACHABLE`, `REMOVAL_FAILED`); the viewer's `Remove evidence` control (new `ic_trash`, drawn last in the top bar and only on the capability), the `JobPhotoRemovalDialog` confirmation that requires a reason, and the screen/NavHost wiring; strings in both languages.  **Docs**: `docs/api/job-photos.md` §1/§2/§4/§5/§7, `docs/api/job-activity.md` §2/§3.1/§3.2/§3.4/§3.5/§4, `ADR-015` (the third capability), the design system's viewer row, the offline standard's §12 and the README. | **API unit**: PASS (`make api-test`, 386 tests). **API e2e**: PASS (`make api-test-e2e`, 246 tests, 17 files) — the new cases cover `401`, `403` without the capability (and nothing recorded), a role that holds the field capabilities being refused, the recorded removal with actor/reason, the evidence excluded from the ordinary activity read and its bytes answering `404`, the audit context containing the removed record with actor/time/reason, `403` for the audit context without the capability, `409` on a second removal, `404` for a photo the Job does not hold and for another organization, `400` with no reason, and the seeded bilingual catalogue row. **Android JVM**: PASS (`make android-test`, 518 tests) — the repository (trimmed reason, mapped events, the already-removed classification, the local copy following the write), the ViewModel (removal recorded and the timeline taken from its answer, a refusal reported without changing anything, no reason sent, a photo this screen does not hold) and the capability mapping. **Android lint**: PASS. **Android build**: PASS (`app-debug.apk`). **Device/emulator tests**: compiled (`assembleDebugAndroidTest`) and **NOT RUN — device QA is the product owner's**; the runbook is `## Manual QA runbook — Phase 6b`. **Left running**: the Gradle/Kotlin daemons were released (`make android-stop`); the foundation stack was already running and was left untouched. |
+
+
 
 ## Manual QA runbook — Phase 3 (product owner)
 
@@ -2445,14 +2504,70 @@ A **permanent** refusal is what these steps need: run the app against a session 
 - Nothing here removes **evidence**: the backend never accepted the photo, so there is no server-side
   object, no route and no capability involved (`BR-088`; removing accepted evidence is Phase 6b).
 
+## Manual QA runbook — Phase 6b (product owner)
+
+Build: `make android-build` (`android/app/build/outputs/apk/debug/app-debug.apk`). The API and the object
+store must be up (`make up`) and reachable from the device (`adb reverse tcp:3000 tcp:3000`). The capability
+cases need **two sessions**: a **Manager** (whose role holds `evidence.photo.remove`) and one whose role does
+not — a default **Technician** is exactly that, and a custom role without the capability works too.
+
+```text
+1. Sign in as a Technician and open a Job that has at least one photo in its Activity.
+2. Open the photo in the gallery.
+   Expect: the viewer's top bar carries Close, the position, Save to device and Share — and NO trash icon.
+   Removing recorded evidence is a Manager action, so the technician is not offered it (`BR-089`).
+3. Sign in as a Manager and open the same Job's photo.
+   Expect: a trash icon is drawn after Save and Share.
+4. Tap the trash icon.
+   Expect: a confirmation dialog titled "Remove this photo?" states that the photo cannot be deleted, and
+   the reason field is empty. The Remove action is greyed out (disabled) until a reason is typed.
+5. Type a reason and tap "Remove".
+   Expect: the viewer closes, a report says the evidence was removed, and the photo is gone from the
+   gallery and from the Activity's photos — while a new timeline entry says a photo was removed, naming
+   you and the reason you gave.
+6. Leave the Job and open it again.
+   Expect: the photo is still gone from the photos and the removal entry is still in the timeline
+   (`BR-080`, `BR-089`).
+7. Tap the removal entry's photo area or try to reopen the photo from any surface.
+   Expect: there is nothing to open — the removed photo is not drawn anywhere, and asking the API for its
+   bytes answers 404. Nothing is served in its place.
+8. Repeat step 4 on a photo that has already been removed (the timeline shows the removal but no photo).
+   Expect: it cannot be reached from the UI at all; if the API is asked directly, it answers 409
+   "That photo has already been removed." — one photo has one removal, and no restore exists.
+9. Switch the app language to French, open another Job's photo and start a removal.
+   Expect: "Retirer la preuve" on the action, "Retirer cette photo ?" as the dialog title, "Pourquoi ce
+   retrait ?" on the reason field, and the same behaviour.
+10. Sign in as a Manager, open the same photo, and turn the network off (airplane mode) before confirming.
+    Expect: "Removing evidence needs the server. Connect and try again." — the removal is online-only and
+    is never queued (`BR-089`, offline standard §5, §8, §13.2).
+11. Turn the network back on and confirm the removal.
+    Expect: it applies exactly as in step 5.
+```
+
+**Known limitations, deliberately.**
+
+- **Nothing purges the bytes.** The stored object stays in the bucket and the device's bounded image cache
+  may keep a copy of what it drew until the LRU evicts it (`D5`, `BR-090`). Neither is a view of the
+  evidence: it is never drawn again, and the API refuses its bytes (`docs/api/job-photos.md` §4.1).
+- **A removal reason is free text.** `BR-089` requires a reason; its catalogue is not defined, so no picker
+  or validation beyond "non-empty, ≤2000 characters" exists (`BR-042`).
+- **There is no restore.** Removal is one-way in v1: a photo taken out of ordinary use stays out of it. A
+  second removal is refused rather than recorded twice.
+- **The removal is not an offline operation.** It is a Manager action that records a historical decision, so
+  it needs the backend's answer (`BR-001`).
+
 ## Not implemented, and not to be assumed
 
 - **Any evidence kind other than photos and audio.** Audio is decided **in scope** on the same abstraction
-  (`D8` ✓, 2026-09-16) and is **not implemented** (Phase 9); generic files — PDFs, documents — are **out of
-  scope in v1** (`BR-091`); video is not decided.
+  (`D8` ✓, 2026-09-16) and its **API half is implemented** — `docs/tracker/035-android-audio-evidence.md`,
+  Phase 9a landed 2026-09-16 (`ADR-018`, `docs/api/job-audio.md`); the Android recorder, offline upload and
+  playback are that tracker's Phases 9b/9c. Generic files — PDFs, documents — are **out of scope in v1**
+  (`BR-091`); video is not decided.
 - **Editing or re-annotating accepted evidence.** `D6a`/`D6b` ✓ (2026-09-16) decide there is **no edit
   route**, in any client, ever, and that a caption/note correction is a new Activity. The audited **soft
-  removal** a Manager performs is Phase 6b and is **not implemented**.
+  removal** a Manager performs is **implemented** (`BR-089`; tracker 029 Phase 6b landed 2026-09-16), and it
+  is a removal rather than an edit: it appends a record and changes nothing the photo holds. **No restore**
+  and no removal-reason catalogue exist.
 - **Retention, visibility and audit of evidence.** Decided (`BR-090`: indefinite for the life of the tenant,
   no content versioning, and a future administrative purge only as a deliberate cascade) but **not
   implemented** — nothing purges an object today, and configurable per-tenant retention is a later

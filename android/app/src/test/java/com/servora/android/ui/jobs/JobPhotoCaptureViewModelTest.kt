@@ -20,7 +20,7 @@ import com.servora.android.data.jobs.JobPhotoSession
 import com.servora.android.data.jobs.MAX_JOB_PHOTO_BYTES
 import com.servora.android.data.jobs.PhotoCollaborators
 import com.servora.android.data.jobs.TEST_CLOCK
-import com.servora.android.data.jobs.VisitNoteResult
+import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.data.offline.OutboxFailureReason
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.CustomerJobAddress
@@ -878,7 +878,13 @@ private class PhotoJobRepository(
         jobId: String,
         visitId: String,
         body: String,
-    ): VisitNoteResult = unsupported()
+    ): ActivityWriteResult = unsupported()
+
+    override suspend fun removeJobPhoto(
+        jobId: String,
+        photoId: String,
+        reason: String,
+    ): ActivityWriteResult = unsupported()
 
     override suspend fun changeJobStatus(
         jobId: String,

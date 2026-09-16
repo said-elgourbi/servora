@@ -4,8 +4,11 @@ import {
   optionalText,
   optionalUuid,
   requireEnum,
+  requireText,
 } from '../validation/domain-validation.js';
 import type { PhotoContentType } from '../storage/object-storage.js';
+import { EVIDENCE_PHASES } from './evidence-phase.js';
+import type { EvidencePhase } from './evidence-phase.js';
 
 /*
  * The Job photo upload request (`BR-015`, `BR-027`).
@@ -25,10 +28,10 @@ import type { PhotoContentType } from '../storage/object-storage.js';
  *   client's declaration.
  */
 
-/** The field-work phase a photo was taken in (`BR-027`). */
-export const JOB_PHOTO_PHASES = ['BEFORE_WORK', 'DURING_WORK', 'AFTER_WORK'] as const;
+/** The field-work phase a photo was taken in (`BR-027`). One definition, shared with every evidence kind. */
+export const JOB_PHOTO_PHASES = EVIDENCE_PHASES;
 
-export type JobPhotoPhase = (typeof JOB_PHOTO_PHASES)[number];
+export type JobPhotoPhase = EvidencePhase;
 
 /**
  * The largest photo the API accepts, in bytes.
@@ -83,6 +86,39 @@ export function parseCreateJobPhotoDto(input: unknown): CreateJobPhotoDto {
     phase: requireEnum(source.phase, JOB_PHOTO_PHASES, 'phase'),
     note: optionalText(source.note, 'note', 2000),
     capturedAt: capturedAt === null ? null : new Date(capturedAt),
+  };
+}
+
+/**
+ * The largest reason a removal may carry, in characters.
+ *
+ * A removal is an audited action (`BR-089`), so its reason is bounded like a photo's note rather than
+ * unbounded: the API accepts free text, but not text of any size. A **structured** catalogue of
+ * removal reasons is not defined by product ownership, so none is invented here (`BR-042`).
+ */
+export const MAX_JOB_PHOTO_REMOVAL_REASON_LENGTH = 2000;
+
+/** The fields a caller supplies to take accepted evidence out of ordinary use (`BR-089`). */
+export interface RemoveJobPhotoDto {
+  /**
+   * Why the evidence is being removed (`BR-089`).
+   *
+   * It is required: the rule states that a removal records the actor, the timestamp and the reason,
+   * and a removal with no reason would be the recorded half of that rule. The catalogue of reasons is
+   * free text until product ownership defines one.
+   */
+  readonly reason: string;
+}
+
+/** Validates the removal request into a `RemoveJobPhotoDto`. */
+export function parseRemoveJobPhotoDto(input: unknown): RemoveJobPhotoDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  return {
+    reason: requireText(
+      source.reason,
+      'reason',
+      MAX_JOB_PHOTO_REMOVAL_REASON_LENGTH,
+    ),
   };
 }
 

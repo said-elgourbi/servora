@@ -452,14 +452,23 @@ private fun activityTitle(event: JobActivityEvent): String =
         // on the photo, rather than twice (`BR-012`, `BR-028`). Its note belongs to the photo and is
         // read there.
         JobActivityKind.JOB_PHOTO_ADDED -> stringResource(R.string.job_photo_activity_added)
+
+        // Removing evidence is its own event (`BR-089`): it names what happened, and the photo is not
+        // drawn, because it is no longer in ordinary use.
+        JobActivityKind.JOB_PHOTO_REMOVED -> stringResource(R.string.job_photo_activity_removed)
     }
 
-/** The optional secondary text an entry carries: an outcome's summary. */
+/** The optional secondary text an entry carries: an outcome's summary, or a removal's reason. */
 @Composable
 private fun activityContent(event: JobActivityEvent): String? =
     when (event.kind) {
         JobActivityKind.VISIT_OUTCOME_RECORDED ->
             event.outcomeSummary?.takeIf { it.isNotBlank() }
+
+        // A removal states why the evidence was taken out of use (`BR-089`), and that reason is what
+        // the entry has to say beyond the fact (`BR-080`).
+        JobActivityKind.JOB_PHOTO_REMOVED ->
+            event.photoRemovalReason?.takeIf { it.isNotBlank() }
 
         // A photo's note is drawn under the photo itself (`ActivityPhotoEvidence`).
         JobActivityKind.JOB_PHOTO_ADDED -> null

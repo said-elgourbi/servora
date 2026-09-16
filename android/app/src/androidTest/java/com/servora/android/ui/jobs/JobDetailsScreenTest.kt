@@ -543,6 +543,60 @@ class JobDetailsScreenTest {
     }
 
     @Test
+    fun offersTheRemovalOnlyToASessionThatMayRemoveEvidenceAndConfirmsTheReason() {
+        var removedPhotoId: String? = null
+        var removedReason: String? = null
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(photoEvent()),
+            ),
+            canViewEvidence = true,
+            canRemoveEvidence = true,
+            onRemoveEvidencePhoto = { photoId, reason ->
+                removedPhotoId = photoId
+                removedReason = reason
+            },
+        )
+
+        tapGalleryPhoto("photo-1")
+        composeTestRule.onNodeWithTag(JobPhotoViewerRemoveTag).performClick()
+
+        // Nothing is applied until the manager has stated why (`BR-067`, `BR-089`).
+        assertNull(removedPhotoId)
+        composeTestRule.onNodeWithTag(JobPhotoRemovalDialogTag).assertIsDisplayed()
+        // The action is disabled until a reason is given, because the API refuses a removal without one.
+        composeTestRule.onNodeWithTag(JobPhotoRemovalConfirmTag).assertIsNotEnabled()
+
+        composeTestRule.onNodeWithTag(JobPhotoRemovalReasonTag)
+            .performTextInput("Photographed the wrong property")
+        composeTestRule.onNodeWithTag(JobPhotoRemovalConfirmTag).performClick()
+
+        assertEquals("photo-1", removedPhotoId)
+        assertEquals("Photographed the wrong property", removedReason)
+    }
+
+    @Test
+    fun doesNotOfferTheRemovalToASessionWithoutTheCapability() {
+        // The removal is a Manager-level capability of its own (`BR-089`), so a session that may read
+        // the evidence is not offered it (`BR-007`, `BR-011`).
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(photoEvent()),
+            ),
+            canViewEvidence = true,
+            canRemoveEvidence = false,
+        )
+
+        tapGalleryPhoto("photo-1")
+        composeTestRule.onNodeWithTag(JobPhotoViewerTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobPhotoViewerRemoveTag).assertDoesNotExist()
+    }
+
+    @Test
     fun keepsTheNotesUnderThePhotoAndExpandsALongOneOnDemand() {
         val images = RecordingJobPhotoImages(ApplicationProvider.getApplicationContext())
         // Long enough that the viewer has to decide whether it fits above the action that expands it.
@@ -966,8 +1020,10 @@ class JobDetailsScreenTest {
         onDismissPhotoMessage: () -> Unit = {},
         onSavePhoto: (String) -> Unit = {},
         onSharePhoto: (String, String) -> Unit = { _, _ -> },
+        onRemoveEvidencePhoto: (String, String) -> Unit = { _, _ -> },
         onSavePermissionResult: (Boolean) -> Unit = {},
         canViewEvidence: Boolean = false,
+        canRemoveEvidence: Boolean = false,
         photoImages: JobPhotoImages = JobPhotoImages.None,
     ) {
         val screenState = state ?: JobDetailsUiState(jobId = JOB_ID, details = details)
@@ -1000,8 +1056,10 @@ class JobDetailsScreenTest {
                     onDismissPhotoMessage = onDismissPhotoMessage,
                     onSavePhoto = onSavePhoto,
                     onSharePhoto = onSharePhoto,
+                    onRemoveEvidencePhoto = onRemoveEvidencePhoto,
                     onSavePermissionResult = onSavePermissionResult,
                     canViewEvidence = canViewEvidence,
+                    canRemoveEvidence = canRemoveEvidence,
                     photoImages = photoImages,
                 )
             }

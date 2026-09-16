@@ -38,7 +38,7 @@ import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsResult
-import com.servora.android.data.jobs.VisitNoteResult
+import com.servora.android.data.jobs.ActivityWriteResult
 import java.time.Instant
 import com.servora.android.domain.model.Customer
 import com.servora.android.domain.model.CustomerCompany
@@ -592,7 +592,13 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
         jobId: String,
         visitId: String,
         body: String,
-    ): VisitNoteResult = unreachable()
+    ): ActivityWriteResult = unreachable()
+
+    override suspend fun removeJobPhoto(
+        jobId: String,
+        photoId: String,
+        reason: String,
+    ): ActivityWriteResult = unreachable()
 
     // The navigation tests never reach a Job or Visit action: the destination reports that no Job is
     // readable, so its action row is never drawn.

@@ -13,16 +13,20 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -98,6 +102,21 @@ const val JobPhotoViewerSaveTag = "job-photo-viewer-save"
 
 /** Identifies the action that hands the photo to another application (`D13`). */
 const val JobPhotoViewerShareTag = "job-photo-viewer-share"
+
+/** Identifies the action that takes accepted evidence out of ordinary use (`BR-089`). */
+const val JobPhotoViewerRemoveTag = "job-photo-viewer-remove"
+
+/** Identifies the confirmation a removal states its reason in (`BR-089`). */
+const val JobPhotoRemovalDialogTag = "job-photo-removal-dialog"
+
+/** Identifies the reason field of the removal confirmation (`BR-089`). */
+const val JobPhotoRemovalReasonTag = "job-photo-removal-reason"
+
+/** Identifies the action that applies the removal (`BR-089`). */
+const val JobPhotoRemovalConfirmTag = "job-photo-removal-confirm"
+
+/** Identifies the action that abandons the removal (`BR-089`). */
+const val JobPhotoRemovalCancelTag = "job-photo-removal-cancel"
 
 /** Identifies the label above the photo's note (`BR-027`). */
 const val JobPhotoViewerNoteLabelTag = "job-photo-viewer-note-label"
@@ -320,9 +339,12 @@ internal fun JobPhotoViewer(
     initialPage: Int,
     uploads: Map<String, JobPhotoSyncState>,
     canExportEvidence: Boolean,
+    canRemoveEvidence: Boolean,
     export: JobPhotoExportAction?,
+    removal: String?,
     onSave: (String) -> Unit,
     onShare: (String) -> Unit,
+    onRemove: (String, String) -> Unit,
     photoImages: JobPhotoImages,
     reportHostState: SnackbarHostState,
     onDismiss: () -> Unit,
@@ -332,6 +354,14 @@ internal fun JobPhotoViewer(
     // badge, a position or an action never names a photo that is halfway off the screen.
     val currentPage = pagerState.currentPage.coerceIn(photos.indices)
     val currentPhoto = photos[currentPage]
+
+    /*
+     * The photo the removal is being confirmed for, or `null` while no confirmation is open.
+     *
+     * The decision is the manager's, so the reason and the confirmation are stated before the API is
+     * asked to apply anything (`BR-067`, `BR-089`), and the dialog names the photo it is about.
+     */
+    var removalTargetId by remember { mutableStateOf<String?>(null) }
 
     /*
      * How far the photo on screen is zoomed, reported by that page (`D11`). It decides whether a swipe
@@ -385,9 +415,12 @@ internal fun JobPhotoViewer(
                             null
                         },
                         canExportEvidence = canExportEvidence,
+                        canRemoveEvidence = canRemoveEvidence,
                         export = export,
+                        removal = removal,
                         onSave = { onSave(currentPhoto.photoId) },
                         onShare = { onShare(currentPhoto.photoId) },
+                        onRemove = { removalTargetId = currentPhoto.photoId },
                         onClose = onDismiss,
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
@@ -438,6 +471,88 @@ internal fun JobPhotoViewer(
             )
         }
     }
+
+    // The confirmation is a window of its own over the viewer, because the removal is a decision about
+    // recorded evidence: the manager states why, and nothing is applied until they confirm it
+    // (`BR-067`, `BR-089`).
+    removalTargetId?.let { photoId ->
+        JobPhotoRemovalDialog(
+            isRemoving = removal == photoId,
+            onConfirm = { reason ->
+                removalTargetId = null
+                onRemove(photoId, reason)
+            },
+            onDismiss = { removalTargetId = null },
+        )
+    }
+}
+
+/**
+ * The confirmation a removal states its reason in (`BR-067`, `BR-089`).
+ *
+ * Removing accepted evidence is a decision about a historical record, so it is confirmed explicitly:
+ * the dialog says what it does, why a reason is required, and what it does **not** do — the photo is
+ * not deleted, its record and history are preserved, and the removal itself is recorded
+ * (`BR-088`, `BR-089`). The reason is the only input, and the action that applies the removal is
+ * disabled until one is given, because the API refuses a removal without a reason and a dialog that
+ * could send one would only produce a refusal.
+ */
+@Composable
+private fun JobPhotoRemovalDialog(
+    isRemoving: Boolean,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var reason by rememberSaveable { mutableStateOf("") }
+    val canConfirm = reason.isNotBlank() && !isRemoving
+
+    AlertDialog(
+        onDismissRequest = { if (!isRemoving) onDismiss() },
+        title = {
+            Text(
+                text = stringResource(R.string.job_photo_removal_title),
+                modifier = Modifier.testTag(JobPhotoRemovalDialogTag),
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = stringResource(R.string.job_photo_removal_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = reason,
+                    onValueChange = { reason = it },
+                    enabled = !isRemoving,
+                    label = { Text(stringResource(R.string.job_photo_removal_reason_label)) },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .testTag(JobPhotoRemovalReasonTag),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(reason) },
+                enabled = canConfirm,
+                modifier = Modifier.testTag(JobPhotoRemovalConfirmTag),
+            ) {
+                Text(stringResource(R.string.job_photo_removal_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isRemoving,
+                modifier = Modifier.testTag(JobPhotoRemovalCancelTag),
+            ) {
+                Text(stringResource(R.string.job_photo_removal_cancel))
+            }
+        },
+    )
 }
 
 /**
@@ -596,25 +711,29 @@ private fun JobPhotoViewerReport(message: String, tag: String) {
 }
 
 /**
- * The viewer's top bar: the close action, the photo's position, and the two evidence actions (`D11`,
- * `D12`, `D13`).
+ * The viewer's top bar: the close action, the photo's position, and the evidence actions (`D11`, `D12`,
+ * `D13`, `BR-089`).
  *
  * It is an overlay on the photo rather than a row above it, so the photo keeps the whole screen; what
  * makes it readable over any photo is [JobPhotoViewerBarScrim], and the position is centred in the
  * screen rather than between the two groups, so it reads as a position and not as a label of either.
  *
- * The evidence actions are drawn only for a session the API would let read the evidence (`BR-006`,
- * `BR-007`, `BR-011`, `BR-015`). While one of them is running it reports that it is working, so a slow
- * read cannot be asked for twice and a tap still in progress does not look like a tap that did nothing
- * (`BR-042`).
+ * The evidence actions are drawn only for a session the API would let perform them (`BR-006`, `BR-007`,
+ * `BR-011`, `BR-015`): the two that read the photo's bytes need `evidence.view`, and removing recorded
+ * evidence needs the Manager-level `evidence.photo.remove` (`BR-089`). While one of them is running it
+ * reports that it is working, so a slow read cannot be asked for twice and a tap still in progress does
+ * not look like a tap that did nothing (`BR-042`).
  */
 @Composable
 private fun JobPhotoViewerTopBar(
     position: String?,
     canExportEvidence: Boolean,
+    canRemoveEvidence: Boolean,
     export: JobPhotoExportAction?,
+    removal: String?,
     onSave: () -> Unit,
     onShare: () -> Unit,
+    onRemove: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -646,24 +765,38 @@ private fun JobPhotoViewerTopBar(
             )
         }
 
-        if (canExportEvidence) {
+        if (canExportEvidence || canRemoveEvidence) {
             Row(modifier = Modifier.align(Alignment.CenterEnd)) {
-                JobPhotoViewerControl(
-                    tag = JobPhotoViewerSaveTag,
-                    icon = R.drawable.ic_download,
-                    label = R.string.job_photo_viewer_save,
-                    working = export == JobPhotoExportAction.SAVE,
-                    enabled = export == null,
-                    onClick = onSave,
-                )
-                JobPhotoViewerControl(
-                    tag = JobPhotoViewerShareTag,
-                    icon = R.drawable.ic_share,
-                    label = R.string.job_photo_viewer_share,
-                    working = export == JobPhotoExportAction.SHARE,
-                    enabled = export == null,
-                    onClick = onShare,
-                )
+                if (canExportEvidence) {
+                    JobPhotoViewerControl(
+                        tag = JobPhotoViewerSaveTag,
+                        icon = R.drawable.ic_download,
+                        label = R.string.job_photo_viewer_save,
+                        working = export == JobPhotoExportAction.SAVE,
+                        enabled = export == null && removal == null,
+                        onClick = onSave,
+                    )
+                    JobPhotoViewerControl(
+                        tag = JobPhotoViewerShareTag,
+                        icon = R.drawable.ic_share,
+                        label = R.string.job_photo_viewer_share,
+                        working = export == JobPhotoExportAction.SHARE,
+                        enabled = export == null && removal == null,
+                        onClick = onShare,
+                    )
+                }
+                if (canRemoveEvidence) {
+                    // Removing is drawn last, so it is the outermost action and never sits under the
+                    // technician's thumb on the way to Save or Share (`BR-012`).
+                    JobPhotoViewerControl(
+                        tag = JobPhotoViewerRemoveTag,
+                        icon = R.drawable.ic_trash,
+                        label = R.string.job_photo_viewer_remove,
+                        working = removal != null,
+                        enabled = removal == null && export == null,
+                        onClick = onRemove,
+                    )
+                }
             }
         }
     }

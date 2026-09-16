@@ -187,8 +187,10 @@ fun JobDetailsScreen(
     onDismissPhotoMessage: () -> Unit,
     onSavePhoto: (String) -> Unit,
     onSharePhoto: (String, String) -> Unit,
+    onRemoveEvidencePhoto: (String, String) -> Unit,
     onSavePermissionResult: (Boolean) -> Unit,
     canViewEvidence: Boolean,
+    canRemoveEvidence: Boolean,
     photoImages: JobPhotoImages = JobPhotoImages.None,
     modifier: Modifier = Modifier,
 ) {
@@ -474,9 +476,14 @@ fun JobDetailsScreen(
             initialPage = viewedPhotoPage,
             uploads = state.photoUploads,
             canExportEvidence = canViewEvidence,
+            // Removing accepted evidence is its own capability, and a Manager-level one (`BR-089`): it
+            // is never inferred from the ability to read or record a photo.
+            canRemoveEvidence = canRemoveEvidence,
             export = state.photoExport,
+            removal = state.photoRemoval,
             onSave = onSavePhoto,
             onShare = { photoId -> onSharePhoto(photoId, shareChooserTitle) },
+            onRemove = onRemoveEvidencePhoto,
             photoImages = photoImages,
             reportHostState = snackbarHostState,
             onDismiss = { viewedPhotoId = null },

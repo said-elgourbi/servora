@@ -104,6 +104,13 @@ class PhotoUploadApi : JobDetailsApi {
         request: AddVisitNoteRequestDto,
     ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
 
+    override suspend fun removeJobPhoto(
+        authorization: String,
+        jobId: String,
+        photoId: String,
+        request: RemoveJobPhotoRequestDto,
+    ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
+
     override suspend fun assignableTechnicians(
         authorization: String,
     ): List<AssignableTechnicianDto> =

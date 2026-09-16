@@ -18,6 +18,14 @@ export class FakeObjectStorage implements ObjectStorage {
   private readonly objects = new Map<string, StoredObject>();
   readonly puts: PutObjectInput[] = [];
 
+  /**
+   * Every key the API asked for, in order.
+   *
+   * It is what lets a test assert that an operation never touched the store — a removal, for example,
+   * records a decision about evidence rather than purging its bytes (`BR-089`, `BR-090`).
+   */
+  readonly gets: string[] = [];
+
   /** When set, every operation fails the way an unreachable provider would. */
   failWith: Error | null = null;
 
@@ -37,6 +45,7 @@ export class FakeObjectStorage implements ObjectStorage {
     if (this.failWith !== null) {
       throw this.failWith;
     }
+    this.gets.push(key);
     const object = this.objects.get(key);
     if (object === undefined) {
       throw new ObjectNotFoundError();
@@ -48,6 +57,7 @@ export class FakeObjectStorage implements ObjectStorage {
   clear(): void {
     this.objects.clear();
     this.puts.length = 0;
+    this.gets.length = 0;
   }
 
   /** A provider failure, for the tests that must see the write refused rather than faked. */

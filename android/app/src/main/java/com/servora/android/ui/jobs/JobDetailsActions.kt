@@ -538,6 +538,12 @@ internal fun jobActionFailureMessage(
         com.servora.android.data.jobs.JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE ->
             R.string.job_action_error_technicians_not_assignable
 
+        // A removal conflict is reported by the evidence removal, which reports through the photo
+        // channel; stating it here too keeps the mapping total without inventing a meaning for a code
+        // this screen's actions cannot produce (`BR-042`).
+        com.servora.android.data.jobs.JobActionFailure.PHOTO_ALREADY_REMOVED ->
+            R.string.job_photo_error_removal_unavailable
+
         com.servora.android.data.jobs.JobActionFailure.NETWORK -> R.string.job_action_error_network
         com.servora.android.data.jobs.JobActionFailure.SERVER -> R.string.job_action_error_server
         com.servora.android.data.jobs.JobActionFailure.UNEXPECTED -> R.string.job_action_error_unexpected

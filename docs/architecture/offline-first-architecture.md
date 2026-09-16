@@ -288,14 +288,20 @@ These remain **OPEN QUESTION** and must not be invented:
    the same terms as the read adopters above — the wire response is kept and mapped on the way out, and
    only a failure that could not reach the backend falls back — and they are the two halves of one
    screen, so a Job read offline is followed by an activity read that falls back the same way. The
-   screen marks both as the last reported answer (§7). Photo **bytes** are not held here: accepted
+   screen marks both as the last reported answer (§7). **A successful activity write replaces the
+   activity row too** (a text update and an evidence removal — both answer with the refreshed timeline),
+   so the local copy never lags behind a change the device itself performed: a removal performed online
+   and then read offline does not serve evidence that predates it (`BR-089`, tracker 029 Phase 6b). Photo
+   **bytes** are not held here: accepted
    evidence's bytes are the image stack's evictable cache, and a pending upload's bytes are its own
-   app-private file (§9). Recorded in `docs/tracker/029-photo-evidence-phases.md` (Phase 5).
+   app-private file (§9). Recorded in `docs/tracker/029-photo-evidence-phases.md` (Phase 5, Phase 6b).
 
 What is still **online-only** on Android: Manager Home, the Job photo reads (the Activity gallery's
 previews, the tray's previews and the full-size viewer, all through
 `GET /jobs/:id/photos/:photoId/content` **when the bytes are on neither the device nor the image
-stack's cache**), technician assignment, scheduling and rescheduling, Job and
+stack's cache**), **removing accepted evidence** (`POST /jobs/:id/photos/:photoId/removal`: its route
+accepts no client-generated idempotency key and no conflict policy is decided for it, so it is never
+queued — `BR-089`, tracker 029 Phase 6b), technician assignment, scheduling and rescheduling, Job and
 Visit status actions, notes, Customer and Property writes, and every form. Their routes accept no
 idempotency key yet, or their mutation conflict policy is undecided (§8, §11.1), so they must not be
 queued or invented. The `D5` question about accepted evidence **was answered on 2026-09-16 and

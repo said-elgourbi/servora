@@ -311,14 +311,131 @@ class JobDetailsRepositoryTest {
                 body = "  Replaced the filter.  ",
             )
         ) {
-            is VisitNoteResult.Success -> result.events
-            is VisitNoteResult.Failure ->
+            is ActivityWriteResult.Success -> result.events
+            is ActivityWriteResult.Failure ->
                 throw AssertionError("expected activity, got ${result.reason}")
         }
 
         assertEquals("Bearer access-token", api.lastAuthorization)
         assertEquals(AddVisitNoteRequestDto(body = "Replaced the filter."), api.lastNoteRequest)
         assertEquals(listOf("note-1"), events.map { it.id })
+    }
+
+    @Test
+    fun `removes a photo with the trimmed reason and maps the refreshed activity`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            activityAnswer = {
+                jobActivityDto(
+                    jobActivityEventDto(
+                        id = "removal-1",
+                        kind = "JOB_PHOTO_REMOVED",
+                        photoId = "photo-1",
+                        photoRemovalReason = "Wrong property",
+                    ),
+                )
+            },
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val events = when (
+            val result = repository.removeJobPhoto(
+                jobId = JOB_ID,
+                photoId = "photo-1",
+                reason = "  Wrong property  ",
+            )
+        ) {
+            is ActivityWriteResult.Success -> result.events
+            is ActivityWriteResult.Failure ->
+                throw AssertionError("expected activity, got ${result.reason}")
+        }
+
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals(JOB_ID, api.lastJobId)
+        assertEquals("photo-1", api.lastPhotoId)
+        assertEquals(RemoveJobPhotoRequestDto(reason = "Wrong property"), api.lastRemovalRequest)
+        assertEquals(listOf("removal-1"), events.map { it.id })
+        assertEquals(JobActivityKind.JOB_PHOTO_REMOVED, events.single().kind)
+        assertEquals("Wrong property", events.single().photoRemovalReason)
+    }
+
+    @Test
+    fun `reports an already-removed photo as its own outcome`() = runTest {
+        // One photo has one removal and no restore is defined, so the API refuses a repeat with its own
+        // code (`BR-089`). The screen has to say that rather than report a generic failure, so the code
+        // is classified here where the envelope is read.
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            activityAnswer = {
+                throw httpFailure(
+                    status = 409,
+                    body = """
+                        {
+                          "statusCode": 409,
+                          "code": "JOB_PHOTO_ALREADY_REMOVED",
+                          "message": "That photo has already been removed."
+                        }
+                    """,
+                )
+            },
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.removeJobPhoto(
+            jobId = JOB_ID,
+            photoId = "photo-1",
+            reason = "Wrong property",
+        )
+
+        assertEquals(
+            JobActionFailure.PHOTO_ALREADY_REMOVED,
+            (result as ActivityWriteResult.Failure).reason,
+        )
+    }
+
+    @Test
+    fun `a removal replaces the local copy of the activity`() = runTest {
+        // A write answers with the refreshed timeline, and that answer is the last one the backend
+        // reported: the local copy is replaced with it, exactly as a successful read replaces it. A
+        // device that removed evidence and then lost connectivity must not serve an activity that
+        // predates its own change and still lists the photo (`BR-089`, `offline-first-architecture.md`
+        // §2).
+        val workingSet = InMemoryWorkingSetStore()
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            activityAnswer = {
+                jobActivityDto(
+                    jobActivityEventDto(
+                        id = "removal-1",
+                        kind = "JOB_PHOTO_REMOVED",
+                        photoId = "photo-1",
+                        photoRemovalReason = "Wrong property",
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api = api,
+            sessionAuthenticator = FakeSessionAuthenticator(accessToken = "access-token"),
+            workingSet = workingSet,
+        )
+        // The device holds a timeline that predates the removal.
+        val cache = JobEvidenceCache(
+            workingSet = workingSet,
+            json = Json { ignoreUnknownKeys = true },
+            clock = TEST_CLOCK,
+        )
+        cache.rememberActivity(
+            subjectId = SUBJECT_ID,
+            jobId = JOB_ID,
+            activity = jobActivityDto(jobActivityEventDto(id = "photo-1", kind = "JOB_PHOTO_ADDED")),
+        )
+
+        repository.removeJobPhoto(jobId = JOB_ID, photoId = "photo-1", reason = "Wrong property")
+
+        val held = requireNotNull(cache.reportedActivity(SUBJECT_ID, JOB_ID))
+        assertEquals(listOf("removal-1"), held.events.map { it.id })
+        assertEquals("JOB_PHOTO_REMOVED", held.events.single().kind)
     }
 
     @Test
@@ -863,6 +980,9 @@ internal fun jobActivityEventDto(
     outcomeCode: String? = null,
     outcomeSummary: String? = null,
     body: String? = "Found a damaged capacitor.",
+    photoId: String? = null,
+    photoPhase: String? = null,
+    photoRemovalReason: String? = null,
 ) = JobActivityEventDto(
     id = id,
     kind = kind,
@@ -877,6 +997,9 @@ internal fun jobActivityEventDto(
     outcomeCode = outcomeCode,
     outcomeSummary = outcomeSummary,
     body = body,
+    photoId = photoId,
+    photoPhase = photoPhase,
+    photoRemovalReason = photoRemovalReason,
 )
 
 internal fun jobActivityDto(vararg events: JobActivityEventDto) =
@@ -907,6 +1030,12 @@ private class FakeJobDetailsApi(
         private set
 
     var lastNoteRequest: AddVisitNoteRequestDto? = null
+        private set
+
+    var lastRemovalRequest: RemoveJobPhotoRequestDto? = null
+        private set
+
+    var lastPhotoId: String? = null
         private set
 
     var assignableCalls = 0
@@ -1032,6 +1161,27 @@ private class FakeJobDetailsApi(
         lastAuthorization = authorization
         lastJobId = jobId
         return JobActivityDto(jobId = jobId, events = emptyList())
+    }
+
+    /**
+     * The removal route (`BR-089`). It answers with the refreshed timeline like the note route, so a
+     * test asserts the request and the mapped events.
+     */
+    override suspend fun removeJobPhoto(
+        authorization: String,
+        jobId: String,
+        photoId: String,
+        request: RemoveJobPhotoRequestDto,
+    ): JobActivityDto {
+        activityCalls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastPhotoId = photoId
+        lastRemovalRequest = request
+        if (activityCalls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return activityAnswer()
     }
 
     override suspend fun jobPhotoContent(

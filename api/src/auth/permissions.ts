@@ -64,7 +64,8 @@ export type TechnicianPermission =
   (typeof TECHNICIAN_PERMISSIONS)[keyof typeof TECHNICIAN_PERMISSIONS];
 
 /**
- * The evidence capability catalogue (`BR-006`, `BR-015`, `BR-027`; tracker 029 D1/D1b).
+ * The evidence capability catalogue (`BR-006`, `BR-015`, `BR-027`, `BR-091`; tracker 029 D1/D1b,
+ * `ADR-018` A7).
  *
  * Evidence is added and read by the person who records it, so it is authorized by capabilities of
  * its own rather than by the Job or Customer capability the Job photo routes used as an interim
@@ -72,14 +73,33 @@ export type TechnicianPermission =
  * and a technician who may photograph a Job must not be refused by a Manager's capability.
  *
  * The capability is **per kind**, so one kind of evidence can be withdrawn from a member without
- * withdrawing the others. `evidence.audio.add` is the agreed extension point for audio evidence but
- * is deliberately **not** in this catalogue: no product rule defines audio yet (`BR-027`,
- * tracker 029 D8), and a capability for a kind that cannot be added would be invented (`BR-042`).
- * When audio lands it is added here, additively, together with the rules that accept it.
+ * withdrawing the others. `evidence.audio.add` was reserved by `ADR-015` D2 and is in this catalogue
+ * now that the rules that accept a recording exist (`ADR-018`): a capability for a kind that cannot be
+ * added would be invented (`BR-042`), and one for a kind that can be added is what authorizes it.
+ *
+ * **Taking accepted evidence out of ordinary use** is its own capability, and a Manager-level one
+ * (`BR-089`). Evidence is immutable once the API has accepted it (`BR-088`), so the only operation
+ * that reaches it is an explicit, audited removal; a technician discards their own unsubmitted draft
+ * instead, which is a local action needing no capability. Removal is therefore deliberately **not**
+ * implied by `evidence.photo.add` or `evidence.view`, and the default Technician role does not hold
+ * it (tracker 029 D6a/D6b).
  */
 export const EVIDENCE_PERMISSIONS = {
   VIEW: 'evidence.view',
   PHOTO_ADD: 'evidence.photo.add',
+  PHOTO_REMOVE: 'evidence.photo.remove',
+  /**
+   * Recording an audio note is a kind of its own (`BR-091`, `ADR-018` A7). The code was reserved by
+   * `ADR-015` D2 and is created by the slice that accepts a recording, which is the only point at which
+   * it could be exercised (`BR-042`).
+   */
+  AUDIO_ADD: 'evidence.audio.add',
+  /**
+   * Taking accepted audio evidence out of ordinary use, granted to the default Manager role alone as
+   * `evidence.photo.remove` is (`BR-089`, `ADR-018` A7). It is separate from the photo capability because
+   * the catalogue is per kind: a member may be trusted with one kind's removals and not the other kind's.
+   */
+  AUDIO_REMOVE: 'evidence.audio.remove',
 } as const;
 
 export type EvidencePermission =

@@ -29,6 +29,10 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     // with another application both read the photo's bytes, so both are drawn on this capability and
     // not on the one that recorded the photo (`BR-006`, `BR-007`, `BR-011`).
     EVIDENCE_VIEW("evidence.view"),
+    // Taking accepted evidence out of ordinary use is a **Manager-level** capability (`BR-089`): the
+    // default Technician role does not hold it, and it is not implied by adding or reading evidence. A
+    // technician's own discard of an unsubmitted draft needs no capability at all (`BR-088`).
+    EVIDENCE_PHOTO_REMOVE("evidence.photo.remove"),
 }
 
 class PermissionChecker(granted: Set<String>) {

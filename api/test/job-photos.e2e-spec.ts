@@ -6,17 +6,20 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
+  CUSTOMER_PERMISSIONS,
   EVIDENCE_PERMISSIONS,
   type PermissionCode,
 } from '../src/auth/permissions.js';
 import {
   customers,
+  jobPhotoRemovals,
   jobPhotos,
   jobs,
   organizationMemberPermissions,
   organizationMembers,
   permissions,
   rolePermissions,
+  userProfiles,
 } from '../src/database/schema.js';
 import { hashPassword } from '../src/users/password-hasher.js';
 import { FakeObjectStorage } from './support/fake-object-storage.js';
@@ -125,6 +128,7 @@ describe('job photos (e2e)', () => {
 
     return {
       membershipId: member.id,
+      userId: user.id,
       accessToken: response.body.accessToken as string,
     };
   }
@@ -530,4 +534,351 @@ describe('job photos (e2e)', () => {
         expect(response.body.code).toBe('JOB_PHOTO_NOT_FOUND');
       });
   });
+
+  /*
+   * Taking accepted evidence out of ordinary use (`BR-088`, `BR-089`; tracker 029 Phase 6b).
+   *
+   * The removal is a recorded business action, not a mutation: the photo's own row is append-only and
+   * the removal is added beside it, so these cases assert both halves — that ordinary reads stop
+   * showing the evidence, and that the record, the bytes and the history are still exactly what they
+   * were.
+   */
+
+  /** Removes one photo, as the Manager surface does (`BR-089`). */
+  function removePhoto(
+    jobId: string,
+    photoId: string,
+    accessToken: string,
+    body: object = { reason: 'Wrong property' },
+  ) {
+    return request(app.getHttpServer())
+      .post(`/jobs/${jobId}/photos/${photoId}/removal`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send(body);
+  }
+
+  /** The activity as the ordinary read answers it (`BR-080`). */
+  async function readActivity(jobId: string, accessToken: string, query = '') {
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${jobId}/activity${query}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+    return response.body.events as Array<Record<string, unknown>>;
+  }
+
+  it('refuses an unauthenticated removal with 401', async () => {
+    const job = await newJobInOrganization();
+
+    await request(app.getHttpServer())
+      .post(`/jobs/${job.id}/photos/${randomUUID()}/removal`)
+      .send({ reason: 'Wrong property' })
+      .expect(401);
+  });
+
+  it('refuses a caller without the removal capability with 403, and records nothing', async () => {
+    // Adding and reading evidence does not grant removing it: taking recorded evidence out of use is a
+    // Manager capability (`BR-089`, tracker 029 D6a/D6b).
+    const session = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.PHOTO_ADD,
+      EVIDENCE_PERMISSIONS.VIEW,
+    ]);
+    const job = await newJobInOrganization();
+    const clientOperationId = randomUUID();
+    await uploadPhoto(job.id, session.accessToken, {
+      clientOperationId,
+    }).expect(201);
+
+    await removePhoto(job.id, clientOperationId, session.accessToken).expect(403);
+
+    const removals = await database.db
+      .select()
+      .from(jobPhotoRemovals)
+      .where(eq(jobPhotoRemovals.jobPhotoId, clientOperationId));
+    expect(removals).toHaveLength(0);
+    // The evidence is untouched: it is still readable and still in the timeline.
+    expect(await readActivity(job.id, session.accessToken)).toHaveLength(1);
+  });
+
+  it('refuses a member whose role holds the field capabilities without the removal capability', async () => {
+    // `BR-009`'s field role records and reads evidence and does not remove it: a technician discards
+    // their own unsubmitted draft instead (`BR-088`). Authorization is decided by the capability, never
+    // by a role name (`BR-006`), so the case is stated as the capability set the field role holds.
+    const role = await createTestOrganizationRole(database.db, organizationId);
+    for (const code of [
+      EVIDENCE_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.PHOTO_ADD,
+    ] as const) {
+      await database.db.insert(rolePermissions).values({
+        organizationId,
+        roleId: role.id,
+        permissionId: await permissionIdFor(code),
+      });
+    }
+    const session = await signInWithRole(role.id);
+    const job = await newJobInOrganization();
+    const clientOperationId = randomUUID();
+    await uploadPhoto(job.id, session.accessToken, {
+      clientOperationId,
+    }).expect(201);
+
+    await removePhoto(job.id, clientOperationId, session.accessToken).expect(403);
+  });
+
+  it('records the removal and excludes the evidence from the ordinary reads', async () => {
+    const session = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.PHOTO_ADD,
+      EVIDENCE_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.PHOTO_REMOVE,
+    ]);
+    await database.db.insert(userProfiles).values({
+      userId: session.userId,
+      firstName: 'Dana',
+      lastName: 'Manager',
+      displayName: 'Dana Manager',
+    });
+    const job = await newJobInOrganization();
+    const clientOperationId = randomUUID();
+    await uploadPhoto(job.id, session.accessToken, {
+      clientOperationId,
+      note: 'Panel before the repair',
+    }).expect(201);
+
+    const response = await removePhoto(
+      job.id,
+      clientOperationId,
+      session.accessToken,
+      {
+        reason: 'Photographed the wrong property',
+      },
+    ).expect(201);
+    expect(response.body.jobId).toBe(job.id);
+
+    // The removal is history, and Activity does not silently drop it (`BR-080`, `BR-089`).
+    const events = response.body.events as Array<Record<string, unknown>>;
+    expect(events.some((event) => event.kind === 'JOB_PHOTO_ADDED')).toBe(false);
+    const removal = events.find((event) => event.kind === 'JOB_PHOTO_REMOVED');
+    expect(removal).toMatchObject({
+      kind: 'JOB_PHOTO_REMOVED',
+      photoId: clientOperationId,
+      actorName: 'Dana Manager',
+      photoRemovalReason: 'Photographed the wrong property',
+      photoPhase: null,
+      body: null,
+      visitSequence: null,
+    });
+    expect(typeof removal?.recordedAt).toBe('string');
+
+    // The record is appended beside the photo rather than written onto it.
+    const removals = await database.db
+      .select()
+      .from(jobPhotoRemovals)
+      .where(eq(jobPhotoRemovals.jobPhotoId, clientOperationId));
+    expect(removals).toHaveLength(1);
+    expect(removals[0]?.actorMembershipId).toBe(session.membershipId);
+    expect(removals[0]?.reason).toBe('Photographed the wrong property');
+
+    const [photo] = await database.db
+      .select()
+      .from(jobPhotos)
+      .where(eq(jobPhotos.id, clientOperationId));
+    expect(photo?.note).toBe('Panel before the repair');
+    expect(photo?.objectKey).toBe(
+      `evidence/job-photos/${organizationId}/${job.id}/${clientOperationId}.jpg`,
+    );
+
+    // Nothing purges the object: physically removing it is a retention concern, not this operation
+    // (`BR-090`).
+    expect(storage.puts).toHaveLength(1);
+    expect(storage.gets).toHaveLength(0);
+
+    // Every ordinary read excludes the evidence (`BR-089`).
+    expect(await readActivity(job.id, session.accessToken)).toHaveLength(1);
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}/photos/${clientOperationId}/content`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404)
+      .expect((notFound) => {
+        expect(notFound.body.code).toBe('JOB_PHOTO_NOT_FOUND');
+      });
+  });
+
+  it('keeps the removed evidence in the audit/history context, with actor, time and reason', async () => {
+    const session = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.PHOTO_ADD,
+      EVIDENCE_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.PHOTO_REMOVE,
+    ]);
+    await database.db.insert(userProfiles).values({
+      userId: session.userId,
+      firstName: 'Dana',
+      lastName: 'Manager',
+      displayName: 'Dana Manager',
+    });
+    const job = await newJobInOrganization();
+    const clientOperationId = randomUUID();
+    await uploadPhoto(job.id, session.accessToken, {
+      clientOperationId,
+      phase: 'BEFORE_WORK',
+      note: 'Panel before the repair',
+    }).expect(201);
+    await removePhoto(job.id, clientOperationId, session.accessToken, {
+      reason: 'Photographed the wrong property',
+    }).expect(201);
+
+    const events = await readActivity(
+      job.id,
+      session.accessToken,
+      '?includeRemovedEvidence=true',
+    );
+
+    // The removed record is still there, exactly as it was recorded (`BR-088`, `D6d`).
+    const added = events.find((event) => event.kind === 'JOB_PHOTO_ADDED');
+    expect(added).toMatchObject({
+      photoId: clientOperationId,
+      photoPhase: 'BEFORE_WORK',
+      body: 'Panel before the repair',
+    });
+
+    // …and so is the statement of who removed it, when and why.
+    const removal = events.find((event) => event.kind === 'JOB_PHOTO_REMOVED');
+    expect(removal).toMatchObject({
+      photoId: clientOperationId,
+      actorName: 'Dana Manager',
+      photoRemovalReason: 'Photographed the wrong property',
+    });
+    expect(typeof removal?.recordedAt).toBe('string');
+  });
+
+  it('refuses the audit/history context to a caller who may not remove evidence', async () => {
+    // The context is a read of evidence that has been taken out of use, so it takes the capability
+    // that governs the evidence lifecycle; a caller without it is refused rather than answered with
+    // the ordinary projection (`BR-007`, `BR-089`). The caller here may read the Job's activity and
+    // its evidence, so the refusal is the flag's own and not the route's.
+    const session = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.PHOTO_ADD,
+      EVIDENCE_PERMISSIONS.VIEW,
+    ]);
+    const job = await newJobInOrganization();
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}/activity?includeRemovedEvidence=true`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(403)
+      .expect((response) => {
+        expect(response.body.code).toBe('FORBIDDEN');
+      });
+  });
+
+  it('refuses a second removal of the same photo', async () => {
+    // One photo has one removal and no restore is defined, so a repeat is refused rather than recorded
+    // as a change that did not happen (`BR-089`).
+    const session = await signInFor([
+      EVIDENCE_PERMISSIONS.PHOTO_ADD,
+      EVIDENCE_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.PHOTO_REMOVE,
+    ]);
+    const job = await newJobInOrganization();
+    const clientOperationId = randomUUID();
+    await uploadPhoto(job.id, session.accessToken, {
+      clientOperationId,
+    }).expect(201);
+
+    await removePhoto(job.id, clientOperationId, session.accessToken).expect(201);
+    const repeated = await removePhoto(
+      job.id,
+      clientOperationId,
+      session.accessToken,
+      { reason: 'Again' },
+    ).expect(409);
+    expect(repeated.body.code).toBe('JOB_PHOTO_ALREADY_REMOVED');
+
+    const removals = await database.db
+      .select()
+      .from(jobPhotoRemovals)
+      .where(eq(jobPhotoRemovals.jobPhotoId, clientOperationId));
+    expect(removals).toHaveLength(1);
+    expect(removals[0]?.reason).toBe('Wrong property');
+  });
+
+  it('answers not found for a photo the Job does not hold, and for another organization', async () => {
+    const session = await signInFor([
+      EVIDENCE_PERMISSIONS.PHOTO_REMOVE,
+      EVIDENCE_PERMISSIONS.PHOTO_ADD,
+      EVIDENCE_PERMISSIONS.VIEW,
+    ]);
+    const job = await newJobInOrganization();
+
+    await removePhoto(job.id, randomUUID(), session.accessToken)
+      .expect(404)
+      .expect((response) => {
+        expect(response.body.code).toBe('JOB_PHOTO_NOT_FOUND');
+      });
+
+    const otherOrganization = await createTestOrganization(database.db, {
+      name: 'Other Removal Org',
+    });
+    database.cleanup.trackOrganization(otherOrganization.id);
+    const foreignJob = await newJobInOrganization(otherOrganization.id);
+
+    // A Job another organization owns is `404`, never `403`: the API does not confirm that it exists
+    // (`BR-001`).
+    await removePhoto(foreignJob.id, randomUUID(), session.accessToken)
+      .expect(404)
+      .expect((response) => {
+        expect(response.body.code).toBe('JOB_NOT_FOUND');
+      });
+    const removals = await database.db
+      .select()
+      .from(jobPhotoRemovals)
+      .where(eq(jobPhotoRemovals.organizationId, otherOrganization.id));
+    expect(removals).toHaveLength(0);
+  });
+
+  it('refuses a removal with no reason', async () => {
+    // `BR-089` records the reason beside the actor and the timestamp, so a removal without one is
+    // refused rather than recorded (tracker 029 Phase 6b).
+    const session = await signInFor([
+      EVIDENCE_PERMISSIONS.PHOTO_ADD,
+      EVIDENCE_PERMISSIONS.PHOTO_REMOVE,
+    ]);
+    const job = await newJobInOrganization();
+    const clientOperationId = randomUUID();
+    await uploadPhoto(job.id, session.accessToken, {
+      clientOperationId,
+    }).expect(201);
+
+    for (const body of [{}, { reason: '   ' }, { reason: 42 }]) {
+      await removePhoto(job.id, clientOperationId, session.accessToken, body)
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.code).toBe('VALIDATION_FAILED');
+        });
+    }
+
+    const removals = await database.db
+      .select()
+      .from(jobPhotoRemovals)
+      .where(eq(jobPhotoRemovals.jobPhotoId, clientOperationId));
+    expect(removals).toHaveLength(0);
+  });
+
+  it('seeds the removal capability with its bilingual catalogue entry', async () => {
+    // The permission is part of the shared vocabulary a client draws its actions from (`BR-005`,
+    // `BR-041`): `0011_job_photo_removals.sql` and the development seed both insert it.
+    const [permission] = await database.db
+      .select()
+      .from(permissions)
+      .where(eq(permissions.code, EVIDENCE_PERMISSIONS.PHOTO_REMOVE));
+
+    expect(permission).toBeDefined();
+    expect(permission?.nameEn).toBe('Remove photo evidence');
+    expect(permission?.nameFr).toBe('Retirer des preuves photo');
+    expect(permission?.descriptionEn).not.toBe('');
+    expect(permission?.descriptionFr).not.toBe('');
+  });
 });
+

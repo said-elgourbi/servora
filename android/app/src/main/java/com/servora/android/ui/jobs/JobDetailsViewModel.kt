@@ -16,7 +16,7 @@ import com.servora.android.data.jobs.JobPhotoPickedItems
 import com.servora.android.data.jobs.JobPhotoRecordResult
 import com.servora.android.data.jobs.JobPhotoRefusal
 import com.servora.android.data.jobs.JobPhotoSession
-import com.servora.android.data.jobs.VisitNoteResult
+import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CapturedJobPhoto
 import com.servora.android.domain.model.JobPhotoPhase
@@ -94,6 +94,8 @@ class JobDetailsViewModel @Inject constructor(
     private var photoInFlight = false
     /** Whether a photo is being saved or shared right now, so one export runs at a time. */
     private var exportInFlight = false
+    /** Whether accepted evidence is being removed right now, so one removal runs at a time. */
+    private var removalInFlight = false
     private var photoCollection: Job? = null
 
     /**
@@ -241,7 +243,7 @@ class JobDetailsViewModel @Inject constructor(
             actionInFlight = false
             _uiState.update { current ->
                 when (result) {
-                    is VisitNoteResult.Success ->
+                    is ActivityWriteResult.Success ->
                         current.copy(
                             isSubmitting = false,
                             activity = result.events,
@@ -252,7 +254,7 @@ class JobDetailsViewModel @Inject constructor(
                             completedAction = JobActionKind.ACTIVITY_TEXT,
                         )
 
-                    is VisitNoteResult.Failure ->
+                    is ActivityWriteResult.Failure ->
                         current.copy(
                             isSubmitting = false,
                             actionFailure = result.reason,
@@ -636,6 +638,70 @@ class JobDetailsViewModel @Inject constructor(
     fun keepCapturedPhoto() {
         _uiState.update { it.copy(capturedPhoto = null, photoFailure = null) }
         continuePickedPhotos()
+    }
+
+    /**
+     * Takes accepted evidence out of ordinary use, recording why (`BR-088`, `BR-089`).
+     *
+     * Only evidence the backend holds can be removed: a photo that has not been submitted is the
+     * technician's own draft and is discarded on the device instead (`BR-088`), which needs no
+     * capability and no API. The removal itself is a Manager action on a recorded photo, so it is
+     * **online-only** — the backend's answer is the only outcome reported (`BR-001`), and a device that
+     * cannot reach the API says so rather than queueing the decision (`offline-first-architecture.md`
+     * §5, §8, §13.2).
+     *
+     * The reason is required, and the dialog asks for it before this is called: a removal records the
+     * actor, the instant and the reason, so a blank one is not sent (`BR-089`).
+     */
+    fun removeEvidencePhoto(photoId: String, reason: String) {
+        val text = reason.trim()
+        val jobId = _uiState.value.jobId
+        if (text.isEmpty() || jobId.isEmpty() || removalInFlight) {
+            return
+        }
+        val photo = viewedJobPhoto(
+            jobId = jobId,
+            photoId = photoId,
+            pendingPhotos = _uiState.value.pendingPhotos,
+            activity = _uiState.value.activity,
+        )
+        // A photo neither the device nor the Activity reports is not evidence this screen can act on,
+        // and a pending one is not evidence at all yet (`BR-042`, `BR-088`).
+        if (photo !is ViewedJobPhoto.Stored) {
+            reportUnreadablePhoto()
+            return
+        }
+        removalInFlight = true
+        // The action says it is running as soon as it is asked for, so the viewer draws its own progress
+        // on the control that started it (`BR-042`).
+        _uiState.update {
+            it.copy(photoRemoval = photoId, photoFailure = null, photoMessage = null)
+        }
+        viewModelScope.launch {
+            val result = repository.removeJobPhoto(jobId, photoId, text)
+            removalInFlight = false
+            _uiState.update { current ->
+                when (result) {
+                    is ActivityWriteResult.Success ->
+                        current.copy(
+                            photoRemoval = null,
+                            // The write's own answer is the backend's, so the timeline — and with it the
+                            // evidence a Job holds — is current again (`§7`, `BR-080`).
+                            activity = result.events,
+                            activitySource = ReadSource.BACKEND,
+                            activityFailure = null,
+                            photoFailure = null,
+                            photoMessage = JobPhotoMessage.EVIDENCE_REMOVED,
+                        )
+
+                    is ActivityWriteResult.Failure ->
+                        current.copy(
+                            photoRemoval = null,
+                            photoFailure = result.reason.toRemovalFailure(),
+                        )
+                }
+            }
+        }
     }
 
     /**
@@ -1048,6 +1114,41 @@ private fun JobPhotoRefusal.toPhotoFailure(): JobPhotoFailure =
         JobPhotoRefusal.TYPE_NOT_ACCEPTED -> JobPhotoFailure.PHOTO_TYPE_NOT_ACCEPTED
         JobPhotoRefusal.TOO_LARGE -> JobPhotoFailure.PHOTO_TOO_LARGE
         JobPhotoRefusal.NOT_STORED -> JobPhotoFailure.PHOTO_NOT_SAVED
+    }
+
+/**
+ * Why a removal the API refused is reported the way it is (`BR-042`, `BR-089`).
+ *
+ * The API's own outcomes are the vocabulary (`docs/api/job-photos.md` §6), so the manager is told what
+ * happened — the capability is missing, the evidence is no longer there to remove, the API could not be
+ * reached — rather than that "something went wrong" (`dev.md` §9). The mapping is total: a removal that
+ * failed in a way this build cannot name is reported as one that failed, never as one that succeeded.
+ */
+private fun JobActionFailure.toRemovalFailure(): JobPhotoFailure =
+    when (this) {
+        JobActionFailure.FORBIDDEN -> JobPhotoFailure.REMOVAL_NOT_PERMITTED
+        JobActionFailure.PHOTO_ALREADY_REMOVED,
+        JobActionFailure.NOT_FOUND,
+        JobActionFailure.VERSION_CONFLICT,
+        -> JobPhotoFailure.REMOVAL_NO_LONGER_AVAILABLE
+
+        JobActionFailure.NETWORK -> JobPhotoFailure.REMOVAL_UNREACHABLE
+        JobActionFailure.UNAUTHENTICATED -> JobPhotoFailure.NOT_SIGNED_IN
+        JobActionFailure.VALIDATION,
+        JobActionFailure.SERVER,
+        JobActionFailure.UNEXPECTED,
+        -> JobPhotoFailure.REMOVAL_FAILED
+
+        // The rest belong to the Job and Visit management actions and cannot be returned by the removal
+        // route: reporting them as a failure keeps the mapping total without inventing a meaning for a
+        // code this operation cannot produce (`BR-042`).
+        JobActionFailure.JOB_TRANSITION_NOT_ALLOWED,
+        JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET,
+        JobActionFailure.JOB_COMPLETION_BLOCKED,
+        JobActionFailure.JOB_CANCELLATION_UNAVAILABLE,
+        JobActionFailure.VISIT_NOT_RESCHEDULABLE,
+        JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE,
+        -> JobPhotoFailure.REMOVAL_FAILED
     }
 
 /**

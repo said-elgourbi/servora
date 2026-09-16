@@ -59,6 +59,31 @@ enum class JobPhotoFailure {
 
     /** Saving on this device needs a storage permission the technician has not granted (`D12`). */
     SAVE_PERMISSION_DENIED,
+
+    /** The session does not hold `evidence.photo.remove`, so the API refused the removal (`BR-089`). */
+    REMOVAL_NOT_PERMITTED,
+
+    /**
+     * The photo is not in this Job any more, or it has already been removed (`BR-089`).
+     *
+     * One photo has one removal and no restore is defined, so the evidence is either there to remove or
+     * already out of ordinary use: both leave the manager with nothing to decide, and the refreshed
+     * timeline says which.
+     */
+    REMOVAL_NO_LONGER_AVAILABLE,
+
+    /**
+     * The removal needs the API and it could not be reached (`BR-089`).
+     *
+     * The removal is **online-only**: its route takes no client-generated idempotency key and no
+     * conflict policy is decided for it, so it is never queued (`offline-first-architecture.md` §5, §8,
+     * §13.2). A manager who removes evidence needs an answer the backend gave, not one the device
+     * assumed.
+     */
+    REMOVAL_UNREACHABLE,
+
+    /** The API refused the removal itself, so nothing was taken out of use (`BR-042`). */
+    REMOVAL_FAILED,
 }
 
 /**
@@ -85,6 +110,9 @@ enum class JobPhotoMessage {
 
     /** The photo was handed to another application (`D13`). */
     SHARED,
+
+    /** Accepted evidence was taken out of ordinary use (`BR-088`, `BR-089`). */
+    EVIDENCE_REMOVED,
 }
 
 /**
@@ -228,6 +256,14 @@ data class JobDetailsUiState(
      * retried when it is granted — and so a save that needs no permission never waits for anything.
      */
     val photoSaveAwaitingPermission: String? = null,
+    /**
+     * The photo a removal is running for, or `null` when none is (`BR-089`).
+     *
+     * It is the photo id, not a flag, so the viewer can show the progress on the control of the photo
+     * it belongs to and disable it while the API answers — a removal is a Manager action on recorded
+     * evidence, and it must not be asked for twice.
+     */
+    val photoRemoval: String? = null,
 ) {
     /** Nothing has been read yet: the screen shows its first-load state. */
     val showsInitialLoading: Boolean

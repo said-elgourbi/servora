@@ -1,7 +1,9 @@
 import { DomainValidationError } from '../validation/domain-validation.js';
 import {
   MAX_JOB_PHOTO_BYTES,
+  MAX_JOB_PHOTO_REMOVAL_REASON_LENGTH,
   parseCreateJobPhotoDto,
+  parseRemoveJobPhotoDto,
   sniffPhotoContentType,
   validateJobPhotoUpload,
 } from './job-photo.dto.js';
@@ -150,6 +152,46 @@ describe('job photo requests', () => {
           size: MAX_JOB_PHOTO_BYTES + 1,
         }),
       ).toThrow(DomainValidationError);
+    });
+  });
+
+  /**
+   * Taking accepted evidence out of ordinary use (`BR-089`, tracker 029 Phase 6b).
+   *
+   * The reason is required, because the rule states that a removal records the actor, the instant and
+   * the reason; it is bounded, because an audited action records a reason rather than arbitrary text.
+   */
+  describe('removal reason', () => {
+    it('accepts a reason and trims it', () => {
+      expect(parseRemoveJobPhotoDto({ reason: '  Wrong property  ' })).toEqual({
+        reason: 'Wrong property',
+      });
+    });
+
+    it('refuses a missing, blank or non-text reason', () => {
+      expect(() => parseRemoveJobPhotoDto({})).toThrow(DomainValidationError);
+      expect(() => parseRemoveJobPhotoDto({ reason: '   ' })).toThrow(
+        DomainValidationError,
+      );
+      expect(() => parseRemoveJobPhotoDto({ reason: 42 })).toThrow(
+        DomainValidationError,
+      );
+    });
+
+    it('refuses a reason longer than the accepted limit', () => {
+      expect(() =>
+        parseRemoveJobPhotoDto({
+          reason: 'x'.repeat(MAX_JOB_PHOTO_REMOVAL_REASON_LENGTH + 1),
+        }),
+      ).toThrow(DomainValidationError);
+    });
+
+    it('accepts a removal that carries no other field', () => {
+      // Nothing else is asked of the caller: the photo is named by the route, the actor comes from the
+      // session, and the instant is the backend's own (`BR-089`).
+      expect(parseRemoveJobPhotoDto({ reason: 'Duplicate capture' })).toEqual({
+        reason: 'Duplicate capture',
+      });
     });
   });
 });

@@ -51,7 +51,11 @@ import {
   readAssignedTechnicians,
   selectVisitsForJobs,
 } from './visit-assignment.js';
-import { readJobActivity, type JobActivityEventDto } from './job-activity.js';
+import {
+  readJobActivity,
+  type JobActivityEventDto,
+  type JobActivityOptions,
+} from './job-activity.js';
 
 /** The Job does not exist in the caller's organization (`BR-001`). */
 export class JobNotFoundError extends Error {
@@ -271,6 +275,7 @@ export class JobsService {
   async findJobActivityInOrganization(
     scope: OrganizationScope,
     jobId: string,
+    options: JobActivityOptions = {},
   ): Promise<JobActivityEventDto[] | null> {
     const [row] = await this.db
       .select({ id: jobs.id })
@@ -295,7 +300,7 @@ export class JobsService {
       return null;
     }
 
-    return readJobActivity(this.db, scope, jobId);
+    return readJobActivity(this.db, scope, jobId, options);
   }
 
   /**

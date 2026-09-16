@@ -213,6 +213,35 @@ const PERMISSION_TEMPLATES = [
     descriptionEn: 'Attach a photo to a Job as field evidence.',
     descriptionFr: 'Joindre une photo a un travail comme preuve terrain.',
   },
+  {
+    // Removing accepted evidence is a Manager capability, not a field one (`BR-089`; tracker 029
+    // Phase 6b). It is in this template so the default Manager role holds it — the role template
+    // below grants the whole catalogue — while the Technician template lists its capabilities
+    // explicitly and does not include it.
+    code: 'evidence.photo.remove',
+    nameEn: 'Remove photo evidence',
+    nameFr: 'Retirer des preuves photo',
+    descriptionEn: 'Remove accepted photo evidence from ordinary views.',
+    descriptionFr: 'Retirer des preuves photo acceptees des vues courantes.',
+  },
+  {
+    // Recording an audio note is a kind of its own (`BR-091`; tracker 035, `ADR-018` A7). The code was
+    // reserved by `ADR-015` D2 and is created with the rules that accept a recording.
+    code: 'evidence.audio.add',
+    nameEn: 'Add audio evidence',
+    nameFr: 'Ajouter des preuves audio',
+    descriptionEn: 'Record an audio note on a Job as field evidence.',
+    descriptionFr: 'Enregistrer une note audio sur un travail comme preuve terrain.',
+  },
+  {
+    // The audio kind's removal, Manager-only exactly as the photo kind's is (`BR-089`, `ADR-018` A7):
+    // the Technician template below lists its capabilities explicitly and does not include it.
+    code: 'evidence.audio.remove',
+    nameEn: 'Remove audio evidence',
+    nameFr: 'Retirer des preuves audio',
+    descriptionEn: 'Remove accepted audio evidence from ordinary views.',
+    descriptionFr: 'Retirer des preuves audio acceptees des vues courantes.',
+  },
 ] as const;
 
 const ROLE_TEMPLATES = {
@@ -236,8 +265,12 @@ const ROLE_TEMPLATES = {
       'VISIT_RECORD_OUTCOME',
       // A technician records the evidence of the work performed, so the evidence capabilities are
       // part of the default field role rather than a Manager grant (`BR-009`, `BR-015`, tracker 029).
+      // `evidence.photo.remove` and `evidence.audio.remove` are deliberately **not** here: taking
+      // accepted evidence out of ordinary use is a Manager capability (`BR-089`, `ADR-018` A7), and the
+      // technician's own discard of an unsubmitted draft needs no capability at all (`BR-088`).
       'evidence.view',
       'evidence.photo.add',
+      'evidence.audio.add',
     ],
   },
 } as const;

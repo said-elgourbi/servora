@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   Req,
   StreamableFile,
   UploadedFile,
@@ -32,13 +33,29 @@ import { toJobDetailsDto } from './job-details.dto.js';
 import type { JobDetailsDto, JobDetails } from './job-details.dto.js';
 import { toJobActivityDto } from './job-activity.js';
 import type { JobActivityDto } from './job-activity.js';
+import { parseJobActivityOptions } from './job-activity-query.dto.js';
 import {
   MAX_JOB_PHOTO_BYTES,
   parseCreateJobPhotoDto,
+  parseRemoveJobPhotoDto,
   validateJobPhotoUpload,
 } from './job-photo.dto.js';
 import type { JobPhotoUpload } from './job-photo.dto.js';
 import {
+  MAX_JOB_AUDIO_BYTES,
+  parseCreateJobAudioNoteDto,
+  parseRemoveJobAudioNoteDto,
+  validateJobAudioNoteUpload,
+} from './job-audio.dto.js';
+import type { JobAudioNoteUpload } from './job-audio.dto.js';
+import {
+  JobAudioNoteAlreadyRemovedError,
+  JobAudioNoteNotFoundError,
+  JobAudioNoteOperationReusedError,
+  JobAudioNotesService,
+} from './job-audio-notes.service.js';
+import {
+  JobPhotoAlreadyRemovedError,
   JobPhotoNotFoundError,
   JobPhotoOperationReusedError,
   JobPhotosService,
@@ -97,6 +114,7 @@ export class JobsController {
   constructor(
     private readonly jobs: JobsService,
     private readonly photos: JobPhotosService,
+    private readonly audioNotes: JobAudioNotesService,
   ) {}
 
   @Get(':id')
@@ -122,17 +140,36 @@ export class JobsController {
    * The same `customers.view` capability guards the Job read and its activity, because the activity is
    * a projection of the same records (`BR-006`). The read stores nothing (`BR-001`) and its event
    * vocabulary is the one defined in `job-activity.ts` (`BR-041`).
+   *
+   * `includeRemovedEvidence=true` asks for the **audit/history context** rather than the ordinary one:
+   * evidence a Manager has removed from ordinary use (`BR-089`) is included, of every kind, which is what
+   * `D6d` requires of the context it stays visible in. That is a read of evidence taken out of use, so it
+   * is authorized by an evidence **removal** capability — the Manager-level capability that governs the
+   * evidence lifecycle — and a caller who may read the activity without one is refused rather than
+   * quietly answered with the ordinary projection (`BR-007`, `BR-089`). Either kind's removal capability
+   * is enough, because the flag asks one question about one read rather than one question per kind
+   * (`ADR-018` A7).
    */
   @Get(':id/activity')
   @RequirePermissions(CUSTOMER_PERMISSIONS.VIEW)
   async findActivity(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
+    @Query() query: unknown,
   ): Promise<JobActivityDto> {
     const authorization = authorizationOf(request);
+    const options = parseInput(() => parseJobActivityOptions(query));
+    if (
+      options.includeRemovedEvidence === true &&
+      !authorization.permissions.includes(EVIDENCE_PERMISSIONS.PHOTO_REMOVE) &&
+      !authorization.permissions.includes(EVIDENCE_PERMISSIONS.AUDIO_REMOVE)
+    ) {
+      throw AuthApiError.forbidden();
+    }
     const events = await this.jobs.findJobActivityInOrganization(
       { organizationId: authorization.organizationId },
       id,
+      options,
     );
     if (events === null) {
       throw jobNotFound();
@@ -332,6 +369,167 @@ export class JobsController {
     }
   }
 
+  /**
+   * Takes one photo out of ordinary use, recording who removed it, when and why (`BR-089`).
+   *
+   * Evidence is immutable once this API has accepted it (`BR-088`), so there is **no edit route** and
+   * this is the only operation that reaches a recorded photo: it appends a removal record, which is
+   * what stops the evidence appearing in ordinary reads while its record and history are preserved
+   * (`BR-067`). The photo is named by the id it is already known by, so a client never supplies an
+   * object key (`ADR-013` D6.5).
+   *
+   * `evidence.photo.remove` guards it — a Manager-level capability that the default Technician role
+   * does not hold (`BR-089`) — and the route is **online-only**: it takes no client-generated
+   * idempotency key and has no decided conflict policy, which is the offline standard's own condition
+   * for staying out of the outbox (§5, §8, §13.2). It answers with the refreshed timeline, exactly as
+   * adding a photo and adding a note do, so the client presents what the backend now reports rather
+   * than patching its own copy (`BR-001`, `BR-080`).
+   */
+  @Post(':id/photos/:photoId/removal')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(EVIDENCE_PERMISSIONS.PHOTO_REMOVE)
+  async removePhoto(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('photoId') photoId: string,
+    @Body() body: unknown,
+  ): Promise<JobActivityDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseRemoveJobPhotoDto(body));
+    try {
+      const events = await this.photos.removeJobPhoto(
+        { organizationId: authorization.organizationId },
+        id,
+        photoId,
+        authorization.membershipId,
+        input,
+      );
+      return toJobActivityDto(id, events);
+    } catch (error) {
+      throw mapPhotoError(error);
+    }
+  }
+
+  /**
+   * Records one audio note on a Job and returns the refreshed timeline (`BR-091`, `ADR-018`).
+   *
+   * An audio note is field evidence of its own kind, so it is offered on the **Job** exactly as a photo
+   * is: a Job may exist with no Visit at all (`BR-051`), and recording must not depend on one. The bytes
+   * are validated before they become evidence — an audio-only MP4 whose length the API reads from the
+   * container (`ADR-018` A2/A3) — and the write is idempotent on the device's own operation id
+   * (`BR-031`), so a retry after a timeout returns the original activity instead of storing the recording
+   * twice.
+   *
+   * `evidence.audio.add` guards the route rather than `JOB_UPDATE`: the caller is the technician who made
+   * the recording, and the default Technician role does not update Jobs (`BR-009`, `ADR-018` A7).
+   *
+   * The part is read through the same multipart handling the photo route uses, bounded by
+   * `MAX_JOB_AUDIO_BYTES`; an oversized body is refused by the parser before it is buffered further.
+   */
+  @Post(':id/audio-notes')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(EVIDENCE_PERMISSIONS.AUDIO_ADD)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_JOB_AUDIO_BYTES, files: 1 },
+    }),
+  )
+  async addAudioNote(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @UploadedFile() file: JobAudioNoteUpload | undefined,
+  ): Promise<JobActivityDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseCreateJobAudioNoteDto(body));
+    const audio = parseInput(() => validateJobAudioNoteUpload(file));
+    try {
+      const events = await this.audioNotes.addJobAudioNote(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+        audio,
+      );
+      return toJobActivityDto(id, events);
+    } catch (error) {
+      throw mapAudioError(error);
+    }
+  }
+
+  /**
+   * Returns one audio note's bytes (`BR-091`).
+   *
+   * Evidence travels through the API on the API port, never through a presigned URL: the request is
+   * authorized like every other one, the object's key is derived from the record rather than supplied by
+   * the client, and moving to a provider later stays a configuration change (`ADR-013` D6.4, D7).
+   *
+   * `evidence.view` is required in its own right, and it is the **same** read capability a photo's bytes
+   * need: reading evidence is one capability rather than one per kind, so a client that may play a
+   * recording may also fetch a photo's bytes. What is per kind is adding and removing (`ADR-018` A7).
+   */
+  @Get(':id/audio-notes/:audioNoteId/content')
+  @RequirePermissions(EVIDENCE_PERMISSIONS.VIEW)
+  async readAudioNoteContent(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('audioNoteId') audioNoteId: string,
+  ): Promise<StreamableFile> {
+    const authorization = authorizationOf(request);
+    try {
+      const object = await this.audioNotes.readJobAudioNoteContent(
+        { organizationId: authorization.organizationId },
+        id,
+        audioNoteId,
+      );
+      return new StreamableFile(object.body, {
+        type: object.contentType,
+        length: object.byteSize,
+      });
+    } catch (error) {
+      throw mapAudioError(error);
+    }
+  }
+
+  /**
+   * Takes one audio note out of ordinary use, recording who removed it, when and why (`BR-089`).
+   *
+   * Evidence is immutable once this API has accepted it (`BR-088`), so there is **no edit route** and
+   * this is the only operation that reaches a recorded audio note: it appends a removal record, which is
+   * what stops the recording appearing in ordinary reads while its record and history are preserved
+   * (`BR-067`). The recording is named by the id it is already known by, so a client never supplies an
+   * object key (`ADR-013` D6.5).
+   *
+   * `evidence.audio.remove` guards it — a Manager-level capability that the default Technician role does
+   * not hold, and which is separate from the photo kind's (`ADR-018` A7) — and the route is
+   * **online-only**: it takes no client-generated idempotency key and has no decided conflict policy,
+   * which is the offline standard's own condition for staying out of the outbox (§5, §8, §13.2).
+   */
+  @Post(':id/audio-notes/:audioNoteId/removal')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(EVIDENCE_PERMISSIONS.AUDIO_REMOVE)
+  async removeAudioNote(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('audioNoteId') audioNoteId: string,
+    @Body() body: unknown,
+  ): Promise<JobActivityDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseRemoveJobAudioNoteDto(body));
+    try {
+      const events = await this.audioNotes.removeJobAudioNote(
+        { organizationId: authorization.organizationId },
+        id,
+        audioNoteId,
+        authorization.membershipId,
+        input,
+      );
+      return toJobActivityDto(id, events);
+    } catch (error) {
+      throw mapAudioError(error);
+    }
+  }
+
   /** Runs one action and answers with the Job as it now stands, or maps its failure. */
   private async action(
     perform: () => Promise<JobDetails>,
@@ -398,6 +596,9 @@ function mapPhotoError(error: unknown): unknown {
       HttpStatus.CONFLICT,
     );
   }
+  if (error instanceof JobPhotoAlreadyRemovedError) {
+    return photoAlreadyRemoved();
+  }
   if (error instanceof ObjectStorageError) {
     // The evidence was not stored, so the request did not succeed. Answering with a success status
     // would tell the client its photo is safe when the backend does not hold it (`BR-015`, `BR-042`).
@@ -422,6 +623,95 @@ function photoNotFound(): HttpException {
       message: 'Job photo was not found.',
     },
     HttpStatus.NOT_FOUND,
+  );
+}
+
+/**
+ * The photo has already been removed from ordinary use (`BR-089`).
+ *
+ * One photo has one removal and no restore is defined, so a repeat is a conflict with the evidence's
+ * own state rather than a second removal: the API refuses it explicitly instead of reporting a change
+ * it did not record (`BR-067`).
+ */
+function photoAlreadyRemoved(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'JOB_PHOTO_ALREADY_REMOVED',
+      message: 'That photo has already been removed.',
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+/**
+ * Maps a Job audio note failure onto the HTTP contract (`dev.md` §7).
+ *
+ * The same answers the photo kind gives, with the audio kind's own codes: a client resolves a stable code
+ * per failure rather than sharing one vocabulary between two kinds (`BR-041`, `ADR-018` A6).
+ */
+function mapAudioError(error: unknown): unknown {
+  if (error instanceof JobNotFoundError) {
+    return jobNotFound();
+  }
+  if (error instanceof JobAudioNoteNotFoundError) {
+    return audioNoteNotFound();
+  }
+  if (error instanceof JobAudioNoteOperationReusedError) {
+    return new HttpException(
+      {
+        statusCode: HttpStatus.CONFLICT,
+        code: 'AUDIO_NOTE_OPERATION_REUSED',
+        message: 'That operation id was already used for another job.',
+      },
+      HttpStatus.CONFLICT,
+    );
+  }
+  if (error instanceof JobAudioNoteAlreadyRemovedError) {
+    return audioNoteAlreadyRemoved();
+  }
+  if (error instanceof ObjectStorageError) {
+    // The evidence was not stored, so the request did not succeed. Answering with a success status
+    // would tell the client its recording is safe when the backend does not hold it (`BR-015`, `BR-042`).
+    return new HttpException(
+      {
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+        code: 'STORAGE_UNAVAILABLE',
+        message: 'The recording could not be stored.',
+      },
+      HttpStatus.SERVICE_UNAVAILABLE,
+    );
+  }
+  return error;
+}
+
+/** The audio note is not in the caller's organization and Job, or its bytes are unavailable (`BR-001`). */
+function audioNoteNotFound(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.NOT_FOUND,
+      code: 'JOB_AUDIO_NOTE_NOT_FOUND',
+      message: 'Job audio note was not found.',
+    },
+    HttpStatus.NOT_FOUND,
+  );
+}
+
+/**
+ * The audio note has already been removed from ordinary use (`BR-089`).
+ *
+ * One recording has one removal and no restore is defined, so a repeat is a conflict with the evidence's
+ * own state rather than a second removal: the API refuses it explicitly instead of reporting a change it
+ * did not record (`BR-067`).
+ */
+function audioNoteAlreadyRemoved(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'JOB_AUDIO_NOTE_ALREADY_REMOVED',
+      message: 'That audio note has already been removed.',
+    },
+    HttpStatus.CONFLICT,
   );
 }
 

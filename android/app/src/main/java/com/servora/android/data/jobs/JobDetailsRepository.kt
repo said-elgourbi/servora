@@ -54,7 +54,21 @@ interface JobDetailsRepository {
         jobId: String,
         visitId: String,
         body: String,
-    ): VisitNoteResult
+    ): ActivityWriteResult
+
+    /**
+     * Takes one photo out of ordinary use, recording [reason], and returns the refreshed activity
+     * (`BR-088`, `BR-089`).
+     *
+     * The backend authorizes it (`evidence.photo.remove`), so this layer never decides whether the
+     * removal is allowed: a caller without the capability is refused by the API and reported as
+     * [JobActionFailure.FORBIDDEN] (`BR-007`).
+     */
+    suspend fun removeJobPhoto(
+        jobId: String,
+        photoId: String,
+        reason: String,
+    ): ActivityWriteResult
 
     /**
      * Moves the Job to [status] (`BR-058`).
@@ -190,16 +204,36 @@ class DefaultJobDetailsRepository @Inject constructor(
         jobId: String,
         visitId: String,
         body: String,
-    ): VisitNoteResult {
+    ): ActivityWriteResult {
         val accessToken = sessionAuthenticator.accessToken()
-            ?: return VisitNoteResult.Failure(JobActionFailure.UNAUTHENTICATED)
+            ?: return ActivityWriteResult.Failure(JobActionFailure.UNAUTHENTICATED)
 
         val request = AddVisitNoteRequestDto(body = body.trim())
         return performActivityWrite(
             accessToken = accessToken,
+            jobId = jobId,
             allowRenewal = true,
             call = { token ->
                 api.addVisitNote("Bearer $token", jobId, visitId, request)
+            },
+        )
+    }
+
+    override suspend fun removeJobPhoto(
+        jobId: String,
+        photoId: String,
+        reason: String,
+    ): ActivityWriteResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return ActivityWriteResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        val request = RemoveJobPhotoRequestDto(reason = reason.trim())
+        return performActivityWrite(
+            accessToken = accessToken,
+            jobId = jobId,
+            allowRenewal = true,
+            call = { token ->
+                api.removeJobPhoto("Bearer $token", jobId, photoId, request)
             },
         )
     }
@@ -330,41 +364,61 @@ class DefaultJobDetailsRepository @Inject constructor(
                 JobActionResult.Failure(JobActionFailure.NETWORK)
         }
 
-    /** Runs an activity write, renewing the session once when the backend rejects the token. */
+    /**
+     * Runs an activity write, renewing the session once when the backend rejects the token.
+     *
+     * A write answers with the refreshed timeline, and that answer **replaces the local copy** exactly
+     * as a successful read replaces it (`offline-first-architecture.md` §2, `BR-041`). Without this a
+     * device that wrote and then lost connectivity would serve an activity that predates its own
+     * change — showing, for a removal, evidence the change took out of ordinary use (`BR-089`).
+     */
     private suspend fun performActivityWrite(
         accessToken: String,
+        jobId: String,
         allowRenewal: Boolean,
         call: suspend (token: String) -> JobActivityDto,
-    ): VisitNoteResult =
+    ): ActivityWriteResult =
         try {
-            VisitNoteResult.Success(
-                call(accessToken).events.mapNotNull { it.toJobActivityEvent() },
+            val activity = call(accessToken)
+            subject.current()?.let { subjectId ->
+                evidence.rememberActivity(subjectId, jobId, activity)
+            }
+            ActivityWriteResult.Success(
+                activity.events.mapNotNull { it.toJobActivityEvent() },
             )
         } catch (failure: HttpException) {
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
-                renewAndRetryActivityWrite(accessToken, call)
+                renewAndRetryActivityWrite(accessToken, jobId, call)
             } else {
-                VisitNoteResult.Failure(failure.toActionFailure())
+                ActivityWriteResult.Failure(
+                    failure.toActionFailure(failure.errorEnvelope(json)?.code),
+                )
             }
         } catch (failure: IOException) {
-            VisitNoteResult.Failure(JobActionFailure.NETWORK)
+            ActivityWriteResult.Failure(JobActionFailure.NETWORK)
         } catch (failure: SerializationException) {
-            VisitNoteResult.Failure(JobActionFailure.UNEXPECTED)
+            ActivityWriteResult.Failure(JobActionFailure.UNEXPECTED)
         }
 
     private suspend fun renewAndRetryActivityWrite(
         rejectedToken: String,
+        jobId: String,
         call: suspend (token: String) -> JobActivityDto,
-    ): VisitNoteResult =
+    ): ActivityWriteResult =
         when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
             is SessionRenewal.Renewed ->
-                performActivityWrite(renewal.accessToken, allowRenewal = false, call = call)
+                performActivityWrite(
+                    accessToken = renewal.accessToken,
+                    jobId = jobId,
+                    allowRenewal = false,
+                    call = call,
+                )
 
             SessionRenewal.Rejected ->
-                VisitNoteResult.Failure(JobActionFailure.UNAUTHENTICATED)
+                ActivityWriteResult.Failure(JobActionFailure.UNAUTHENTICATED)
 
             SessionRenewal.Unavailable ->
-                VisitNoteResult.Failure(JobActionFailure.NETWORK)
+                ActivityWriteResult.Failure(JobActionFailure.NETWORK)
         }
 
     private suspend fun readTechnicians(
@@ -541,6 +595,7 @@ private const val CODE_REVIEW_CONDITION_NOT_MET = "JOB_REVIEW_CONDITION_NOT_MET"
 private const val CODE_COMPLETION_BLOCKED = "JOB_COMPLETION_BLOCKED"
 private const val CODE_VISIT_NOT_RESCHEDULABLE = "VISIT_NOT_RESCHEDULABLE"
 private const val CODE_TECHNICIANS_NOT_ASSIGNABLE = "TECHNICIANS_NOT_ASSIGNABLE"
+private const val CODE_PHOTO_ALREADY_REMOVED = "JOB_PHOTO_ALREADY_REMOVED"
 private const val CODE_SCHEDULE_CONFLICT = "SCHEDULE_CONFLICT"
 private const val CODE_VERSION_CONFLICT = "VERSION_CONFLICT"
 
@@ -597,6 +652,7 @@ private fun HttpException.toActionFailure(errorCode: String? = null): JobActionF
         CODE_COMPLETION_BLOCKED -> JobActionFailure.JOB_COMPLETION_BLOCKED
         CODE_VISIT_NOT_RESCHEDULABLE -> JobActionFailure.VISIT_NOT_RESCHEDULABLE
         CODE_TECHNICIANS_NOT_ASSIGNABLE -> JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE
+        CODE_PHOTO_ALREADY_REMOVED -> JobActionFailure.PHOTO_ALREADY_REMOVED
         CODE_VERSION_CONFLICT, CODE_SCHEDULE_CONFLICT ->
             JobActionFailure.VERSION_CONFLICT
 
@@ -701,5 +757,6 @@ private fun JobActivityEventDto.toJobActivityEvent(): JobActivityEvent? {
         body = body,
         photoId = photoId,
         photoPhase = photoPhase,
+        photoRemovalReason = photoRemovalReason,
     )
 }

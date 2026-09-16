@@ -664,6 +664,12 @@ internal fun jobPhotoFailureMessage(failure: JobPhotoFailure): Int =
         JobPhotoFailure.EXPORT_FAILED -> R.string.job_photo_error_export_failed
         JobPhotoFailure.SHARE_UNAVAILABLE -> R.string.job_photo_error_share_unavailable
         JobPhotoFailure.SAVE_PERMISSION_DENIED -> R.string.job_photo_error_save_permission
+        JobPhotoFailure.REMOVAL_NOT_PERMITTED -> R.string.job_photo_error_removal_not_permitted
+        JobPhotoFailure.REMOVAL_NO_LONGER_AVAILABLE ->
+            R.string.job_photo_error_removal_unavailable
+
+        JobPhotoFailure.REMOVAL_UNREACHABLE -> R.string.job_photo_error_removal_unreachable
+        JobPhotoFailure.REMOVAL_FAILED -> R.string.job_photo_error_removal_failed
     }
 
 /** The localized report of what the last photo action did (`§7`). */
@@ -672,5 +678,6 @@ internal fun jobPhotoMessageText(message: JobPhotoMessage): Int =
         JobPhotoMessage.QUEUED -> R.string.job_photo_saved_message
         JobPhotoMessage.SAVED_TO_DEVICE -> R.string.job_photo_saved_to_device_message
         JobPhotoMessage.SHARED -> R.string.job_photo_shared_message
+        JobPhotoMessage.EVIDENCE_REMOVED -> R.string.job_photo_removed_message
     }
 

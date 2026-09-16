@@ -31,6 +31,10 @@ data class CustomerPermissionsUiState(
     // viewer's two export actions are drawn on: saving a photo on the device and sharing it with
     // another application both read it (`D12`, `D13`, `BR-011`, `BR-015`).
     val canViewEvidence: Boolean = false,
+    // Removing accepted evidence is the capability the API enforces on the removal route, and the one
+    // the viewer's remove action is drawn on (`BR-089`). It is a Manager-level capability the default
+    // Technician role does not hold, and it is never inferred from adding or reading evidence.
+    val canRemoveEvidence: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -52,4 +56,5 @@ fun customerPermissionsUiState(
         canViewTechnicians = permissionChecker.has(Permission.TECHNICIAN_VIEW),
         canAddEvidencePhoto = permissionChecker.has(Permission.EVIDENCE_PHOTO_ADD),
         canViewEvidence = permissionChecker.has(Permission.EVIDENCE_VIEW),
+        canRemoveEvidence = permissionChecker.has(Permission.EVIDENCE_PHOTO_REMOVE),
     )

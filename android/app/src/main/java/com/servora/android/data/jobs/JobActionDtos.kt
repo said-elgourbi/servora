@@ -48,6 +48,17 @@ data class AddVisitNoteRequestDto(
     val body: String,
 )
 
+/**
+ * Request body that takes one photo out of ordinary use (`BR-089`).
+ *
+ * The reason is required: a removal records the actor, the instant and the reason. The actor and the
+ * instant are not sent — they come from the session and the backend's own clock (`BR-001`, `BR-031`).
+ */
+@Serializable
+data class RemoveJobPhotoRequestDto(
+    val reason: String,
+)
+
 /** One technician in an assignment request, with the role they hold on the Visit. */
 @Serializable
 data class TechnicianAssignmentRequestDto(

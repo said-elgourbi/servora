@@ -1,7 +1,10 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { DatabaseService } from '../database/database.service.js';
 import {
+  jobAudioNoteRemovals,
+  jobAudioNotes,
   jobCustomerHistory,
+  jobPhotoRemovals,
   jobPhotos,
   jobPropertyHistory,
   jobStatusHistory,
@@ -42,6 +45,9 @@ export const JOB_ACTIVITY_KINDS = [
   'JOB_PROPERTY_CHANGED',
   'JOB_CUSTOMER_CHANGED',
   'JOB_PHOTO_ADDED',
+  'JOB_PHOTO_REMOVED',
+  'JOB_AUDIO_ADDED',
+  'JOB_AUDIO_REMOVED',
   'VISIT_STATUS_CHANGED',
   'VISIT_SCHEDULED',
   'VISIT_RESCHEDULED',
@@ -90,12 +96,44 @@ export interface JobActivityEventDto {
   /** The note's text (`VISIT_NOTE_ADDED`, or a photo's optional note for `JOB_PHOTO_ADDED`). */
   body: string | null;
   /**
-   * The photo's identifier (`JOB_PHOTO_ADDED`), which is also the idempotency key the device
-   * generated. A client asks `GET /jobs/:id/photos/:photoId/content` for its bytes.
+   * The photo's identifier (`JOB_PHOTO_ADDED`, `JOB_PHOTO_REMOVED`), which is also the idempotency
+   * key the device generated. A client asks `GET /jobs/:id/photos/:photoId/content` for its bytes
+   * while the photo is in ordinary use.
    */
   photoId: string | null;
   /** The field-work phase a photo was taken in (`JOB_PHOTO_ADDED`, `BR-027`). */
   photoPhase: string | null;
+  /**
+   * Why a photo was removed (`JOB_PHOTO_REMOVED`, `BR-089`); `null` on every other kind.
+   *
+   * It is separate from [body] rather than sharing it, because the two say different things: `body` is
+   * the author's own text recorded with the evidence, while this is the reason a Manager gave for
+   * taking that evidence out of ordinary use, and a client must be able to present one without the
+   * other (`BR-028`, `BR-089`).
+   */
+  photoRemovalReason: string | null;
+  /**
+   * The audio note's identifier (`JOB_AUDIO_ADDED`, `JOB_AUDIO_REMOVED`), which is also the idempotency
+   * key the device generated. A client asks `GET /jobs/:id/audio-notes/:audioNoteId/content` for its
+   * bytes while the recording is in ordinary use (`ADR-018` A6).
+   */
+  audioNoteId: string | null;
+  /** The field-work phase an audio note was recorded in (`JOB_AUDIO_ADDED`, `BR-091`). */
+  audioPhase: string | null;
+  /**
+   * The recording's length in whole seconds (`JOB_AUDIO_ADDED`), derived from its own container by the
+   * API rather than declared by a client (`ADR-018` A3). It is what a client draws as the recording's
+   * duration without opening the file.
+   */
+  audioDurationSeconds: number | null;
+  /**
+   * Why an audio note was removed (`JOB_AUDIO_REMOVED`, `BR-089`); `null` on every other kind.
+   *
+   * It is its own field for the same reason a photo's removal reason is: the reason a Manager gave for
+   * taking evidence out of ordinary use is not the author's own text recorded with the evidence, and a
+   * client must be able to present one without the other (`BR-028`, `BR-089`).
+   */
+  audioRemovalReason: string | null;
 }
 
 /** The Job Activity read's response body. */
@@ -128,6 +166,20 @@ interface RawEvent {
    */
   photoId?: string | null;
   photoPhase?: string | null;
+  /** Set only by `JOB_PHOTO_REMOVED`; normalized to `null` on every other event. */
+  photoRemovalReason?: string | null;
+  /**
+   * The audio note's id, phase and length, carried only by `JOB_AUDIO_ADDED` (`ADR-018` A6).
+   *
+   * They are optional here for the same reason the photo fields are: only one kind carries them, and
+   * every event is mapped onto the response with them normalized to `null` — the response contract still
+   * states every field on every event (`docs/api/job-activity.md` §3.1).
+   */
+  audioNoteId?: string | null;
+  audioPhase?: string | null;
+  audioDurationSeconds?: number | null;
+  /** Set only by `JOB_AUDIO_REMOVED`; normalized to `null` on every other event. */
+  audioRemovalReason?: string | null;
 }
 
 /** Wraps the read's events in its response body (`docs/api/job-activity.md`). */
@@ -138,6 +190,26 @@ export function toJobActivityDto(
   return { jobId, events };
 }
 /**
+ * What a Job Activity read includes beyond the ordinary account (`BR-089`, tracker 029 D6d).
+ *
+ * A removal takes evidence out of **ordinary** use, and the audit/history context is the other half
+ * of that rule: an authorized Manager can still see the removed record and what the removal recorded.
+ * The caller decides, so no read silently answers with a different set of records than it was asked
+ * for.
+ */
+export interface JobActivityOptions {
+  /**
+   * Include the evidence entries of evidence that has been removed, of **every** kind.
+   *
+   * Defaults to `false`: an ordinary read — the technician's field views in particular — excludes removed
+   * evidence. The removal event itself is part of both reads, because the removal is history and Activity
+   * must not silently drop it (`BR-080`). It is one flag for one question ("show me removed evidence"),
+   * not one flag per kind (`ADR-018` A6).
+   */
+  readonly includeRemovedEvidence?: boolean;
+}
+
+/**
  * Reads one Job's chronological activity, newest first (`BR-080`).
  *
  * Every query is scoped by `organization_id` (`BR-001`); nothing here fetches a record by primary key
@@ -145,11 +217,18 @@ export function toJobActivityDto(
  * never projected. The `Visit N` sequence is derived from the Visit's creation order within the Job
  * and is a presentation label, never an identifier and never a stored field
  * (`docs/domain/job-visit-domain-model.md` §6).
+ *
+ * **Removed evidence** (`BR-088`, `BR-089`) is a projection rule rather than a stored flag: a photo is
+ * out of ordinary use when a removal row records it, the photo's own row stays untouched and
+ * append-only, and the removal appears as its own event beside it. Every read therefore sees the
+ * removal; only [JobActivityOptions.includeRemovedEvidence] additionally shows the evidence it
+ * removed.
  */
 export async function readJobActivity(
   db: DatabaseService['db'],
   scope: OrganizationScope,
   jobId: string,
+  options: JobActivityOptions = {},
 ): Promise<JobActivityEventDto[]> {
   const visitRows = await db
     .select({ id: visits.id, createdAt: visits.createdAt })
@@ -176,6 +255,9 @@ export async function readJobActivity(
     outcomeRows,
     noteRows,
     photoRows,
+    removalRows,
+    audioNoteRows,
+    audioRemovalRows,
   ] = await Promise.all([
     db
       .select({
@@ -273,7 +355,67 @@ export async function readJobActivity(
           eq(jobPhotos.jobId, jobId),
         ),
       ),
+    // The removals of this Job's photos. The join is what bounds them to the Job: a removal names its
+    // photo, and the photo names the Job (`BR-001`, `BR-089`).
+    db
+      .select({
+        id: jobPhotoRemovals.id,
+        jobPhotoId: jobPhotoRemovals.jobPhotoId,
+        actorMembershipId: jobPhotoRemovals.actorMembershipId,
+        reason: jobPhotoRemovals.reason,
+        recordedAt: jobPhotoRemovals.recordedAt,
+      })
+      .from(jobPhotoRemovals)
+      .innerJoin(jobPhotos, eq(jobPhotos.id, jobPhotoRemovals.jobPhotoId))
+      .where(
+        and(
+          eq(jobPhotoRemovals.organizationId, scope.organizationId),
+          eq(jobPhotos.jobId, jobId),
+        ),
+      ),
+    // The audio notes of this Job, and their removals — the same two reads the photo kind has, because
+    // an audio note is evidence of its own kind with the same projection rules (`BR-091`, `ADR-018` A1).
+    db
+      .select({
+        id: jobAudioNotes.id,
+        uploaderMembershipId: jobAudioNotes.uploaderMembershipId,
+        phase: jobAudioNotes.phase,
+        note: jobAudioNotes.note,
+        durationSeconds: jobAudioNotes.durationSeconds,
+        recordedAt: jobAudioNotes.recordedAt,
+      })
+      .from(jobAudioNotes)
+      .where(
+        and(
+          eq(jobAudioNotes.organizationId, scope.organizationId),
+          eq(jobAudioNotes.jobId, jobId),
+        ),
+      ),
+    db
+      .select({
+        id: jobAudioNoteRemovals.id,
+        jobAudioNoteId: jobAudioNoteRemovals.jobAudioNoteId,
+        actorMembershipId: jobAudioNoteRemovals.actorMembershipId,
+        reason: jobAudioNoteRemovals.reason,
+        recordedAt: jobAudioNoteRemovals.recordedAt,
+      })
+      .from(jobAudioNoteRemovals)
+      .innerJoin(
+        jobAudioNotes,
+        eq(jobAudioNotes.id, jobAudioNoteRemovals.jobAudioNoteId),
+      )
+      .where(
+        and(
+          eq(jobAudioNoteRemovals.organizationId, scope.organizationId),
+          eq(jobAudioNotes.jobId, jobId),
+        ),
+      ),
   ]);
+
+  const removedPhotoIds = new Set(removalRows.map((row) => row.jobPhotoId));
+  const removedAudioNoteIds = new Set(
+    audioRemovalRows.map((row) => row.jobAudioNoteId),
+  );
 
   const rawEvents: RawEvent[] = [
     ...jobStatusRows.map((row): RawEvent => ({
@@ -401,12 +543,40 @@ export async function readJobActivity(
     })),
     // A photo is Job-level evidence (`BR-015`, `BR-027`): it carries no Visit, its actor is the
     // member who uploaded it, and its optional note travels in `body`, which is the field a client
-    // already renders as an entry's own text (`BR-080`).
-    ...photoRows.map((row): RawEvent => ({
+    // already renders as an entry's own text (`BR-080`). A photo that has been removed is left out of
+    // an ordinary read — the evidence is out of use (`BR-089`) — and included when the caller asks for
+    // the audit/history context (`D6d`).
+    ...photoRows
+      .filter(
+        (row) =>
+          options.includeRemovedEvidence === true ||
+          !removedPhotoIds.has(row.id),
+      )
+      .map((row): RawEvent => ({
+        id: row.id,
+        kind: 'JOB_PHOTO_ADDED',
+        recordedAt: row.recordedAt as Date,
+        actorMembershipId: row.uploaderMembershipId,
+        visitId: null,
+        fromStatus: null,
+        toStatus: null,
+        technicianMembershipId: null,
+        roleCode: null,
+        previousRoleCode: null,
+        outcomeCode: null,
+        outcomeSummary: null,
+        body: row.note,
+        photoId: row.id,
+        photoPhase: row.phase,
+      })),
+    // The removal is history in its own right (`BR-067`, `BR-089`) and is part of **every** read, so
+    // Activity never silently drops the fact that evidence was taken out of use; the reason it was
+    // removed travels in its own field rather than in `body` (`BR-080`, `docs/api/job-activity.md`).
+    ...removalRows.map((row): RawEvent => ({
       id: row.id,
-      kind: 'JOB_PHOTO_ADDED',
+      kind: 'JOB_PHOTO_REMOVED',
       recordedAt: row.recordedAt as Date,
-      actorMembershipId: row.uploaderMembershipId,
+      actorMembershipId: row.actorMembershipId,
       visitId: null,
       fromStatus: null,
       toStatus: null,
@@ -415,9 +585,57 @@ export async function readJobActivity(
       previousRoleCode: null,
       outcomeCode: null,
       outcomeSummary: null,
-      body: row.note,
-      photoId: row.id,
-      photoPhase: row.phase,
+      body: null,
+      photoId: row.jobPhotoId,
+      photoRemovalReason: row.reason,
+    })),
+    // An audio note is Job-level evidence of its own kind, projected exactly as a photo is: its actor is
+    // the member who recorded it, its optional note travels in `body`, and its length is carried so a
+    // client can draw the recording without opening it (`BR-080`, `BR-091`, `ADR-018` A6). A recording
+    // that has been removed is left out of an ordinary read — it is out of use (`BR-089`) — and included
+    // when the caller asks for the audit/history context (`D6d`).
+    ...audioNoteRows
+      .filter(
+        (row) =>
+          options.includeRemovedEvidence === true ||
+          !removedAudioNoteIds.has(row.id),
+      )
+      .map((row): RawEvent => ({
+        id: row.id,
+        kind: 'JOB_AUDIO_ADDED',
+        recordedAt: row.recordedAt as Date,
+        actorMembershipId: row.uploaderMembershipId,
+        visitId: null,
+        fromStatus: null,
+        toStatus: null,
+        technicianMembershipId: null,
+        roleCode: null,
+        previousRoleCode: null,
+        outcomeCode: null,
+        outcomeSummary: null,
+        body: row.note,
+        audioNoteId: row.id,
+        audioPhase: row.phase,
+        audioDurationSeconds: row.durationSeconds,
+      })),
+    // The removal is history in its own right (`BR-067`, `BR-089`) and is part of every read, exactly as
+    // a photo's removal is, so Activity never silently drops the fact that evidence was taken out of use.
+    ...audioRemovalRows.map((row): RawEvent => ({
+      id: row.id,
+      kind: 'JOB_AUDIO_REMOVED',
+      recordedAt: row.recordedAt as Date,
+      actorMembershipId: row.actorMembershipId,
+      visitId: null,
+      fromStatus: null,
+      toStatus: null,
+      technicianMembershipId: null,
+      roleCode: null,
+      previousRoleCode: null,
+      outcomeCode: null,
+      outcomeSummary: null,
+      body: null,
+      audioNoteId: row.jobAudioNoteId,
+      audioRemovalReason: row.reason,
     })),
   ];
 
@@ -459,6 +677,11 @@ export async function readJobActivity(
     body: event.body,
     photoId: event.photoId ?? null,
     photoPhase: event.photoPhase ?? null,
+    photoRemovalReason: event.photoRemovalReason ?? null,
+    audioNoteId: event.audioNoteId ?? null,
+    audioPhase: event.audioPhase ?? null,
+    audioDurationSeconds: event.audioDurationSeconds ?? null,
+    audioRemovalReason: event.audioRemovalReason ?? null,
   }));
 }
 

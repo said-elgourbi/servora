@@ -17,8 +17,10 @@ A photo is **evidence a technician attached to a Job** (`BR-015`, `BR-027`), not
 Visit status. It is recorded on the **Job**, so it can be captured whether or not the Job has a Visit
 (`BR-051`), and it is **appended only**: nothing in this contract edits a photo, and there is no
 edit-evidence operation in Servora at all (`BR-067`, `BR-088`). A photo is draft material until this API
-records it and immutable historical evidence from that moment; an explicit, audited **remove** operation
-is decided (`BR-089`, tracker 029 Phase 6b) and is **not** part of this contract yet.
+records it and immutable historical evidence from that moment. From 2026-09-16 an explicit, audited
+**remove** operation exists (`BR-089`, tracker 029 Phase 6b): it appends a removal record beside the
+photo, which takes the evidence out of ordinary use while its record, its bytes and its history are
+preserved — §7.
 
 What the API stores per photo:
 
@@ -37,10 +39,11 @@ What the API stores per photo:
 
 ## 2. Permissions
 
-| Route                                   | Permission           |
-| --------------------------------------- | -------------------- |
-| `POST /jobs/:id/photos`                 | `evidence.photo.add` |
-| `GET /jobs/:id/photos/:photoId/content` | `evidence.view`      |
+| Route                                        | Permission             |
+| -------------------------------------------- | ---------------------- |
+| `POST /jobs/:id/photos`                      | `evidence.photo.add`   |
+| `GET /jobs/:id/photos/:photoId/content`      | `evidence.view`        |
+| `POST /jobs/:id/photos/:photoId/removal`     | `evidence.photo.remove` |
 
 Evidence is authorized by the capabilities the catalogue defines for evidence (`BR-006`, `ADR-015`),
 not by a Job or Customer capability. A client draws its actions from the same codes (`BR-011`), and the
@@ -53,14 +56,19 @@ photo evidence unusable by the audience it exists for. This is the decision reco
 `docs/decisions/015-evidence-capabilities.md` and in tracker 029 (D1, D1b); the interim authorization no
 longer applies.
 
-**Per kind.** The catalogue is `evidence.view` and `evidence.photo.add`, so one kind of evidence can be
-withdrawn from a member without withdrawing the others. The reserved `evidence.audio.add` is **not**
-created yet: audio is agreed as a future kind but no rule accepts it (`BR-027`, `BR-042`, tracker 029
-D8). Adding evidence does not grant reading it back, and reading it does not grant adding it.
+**Per kind.** The catalogue is `evidence.view`, `evidence.photo.add` and `evidence.photo.remove`, so one
+kind of evidence can be withdrawn from a member without withdrawing the others. The reserved
+`evidence.audio.add` is **not** created yet: audio is agreed as a future kind but no rule accepts it
+(`BR-027`, `BR-042`, tracker 029 D8). Adding evidence does not grant reading it back, reading it does not
+grant adding it, and **neither grants removing it**: taking accepted evidence out of ordinary use is a
+separate, Manager-level capability (`BR-089`).
 
-**Default roles.** Both capabilities are held by the default **Manager** and **Technician** roles
-(`0010_evidence_permissions.sql`, and the development seed for the local QA accounts). A custom role or
-a member's direct permissions may grant them the same way as any other capability (`BR-004`, `BR-006`).
+**Default roles.** `evidence.view` and `evidence.photo.add` are held by the default **Manager** and
+**Technician** roles (`0010_evidence_permissions.sql`, and the development seed for the local QA
+accounts). `evidence.photo.remove` is granted to the default **Manager** role alone
+(`0011_job_photo_removals.sql`): `BR-009`'s field role records and reads evidence and does not remove it.
+A custom role or a member's direct permissions may grant any of them the same way as any other
+capability (`BR-004`, `BR-006`).
 
 **Not decided here.** The `jobs.*` capability set remains the Jobs feature's own open question
 (`docs/api/job-actions.md` §2, `docs/api/job-details.md` §2): this contract decides the evidence
@@ -99,12 +107,15 @@ event and there is no separate photo read. The new entry is:
   "outcomeSummary": null,
   "body": "Panel before the repair",
   "photoId": "9d2c…",
-  "photoPhase": "BEFORE_WORK"
+  "photoPhase": "BEFORE_WORK",
+  "photoRemovalReason": null
 }
 ```
 
 `photoId` is what `GET /jobs/:id/photos/:photoId/content` is asked for, and `body` carries the note.
-The entry is Job-level (`visitSequence: null`), matching where the photo is recorded.
+`photoRemovalReason` is `null` on every event but `JOB_PHOTO_REMOVED`, which carries no `body`
+(`docs/api/job-activity.md` §3.2). The entry is Job-level (`visitSequence: null`), matching where the
+photo is recorded.
 
 ### 3.2 Idempotency (`BR-031`, offline standard §5)
 
@@ -145,7 +156,9 @@ the audience the feature exists for — that open question was recorded in
 Tenant scope comes from the authenticated session only: a photo is always resolved by
 `(organizationId, jobId, photoId)`, and a Job another organization owns is `404`, never `403`
 
-## 4. `GET /jobs/:id/photos/:photoId/content`
+## 4. The stored bytes and the removal
+
+### 4.1 `GET /jobs/:id/photos/:photoId/content`
 
 Streams the stored bytes with the stored content type.
 
@@ -160,19 +173,75 @@ Streams the stored bytes with the stored content type.
   URL is debug-build-only. Until it lands, the behaviour above is what the API does.
 - If the record exists but the store no longer holds the object, the route answers `404` rather than an
   empty `200`: the API never reports success for bytes it does not have.
+- **A removed photo is not readable here** (`BR-089`): this is an ordinary read of evidence, and removed
+  evidence is out of ordinary use, so the route answers `404 JOB_PHOTO_NOT_FOUND` exactly as it does for
+  a photo that does not exist. The response never discloses that there is evidence behind the id.
+
+### 4.2 `POST /jobs/:id/photos/:photoId/removal`
+
+Takes accepted evidence **out of ordinary use** (`BR-088`, `BR-089`). It is not a delete and it is not
+an edit: nothing in this contract overwrites a photo, replaces its bytes, changes its phase or rewrites
+its note.
+
+Body:
+
+| Field    | Required | Notes                                                                 |
+| -------- | -------- | --------------------------------------------------------------------- |
+| `reason` | yes      | Free text, at most 2000 characters. A structured catalogue is not defined (`BR-042`). |
+
+- **The record is appended, never written onto.** The API inserts a `job_photo_removals` row naming the
+  photo, the actor (from the session, never from input), the instant and the reason; `job_photos` stays
+  append-only and every field it holds is untouched (`BR-067`, `BR-089`).
+- **One removal per photo.** No restore is defined, so a second removal is refused with
+  `409 JOB_PHOTO_ALREADY_REMOVED` rather than recorded as a state change that did not happen.
+- **Ordinary reads exclude the evidence**: it leaves the Job Activity's photos, so it leaves the gallery
+  a client draws from it, and §4.1 refuses its bytes. The removal itself is **not** hidden: Job Activity
+  states that the evidence was removed, by whom, when and why (`JOB_PHOTO_REMOVED`,
+  `docs/api/job-activity.md` §3.2, §3.5).
+- **Nothing purges the bytes.** The stored object is left exactly where it is; physically removing it is
+  a retention concern (`BR-090`) and is not this operation.
+- **Online-only.** The route takes no client-generated idempotency key and no conflict policy is decided
+  for it, so it is never queued on a device (`offline-first-architecture.md` §5, §8, §13.2). The Android
+  client reports an unreachable API rather than queueing the decision.
+- Authorization is `evidence.photo.remove` (§2), a Manager-level capability the default Technician role
+  does not hold (`BR-089`).
+
+Response — `201 Created`: the refreshed Job Activity projection, like §3.1. The removal appears as:
+
+```json
+{
+  "id": "b41f…",
+  "kind": "JOB_PHOTO_REMOVED",
+  "recordedAt": "2026-09-16T18:22:00.000Z",
+  "actorName": "Dana Manager",
+  "visitSequence": null,
+  "fromStatus": null,
+  "toStatus": null,
+  "technicianName": null,
+  "roleCode": null,
+  "previousRoleCode": null,
+  "outcomeCode": null,
+  "outcomeSummary": null,
+  "body": null,
+  "photoId": "9d2c…",
+  "photoPhase": null,
+  "photoRemovalReason": "Photographed the wrong property"
+}
+```
 
 ## 5. Errors
 
-| Status | Code                     | When                                                                         |
-| ------ | ------------------------ | ---------------------------------------------------------------------------- |
-| `400`  | `VALIDATION_FAILED`      | A missing or malformed part: no file, unknown phase, bad id, oversized note.  |
-| `401`  | `UNAUTHENTICATED`        | No usable session.                                                            |
-| `403`  | `FORBIDDEN`              | The caller does not hold the capability the route requires (§2).              |
-| `404`  | `JOB_NOT_FOUND`          | The Job is not in the caller's organization (or its Customer was deleted).    |
-| `404`  | `JOB_PHOTO_NOT_FOUND`    | The photo is not in that organization and Job, or its bytes are unavailable.  |
-| `409`  | `PHOTO_OPERATION_REUSED` | The idempotency key was already used for another Job.                         |
-| `413`  | —                        | The upload exceeded the multipart limit.                                      |
-| `503`  | `STORAGE_UNAVAILABLE`    | The object store did not store the photo. **Nothing was recorded.**           |
+| Status | Code                       | When                                                                         |
+| ------ | -------------------------- | ---------------------------------------------------------------------------- |
+| `400`  | `VALIDATION_FAILED`        | A missing or malformed part: no file, unknown phase, bad id, oversized note, or a removal with no reason. |
+| `401`  | `UNAUTHENTICATED`          | No usable session.                                                            |
+| `403`  | `FORBIDDEN`                | The caller does not hold the capability the route requires (§2).              |
+| `404`  | `JOB_NOT_FOUND`            | The Job is not in the caller's organization (or its Customer was deleted).    |
+| `404`  | `JOB_PHOTO_NOT_FOUND`      | The photo is not in that organization and Job, its bytes are unavailable, or it has been removed (§4.1). |
+| `409`  | `PHOTO_OPERATION_REUSED`   | The idempotency key was already used for another Job.                         |
+| `409`  | `JOB_PHOTO_ALREADY_REMOVED` | The photo has already been taken out of ordinary use (§4.2).                 |
+| `413`  | —                          | The upload exceeded the multipart limit.                                      |
+| `503`  | `STORAGE_UNAVAILABLE`      | The object store did not store the photo. **Nothing was recorded.**           |
 
 `503` matters for the client: an unreachable store is a failure, never a success with a lost photo, so a
 queued upload retries rather than being reported as applied (`BR-014`, `BR-015`).
@@ -209,15 +278,19 @@ Recorded rather than guessed (`BR-042`).
    (`ADR-015`, tracker 029 Phase 1).
 2. **Photo retention, visibility and audit** (`BR-027`, `BR-033`, `BR-015`): **decided 2026-09-16** —
    evidence is immutable once accepted (`BR-088`), may be removed only by an audited, Manager-level
-   `evidence.photo.remove` (`BR-089`, tracker 029 Phase 6b — not implemented), retention is indefinite for
-   the life of the tenant, and normal product flows never hard-delete a Job (`BR-090`).
+   `evidence.photo.remove` (`BR-089`, §4.2 — **implemented 2026-09-16**, tracker 029 Phase 6b),
+   retention is indefinite for the life of the tenant, and normal product flows never hard-delete a Job
+   (`BR-090`). A **structured removal-reason catalogue** is still not defined: the reason is free text
+   (`BR-042`).
 3. **Thumbnails and derived objects** (`ADR-013`): **decided 2026-09-16** — none in v1. The stored object
    is the normalized original and the client renders from it; a derived pipeline is revisited only when
    performance proves it necessary.
 4. **Audio and other evidence** (`BR-027`): **decided 2026-09-16** — audio notes are evidence of their own
    kind, following this shape with the same storage, outbox, upload, authorization and immutability rules
-   (`BR-091`). Its capability `evidence.audio.add` is created when the audio feature is implemented
-   (tracker 029 Phase 9), and generic file attachments are out of scope in v1.
+   (`BR-091`). **Implemented 2026-09-16** for the API half (`docs/api/job-audio.md`,
+   `docs/tracker/035-android-audio-evidence.md`, `ADR-018`): `evidence.audio.add` and the audio kind's own
+   `evidence.audio.remove` are created, the three routes exist, and generic file attachments remain out of
+   scope in v1.
 5. **Whether evidence may be attached to a Visit rather than the Job.** This slice records photos on the
    Job, because that is where Job Activity projects them (`BR-080`) and because a Job need not have a
    Visit (`BR-051`). A Visit-scoped photo stream would be a product decision.

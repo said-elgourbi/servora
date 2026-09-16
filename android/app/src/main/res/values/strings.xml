@@ -558,6 +558,23 @@
     <string name="job_photo_viewer_share_title">Share photo</string>
     <string name="job_photo_saved_to_device_message">Photo saved on this device.</string>
     <string name="job_photo_shared_message">Photo handed to the application you chose.</string>
+    <!--
+      Taking accepted evidence out of ordinary use (`BR-088`, `BR-089`). It is a Manager action on a
+      recorded photo, so it is confirmed and a reason is stated before anything is applied; the photo
+      is not deleted, its record and history are preserved, and the removal itself is recorded.
+    -->
+    <string name="job_photo_viewer_remove">Remove evidence</string>
+    <string name="job_photo_removal_title">Remove this photo?</string>
+    <string name="job_photo_removal_message">This photo was recorded as evidence, so it cannot be deleted. It will be removed from the job\'s photos and from ordinary views, and the reason you give is kept with the record.</string>
+    <string name="job_photo_removal_reason_label">Why is it being removed?</string>
+    <string name="job_photo_removal_confirm">Remove</string>
+    <string name="job_photo_removal_cancel">Cancel</string>
+    <string name="job_photo_removed_message">Photo evidence removed. The record and its history were kept.</string>
+    <string name="job_photo_activity_removed">Removed a photo from ordinary use</string>
+    <string name="job_photo_error_removal_not_permitted">Your role does not allow removing evidence. Ask a manager.</string>
+    <string name="job_photo_error_removal_unavailable">That photo is no longer available to remove.</string>
+    <string name="job_photo_error_removal_unreachable">Removing evidence needs the server. Connect and try again.</string>
+    <string name="job_photo_error_removal_failed">The photo could not be removed, so nothing changed.</string>
     <string name="job_photo_error_export_unreadable">That photo could not be read, so it was not saved or shared.</string>
     <string name="job_photo_error_export_failed">The photo could not be saved on this device.</string>
     <string name="job_photo_error_share_unavailable">No application on this device can share the photo.</string>
