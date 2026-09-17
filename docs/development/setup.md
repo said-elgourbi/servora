@@ -205,6 +205,22 @@ Notes:
 | `make android-stop` / `tidy`                           | Stop the Gradle/Kotlin build daemons / stop them and report leftovers (§8) |
 | `make test` / `lint` / `build`                         | Aliases for the API targets                      |
 
+### How much verification to run
+
+Verification is scoped to the change (`.clinerules/qa.md` §3.1): an ordinary task runs the affected
+application's compile/build, its type check and the tests that cover the code it touched, while the full
+lint, the full suites and the full builds run when the feature completes — not after every correction.
+
+```bash
+cd api && npm run typecheck && npm run build
+cd api && npm test -- src/jobs/mp4-audio.spec.ts                   # the spec(s) covering the change
+cd api && npm run test:e2e -- test/job-audio-notes.e2e-spec.ts     # the e2e spec(s) covering the change
+cd android && ./gradlew compileDebugKotlin
+cd android && ./gradlew testDebugUnitTest --tests 'com.servora.android.ui.jobs.*'
+```
+
+Stop the build daemons after the last Gradle command either way (§8).
+
 ## 6. Transactional email (`ADR-008`)
 
 Password-reset messages are delivered through the `EMAIL_PROVIDER` port. Every value has an

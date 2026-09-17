@@ -80,7 +80,9 @@ import com.servora.android.ui.components.ServoraTopBarState
 import com.servora.android.ui.components.initials
 import com.servora.android.ui.home.ManagerHomeScreen
 import com.servora.android.ui.home.ManagerHomeViewModel
-import com.servora.android.ui.home.managerHomeHeader
+import com.servora.android.ui.home.TechnicianHomeScreen
+import com.servora.android.ui.home.TechnicianHomeViewModel
+import com.servora.android.ui.home.homeHeader
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.navigation.ServoraNavHost
 import com.servora.android.ui.navigation.ServoraRoutes
@@ -166,12 +168,14 @@ fun ServoraHomeScreen(
     propertyDetailViewModel: PropertyDetailViewModel,
     editPropertyViewModel: EditPropertyViewModel,
     managerHomeViewModel: ManagerHomeViewModel,
+    technicianHomeViewModel: TechnicianHomeViewModel,
     jobDetailsViewModel: JobDetailsViewModel,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val customers by customersViewModel.uiState.collectAsState()
     val managerHome by managerHomeViewModel.uiState.collectAsState()
+    val technicianHome by technicianHomeViewModel.uiState.collectAsState()
     // The list is read once the user is allowed to see customers (`BR-007`); the backend still
     // decides whether the read succeeds.
     LaunchedEffect(permissions.canOpenCustomers) {
@@ -185,12 +189,20 @@ fun ServoraHomeScreen(
     val selectedTab = DashboardTab.valueOf(selected)
     val navController = rememberNavController()
 
-    // The home asks the backend for today's operation in the device's own zone, so the day the
-    // backend resolves is the day the manager is working in (`BR-001`).
+    // The home asks the backend for the caller's own day in the device's own zone, so the day the
+    // backend resolves is the day the caller is working in (`BR-001`).
     val timeZoneId = remember { ZoneId.systemDefault().id }
     LaunchedEffect(selectedTab) {
         if (selectedTab == DashboardTab.HOME) {
-            managerHomeViewModel.load(timeZoneId)
+            // Which home a member has is decided by their capabilities, never by a role name
+            // (`BR-011`, `ADR-019` D6): the office read capability opens the operation’s day,
+            // the field capability opens the caller’s own. A member holding both keeps the
+            // office day, which is the home they already had.
+            if (permissions.canOpenCustomers) {
+                managerHomeViewModel.load(timeZoneId)
+            } else if (permissions.canViewAssignedWork) {
+                technicianHomeViewModel.load(timeZoneId)
+            }
         }
     }
 
@@ -198,10 +210,17 @@ fun ServoraHomeScreen(
     // no back control; a pushed screen replaces this with its own title, a back control and its
     // contextual actions (`docs/decisions/011-android-contextual-top-bar.md`).
     //
-    // Home is the exception the design calls for: the manager's home opens with a greeting and the
-    // current date rather than the tab's name. It is the same one top bar, so the home still does
-    // not stack a second header above its content.
-    val homeHeader = managerHomeHeader(managerHome.home?.displayName)
+    // Home is the exception the design calls for: a home opens with a greeting and the current date
+    // rather than the tab's name. It is the same one top bar, so the home still does not stack a
+    // second header above its content.
+    // The greeting’s name belongs to whichever home is on screen, so the header never greets the
+    // technician with the manager’s day (`BR-010`).
+    val greetingName = if (permissions.canOpenCustomers) {
+        managerHome.home?.displayName
+    } else {
+        technicianHome.home?.displayName
+    }
+    val homeHeader = homeHeader(greetingName)
     val rootTitle = when (selectedTab) {
         DashboardTab.HOME -> homeHeader.title
         DashboardTab.SCHEDULE -> stringResource(R.string.nav_schedule)
@@ -285,19 +304,32 @@ fun ServoraHomeScreen(
                         )
 
                     DashboardTab.HOME ->
-                        ManagerHomeScreen(
-                            state = managerHome,
-                            // A condition or a schedule row opens the Job it is about: the Job
-                            // Details destination is where the manager acts on it (`BR-012`).
-                            onOpenJob = { jobId ->
-                                navController.navigate(ServoraRoutes.jobDetail(jobId))
-                            },
-                            // "See all" and the tab are the same destination: the schedule area is
-                            // where today can be worked on, and it already exists in the bottom
-                            // navigation.
-                            onOpenSchedule = { selected = DashboardTab.SCHEDULE.name },
-                            onRetry = { managerHomeViewModel.retry(timeZoneId) },
-                        )
+                        if (permissions.canOpenCustomers) {
+                            ManagerHomeScreen(
+                                state = managerHome,
+                                // A condition or a schedule row opens the Job it is about: the Job
+                                // Details destination is where the manager acts on it (`BR-012`).
+                                onOpenJob = { jobId ->
+                                    navController.navigate(ServoraRoutes.jobDetail(jobId))
+                                },
+                                // "See all" and the tab are the same destination: the schedule
+                                // area is where today can be worked on, and it already exists in
+                                // the bottom navigation.
+                                onOpenSchedule = { selected = DashboardTab.SCHEDULE.name },
+                                onRetry = { managerHomeViewModel.retry(timeZoneId) },
+                            )
+                        } else {
+                            // The field home: the caller's own day, which is the screen a session
+                            // holding only the field capability can actually read (`BR-009`,
+                            // `BR-010`, `ADR-019` D6).
+                            TechnicianHomeScreen(
+                                state = technicianHome,
+                                onOpenJob = { jobId ->
+                                    navController.navigate(ServoraRoutes.jobDetail(jobId))
+                                },
+                                onRetry = { technicianHomeViewModel.retry(timeZoneId) },
+                            )
+                        }
 
                     DashboardTab.SCHEDULE ->
                         PlaceholderTab(

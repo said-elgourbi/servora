@@ -544,6 +544,11 @@ internal fun jobActionFailureMessage(
         com.servora.android.data.jobs.JobActionFailure.PHOTO_ALREADY_REMOVED ->
             R.string.job_photo_error_removal_unavailable
 
+        // The audio kind's own conflict (`ADR-018` A7), reported through the audio channel for the
+        // same reason (`BR-042`).
+        com.servora.android.data.jobs.JobActionFailure.AUDIO_NOTE_ALREADY_REMOVED ->
+            R.string.job_audio_error_removal_unavailable
+
         com.servora.android.data.jobs.JobActionFailure.NETWORK -> R.string.job_action_error_network
         com.servora.android.data.jobs.JobActionFailure.SERVER -> R.string.job_action_error_server
         com.servora.android.data.jobs.JobActionFailure.UNEXPECTED -> R.string.job_action_error_unexpected

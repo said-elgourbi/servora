@@ -647,6 +647,11 @@ Consider:
 
 A change that modifies behavior must include appropriate verification.
 
+Verification is **scoped to the change** rather than repeated repository-wide by reflex: an ordinary task
+runs the compile/build and the tests that cover the code it touched, and the full lint, suites and builds of
+the affected applications run when the feature completes (`qa.md` §3.1). Re-running the whole set after every
+small correction is not what makes a change correct, and it is what leaves the machine unusable (§18).
+
 Do not weaken or delete tests merely because they make implementation inconvenient.
 
 Detailed verification requirements belong in `qa.md`.

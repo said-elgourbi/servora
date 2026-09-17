@@ -1,16 +1,18 @@
 import { DomainValidationError } from '../validation/domain-validation.js';
 import {
+  parseAddVisitNoteDto,
   parseAssignVisitTechniciansDto,
   parseChangeJobStatusDto,
+  parseChangeVisitStatusDto,
   parseRescheduleVisitDto,
 } from './job-action.dto.js';
 
 /**
- * The action request parsers (`BR-058`, `BR-068`, `BR-072`, `BR-073`).
+ * The action request parsers (`BR-058`, `BR-068`, `BR-072`, `BR-073`, `BR-074`, `BR-077`, `BR-078`).
  *
  * Validation is the API boundary's job (`dev.md` §7): a client that sends a status Servora does not
- * have, a schedule the API cannot store, or a crew without exactly one Lead is refused here rather
- * than reaching the database.
+ * have, a schedule the API cannot store, a crew without exactly one Lead, or a completion without the
+ * outcome `BR-077` requires is refused here rather than reaching the database.
  */
 describe('job action requests', () => {
   describe('job status change', () => {
@@ -100,6 +102,138 @@ describe('job action requests', () => {
         arrivalWindowStart: new Date('2026-09-14T12:00:00.000Z'),
         arrivalWindowEnd: new Date('2026-09-14T14:00:00.000Z'),
       });
+    });
+  });
+
+  describe('visit status change', () => {
+    it('accepts a lifecycle destination with the device provenance and version', () => {
+      expect(
+        parseChangeVisitStatusDto({
+          status: 'EN_ROUTE',
+          clientOperationId: '33333333-3333-4333-8333-333333333333',
+          capturedAt: '2026-09-17T12:00:00.000Z',
+          expectedVersion: 3,
+        }),
+      ).toEqual({
+        status: 'EN_ROUTE',
+        outcomeCode: null,
+        outcomeSummary: null,
+        clientOperationId: '33333333-3333-4333-8333-333333333333',
+        capturedAt: new Date('2026-09-17T12:00:00.000Z'),
+        expectedVersion: 3,
+        confirmConflicts: false,
+      });
+    });
+
+    it('requires the outcome a completion records (`BR-077`, `BR-078`)', () => {
+      expect(() => parseChangeVisitStatusDto({ status: 'COMPLETED' })).toThrow(
+        DomainValidationError,
+      );
+      // A code is not enough: `BR-077` requires the outcome type *and* its summary.
+      expect(() =>
+        parseChangeVisitStatusDto({
+          status: 'COMPLETED',
+          outcomeCode: 'RESOLVED',
+        }),
+      ).toThrow(DomainValidationError);
+      expect(() =>
+        parseChangeVisitStatusDto({
+          status: 'COMPLETED',
+          outcomeSummary: 'Replaced the igniter.',
+        }),
+      ).toThrow(DomainValidationError);
+      expect(
+        parseChangeVisitStatusDto({
+          status: 'COMPLETED',
+          outcomeCode: 'NEEDS_PARTS',
+          outcomeSummary: ' Ordered the igniter. ',
+        }),
+      ).toMatchObject({
+        outcomeCode: 'NEEDS_PARTS',
+        outcomeSummary: 'Ordered the igniter.',
+      });
+    });
+
+    it('refuses an outcome on a destination that stores none', () => {
+      // `docs/domain/job-visit-domain-model.md` §11.2: a DRAFT outcome is not modelled, so accepting one
+      // for another destination would report a record the API did not make (`BR-042`).
+      expect(() =>
+        parseChangeVisitStatusDto({
+          status: 'ON_SITE',
+          outcomeCode: 'RESOLVED',
+          outcomeSummary: 'Done.',
+        }),
+      ).toThrow(DomainValidationError);
+    });
+
+    it('refuses a Visit status Servora does not have, and the two no route applies', () => {
+      expect(() => parseChangeVisitStatusDto({ status: 'PAUSED' })).toThrow(
+        DomainValidationError,
+      );
+      // A Job status is not a Visit status: the vocabularies are separate and closed (`BR-041`).
+      expect(() => parseChangeVisitStatusDto({ status: 'PENDING_REVIEW' })).toThrow(
+        DomainValidationError,
+      );
+      // `CANCELED` and `NO_SHOW` are refused by the lifecycle table, not by the parser, so the API can
+      // answer with the destinations the Visit really has (`BR-074`, `BR-066`).
+      expect(parseChangeVisitStatusDto({ status: 'CANCELED' }).status).toBe(
+        'CANCELED',
+      );
+      expect(parseChangeVisitStatusDto({ status: 'NO_SHOW' }).status).toBe(
+        'NO_SHOW',
+      );
+    });
+
+    it('refuses an outcome code Servora does not have', () => {
+      expect(() =>
+        parseChangeVisitStatusDto({
+          status: 'COMPLETED',
+          outcomeCode: 'FIXED',
+          outcomeSummary: 'Done.',
+        }),
+      ).toThrow(DomainValidationError);
+    });
+
+    it('refuses a malformed operation id, instant or version', () => {
+      expect(() =>
+        parseChangeVisitStatusDto({
+          status: 'EN_ROUTE',
+          clientOperationId: 'not-a-uuid',
+        }),
+      ).toThrow(DomainValidationError);
+      expect(() =>
+        parseChangeVisitStatusDto({
+          status: 'EN_ROUTE',
+          capturedAt: '2026-09-17 12:00',
+        }),
+      ).toThrow(DomainValidationError);
+      expect(() =>
+        parseChangeVisitStatusDto({ status: 'EN_ROUTE', expectedVersion: 0 }),
+      ).toThrow(DomainValidationError);
+    });
+  });
+
+  describe('visit note', () => {
+    it('accepts a body with the optional device provenance', () => {
+      expect(parseAddVisitNoteDto({ body: ' Filter replaced. ' })).toEqual({
+        body: 'Filter replaced.',
+        clientOperationId: null,
+        capturedAt: null,
+      });
+      expect(
+        parseAddVisitNoteDto({
+          body: 'Filter replaced.',
+          clientOperationId: '44444444-4444-4444-8444-444444444444',
+          capturedAt: '2026-09-17T12:30:00.000Z',
+        }),
+      ).toMatchObject({
+        clientOperationId: '44444444-4444-4444-8444-444444444444',
+        capturedAt: new Date('2026-09-17T12:30:00.000Z'),
+      });
+      expect(() => parseAddVisitNoteDto({})).toThrow(DomainValidationError);
+      expect(() => parseAddVisitNoteDto({ body: '   ' })).toThrow(
+        DomainValidationError,
+      );
     });
   });
 

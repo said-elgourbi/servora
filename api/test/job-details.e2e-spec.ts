@@ -1,11 +1,12 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
   CUSTOMER_PERMISSIONS,
+  VISIT_PERMISSIONS,
   type PermissionCode,
 } from '../src/auth/permissions.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
@@ -69,18 +70,33 @@ describe('job details (e2e)', () => {
     await database.dispose();
   });
 
-  /** A signed-in member of the organization holding exactly [granted]. */
-  async function signInFor(granted: readonly PermissionCode[]) {
+  /**
+   * A signed-in member holding exactly [granted], in [targetOrganizationId].
+   *
+   * The organization is a parameter because the tenant boundary is one of the things the field read
+   * has to be asserted against (`BR-001`); it defaults to this suite's organization.
+   */
+  async function signInFor(
+    granted: readonly PermissionCode[],
+    targetOrganizationId = organizationId,
+  ) {
     const email = uniqueEmail('job-details');
     const user = await createTestUser(database.db, {
       email,
       passwordHash: await hashPassword(PASSWORD),
     });
     database.cleanup.trackUser(user.id);
-    const role = await createTestOrganizationRole(database.db, organizationId);
+    const role = await createTestOrganizationRole(
+      database.db,
+      targetOrganizationId,
+    );
     const [member] = await database.db
       .insert(organizationMembers)
-      .values({ organizationId, userId: user.id, roleId: role.id })
+      .values({
+        organizationId: targetOrganizationId,
+        userId: user.id,
+        roleId: role.id,
+      })
       .returning();
 
     for (const code of granted) {
@@ -93,7 +109,7 @@ describe('job details (e2e)', () => {
         throw new Error(`Missing permission seed: ${code}`);
       }
       await database.db.insert(organizationMemberPermissions).values({
-        organizationId,
+        organizationId: targetOrganizationId,
         memberId: member.id,
         permissionId: permission.id,
       });
@@ -595,5 +611,152 @@ describe('job details (e2e)', () => {
     );
 
     expect(details).toBeNull();
+  });
+
+  /*
+   * The field caller (`BR-009`; `ADR-019` D1, D2).
+   *
+   * A technician reaches a Job through `VISIT_VIEW_ASSIGNED` and reads **the same** projection the
+   * office reads — one contract, one parser (`BR-041`). What that capability admits them to is decided
+   * by their own current assignments, and a Job their crew does not include is reported as not found
+   * rather than forbidden, so a Job id cannot be probed for existence (`BR-001`).
+   */
+
+  /** A Job with a Property and one Visit whose crew is [memberId]. */
+  async function jobWithCrew(memberId: string, status = 'SCHEDULED') {
+    const actor = await newMembership(organizationId);
+    const customer = await newCustomer(organizationId, 'Field Customer');
+    const property = await newProperty(organizationId, '12 Field Road');
+    await linkProperty(organizationId, property.id, customer.id, actor.id);
+    const job = await newJob(organizationId, customer.id, property.id);
+    // A `SCHEDULED` Visit requires a Property (`visits_scheduled_requirements_check`, `BR-072`).
+    const visit = await newVisit({
+      targetOrganizationId: organizationId,
+      jobId: job.id,
+      propertyId: property.id,
+      status,
+      scheduledStart: new Date(Date.now() + 3_600_000),
+      scheduledEnd: new Date(Date.now() + 7_200_000),
+      ...(status === 'COMPLETED' ? { actorMembershipId: actor.id } : {}),
+    });
+    await assign({
+      targetOrganizationId: organizationId,
+      visitId: visit.id,
+      technicianMembershipId: memberId,
+      roleCode: 'LEAD',
+    });
+    return { job, visit };
+  }
+
+  it('answers the Job to a field caller assigned to its Visit', async () => {
+    const session = await signInFor([VISIT_PERMISSIONS.VIEW_ASSIGNED]);
+    const { job, visit } = await jobWithCrew(session.membershipId);
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(response.body.id).toBe(job.id);
+    expect(response.body.jobNumber).toBe(job.jobNumber);
+    expect(response.body.selectedVisit.id).toBe(visit.id);
+    expect(response.body.technicians).toEqual([
+      { membershipId: session.membershipId, name: null, roleCode: 'LEAD' },
+    ]);
+  });
+
+  it('answers a Job whose crew still includes the caller after the Visit completed', async () => {
+    // A completed assignment stays a current assignment until a manager removes it (`BR-069`), so the
+    // technician who did the work can still open the Job.
+    const session = await signInFor([VISIT_PERMISSIONS.VIEW_ASSIGNED]);
+    const { job } = await jobWithCrew(session.membershipId, 'COMPLETED');
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+  });
+
+  it('answers not found for a Job a field caller is not assigned to', async () => {
+    const session = await signInFor([VISIT_PERMISSIONS.VIEW_ASSIGNED]);
+    const other = await newMembership(organizationId);
+    const { job } = await jobWithCrew(other.id);
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404)
+      .expect((response) => {
+        expect(response.body.code).toBe('JOB_NOT_FOUND');
+      });
+  });
+
+  it('stops answering a Job once the caller is removed from its crew', async () => {
+    const session = await signInFor([VISIT_PERMISSIONS.VIEW_ASSIGNED]);
+    const { job, visit } = await jobWithCrew(session.membershipId);
+    await database.db
+      .delete(visitTechnicians)
+      .where(
+        and(
+          eq(visitTechnicians.visitId, visit.id),
+          eq(visitTechnicians.technicianMembershipId, session.membershipId),
+        ),
+      );
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404);
+  });
+
+  it('refuses a caller holding a field write capability but no read capability with 403', async () => {
+    // The guard asks one question — which **read** capability admitted the caller — and a write
+    // capability is not a substitute for it (`BR-006`, `BR-009`).
+    const session = await signInFor([
+      VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS,
+    ]);
+    const other = await newMembership(organizationId);
+    const { job } = await jobWithCrew(other.id);
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(403);
+  });
+
+  it('reads the organization when the caller holds the office capability as well', async () => {
+    // D2's scope follows the capability that admits the caller: a member who also holds
+    // `customers.view` is an office caller, exactly as before this slice.
+    const session = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      VISIT_PERMISSIONS.VIEW_ASSIGNED,
+    ]);
+    const other = await newMembership(organizationId);
+    const { job } = await jobWithCrew(other.id);
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+  });
+
+  it('keeps a field caller inside their own organization', async () => {
+    const otherOrganization = await createTestOrganization(database.db, {
+      name: 'Other Field Org',
+    });
+    database.cleanup.trackOrganization(otherOrganization.id);
+    const session = await signInFor(
+      [VISIT_PERMISSIONS.VIEW_ASSIGNED],
+      otherOrganization.id,
+    );
+    // A Job of this suite's organization, requested by the other organization's member: the field
+    // capability is held in **their** organization and reaches nothing here (`BR-001`).
+    const other = await newMembership(organizationId);
+    const { job } = await jobWithCrew(other.id);
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404);
   });
 });

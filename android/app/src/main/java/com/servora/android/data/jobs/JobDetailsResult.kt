@@ -145,6 +145,16 @@ enum class JobActionFailure {
      */
     PHOTO_ALREADY_REMOVED,
 
+    /**
+     * The recording has already been removed from ordinary use (`BR-089`).
+     *
+     * It is the audio kind's own code because the API reports each kind's conflict as its own stable
+     * code (`docs/api/job-audio.md` §5), and the two capabilities are separate (`ADR-018` A7). Like
+     * the photo's, it leaves the manager nothing to decide: the evidence is out of use, and the screen
+     * says so rather than reporting a failure it cannot explain (`BR-067`).
+     */
+    AUDIO_NOTE_ALREADY_REMOVED,
+
     /** `BR-073` only permits rescheduling a Visit that is `SCHEDULED`. */
     VISIT_NOT_RESCHEDULABLE,
 

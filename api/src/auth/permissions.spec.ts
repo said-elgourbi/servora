@@ -1,4 +1,4 @@
-import { EVIDENCE_PERMISSIONS } from './permissions.js';
+import { EVIDENCE_PERMISSIONS, VISIT_PERMISSIONS } from './permissions.js';
 
 /**
  * The evidence capability catalogue (`BR-006`, `BR-015`, `BR-027`, `BR-091`; tracker 029 D1/D1b,
@@ -40,5 +40,32 @@ describe('evidence permissions', () => {
     expect(EVIDENCE_PERMISSIONS.AUDIO_REMOVE).not.toBe(
       EVIDENCE_PERMISSIONS.AUDIO_ADD,
     );
+  });
+});
+
+/**
+ * The field capability catalogue (`BR-009`; `ADR-019` D1, D3).
+ *
+ * These four codes are **not** introduced by this slice. Migration `0004_woozy_spitfire` creates them
+ * with their bilingual catalogue rows and grants exactly them to the default Technician role, and the
+ * development seed mirrors the grants. They are pinned here because the other half of `BR-006` —
+ * enforcement — now exists: a route is guarded by them and a client draws its field action from them,
+ * so a rename would break the API and every client at once (`BR-041`).
+ */
+describe('visit permissions', () => {
+  it('pins the four codes the Technician role is granted and the routes enforce', () => {
+    expect(VISIT_PERMISSIONS).toEqual({
+      VIEW_ASSIGNED: 'VISIT_VIEW_ASSIGNED',
+      UPDATE_ASSIGNED_STATUS: 'VISIT_UPDATE_ASSIGNED_STATUS',
+      ADD_NOTE: 'VISIT_ADD_NOTE',
+      RECORD_OUTCOME: 'VISIT_RECORD_OUTCOME',
+    });
+  });
+
+  it('keeps reading, acting, noting and recording apart', () => {
+    // A company may withdraw one of these from a member without withdrawing the others (`BR-006`,
+    // `BR-009`), so no two capabilities may collapse into the same code.
+    const codes = Object.values(VISIT_PERMISSIONS);
+    expect(new Set(codes).size).toBe(codes.length);
   });
 });

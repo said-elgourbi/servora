@@ -13,11 +13,9 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,7 +24,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -477,7 +474,8 @@ internal fun JobPhotoViewer(
     // recorded evidence: the manager states why, and nothing is applied until they confirm it
     // (`BR-067`, `BR-089`).
     removalTargetId?.let { photoId ->
-        JobPhotoRemovalDialog(
+        EvidenceRemovalDialog(
+            copy = JobPhotoRemovalCopy,
             isRemoving = removal == photoId,
             onConfirm = { reason ->
                 removalTargetId = null
@@ -489,72 +487,22 @@ internal fun JobPhotoViewer(
 }
 
 /**
- * The confirmation a removal states its reason in (`BR-067`, `BR-089`).
+ * The photo kind's own copy and tags for the removal confirmation (`BR-089`).
  *
- * Removing accepted evidence is a decision about a historical record, so it is confirmed explicitly:
- * the dialog says what it does, why a reason is required, and what it does **not** do — the photo is
- * not deleted, its record and history are preserved, and the removal itself is recorded
- * (`BR-088`, `BR-089`). The reason is the only input, and the action that applies the removal is
- * disabled until one is given, because the API refuses a removal without a reason and a dialog that
- * could send one would only produce a refusal.
+ * The dialog itself is shared with the audio kind ([EvidenceRemovalDialog]); what is per kind is what
+ * the manager is told and which nodes a UI test names (`BR-028`, `BR-041`).
  */
-@Composable
-private fun JobPhotoRemovalDialog(
-    isRemoving: Boolean,
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var reason by rememberSaveable { mutableStateOf("") }
-    val canConfirm = reason.isNotBlank() && !isRemoving
-
-    AlertDialog(
-        onDismissRequest = { if (!isRemoving) onDismiss() },
-        title = {
-            Text(
-                text = stringResource(R.string.job_photo_removal_title),
-                modifier = Modifier.testTag(JobPhotoRemovalDialogTag),
-            )
-        },
-        text = {
-            Column {
-                Text(
-                    text = stringResource(R.string.job_photo_removal_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                OutlinedTextField(
-                    value = reason,
-                    onValueChange = { reason = it },
-                    enabled = !isRemoving,
-                    label = { Text(stringResource(R.string.job_photo_removal_reason_label)) },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .testTag(JobPhotoRemovalReasonTag),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(reason) },
-                enabled = canConfirm,
-                modifier = Modifier.testTag(JobPhotoRemovalConfirmTag),
-            ) {
-                Text(stringResource(R.string.job_photo_removal_confirm))
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                enabled = !isRemoving,
-                modifier = Modifier.testTag(JobPhotoRemovalCancelTag),
-            ) {
-                Text(stringResource(R.string.job_photo_removal_cancel))
-            }
-        },
-    )
-}
+internal val JobPhotoRemovalCopy = EvidenceRemovalCopy(
+    tag = JobPhotoRemovalDialogTag,
+    reasonTag = JobPhotoRemovalReasonTag,
+    confirmTag = JobPhotoRemovalConfirmTag,
+    cancelTag = JobPhotoRemovalCancelTag,
+    title = R.string.job_photo_removal_title,
+    message = R.string.job_photo_removal_message,
+    reasonLabel = R.string.job_photo_removal_reason_label,
+    confirm = R.string.job_photo_removal_confirm,
+    cancel = R.string.job_photo_removal_cancel,
+)
 
 /**
  * One page of the viewer: one photo, filling the page, with its own gesture surface (`D11`, `D9`).
@@ -850,8 +798,8 @@ private fun JobPhotoViewerControl(
  * A note that does not fit is read a few lines at a time with an explicit **More**, and a very long one
  * scrolls inside its own bounded area rather than pushing the photo out: the photo is the subject of
  * this screen (`BR-012`, `BR-015`). How a note is read — when it needs the action, how much of it is
- * shown at once — is the shared photo-note piece (`JobPhotoNote`), so this viewer and the timeline read
- * a note the same way.
+ * shown at once — is the shared evidence-note piece (`EvidenceNote`), so this viewer and the timeline
+ * read a note the same way.
  *
  * The expansion belongs to the photo it was asked for: paging on starts the next note collapsed.
  */
@@ -869,7 +817,7 @@ private fun JobPhotoViewerNote(note: String, photoId: String) {
             color = JobPhotoViewerMutedContent,
             modifier = Modifier.testTag(JobPhotoViewerNoteLabelTag),
         )
-        JobPhotoNote(
+        EvidenceNote(
             note = note,
             collapseKey = photoId,
             textColor = JobPhotoViewerContent,

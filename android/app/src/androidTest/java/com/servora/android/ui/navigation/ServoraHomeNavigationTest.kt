@@ -33,6 +33,11 @@ import com.servora.android.data.customers.UpdateCustomerRequest
 import com.servora.android.data.customers.UpdatePropertyRequest
 import com.servora.android.data.home.ManagerHomeRepository
 import com.servora.android.data.home.ManagerHomeResult
+import com.servora.android.data.home.TechnicianHomeRepository
+import com.servora.android.data.home.TechnicianHomeResult
+import com.servora.android.domain.model.TechnicianHome
+import com.servora.android.domain.model.TechnicianHomeVisit
+import com.servora.android.domain.model.VisitStatus
 import com.servora.android.data.jobs.AssignableTechniciansResult
 import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
@@ -70,6 +75,7 @@ import com.servora.android.ui.customers.CustomerDetailCreateJobTag
 import com.servora.android.ui.customers.CustomerDetailPropertiesTag
 import com.servora.android.ui.customers.CustomerDetailSeeAllJobsTag
 import com.servora.android.ui.customers.CustomerPermissionsUiState
+import com.servora.android.ui.customers.CustomersNavTag
 import com.servora.android.ui.customers.CustomersViewModel
 import com.servora.android.ui.customers.EditCustomerActionTag
 import com.servora.android.ui.customers.EditCustomerViewModel
@@ -79,7 +85,12 @@ import com.servora.android.ui.customers.ServoraHomeScreen
 import com.servora.android.ui.customers.customerDetailJobTag
 import com.servora.android.ui.customers.customerRowTag
 import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.ui.home.TechnicianHomeContentTag
+import com.servora.android.ui.home.TechnicianHomeNextVisitTag
+import com.servora.android.ui.home.TechnicianHomeViewModel
 import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.jobs.inertJobAudioEvidenceCache
+import com.servora.android.data.jobs.inertJobAudioPlayer
 import com.servora.android.data.jobs.inertJobAudioSession
 import com.servora.android.data.jobs.inertJobPhotoExporter
 import com.servora.android.data.jobs.inertJobPhotoPickedItems
@@ -305,11 +316,25 @@ class ServoraHomeNavigationTest {
         composeTestRule.onNodeWithText(string(R.string.customers_view_title)).assertIsDisplayed()
     }
 
+    @Test
+    fun aFieldSessionLandsOnItsOwnDay() {
+        render(canOpenCustomers = false, canViewAssignedWork = true)
+
+        // A session holding only the field capability opens its own day rather than the
+        // operation’s, and the office destinations are not offered to it (`BR-009`, `BR-010`,
+        // `ADR-019` D6).
+        composeTestRule.onNodeWithTag(TechnicianHomeContentTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TechnicianHomeNextVisitTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(CustomersNavTag).assertDoesNotExist()
+    }
+
     private fun render(
         jobCount: Int = 1,
         canEditCustomer: Boolean = true,
         canViewProperties: Boolean = true,
         canCreateProperty: Boolean = true,
+        canOpenCustomers: Boolean = true,
+        canViewAssignedWork: Boolean = false,
     ) {
         val repository = FakeCustomersRepository(jobCount = jobCount)
         viewModel = CustomersViewModel(repository)
@@ -325,6 +350,10 @@ class ServoraHomeNavigationTest {
         // The manager home is wired by the shell too. These tests cover navigation, so it answers an
         // empty day rather than a scripted one.
         val managerHomeViewModel = ManagerHomeViewModel(FakeManagerHomeRepository())
+        // The technician home is wired by the shell too; the fake answers the caller's own day,
+        // because a session holding only the field capability lands on it (`ADR-019` D6).
+        val technicianHomeViewModel =
+            TechnicianHomeViewModel(FakeTechnicianHomeRepository())
         // The Job Details destination is wired by the shell too; the fake answers "not found",
         // because these tests cover navigation rather than Job behaviour.
         val jobDetailsViewModel = JobDetailsViewModel(
@@ -334,6 +363,10 @@ class ServoraHomeNavigationTest {
             jobPhotoImages = JobPhotoImages.None,
             pickedItems = inertJobPhotoPickedItems(),
             exporter = inertJobPhotoExporter(),
+            // Playback needs a device, so the navigation tests get a player that plays nothing and a
+            // cache that holds no bytes (`ADR-018` A9, `qa.md` §6.2).
+            audioEvidence = inertJobAudioEvidenceCache(),
+            audioPlayer = inertJobAudioPlayer(),
             clock = Clock.systemUTC(),
         )
         composeTestRule.setContent {
@@ -341,12 +374,13 @@ class ServoraHomeNavigationTest {
                 ServoraHomeScreen(
                     permissions =
                         CustomerPermissionsUiState(
-                            canOpenCustomers = true,
-                            canCreateCustomer = true,
+                            canOpenCustomers = canOpenCustomers,
+                            canCreateCustomer = canOpenCustomers,
                             canEditCustomer = canEditCustomer,
-                            canArchiveCustomer = true,
+                            canArchiveCustomer = canOpenCustomers,
                             canViewProperties = canViewProperties,
                             canCreateProperty = canCreateProperty,
+                            canViewAssignedWork = canViewAssignedWork,
                         ),
                     customersViewModel = viewModel,
                     addCustomerViewModel = addCustomerViewModel,
@@ -355,13 +389,19 @@ class ServoraHomeNavigationTest {
                     propertyDetailViewModel = propertyDetailViewModel,
                     editPropertyViewModel = editPropertyViewModel,
                     managerHomeViewModel = managerHomeViewModel,
+                    technicianHomeViewModel = technicianHomeViewModel,
                     jobDetailsViewModel = jobDetailsViewModel,
                     onSignOut = {},
                 )
             }
         }
         composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT) {
-            viewModel.uiState.value.customers.isNotEmpty()
+            // Which home a session lands on is decided by its capabilities (`BR-011`).
+            if (canOpenCustomers) {
+                viewModel.uiState.value.customers.isNotEmpty()
+            } else {
+                technicianHomeViewModel.uiState.value.hasContent
+            }
         }
     }
 
@@ -559,7 +599,6 @@ private class FakePropertyRepository : PropertyRepository {
 
 /** A [ManagerHomeRepository] that answers an empty day, so the shell always has one to render. */
 private class FakeManagerHomeRepository : ManagerHomeRepository {
-
     override suspend fun loadManagerHome(timeZone: String): ManagerHomeResult =
         ManagerHomeResult.Success(
             ManagerHome(
@@ -602,6 +641,12 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
         reason: String,
     ): ActivityWriteResult = unreachable()
 
+    override suspend fun removeJobAudioNote(
+        jobId: String,
+        audioNoteId: String,
+        reason: String,
+    ): ActivityWriteResult = unreachable()
+
     // The navigation tests never reach a Job or Visit action: the destination reports that no Job is
     // readable, so its action row is never drawn.
     override suspend fun changeJobStatus(
@@ -634,4 +679,39 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
 
     private fun unreachable(): Nothing =
         throw AssertionError("the navigation tests do not act on a Job")
+}
+
+/**
+ * A [TechnicianHomeRepository] that answers the caller's own day with one Visit to do next.
+ *
+ * These tests cover navigation, so the day is the smallest one that renders the field home.
+ */
+private class FakeTechnicianHomeRepository : TechnicianHomeRepository {
+
+    override suspend fun loadTechnicianHome(timeZone: String): TechnicianHomeResult =
+        TechnicianHomeResult.Success(
+            TechnicianHome(
+                displayName = "Mike Johnson",
+                nextVisit = TechnicianHomeVisit(
+                    visitId = "visit-1",
+                    visitStatus = VisitStatus.SCHEDULED,
+                    scheduledStart = "2026-09-17T13:00:00.000Z",
+                    scheduledEnd = "2026-09-17T14:00:00.000Z",
+                    jobId = "job-1",
+                    jobNumber = 1042,
+                    jobTitle = "Furnace repair",
+                    jobStatus = JobStatus.SCHEDULED,
+                    customerId = "customer-1",
+                    customerName = "ABC Property Management",
+                    address = null,
+                    technicians = emptyList(),
+                    isOverdue = false,
+                ),
+                visits = emptyList(),
+                upcoming = emptyList(),
+                upcomingTotal = 0,
+                attention = emptyList(),
+                attentionTotal = 0,
+            ),
+        )
 }

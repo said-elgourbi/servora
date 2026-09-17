@@ -26,6 +26,7 @@ import com.servora.android.ui.customers.EditCustomerViewModel
 import com.servora.android.ui.customers.EditPropertyViewModel
 import com.servora.android.ui.customers.PropertyDetailViewModel
 import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.ui.home.TechnicianHomeViewModel
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.passwordreset.PasswordResetViewModel
 import com.servora.android.ui.signin.SignInViewModel
@@ -61,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private val propertyDetailViewModel: PropertyDetailViewModel by viewModels()
     private val editPropertyViewModel: EditPropertyViewModel by viewModels()
     private val managerHomeViewModel: ManagerHomeViewModel by viewModels()
+    private val technicianHomeViewModel: TechnicianHomeViewModel by viewModels()
     private val jobDetailsViewModel: JobDetailsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,6 +86,7 @@ class MainActivity : AppCompatActivity() {
                             propertyDetailViewModel = propertyDetailViewModel,
                             editPropertyViewModel = editPropertyViewModel,
                             managerHomeViewModel = managerHomeViewModel,
+                            technicianHomeViewModel = technicianHomeViewModel,
                             jobDetailsViewModel = jobDetailsViewModel,
                             // Ending a session must also drop the session-scoped UI state: the
                             // customer list belongs to the session that read it (`BR-001`).
@@ -103,6 +106,9 @@ class MainActivity : AppCompatActivity() {
                                 // The manager home holds the operation the ending session read, so
                                 // it is released with it (`BR-001`).
                                 managerHomeViewModel.reset()
+                                // The technician home holds the day the ending session read, so
+                                // it is released with it (`BR-001`).
+                                technicianHomeViewModel.reset()
                                 // The Job Details screen holds a Job read with the ending session,
                                 // so it is released with it (`BR-001`).
                                 jobDetailsViewModel.reset()

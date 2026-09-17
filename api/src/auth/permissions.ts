@@ -105,10 +105,42 @@ export const EVIDENCE_PERMISSIONS = {
 export type EvidencePermission =
   (typeof EVIDENCE_PERMISSIONS)[keyof typeof EVIDENCE_PERMISSIONS];
 
+/**
+ * The field capabilities the default Technician role holds (`BR-009`; `ADR-019` D1, D3).
+ *
+ * **No capability is invented here.** Migration `0004_woozy_spitfire` already creates these four codes
+ * with their bilingual catalogue rows and grants exactly them to the default Technician role
+ * (`api/drizzle/migrations/0004_woozy_spitfire.sql:75-78`, `:104-118`); the development seed mirrors the
+ * grants. What was missing is the other half `BR-006` and `BR-007` require — a route guarded by them —
+ * which is what this catalogue entry makes possible.
+ *
+ * The spellings are kept as they are rather than re-spelled `visit.*`: renaming capabilities that live
+ * roles already hold is a catalogue migration and a `BR-040` change record with no product decision
+ * behind it (`ADR-019` D1, open question 6).
+ *
+ * `VIEW_ASSIGNED` is a **read** capability and is deliberately not implied by the three write ones: a
+ * company may let a member act on a Visit it may not read, and the reverse, exactly as the evidence
+ * catalogue keeps adding and reading apart (`ADR-015` D2).
+ */
+export const VISIT_PERMISSIONS = {
+  /** Read the Visits a caller is assigned to (`BR-009`) — the capability a field caller reads a Job by (`ADR-019` D2). */
+  VIEW_ASSIGNED: 'VISIT_VIEW_ASSIGNED',
+  /** Advance the field status of an assigned Visit (`BR-074`, `ADR-019` D4). */
+  UPDATE_ASSIGNED_STATUS: 'VISIT_UPDATE_ASSIGNED_STATUS',
+  /** Add a note to an assigned Visit (`BR-077`, `ADR-019` D3). */
+  ADD_NOTE: 'VISIT_ADD_NOTE',
+  /** Record the outcome a completed Visit requires (`BR-077`, `BR-078`, `ADR-019` D3). */
+  RECORD_OUTCOME: 'VISIT_RECORD_OUTCOME',
+} as const;
+
+export type VisitPermission =
+  (typeof VISIT_PERMISSIONS)[keyof typeof VISIT_PERMISSIONS];
+
 export type PermissionCode =
   | CustomerPermission
   | PropertyPermission
   | JobPermission
   | TechnicianPermission
   | EvidencePermission
+  | VisitPermission
   | (string & {});

@@ -31,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +51,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.data.jobs.JobAudioPlayback
+import com.servora.android.data.jobs.JobAudioPlaybackProgress
 import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.PendingJobAudioNote
 
@@ -166,12 +169,17 @@ internal fun JobUpdateSheet(
     isRecordingAudio: Boolean,
     isAttachingAudio: Boolean,
     audioPhase: EvidencePhase,
+    audioPlayback: JobAudioPlayback?,
+    audioProgress: State<JobAudioPlaybackProgress?>,
     onConfirmNote: (body: String) -> Unit,
     onTakePhoto: () -> Unit,
     onChoosePhotos: () -> Unit,
     onSelectAudioPhase: (EvidencePhase) -> Unit,
     onStartAudioRecording: () -> Unit,
     onStopAudioRecording: () -> Unit,
+    onPlayAudioDraft: () -> Unit,
+    /** Moves the take under review to a position the technician chose (`ADR-018` A11). */
+    onSeekAudioDraft: (audioNoteId: String, positionMillis: Int) -> Unit,
     onDiscardAudioDraft: () -> Unit,
     onAttachAudio: (String?) -> Unit,
     onMicrophoneDenied: () -> Unit,
@@ -263,9 +271,17 @@ internal fun JobUpdateSheet(
                             isRecording = isRecordingAudio,
                             isAttaching = isAttachingAudio,
                             phase = audioPhase,
+                            // Whether the take is the one playing is the device player's own answer, and a
+                            // take it has paused is held rather than playing, so this control returns to
+                            // **Play** while the playhead keeps its position (`ADR-018` A11).
+                            isPlaying = audioPlayback?.takeIf { it.audioNoteId == audioDraft?.audioNoteId }
+                                ?.isPlaying == true,
+                            audioProgress = audioProgress,
                             onSelectPhase = onSelectAudioPhase,
                             onStartRecording = onStartAudioRecording,
                             onStopRecording = onStopAudioRecording,
+                            onPlay = onPlayAudioDraft,
+                            onSeek = onSeekAudioDraft,
                             onDiscard = onDiscardAudioDraft,
                             onAttach = onAttachAudio,
                             onMicrophoneDenied = onMicrophoneDenied,
@@ -539,8 +555,18 @@ private fun JobUpdateNoteContent(
     }
 }
 
+/** Identifies the audio kind's play/pause action in the review of a take (`ADR-018` A9). */
+const val JobUpdatePlayAudioTag = "job-update-play-audio"
+
+/** Identifies the review's statement of where the take is and how long it is (`ADR-018` A11). */
+const val JobUpdateAudioPositionTag = "job-update-audio-position"
+
+/** Identifies the review's seek track for the take (`ADR-018` A11). */
+const val JobUpdateSeekAudioTag = "job-update-audio-seek"
+
 /**
- * The audio kind's own controls: record, stop, review, delete/re-record and attach (`BR-091`, `ADR-018`).
+ * The audio kind's own controls: record, stop, review, play back, delete/re-record and attach
+ * (`BR-091`, `ADR-018`).
  *
  * It is the design's own list (`Figma/…/servora-job-details-spec.md` §Audio), and it is drawn as one
  * block because audio is one update: the phase is stated first — the same vocabulary a photo carries
@@ -552,10 +578,9 @@ private fun JobUpdateNoteContent(
  * (`BR-014`). Deleting the take is what makes another possible, so *delete/re-record* is one step back to
  * the first state rather than a second recorder beside the first.
  *
- * **Playback is not here yet.** The recording is a file on this device, and playing it back is tracker
- * 035's Phase 9c, which adds the player to the sheet and to the Job's timeline together — one port for one
- * platform stack (`ADR-018` A9) rather than a second one here. What the review states instead is the
- * take's length, which is what the technician decides to keep or drop on.
+ * The review plays the take back with the **one** player this feature owns (`ADR-018` A9), the same one
+ * the Job's timeline plays an accepted recording with: the bytes are already on this device, so this needs
+ * no connectivity, and whether it is playing is the device player's own answer rather than a local guess.
  */
 @Composable
 private fun JobUpdateAudioContent(
@@ -563,9 +588,13 @@ private fun JobUpdateAudioContent(
     isRecording: Boolean,
     isAttaching: Boolean,
     phase: EvidencePhase,
+    isPlaying: Boolean,
+    audioProgress: State<JobAudioPlaybackProgress?>,
     onSelectPhase: (EvidencePhase) -> Unit,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
+    onPlay: () -> Unit,
+    onSeek: (audioNoteId: String, positionMillis: Int) -> Unit,
     onDiscard: () -> Unit,
     onAttach: (note: String?) -> Unit,
     onMicrophoneDenied: () -> Unit,
@@ -656,22 +685,37 @@ private fun JobUpdateAudioContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = JobUpdateAudioActionHeight)
                         .testTag(JobUpdateAudioReviewTag),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_mic),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(JobUpdateAudioIconSize),
+                    JobAudioPlayControl(
+                        tag = JobUpdatePlayAudioTag,
+                        isPlaying = isPlaying,
+                        isLoading = false,
+                        enabled = !isAttaching,
+                        onClick = onPlay,
                     )
-                    Text(
-                        text = audioDurationLabel(draft.durationSeconds),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                    // Where the take is and how long it is, in the same shape the timeline states it with:
+                    // one control, one player and one way of reading a recording on both surfaces
+                    // (`BR-041`, `ADR-018` A11).
+                    JobAudioPositionLabel(
+                        tag = JobUpdateAudioPositionTag,
+                        progress = audioProgress,
+                        audioNoteId = draft.audioNoteId,
+                        totalSeconds = draft.durationSeconds,
                     )
                 }
+                // The track sits directly under the row it belongs to, and the height it carries is its
+                // own touch area rather than a gap (`A11`, `BR-012`).
+                JobAudioSeekTrack(
+                    tag = JobUpdateSeekAudioTag,
+                    progress = audioProgress,
+                    audioNoteId = draft.audioNoteId,
+                    enabled = !isAttaching,
+                    onSeek = { positionMillis -> onSeek(draft.audioNoteId, positionMillis) },
+                )
                 OutlinedTextField(
                     value = note,
                     onValueChange = { text -> note = text },

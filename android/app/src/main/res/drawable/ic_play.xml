@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Play glyph for the audio-evidence player (`BR-091`, ADR-018 A9).
+
+  Geometry matches the icon set the design uses (lucide `Play`, the filled triangle the design's player
+  draws). The control that draws it supplies the colour, so the fill colour here is only a placeholder.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M7,4.5L19,12L7,19.5Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

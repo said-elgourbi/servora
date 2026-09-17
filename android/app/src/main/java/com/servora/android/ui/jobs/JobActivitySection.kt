@@ -108,6 +108,7 @@ internal fun JobActivitySection(
     onRetry: () -> Unit,
     onOpenPhoto: (String) -> Unit,
     photoImages: JobPhotoImages = JobPhotoImages.None,
+    audio: JobActivityAudio = JobActivityAudio(),
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth().testTag(JobActivityTag)) {
@@ -153,6 +154,7 @@ internal fun JobActivitySection(
                         jobId = state.jobId,
                         photoImages = photoImages,
                         onOpenPhoto = onOpenPhoto,
+                        audio = audio,
                     )
                 }
             }
@@ -209,6 +211,7 @@ private fun ActivityTimeline(
     jobId: String,
     photoImages: JobPhotoImages,
     onOpenPhoto: (String) -> Unit,
+    audio: JobActivityAudio,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         events.forEachIndexed { index, event ->
@@ -218,6 +221,7 @@ private fun ActivityTimeline(
                 jobId = jobId,
                 photoImages = photoImages,
                 onOpenPhoto = onOpenPhoto,
+                audio = audio,
             )
         }
     }
@@ -230,6 +234,7 @@ private fun ActivityEventRow(
     jobId: String,
     photoImages: JobPhotoImages,
     onOpenPhoto: (String) -> Unit,
+    audio: JobActivityAudio,
 ) {
     Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         // The rail draws the connecting line behind the marker, so the line runs marker to marker
@@ -275,6 +280,10 @@ private fun ActivityEventRow(
                     photoImages = photoImages,
                     onOpenPhoto = onOpenPhoto,
                 )
+            } else if (event.kind == JobActivityKind.JOB_AUDIO_ADDED) {
+                // A recording cannot be drawn the way a photo is, so the entry carries what stands for
+                // it: the control that plays it back, its length and its phase (`BR-091`, `ADR-018` A9).
+                ActivityAudioEvidence(event = event, audio = audio)
             } else {
                 activityContent(event)?.let { content ->
                     Text(
@@ -341,7 +350,7 @@ private fun ActivityPhotoEvidence(
 
         val note = event.body?.takeIf { it.isNotBlank() }
         if (note != null) {
-            JobPhotoNote(
+            EvidenceNote(
                 note = note,
                 collapseKey = photoId,
                 textColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -457,6 +466,15 @@ private fun activityTitle(event: JobActivityEvent): String =
         // Removing evidence is its own event (`BR-089`): it names what happened, and the photo is not
         // drawn, because it is no longer in ordinary use.
         JobActivityKind.JOB_PHOTO_REMOVED -> stringResource(R.string.job_photo_activity_removed)
+
+        // A recording is evidence of its own kind (`BR-091`): the entry names what happened, and the
+        // recording it recorded is drawn under it with its phase, its length and the control that plays
+        // it back (`ADR-018` A9).
+        JobActivityKind.JOB_AUDIO_ADDED -> stringResource(R.string.job_audio_activity_added)
+
+        // Removing a recording is its own event for the same reason a photo's is (`BR-089`); the
+        // recording is not drawn, because it is no longer in ordinary use.
+        JobActivityKind.JOB_AUDIO_REMOVED -> stringResource(R.string.job_audio_activity_removed)
     }
 
 /** The optional secondary text an entry carries: an outcome's summary, or a removal's reason. */
@@ -473,6 +491,13 @@ private fun activityContent(event: JobActivityEvent): String? =
 
         // A photo's note is drawn under the photo itself (`ActivityPhotoEvidence`).
         JobActivityKind.JOB_PHOTO_ADDED -> null
+
+        // A recording's own removal reason, for the same reason a photo's travels here (`BR-089`).
+        JobActivityKind.JOB_AUDIO_REMOVED ->
+            event.audioRemovalReason?.takeIf { it.isNotBlank() }
+
+        // A recording's note is drawn under the recording itself (`ActivityAudioEvidence`).
+        JobActivityKind.JOB_AUDIO_ADDED -> null
 
         else -> null
     }

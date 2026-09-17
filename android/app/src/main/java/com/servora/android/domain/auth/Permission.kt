@@ -39,6 +39,18 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     // by the photo capability. A capability named here is a UI gate only: the backend remains the
     // authority (`BR-007`, `BR-011`).
     EVIDENCE_AUDIO_ADD("evidence.audio.add"),
+    // Taking an accepted recording out of ordinary use is the audio kind's own **Manager-level**
+    // capability (`BR-089`, `ADR-018` A7): the default Technician role does not hold it, it is not
+    // implied by `evidence.audio.add` or by `evidence.photo.remove`, and the API enforces it on the
+    // removal route. A capability named here is a UI gate only (`BR-007`, `BR-011`).
+    EVIDENCE_AUDIO_REMOVE("evidence.audio.remove"),
+    // The field capability `BR-009` names for a technician's read of their own assigned work
+    // (`ADR-019` D1, D6). The API enforces it on `GET /home/technician` and on the Job read, and the
+    // scope is the caller's own current assignments rather than the capability itself (`ADR-019`
+    // D2). The remaining field capabilities `BR-009` names are added with the field action that uses
+    // them, so no gate is named here before anything draws on it. A capability named here is a UI
+    // gate only: the backend remains the authority (`BR-007`, `BR-011`).
+    VISIT_VIEW_ASSIGNED("VISIT_VIEW_ASSIGNED"),
 }
 
 class PermissionChecker(granted: Set<String>) {

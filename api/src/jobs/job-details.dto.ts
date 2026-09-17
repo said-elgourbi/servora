@@ -10,6 +10,7 @@ import type {
 } from './job.types.js';
 import {
   applicableJobStatusTransitions,
+  applicableVisitStatusTransitions,
   isReschedulableVisitStatus,
 } from './job.types.js';
 import type { AssignedTechnician, SelectedVisit } from './visit-assignment.js';
@@ -50,6 +51,20 @@ export interface JobDetailsVisitDto {
    * own copy of the lifecycle (`BR-041`).
    */
   reschedulable: boolean;
+  /**
+   * The statuses this Visit may move to in its field lifecycle (`BR-074`, `BR-075`).
+   *
+   * It is the same structural table the field route validates against, read from the server so a client
+   * draws the technician's action from the backend's own answer instead of holding a second copy of the
+   * lifecycle (`BR-022`, `BR-041`). `CANCELED` and `NO_SHOW` are absent because they are dispatch
+   * actions no capability authorizes today (`BR-066`, `ADR-019` D7).
+   *
+   * Whether the caller may *perform* a field action is a separate question with a separate answer: the
+   * capability the session holds decides that in the client, and the API decides it again at the route
+   * (`BR-007`, `BR-011`). The list is therefore reported to every caller the Job read admits, as the
+   * Job's own `allowedStatusTransitions` already is.
+   */
+  allowedStatusTransitions: VisitStatus[];
 }
 
 export interface JobDetailsDto {
@@ -122,6 +137,11 @@ export function toJobDetailsDto(details: JobDetails): JobDetailsDto {
             reschedulable: isReschedulableVisitStatus(
               details.selectedVisit.status,
             ),
+            allowedStatusTransitions: [
+              ...applicableVisitStatusTransitions(
+                details.selectedVisit.status,
+              ),
+            ],
           },
     technicians: details.technicians.map((technician) => ({
       membershipId: technician.membershipId,

@@ -335,7 +335,7 @@ repository**, so there is no web photo surface and no reporting over evidence.
 | 6 | The rest of the evidence lifecycle | **D6 answered in full; `D6e` ✓** | — | **Closed** — no hard Job deletion in normal flows, so there is no orphaned object to fix; what remains is carried by 6b and 6c |
 | 7 | Angular parity and reporting over evidence | D1–D15, Phases 5/6b/6c/8/9, an Angular application | Angular, API | Blocked on the Angular application, which does not exist in this repository |
 | 8 | Evidence reads through short-lived presigned URLs | **D15 ✓**, Phase 5 (the read path it changes) | API, Android, `docs/decisions/`, `docs/api/` | Startable once the design states the resolution `ADR-013` D7 requires |
-| 9 | Audio evidence (`evidence.audio.add`) | **D8 ✓**, Phase 1 | API, database, Android, offline, localization, tests, docs | **API half landed (2026-09-16)** — see `docs/tracker/035-android-audio-evidence.md` (Phase 9a): `job_audio_notes` + `job_audio_note_removals`, `evidence.audio.add`/`evidence.audio.remove`, the three `/jobs/:id/audio-notes` routes and `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED`, decided by `ADR-018`. Android (record, draft, queue, playback) is Phases 9b/9c of that tracker |
+| 9 | Audio evidence (`evidence.audio.add`) | **D8 ✓**, Phase 1 | API, database, Android, offline, localization, tests, docs | **Implemented (2026-09-17: API 2026-09-16, Android 2026-09-16/2026-09-17)** — see `docs/tracker/035-android-audio-evidence.md`: Phase 9a landed the API (`job_audio_notes` + `job_audio_note_removals`, `evidence.audio.add`/`evidence.audio.remove`, the three `/jobs/:id/audio-notes` routes and `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED`, decided by `ADR-018`), 9b the Android recorder, durable draft and queued upload, and 9c the playback, the two timeline entries and the removal of an accepted recording. Device QA is that tracker's Phase 9d |
 
 ## Phase 0 — decisions requested
 
@@ -2559,10 +2559,11 @@ not — a default **Technician** is exactly that, and a custom role without the 
 ## Not implemented, and not to be assumed
 
 - **Any evidence kind other than photos and audio.** Audio is decided **in scope** on the same abstraction
-  (`D8` ✓, 2026-09-16) and its **API half is implemented** — `docs/tracker/035-android-audio-evidence.md`,
-  Phase 9a landed 2026-09-16 (`ADR-018`, `docs/api/job-audio.md`); the Android recorder, offline upload and
-  playback are that tracker's Phases 9b/9c. Generic files — PDFs, documents — are **out of scope in v1**
-  (`BR-091`); video is not decided.
+  (`D8` ✓, 2026-09-16) and its **Android and API halves are implemented** —
+  `docs/tracker/035-android-audio-evidence.md`, Phase 9a landed 2026-09-16 (`ADR-018`,
+  `docs/api/job-audio.md`), Phases 9b and 9c on 2026-09-16/2026-09-17 (the recorder, the durable draft, the
+  offline upload, playback, the two timeline entries and the removal of an accepted recording). Generic
+  files — PDFs, documents — are **out of scope in v1** (`BR-091`); video is not decided.
 - **Editing or re-annotating accepted evidence.** `D6a`/`D6b` ✓ (2026-09-16) decide there is **no edit
   route**, in any client, ever, and that a caption/note correction is a new Activity. The audited **soft
   removal** a Manager performs is **implemented** (`BR-089`; tracker 029 Phase 6b landed 2026-09-16), and it

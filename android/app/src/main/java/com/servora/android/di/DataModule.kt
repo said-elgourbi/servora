@@ -9,7 +9,9 @@ import com.servora.android.data.customers.PropertyRepository
 import com.servora.android.data.device.DeviceIdentity
 import com.servora.android.data.device.DeviceIdentityProvider
 import com.servora.android.data.home.DefaultManagerHomeRepository
+import com.servora.android.data.home.DefaultTechnicianHomeRepository
 import com.servora.android.data.home.ManagerHomeRepository
+import com.servora.android.data.home.TechnicianHomeRepository
 import com.servora.android.data.jobs.DefaultJobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.session.AccessTokenSubject
@@ -76,6 +78,12 @@ abstract class DataModule {
     abstract fun bindManagerHomeRepository(
         implementation: DefaultManagerHomeRepository,
     ): ManagerHomeRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindTechnicianHomeRepository(
+        implementation: DefaultTechnicianHomeRepository,
+    ): TechnicianHomeRepository
 
     @Binds
     @Singleton

@@ -62,4 +62,15 @@ object WorkingSetEntityTypes {
 
     /** One Job's chronological activity (`GET /jobs/:id/activity`, `BR-080`). */
     const val JOB_ACTIVITY = "job.activity"
+
+    /**
+     * The signed-in technician's own working day (`GET /home/technician`, `BR-013`).
+     *
+     * It is what makes "what do I need to do next?" a question the app answers without connectivity:
+     * the day the backend last reported — the next Visit, the day's own Visits, the preview and the
+     * conditions on the caller's own work — is kept here and served when the API cannot be reached
+     * (`§2`, `§7`). It is keyed by the authenticated subject like every other row, so one
+     * technician's day is never served to whoever signs in next (`§10`).
+     */
+    const val TECHNICIAN_HOME = "home.technician"
 }

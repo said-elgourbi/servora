@@ -4,10 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -19,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
@@ -28,6 +33,8 @@ import coil3.request.ImageRequest
 import com.servora.android.R
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
+import com.servora.android.data.jobs.JobAudioPlayback
+import com.servora.android.data.jobs.JobAudioPlaybackProgress
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
@@ -597,6 +604,135 @@ class JobDetailsScreenTest {
     }
 
     @Test
+    fun drawsAnAcceptedRecordingWithItsPositionItsPhaseAndItsPlayControl() {
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(audioEvent()),
+            ),
+        )
+
+        // A recording cannot be drawn the way a photo is, so the entry carries what stands for it: the
+        // control that plays it back, where it is and how long it is — the length the API read from the
+        // recording's own container — the track that moves it through the recording, and the phase every
+        // evidence kind carries (`BR-091`, `ADR-018` A3/A4/A9/A11).
+        composeTestRule.onNodeWithTag(jobAudioPlayTag("audio-1")).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(jobAudioPositionTag("audio-1"))
+            .assertTextEquals(
+                string(
+                    R.string.job_audio_position_format,
+                    string(R.string.job_audio_duration, 0, 0),
+                    string(R.string.job_audio_duration, 18, 0),
+                ),
+            )
+        composeTestRule.onNodeWithTag(jobAudioSeekTag("audio-1")).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.evidence_phase_during)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.job_audio_activity_added)).assertIsDisplayed()
+    }
+
+    @Test
+    fun movesThroughARecordingFromItsOwnSeekTrack() {
+        var sought: Pair<String, Int>? = null
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(audioEvent()),
+                // The device is holding this recording, so its track is the one that can be moved
+                // (`ADR-018` A11).
+                audioPlayback = JobAudioPlayback("audio-1", isPlaying = true),
+            ),
+            audioProgress = mutableStateOf(
+                JobAudioPlaybackProgress("audio-1", positionMillis = 0, durationMillis = 18_000),
+            ),
+            onSeekAudioPlayback = { audioNoteId, positionMillis ->
+                sought = audioNoteId to positionMillis
+            },
+        )
+
+        // Half of an eighteen-second recording, asked for through the action a screen reader uses to move a
+        // slider, so the track is movable without a finger.
+        composeTestRule
+            .onNodeWithTag(jobAudioSeekTag("audio-1"))
+            .performSemanticsAction(SemanticsActions.SetProgress) { setProgress -> setProgress(0.5f) }
+
+        // A position is measured in the recording's own timebase, and the recording that moves is the one
+        // the entry names rather than whichever recording happens to be first (`BR-080`, `A11`).
+        assertEquals("audio-1" to 9_000, sought)
+    }
+
+    @Test
+    fun playsTheRecordingTheTechnicianTappedAndReportsWhichOneItIs() {
+        var playedNoteId: String? = null
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(audioEvent(), audioEvent(audioNoteId = "audio-2")),
+            ),
+            onToggleAudioPlayback = { audioNoteId -> playedNoteId = audioNoteId },
+        )
+
+        composeTestRule.onNodeWithTag(jobAudioPlayTag("audio-2")).performClick()
+
+        // Each recording's controls are named by that recording, so a tap acts on the one the technician
+        // chose rather than on whichever entry happens to be first (`BR-080`, `BR-012`).
+        assertEquals("audio-2", playedNoteId)
+    }
+
+    @Test
+    fun offersARecordingsRemovalOnlyToASessionThatMayRemoveEvidenceAndConfirmsItsReason() {
+        var removedNoteId: String? = null
+        var removedReason: String? = null
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(audioEvent()),
+            ),
+            canRemoveAudioEvidence = true,
+            onRemoveEvidenceAudioNote = { audioNoteId, reason ->
+                removedNoteId = audioNoteId
+                removedReason = reason
+            },
+        )
+
+        composeTestRule.onNodeWithTag(jobAudioRemoveTag("audio-1")).performClick()
+
+        // Nothing is applied until the manager has stated why (`BR-067`, `BR-089`), and the action is
+        // disabled until a reason is given, because the API refuses a removal without one.
+        assertNull(removedNoteId)
+        composeTestRule.onNodeWithTag(JobAudioRemovalDialogTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobAudioRemovalConfirmTag).assertIsNotEnabled()
+
+        composeTestRule.onNodeWithTag(JobAudioRemovalReasonTag)
+            .performTextInput("Recorded the wrong job")
+        composeTestRule.onNodeWithTag(JobAudioRemovalConfirmTag).performClick()
+
+        assertEquals("audio-1", removedNoteId)
+        assertEquals("Recorded the wrong job", removedReason)
+    }
+
+    @Test
+    fun doesNotOfferARecordingsRemovalToASessionWithoutTheCapability() {
+        // The audio removal is the kind's own Manager-level capability (`BR-089`, `ADR-018` A7): being
+        // able to record or listen to a recording does not imply it (`BR-007`, `BR-011`).
+        render(
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                activity = listOf(audioEvent()),
+            ),
+            canRemoveAudioEvidence = false,
+        )
+
+        composeTestRule.onNodeWithTag(jobAudioRemoveTag("audio-1")).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(jobAudioPlayTag("audio-1")).assertIsDisplayed()
+    }
+
+    @Test
     fun keepsTheNotesUnderThePhotoAndExpandsALongOneOnDemand() {
         val images = RecordingJobPhotoImages(ApplicationProvider.getApplicationContext())
         // Long enough that the viewer has to decide whether it fits above the action that expands it.
@@ -1025,14 +1161,19 @@ class JobDetailsScreenTest {
         canViewEvidence: Boolean = false,
         canRemoveEvidence: Boolean = false,
         canAddAudio: Boolean = false,
+        canRemoveAudioEvidence: Boolean = false,
         onSelectAudioPhase: (EvidencePhase) -> Unit = {},
         onStartAudioRecording: () -> Unit = {},
         onStopAudioRecording: () -> Unit = {},
         onCancelAudioRecording: () -> Unit = {},
+        onToggleAudioPlayback: (String) -> Unit = {},
+        onSeekAudioPlayback: (String, Int) -> Unit = { _, _ -> },
         onAttachAudioNote: (String?) -> Unit = {},
         onRemovePendingAudioNote: (String) -> Unit = {},
+        onRemoveEvidenceAudioNote: (String, String) -> Unit = { _, _ -> },
         onMicrophoneDenied: () -> Unit = {},
         onDismissAudioMessage: () -> Unit = {},
+        audioProgress: State<JobAudioPlaybackProgress?> = mutableStateOf(null),
         photoImages: JobPhotoImages = JobPhotoImages.None,
     ) {
         val screenState = state ?: JobDetailsUiState(jobId = JOB_ID, details = details)
@@ -1068,17 +1209,22 @@ class JobDetailsScreenTest {
                     onRemoveEvidencePhoto = onRemoveEvidencePhoto,
                     onSavePermissionResult = onSavePermissionResult,
                     canAddAudio = canAddAudio,
+                    canRemoveAudioEvidence = canRemoveAudioEvidence,
                     onSelectAudioPhase = onSelectAudioPhase,
                     onStartAudioRecording = onStartAudioRecording,
                     onStopAudioRecording = onStopAudioRecording,
                     onCancelAudioRecording = onCancelAudioRecording,
+                    onToggleAudioPlayback = onToggleAudioPlayback,
+                    onSeekAudioPlayback = onSeekAudioPlayback,
                     onAttachAudioNote = onAttachAudioNote,
                     onRemovePendingAudioNote = onRemovePendingAudioNote,
+                    onRemoveEvidenceAudioNote = onRemoveEvidenceAudioNote,
                     onMicrophoneDenied = onMicrophoneDenied,
                     onDismissAudioMessage = onDismissAudioMessage,
                     canViewEvidence = canViewEvidence,
                     canRemoveEvidence = canRemoveEvidence,
                     photoImages = photoImages,
+                    audioProgress = audioProgress,
                 )
             }
         }
@@ -1809,6 +1955,9 @@ class JobDetailsScreenTest {
         canAddPhoto: Boolean,
         canAddAudio: Boolean,
     ) {
+        // The sheet reads playback through a State, and a state object is not created during
+        // composition (`lintDebug`).
+        val audioProgress = mutableStateOf<JobAudioPlaybackProgress?>(null)
         composeTestRule.setContent {
             ServoraTheme {
                 JobUpdateSheet(
@@ -1820,12 +1969,19 @@ class JobDetailsScreenTest {
                     isRecordingAudio = false,
                     isAttachingAudio = false,
                     audioPhase = EvidencePhase.DURING_WORK,
+                    // A take under review is the sheet's own, so a test that draws the sheet without one
+                    // states that nothing is playing and that no position has been reported yet
+                    // (`ADR-018` A9, A11).
+                    audioPlayback = null,
+                    audioProgress = audioProgress,
                     onConfirmNote = {},
                     onTakePhoto = {},
                     onChoosePhotos = {},
                     onSelectAudioPhase = {},
                     onStartAudioRecording = {},
                     onStopAudioRecording = {},
+                    onPlayAudioDraft = {},
+                    onSeekAudioDraft = { _, _ -> },
                     onDiscardAudioDraft = {},
                     onAttachAudio = {},
                     onMicrophoneDenied = {},
@@ -1940,6 +2096,10 @@ private fun activityEvent(
     body: String? = "Found a damaged capacitor.",
     photoId: String? = null,
     photoPhase: String? = null,
+    audioNoteId: String? = null,
+    audioPhase: String? = null,
+    audioDurationSeconds: Int? = null,
+    audioRemovalReason: String? = null,
 ) = JobActivityEvent(
     id = id,
     kind = kind,
@@ -1956,6 +2116,26 @@ private fun activityEvent(
     body = body,
     photoId = photoId,
     photoPhase = photoPhase,
+    audioNoteId = audioNoteId,
+    audioPhase = audioPhase,
+    audioDurationSeconds = audioDurationSeconds,
+    audioRemovalReason = audioRemovalReason,
+)
+
+/** One `JOB_AUDIO_ADDED` entry: the Job's recording as the Activity reports it (`BR-080`, `BR-091`). */
+private fun audioEvent(
+    audioNoteId: String = "audio-1",
+    body: String? = "Furnace noise",
+    phase: String? = "DURING_WORK",
+    durationSeconds: Int? = 18,
+) = activityEvent(
+    id = audioNoteId,
+    kind = JobActivityKind.JOB_AUDIO_ADDED,
+    visitSequence = null,
+    body = body,
+    audioNoteId = audioNoteId,
+    audioPhase = phase,
+    audioDurationSeconds = durationSeconds,
 )
 
 /** One photo the technician captured that the backend has not accepted yet (`§9`). */

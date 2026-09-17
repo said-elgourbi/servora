@@ -394,6 +394,84 @@ class JobDetailsRepositoryTest {
     }
 
     @Test
+    fun `removes a recording with the trimmed reason and maps the refreshed activity`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            activityAnswer = {
+                jobActivityDto(
+                    jobActivityEventDto(
+                        id = "removal-1",
+                        kind = "JOB_AUDIO_REMOVED",
+                        body = null,
+                        audioNoteId = "audio-1",
+                        audioRemovalReason = "Recorded the wrong job",
+                    ),
+                )
+            },
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val events = when (
+            val result = repository.removeJobAudioNote(
+                jobId = JOB_ID,
+                audioNoteId = "audio-1",
+                reason = "  Recorded the wrong job  ",
+            )
+        ) {
+            is ActivityWriteResult.Success -> result.events
+            is ActivityWriteResult.Failure ->
+                throw AssertionError("expected activity, got ${result.reason}")
+        }
+
+        // The audio kind's own route and request (`BR-089`, `ADR-018` A7): the reason is stated, trimmed,
+        // and the recording is named by the id the caller already knows it by.
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals(JOB_ID, api.lastJobId)
+        assertEquals("audio-1", api.lastAudioNoteId)
+        assertEquals(
+            RemoveJobAudioNoteRequestDto(reason = "Recorded the wrong job"),
+            api.lastAudioRemovalRequest,
+        )
+        assertEquals(listOf("removal-1"), events.map { it.id })
+        assertEquals(JobActivityKind.JOB_AUDIO_REMOVED, events.single().kind)
+        assertEquals("Recorded the wrong job", events.single().audioRemovalReason)
+    }
+
+    @Test
+    fun `reports an already-removed recording as its own outcome`() = runTest {
+        // One recording has one removal and no restore is defined, so the API refuses a repeat with the
+        // audio kind's own code (`BR-089`, `ADR-018` A7). The screen has to say that rather than report a
+        // generic failure, so the code is classified here where the envelope is read.
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            activityAnswer = {
+                throw httpFailure(
+                    status = 409,
+                    body = """
+                        {
+                          "statusCode": 409,
+                          "code": "JOB_AUDIO_NOTE_ALREADY_REMOVED",
+                          "message": "That recording has already been removed."
+                        }
+                    """,
+                )
+            },
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.removeJobAudioNote(
+            jobId = JOB_ID,
+            audioNoteId = "audio-1",
+            reason = "Recorded the wrong job",
+        )
+
+        assertEquals(
+            JobActionFailure.AUDIO_NOTE_ALREADY_REMOVED,
+            (result as ActivityWriteResult.Failure).reason,
+        )
+    }
+
+    @Test
     fun `a removal replaces the local copy of the activity`() = runTest {
         // A write answers with the refreshed timeline, and that answer is the last one the backend
         // reported: the local copy is replaced with it, exactly as a successful read replaces it. A
@@ -871,6 +949,57 @@ class JobDetailsRepositoryTest {
     }
 
     @Test
+    fun `maps an accepted recording with its own id, phase, length and note`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            activityAnswer = {
+                jobActivityDto(
+                    jobActivityEventDto(
+                        id = "audio-1",
+                        kind = "JOB_AUDIO_ADDED",
+                        visitSequence = null,
+                        body = "Furnace noise",
+                        audioNoteId = "audio-1",
+                        audioPhase = "DURING_WORK",
+                        audioDurationSeconds = 18,
+                    ),
+                    jobActivityEventDto(
+                        id = "removal-1",
+                        kind = "JOB_AUDIO_REMOVED",
+                        visitSequence = null,
+                        body = null,
+                        audioNoteId = "audio-1",
+                        audioRemovalReason = "Recorded the wrong job",
+                    ),
+                )
+            },
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val events = when (val result = repository.loadJobActivity(JOB_ID)) {
+            is JobActivityResult.Success -> result.events
+            is JobActivityResult.Failure ->
+                throw AssertionError("expected activity, got ${result.reason}")
+        }
+
+        // A recording carries its own fields rather than a photo's (`BR-091`, `ADR-018` A6): the id its
+        // bytes are read with, the phase every evidence kind carries, and the length the API read from the
+        // recording's own container — so a client states a length it never measured (`A3`).
+        assertEquals(JobActivityKind.JOB_AUDIO_ADDED, events[0].kind)
+        assertEquals("audio-1", events[0].audioNoteId)
+        assertEquals("DURING_WORK", events[0].audioPhase)
+        assertEquals(18, events[0].audioDurationSeconds)
+        assertEquals("Furnace noise", events[0].body)
+        assertNull(events[0].photoId)
+
+        // A removal names the recording and states why it was taken out of ordinary use (`BR-089`).
+        assertEquals(JobActivityKind.JOB_AUDIO_REMOVED, events[1].kind)
+        assertEquals("audio-1", events[1].audioNoteId)
+        assertEquals("Recorded the wrong job", events[1].audioRemovalReason)
+        assertNull(events[1].audioDurationSeconds)
+    }
+
+    @Test
     fun `drops an event whose kind this build does not know`() = runTest {
         val api = FakeJobDetailsApi(
             answer = { jobDetailsDto() },
@@ -983,6 +1112,10 @@ internal fun jobActivityEventDto(
     photoId: String? = null,
     photoPhase: String? = null,
     photoRemovalReason: String? = null,
+    audioNoteId: String? = null,
+    audioPhase: String? = null,
+    audioDurationSeconds: Int? = null,
+    audioRemovalReason: String? = null,
 ) = JobActivityEventDto(
     id = id,
     kind = kind,
@@ -1000,6 +1133,10 @@ internal fun jobActivityEventDto(
     photoId = photoId,
     photoPhase = photoPhase,
     photoRemovalReason = photoRemovalReason,
+    audioNoteId = audioNoteId,
+    audioPhase = audioPhase,
+    audioDurationSeconds = audioDurationSeconds,
+    audioRemovalReason = audioRemovalReason,
 )
 
 internal fun jobActivityDto(vararg events: JobActivityEventDto) =
@@ -1036,6 +1173,12 @@ private class FakeJobDetailsApi(
         private set
 
     var lastPhotoId: String? = null
+        private set
+
+    var lastAudioRemovalRequest: RemoveJobAudioNoteRequestDto? = null
+        private set
+
+    var lastAudioNoteId: String? = null
         private set
 
     var assignableCalls = 0
@@ -1195,8 +1338,44 @@ private class FakeJobDetailsApi(
     }
 
     /**
-     * The audio route is not used by these tests. They cover the Job read and the management actions;
-     * the audio upload is covered where it lives (`JobAudioUploadHandlerTest`).
+     * The audio removal route (`BR-089`, `ADR-018` A7). It answers with the refreshed timeline exactly
+     * as the photo removal does, so a test asserts the request and the mapped events.
+     */
+    override suspend fun removeJobAudioNote(
+        authorization: String,
+        jobId: String,
+        audioNoteId: String,
+        request: RemoveJobAudioNoteRequestDto,
+    ): JobActivityDto {
+        activityCalls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastAudioNoteId = audioNoteId
+        lastAudioRemovalRequest = request
+        if (activityCalls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return activityAnswer()
+    }
+
+    /**
+     * The audio content route (`BR-091`). The playback reader is exercised by
+     * `JobAudioEvidenceCacheTest`, so this answers the smallest honest thing.
+     */
+    override suspend fun jobAudioNoteContent(
+        authorization: String,
+        jobId: String,
+        audioNoteId: String,
+    ): ResponseBody {
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastAudioNoteId = audioNoteId
+        return "".toResponseBody("audio/mp4".toMediaType())
+    }
+
+    /**
+     * The audio upload route is not used by these tests. They cover the Job read and the management
+     * actions; the audio upload is covered where it lives (`JobAudioUploadHandlerTest`).
      */
     override suspend fun addJobAudioNote(
         authorization: String,

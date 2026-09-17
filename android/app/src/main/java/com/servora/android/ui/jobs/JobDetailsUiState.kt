@@ -3,6 +3,7 @@ package com.servora.android.ui.jobs
 import androidx.compose.runtime.Immutable
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
+import com.servora.android.data.jobs.JobAudioPlayback
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.CapturedJobAudioNote
@@ -150,12 +151,54 @@ enum class JobAudioFailure {
 
     /** The recording has already been queued for upload, so it can no longer be removed here. */
     ALREADY_SUBMITTED,
+
+    /** The device could not play the recording, so nothing was heard (`ADR-018` A9). */
+    PLAYBACK_FAILED,
+
+    /**
+     * Playing an accepted recording needed the API and it could not be reached (`BR-013`).
+     *
+     * A recording this device already played is readable offline, because its bytes are cached; one it
+     * has never held is not, and the technician is told which of the two it is (`BR-042`).
+     */
+    PLAYBACK_UNREACHABLE,
+
+    /** The API did not deliver the recording, so it could not be played (`BR-007`). */
+    PLAYBACK_UNAVAILABLE,
+
+    /** The session does not hold `evidence.audio.remove`, so the API refused the removal (`BR-089`). */
+    REMOVAL_NOT_PERMITTED,
+
+    /**
+     * The recording is not in this Job any more, or it has already been removed (`BR-089`).
+     *
+     * One recording has one removal and no restore is defined, so the evidence is either there to remove
+     * or already out of ordinary use: both leave the manager with nothing to decide, and the refreshed
+     * timeline says which.
+     */
+    REMOVAL_NO_LONGER_AVAILABLE,
+
+    /**
+     * The removal needs the API and it could not be reached (`BR-089`).
+     *
+     * The removal is **online-only** (`ADR-018` A10): its route takes no client-generated idempotency key
+     * and no conflict policy is decided for it, so it is never queued
+     * (`offline-first-architecture.md` §5, §8, §13.2). A manager who removes evidence needs an answer the
+     * backend gave, not one the device assumed.
+     */
+    REMOVAL_UNREACHABLE,
+
+    /** The API refused the removal itself, so nothing was taken out of use (`BR-042`). */
+    REMOVAL_FAILED,
 }
 
 /** What the last audio action did, until the screen acknowledges it. */
 enum class JobAudioMessage {
     /** The recording is queued on the device and will upload when the API can be reached (`§7`). */
     QUEUED,
+
+    /** Accepted evidence was taken out of ordinary use (`BR-088`, `BR-089`). */
+    EVIDENCE_REMOVED,
 }
 
 /**
@@ -339,6 +382,34 @@ data class JobDetailsUiState(
     val audioFailure: JobAudioFailure? = null,
     /** What the last audio action did, until the screen acknowledges it. */
     val audioMessage: JobAudioMessage? = null,
+    /**
+     * The recording the device's player holds, and whether it is moving, or `null` (`ADR-018` A9, A11).
+     *
+     * It is the device player's own answer, reported here rather than patched from the tap: the
+     * recording names itself, so the control that started it — and only that one — returns to its idle
+     * state when it ends, fails, or is replaced, and a recording the technician paused is *held* rather
+     * than playing, so that control returns to **Play** while the recording keeps its position.
+     *
+     * Where it has got to is **not** here: a position changes ten times a second and is read where it is
+     * drawn (`JobDetailsViewModel.audioPlaybackProgress`), so a moving playhead does not recompose the
+     * screen (`BR-012`).
+     */
+    val audioPlayback: JobAudioPlayback? = null,
+    /**
+     * The recording whose bytes are being read before it can play, or `null` when none is (`BR-042`).
+     *
+     * It is the recording's id, not a flag, so the control that was tapped is the one that reports it is
+     * working: an accepted recording is read through the API on the first play, and a tap that is still
+     * in progress must not look like a tap that did nothing (`BR-012`).
+     */
+    val audioPlaybackLoading: String? = null,
+    /**
+     * The recording a removal is running for, or `null` when none is (`BR-089`).
+     *
+     * It is the recording's id, not a flag, so the timeline entry can show the progress on the control
+     * of the recording it belongs to, and so two removals of the same evidence cannot be asked for twice.
+     */
+    val audioRemoval: String? = null,
 ) {
     /** Nothing has been read yet: the screen shows its first-load state. */
     val showsInitialLoading: Boolean

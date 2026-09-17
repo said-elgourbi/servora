@@ -59,6 +59,18 @@ data class RemoveJobPhotoRequestDto(
     val reason: String,
 )
 
+/**
+ * Request body that takes one recording out of ordinary use (`BR-089`, `ADR-018` A7).
+ *
+ * It is the audio kind's own body rather than a shared one, because the two removals are authorized by
+ * different capabilities on different routes; the shape is the same because a removal of evidence is
+ * one operation (`BR-041`, `BR-089`).
+ */
+@Serializable
+data class RemoveJobAudioNoteRequestDto(
+    val reason: String,
+)
+
 /** One technician in an assignment request, with the role they hold on the Visit. */
 @Serializable
 data class TechnicianAssignmentRequestDto(

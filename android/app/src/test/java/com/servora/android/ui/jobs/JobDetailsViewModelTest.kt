@@ -6,8 +6,14 @@ import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
 import com.servora.android.data.jobs.AssignableTechniciansResult
 import com.servora.android.data.jobs.AudioCollaborators
+import com.servora.android.data.jobs.FakeJobAudioEvidenceCache
+import com.servora.android.data.jobs.FakeJobAudioPlayer
 import com.servora.android.data.jobs.FakeJobPhotoExporter
+import com.servora.android.data.jobs.JobAudioEvidenceCache
+import com.servora.android.data.jobs.JobAudioEvidenceRead
 import com.servora.android.data.jobs.JobAudioOperations
+import com.servora.android.data.jobs.JobAudioPlayback
+import com.servora.android.data.jobs.JobAudioPlayer
 import com.servora.android.data.jobs.JobAudioSession
 import com.servora.android.data.jobs.JOB_AUDIO_MIME_TYPE
 import com.servora.android.data.jobs.JobDetailsRepository
@@ -1068,6 +1074,469 @@ class JobDetailsViewModelTest {
             viewModel.uiState.value.photoFailure,
         )
     }
+
+    @Test
+    fun `plays a take this device holds from its own bytes, without asking the API for any`() =
+        runTest(dispatcher) {
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(emptyList())),
+            )
+            val audio = AudioCollaborators()
+            val player = FakeJobAudioPlayer()
+            val evidence = FakeJobAudioEvidenceCache()
+            val viewModel = viewModel(
+                repository,
+                audio = audio.session,
+                audioPlayer = player,
+                audioEvidence = evidence,
+            )
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+            viewModel.startAudioRecording()
+            viewModel.stopAudioRecording()
+            advanceUntilIdle()
+            val draft = requireNotNull(viewModel.uiState.value.audioDraft)
+
+            viewModel.toggleAudioPlayback(draft.audioNoteId)
+            advanceUntilIdle()
+
+            // The take is on this device and the backend has accepted nothing, so the recording plays from
+            // its own file and nothing is read through the API (`BR-013`, `BR-088`).
+            assertEquals(listOf("${draft.audioNoteId}:${draft.localPath}"), player.played)
+            assertEquals(emptyList<String>(), evidence.requested)
+            assertEquals(draft.audioNoteId, viewModel.uiState.value.audioPlayback?.audioNoteId)
+        }
+
+    @Test
+    fun `pauses the recording it holds where it got to, and continues from there when tapped again`() =
+        runTest(dispatcher) {
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(emptyList())),
+            )
+            val player = FakeJobAudioPlayer()
+            val viewModel = viewModel(repository, audioPlayer = player)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+            viewModel.startAudioRecording()
+            viewModel.stopAudioRecording()
+            advanceUntilIdle()
+            val draft = requireNotNull(viewModel.uiState.value.audioDraft)
+
+            viewModel.toggleAudioPlayback(draft.audioNoteId)
+            advanceUntilIdle()
+            viewModel.toggleAudioPlayback(draft.audioNoteId)
+            advanceUntilIdle()
+
+            // One control is both the play and the pause, and a pause **holds** the recording where it got
+            // to: the playhead states a position the technician can move, so the same control must not be
+            // the thing that throws that position away (`BR-042`, `ADR-018` A11). The state it draws is the
+            // player's own answer rather than this screen's guess.
+            assertEquals(listOf("${draft.audioNoteId}:${draft.localPath}"), player.played)
+            assertEquals(1, player.pauses)
+            assertEquals(0, player.resumes)
+            assertEquals(0, player.stops)
+            assertEquals(
+                JobAudioPlayback(draft.audioNoteId, isPlaying = false),
+                viewModel.uiState.value.audioPlayback,
+            )
+
+            viewModel.toggleAudioPlayback(draft.audioNoteId)
+            advanceUntilIdle()
+
+            // Tapping it again continues the recording the player still holds rather than starting it over
+            // from the beginning (`A11`).
+            assertEquals(1, player.resumes)
+            assertEquals(listOf("${draft.audioNoteId}:${draft.localPath}"), player.played)
+            assertEquals(
+                JobAudioPlayback(draft.audioNoteId, isPlaying = true),
+                viewModel.uiState.value.audioPlayback,
+            )
+        }
+
+    @Test
+    fun `moves the recording the player holds to the position the technician chose`() = runTest(dispatcher) {
+        val recording = activityEvent(
+            id = "audio-1",
+            kind = JobActivityKind.JOB_AUDIO_ADDED,
+            visitSequence = null,
+            body = null,
+            audioNoteId = "audio-1",
+            audioDurationSeconds = 18,
+        )
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+        )
+        val player = FakeJobAudioPlayer()
+        val viewModel = viewModel(repository, audioPlayer = player)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+        viewModel.toggleAudioPlayback("audio-1")
+        advanceUntilIdle()
+
+        viewModel.seekAudioPlayback("audio-1", 4_000)
+        advanceUntilIdle()
+
+        // Where a recording went is the device player's own answer, and the position the playhead and the
+        // elapsed seconds draw is read from it rather than remembered here (`ADR-018` A11, `BR-001`).
+        assertEquals(listOf(4_000), player.seeks)
+        assertEquals(4_000, viewModel.audioPlaybackProgress.value?.positionMillis)
+        assertEquals("audio-1", viewModel.audioPlaybackProgress.value?.audioNoteId)
+    }
+
+    @Test
+    fun `does not move a recording the player does not hold`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val player = FakeJobAudioPlayer()
+        val viewModel = viewModel(repository, audioPlayer = player)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.seekAudioPlayback("audio-1", 4_000)
+        advanceUntilIdle()
+
+        // A recording this screen never loaded has no timebase to be moved through, and its track is drawn
+        // as one that cannot be used rather than as one that would work if it were touched (`BR-042`).
+        assertEquals(emptyList<Int>(), player.seeks)
+        assertNull(viewModel.audioPlaybackProgress.value)
+    }
+
+    @Test
+    fun `moves the playhead without rewriting the state the screen is composed from`() =
+        runTest(dispatcher) {
+            val recording = activityEvent(
+                id = "audio-1",
+                kind = JobActivityKind.JOB_AUDIO_ADDED,
+                visitSequence = null,
+                body = null,
+                audioNoteId = "audio-1",
+                audioDurationSeconds = 18,
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+            )
+            val player = FakeJobAudioPlayer()
+            val viewModel = viewModel(repository, audioPlayer = player)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+            viewModel.toggleAudioPlayback("audio-1")
+            advanceUntilIdle()
+            val screenState = viewModel.uiState.value
+
+            player.reportProgress(4_000)
+            advanceUntilIdle()
+
+            // The position is an answer of its own (`ADR-018` A11): it is read where the playhead and the
+            // elapsed seconds are drawn, and the state Job Details, the timeline and the entry around the
+            // recording are composed from is not rewritten for it (`BR-012`).
+            assertEquals(4_000, viewModel.audioPlaybackProgress.value?.positionMillis)
+            assertEquals(screenState, viewModel.uiState.value)
+        }
+
+    @Test
+    fun `reads accepted evidence through the API once, then plays the file it cached`() =
+        runTest(dispatcher) {
+            val recording = activityEvent(
+                id = "audio-1",
+                kind = JobActivityKind.JOB_AUDIO_ADDED,
+                visitSequence = null,
+                body = "Furnace noise",
+                audioNoteId = "audio-1",
+                audioPhase = "DURING_WORK",
+                audioDurationSeconds = 18,
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+            )
+            val player = FakeJobAudioPlayer()
+            val evidence = FakeJobAudioEvidenceCache()
+            val viewModel = viewModel(
+                repository,
+                audioPlayer = player,
+                audioEvidence = evidence,
+            )
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.toggleAudioPlayback("audio-1")
+            advanceUntilIdle()
+
+            // The bytes are the backend's, so they are read through the API and played from the local copy
+            // the cache answers with. The length the timeline states is the API's own reading of the
+            // container, so nothing here asks for it again (`ADR-018` A3/A9).
+            assertEquals(listOf("job-1:audio-1"), evidence.requested)
+            assertEquals(listOf("audio-1:/cache/audio-1.m4a"), player.played)
+            assertEquals("audio-1", viewModel.uiState.value.audioPlayback?.audioNoteId)
+            assertNull(viewModel.uiState.value.audioPlaybackLoading)
+        }
+
+    @Test
+    fun `reports a recording whose bytes could not be read as needing the server`() =
+        runTest(dispatcher) {
+            val recording = activityEvent(
+                id = "audio-1",
+                kind = JobActivityKind.JOB_AUDIO_ADDED,
+                visitSequence = null,
+                body = null,
+                audioNoteId = "audio-1",
+                audioDurationSeconds = 18,
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+            )
+            val player = FakeJobAudioPlayer()
+            val viewModel = viewModel(
+                repository,
+                audioPlayer = player,
+                audioEvidence = FakeJobAudioEvidenceCache(JobAudioEvidenceRead.Unreachable),
+            )
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.toggleAudioPlayback("audio-1")
+            advanceUntilIdle()
+
+            // Nothing was played and the technician is told which state it is: the bytes are only on the
+            // server and this device could not reach it (`BR-013`, `BR-042`).
+            assertEquals(emptyList<String>(), player.played)
+            assertEquals(JobAudioFailure.PLAYBACK_UNREACHABLE, viewModel.uiState.value.audioFailure)
+            assertNull(viewModel.uiState.value.audioPlaybackLoading)
+        }
+
+    @Test
+    fun `reports a device that could not play the recording it was given`() = runTest(dispatcher) {
+        val recording = activityEvent(
+            id = "audio-1",
+            kind = JobActivityKind.JOB_AUDIO_ADDED,
+            visitSequence = null,
+            body = null,
+            audioNoteId = "audio-1",
+            audioDurationSeconds = 18,
+        )
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+        )
+        val player = FakeJobAudioPlayer().apply { playSucceeds = false }
+        val viewModel = viewModel(repository, audioPlayer = player)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.toggleAudioPlayback("audio-1")
+        advanceUntilIdle()
+
+        // A device that cannot play the recording reports that rather than leaving a control that looks as
+        // though it did something (`BR-042`).
+        assertEquals(JobAudioFailure.PLAYBACK_FAILED, viewModel.uiState.value.audioFailure)
+        assertNull(viewModel.uiState.value.audioPlayback)
+    }
+
+    @Test
+    fun `reports a read that failed in a way this build did not foresee instead of crashing`() =
+        runTest(dispatcher) {
+            val recording = activityEvent(
+                id = "audio-1",
+                kind = JobActivityKind.JOB_AUDIO_ADDED,
+                visitSequence = null,
+                body = null,
+                audioNoteId = "audio-1",
+                audioDurationSeconds = 18,
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+            )
+            val player = FakeJobAudioPlayer()
+            val evidence = FakeJobAudioEvidenceCache().apply {
+                failure = IllegalStateException("a failure this build cannot name")
+            }
+            val viewModel = viewModel(
+                repository,
+                audioPlayer = player,
+                audioEvidence = evidence,
+            )
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.toggleAudioPlayback("audio-1")
+            advanceUntilIdle()
+
+            // A tap that starts playback is a user action on a phone in the field (`BR-012`): a read that
+            // fails in a way this build cannot name is reported as a recording that could not be read
+            // rather than taking the screen down with it (`BR-042`).
+            assertEquals(listOf("job-1:audio-1"), evidence.requested)
+            assertEquals(emptyList<String>(), player.played)
+            assertEquals(JobAudioFailure.PLAYBACK_UNAVAILABLE, viewModel.uiState.value.audioFailure)
+            assertNull(viewModel.uiState.value.audioPlaybackLoading)
+        }
+
+    @Test
+    fun `removes an accepted recording through the API and takes the timeline from its answer`() =
+        runTest(dispatcher) {
+            val recording = activityEvent(
+                id = "audio-1",
+                kind = JobActivityKind.JOB_AUDIO_ADDED,
+                visitSequence = null,
+                body = null,
+                audioNoteId = "audio-1",
+                audioDurationSeconds = 18,
+            )
+            val removal = activityEvent(
+                id = "removal-1",
+                kind = JobActivityKind.JOB_AUDIO_REMOVED,
+                visitSequence = null,
+                body = null,
+                audioNoteId = "audio-1",
+                audioRemovalReason = "Recorded the wrong job",
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+                noteResult = ActivityWriteResult.Success(listOf(removal)),
+            )
+            val viewModel = viewModel(repository)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.removeEvidenceAudioNote("audio-1", "  Recorded the wrong job  ")
+            advanceUntilIdle()
+
+            // The reason is stated, trimmed, and the recording is named by the id it is already known by
+            // (`BR-089`, `ADR-018` A7).
+            assertEquals(
+                listOf("audio-removal:audio-1:Recorded the wrong job"),
+                repository.actions,
+            )
+            val state = viewModel.uiState.value
+            // The write's own answer is the backend's, so the evidence the Job holds is current again
+            // (`BR-001`, `BR-080`, `§7`).
+            assertEquals(listOf("removal-1"), state.activity?.map { it.id })
+            assertEquals(ReadSource.BACKEND, state.activitySource)
+            assertEquals(JobAudioMessage.EVIDENCE_REMOVED, state.audioMessage)
+            assertNull(state.audioFailure)
+            assertNull(state.audioRemoval)
+        }
+
+    @Test
+    fun `stops playing a recording that is taken out of ordinary use`() = runTest(dispatcher) {
+        val recording = activityEvent(
+            id = "audio-1",
+            kind = JobActivityKind.JOB_AUDIO_ADDED,
+            visitSequence = null,
+            body = null,
+            audioNoteId = "audio-1",
+            audioDurationSeconds = 18,
+        )
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+            noteResult = ActivityWriteResult.Success(emptyList()),
+        )
+        val player = FakeJobAudioPlayer()
+        val viewModel = viewModel(repository, audioPlayer = player)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+        viewModel.toggleAudioPlayback("audio-1")
+        advanceUntilIdle()
+        assertEquals("audio-1", viewModel.uiState.value.audioPlayback?.audioNoteId)
+
+        viewModel.removeEvidenceAudioNote("audio-1", "Recorded the wrong job")
+        advanceUntilIdle()
+
+        // Evidence that leaves ordinary use is not left playing (`BR-089`, `BR-067`).
+        assertNull(viewModel.uiState.value.audioPlayback)
+    }
+
+    @Test
+    fun `reports a refused audio removal as the reason it names, and changes nothing`() =
+        runTest(dispatcher) {
+            val recording = activityEvent(
+                id = "audio-1",
+                kind = JobActivityKind.JOB_AUDIO_ADDED,
+                visitSequence = null,
+                body = null,
+                audioNoteId = "audio-1",
+                audioDurationSeconds = 18,
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+                noteResult =
+                    ActivityWriteResult.Failure(JobActionFailure.AUDIO_NOTE_ALREADY_REMOVED),
+            )
+            val viewModel = viewModel(repository)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.removeEvidenceAudioNote("audio-1", "Recorded the wrong job")
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            // The API's own conflict is reported as what happened, and the timeline is left as the backend
+            // last reported it rather than being patched locally (`BR-001`, `BR-042`, `BR-067`).
+            assertEquals(JobAudioFailure.REMOVAL_NO_LONGER_AVAILABLE, state.audioFailure)
+            assertEquals(listOf("audio-1"), state.activity?.map { it.id })
+            assertNull(state.audioRemoval)
+            assertNull(state.audioMessage)
+        }
+
+    @Test
+    fun `sends no audio removal without a reason`() = runTest(dispatcher) {
+        val recording = activityEvent(
+            id = "audio-1",
+            kind = JobActivityKind.JOB_AUDIO_ADDED,
+            visitSequence = null,
+            body = null,
+            audioNoteId = "audio-1",
+            audioDurationSeconds = 18,
+        )
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(listOf(recording))),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.removeEvidenceAudioNote("audio-1", "   ")
+        advanceUntilIdle()
+
+        // `BR-089` records the reason, so the screen requires one before it asks the API to apply
+        // anything: nothing is sent without it.
+        assertEquals(emptyList<String>(), repository.actions)
+        assertNull(viewModel.uiState.value.audioFailure)
+    }
+
+    @Test
+    fun `reports a removal of a recording this screen does not hold as evidence`() =
+        runTest(dispatcher) {
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(emptyList())),
+            )
+            val viewModel = viewModel(repository)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.removeEvidenceAudioNote("audio-1", "Recorded the wrong job")
+            advanceUntilIdle()
+
+            // A recording the Activity does not report is not evidence this screen can remove — a take the
+            // technician has not attached is theirs to discard — so nothing is sent (`BR-042`, `BR-089`).
+            assertEquals(emptyList<String>(), repository.actions)
+            assertEquals(
+                JobAudioFailure.REMOVAL_NO_LONGER_AVAILABLE,
+                viewModel.uiState.value.audioFailure,
+            )
+        }
 }
 
 private const val JOB_ID = "job-1"
@@ -1127,6 +1596,10 @@ private fun activityEvent(
     photoId: String? = null,
     photoPhase: String? = null,
     photoRemovalReason: String? = null,
+    audioNoteId: String? = null,
+    audioPhase: String? = null,
+    audioDurationSeconds: Int? = null,
+    audioRemovalReason: String? = null,
 ) = JobActivityEvent(
     id = id,
     kind = kind,
@@ -1144,6 +1617,10 @@ private fun activityEvent(
     photoId = photoId,
     photoPhase = photoPhase,
     photoRemovalReason = photoRemovalReason,
+    audioNoteId = audioNoteId,
+    audioPhase = audioPhase,
+    audioDurationSeconds = audioDurationSeconds,
+    audioRemovalReason = audioRemovalReason,
 )
 
 /** Records every Job it is asked for, and every action it is asked to send. */
@@ -1204,6 +1681,21 @@ private class RecordingJobDetailsRepository(
         reason: String,
     ): ActivityWriteResult {
         actions += "removal:$photoId:$reason"
+        return noteResult
+    }
+
+    /**
+     * Records an audio recording's removal and answers with the scripted write result.
+     *
+     * It is a write like a note — it answers with the refreshed timeline — so a test scripts its answer
+     * the same way and asserts the recording it was told to remove (`BR-089`, `ADR-018` A7).
+     */
+    override suspend fun removeJobAudioNote(
+        jobId: String,
+        audioNoteId: String,
+        reason: String,
+    ): ActivityWriteResult {
+        actions += "audio-removal:$audioNoteId:$reason"
         return noteResult
     }
 
@@ -1287,6 +1779,12 @@ private class ScriptedJobDetailsRepository(
         reason: String,
     ): ActivityWriteResult = unsupported()
 
+    override suspend fun removeJobAudioNote(
+        jobId: String,
+        audioNoteId: String,
+        reason: String,
+    ): ActivityWriteResult = unsupported()
+
     override suspend fun changeJobStatus(
         jobId: String,
         status: JobStatus,
@@ -1331,6 +1829,8 @@ private fun viewModel(
     session: JobPhotoSession = PhotoCollaborators().session,
     exporter: JobPhotoExporter = FakeJobPhotoExporter(),
     audio: JobAudioSession = AudioCollaborators().session,
+    audioPlayer: JobAudioPlayer = FakeJobAudioPlayer(),
+    audioEvidence: JobAudioEvidenceCache = FakeJobAudioEvidenceCache(),
     clock: Clock = TEST_CLOCK,
 ) = JobDetailsViewModel(
     repository = repository,
@@ -1340,5 +1840,7 @@ private fun viewModel(
     // These tests are about the Job's own actions, so no photo source hands over anything.
     pickedItems = FakeJobPhotoPickedItems(emptyMap()),
     exporter = exporter,
+    audioEvidence = audioEvidence,
+    audioPlayer = audioPlayer,
     clock = clock,
 )

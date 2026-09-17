@@ -31,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.data.jobs.JobAudioPlaybackProgress
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CustomerJobAddress
@@ -192,14 +194,22 @@ fun JobDetailsScreen(
     canViewEvidence: Boolean,
     canRemoveEvidence: Boolean,
     canAddAudio: Boolean,
+    canRemoveAudioEvidence: Boolean,
     onSelectAudioPhase: (EvidencePhase) -> Unit,
     onStartAudioRecording: () -> Unit,
     onStopAudioRecording: () -> Unit,
     onCancelAudioRecording: () -> Unit,
+    onToggleAudioPlayback: (String) -> Unit,
+    onSeekAudioPlayback: (audioNoteId: String, positionMillis: Int) -> Unit,
     onAttachAudioNote: (String?) -> Unit,
     onRemovePendingAudioNote: (String) -> Unit,
+    onRemoveEvidenceAudioNote: (String, String) -> Unit,
     onMicrophoneDenied: () -> Unit,
     onDismissAudioMessage: () -> Unit,
+    // The player's moving answer, collected where the screen's state is and passed down **as a state**
+    // rather than as a value: what reads it is the playhead and the elapsed seconds of the recording the
+    // player holds, so a moving position does not recompose this screen (`ADR-018` A11, `BR-012`).
+    audioProgress: State<JobAudioPlaybackProgress?>,
     photoImages: JobPhotoImages = JobPhotoImages.None,
     modifier: Modifier = Modifier,
 ) {
@@ -207,6 +217,15 @@ fun JobDetailsScreen(
     var showReschedule by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAssign by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAddActivity by rememberSaveable(state.jobId) { mutableStateOf(false) }
+
+    /*
+     * The recording whose removal is being confirmed, or `null` while no confirmation is open.
+     *
+     * Removing accepted evidence is the manager's decision and it carries a reason, so it is confirmed
+     * from the entry that holds the recording before the API is asked to apply anything (`BR-067`,
+     * `BR-089`).
+     */
+    var audioRemovalTargetId by remember { mutableStateOf<String?>(null) }
 
     // The photo the viewer opens on, if any. Only its identity is held: the phase, the note and the
     // bytes are resolved from the records that already state them, so the viewer is never a second
@@ -323,6 +342,19 @@ fun JobDetailsScreen(
                     onRetryActivity = onRetryActivity,
                     onOpenPhoto = { photoId -> viewedPhotoId = photoId },
                     photoImages = photoImages,
+                    // The recordings on this Job, as the timeline draws them: what the device player is
+                    // playing, what the session may remove, and the two actions a recording offers
+                    // (`BR-011`, `BR-089`, `ADR-018` A9).
+                    audio = JobActivityAudio(
+                        playback = state.audioPlayback,
+                        progress = audioProgress,
+                        playbackLoading = state.audioPlaybackLoading,
+                        removal = state.audioRemoval,
+                        canRemoveEvidence = canRemoveAudioEvidence,
+                        onTogglePlayback = onToggleAudioPlayback,
+                        onSeek = onSeekAudioPlayback,
+                        onRemove = { audioNoteId -> audioRemovalTargetId = audioNoteId },
+                    ),
                 )
 
             state.showsFailure -> JobDetailsFailure(onRetry = onRetry)
@@ -430,6 +462,11 @@ fun JobDetailsScreen(
             isRecordingAudio = state.audioRecording != null,
             isAttachingAudio = state.isSubmittingAudio,
             audioPhase = state.audioPhase,
+            // The take under review plays back through the one player the feature owns, so whether it is
+            // playing comes from the device rather than from the tap that asked, and where it has got to
+            // is the same answer the timeline draws (`ADR-018` A9, A11).
+            audioPlayback = state.audioPlayback,
+            audioProgress = audioProgress,
             onConfirmNote = { body ->
                 showAddActivity = false
                 onAddActivityText(body)
@@ -448,6 +485,10 @@ fun JobDetailsScreen(
             onSelectAudioPhase = onSelectAudioPhase,
             onStartAudioRecording = onStartAudioRecording,
             onStopAudioRecording = onStopAudioRecording,
+            onPlayAudioDraft = {
+                state.audioDraft?.let { draft -> onToggleAudioPlayback(draft.audioNoteId) }
+            },
+            onSeekAudioDraft = onSeekAudioPlayback,
             // Deleting the take is the device's own removal of evidence the backend has not accepted;
             // it needs no capability, because nothing has been recorded yet (`BR-088`, `BR-091`).
             onDiscardAudioDraft = {
@@ -521,6 +562,21 @@ fun JobDetailsScreen(
             isSubmitting = state.isSubmitting,
             onConfirm = onConfirmPendingAction,
             onDismiss = onDismissPendingAction,
+        )
+    }
+
+    // A recording the manager asked to remove is confirmed before anything is applied: the reason is
+    // what the removal is recorded with, and the wording says what a removal does not do (`BR-067`,
+    // `BR-088`, `BR-089`).
+    audioRemovalTargetId?.let { audioNoteId ->
+        EvidenceRemovalDialog(
+            copy = JobAudioRemovalCopy,
+            isRemoving = state.audioRemoval == audioNoteId,
+            onConfirm = { reason ->
+                audioRemovalTargetId = null
+                onRemoveEvidenceAudioNote(audioNoteId, reason)
+            },
+            onDismiss = { audioRemovalTargetId = null },
         )
     }
 
@@ -623,6 +679,7 @@ private fun JobDetailsContent(
     onRetryActivity: () -> Unit,
     onOpenPhoto: (String) -> Unit,
     photoImages: JobPhotoImages,
+    audio: JobActivityAudio,
 ) {
     Column(
         modifier = Modifier
@@ -672,6 +729,7 @@ private fun JobDetailsContent(
             onRetry = onRetryActivity,
             onOpenPhoto = onOpenPhoto,
             photoImages = photoImages,
+            audio = audio,
         )
         // Keeps the last timeline entry clear of the floating Add update action the design places
         // over the timeline, so it is never covered (`Figma/src/screens/JobDetails.tsx`), and clear of

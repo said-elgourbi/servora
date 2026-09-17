@@ -522,10 +522,14 @@ private fun JobPhotoGalleryTile(
 }
 
 /**
- * A photo's note, with the action a note that does not fit needs (`BR-012`, `BR-027`).
+ * One evidence record's note, with the action a note that does not fit needs (`BR-012`, `BR-027`).
  *
- * Whether a note needs it is answered by the layout it is actually drawn in — its language, its own
- * length and the font scale all decide it — rather than by a character count a different device would
+ * It is **both kinds'** note treatment — a photo's and a recording's — because an evidence note is one
+ * idea: a piece of text an author recorded with the evidence, read where that evidence is drawn. A
+ * second treatment could only read differently from this one (`BR-041`).
+ *
+ * Whether a note needs the action is answered by the layout it is actually drawn in — its language, its
+ * own length and the font scale all decide it — rather than by a character count a different device would
  * get wrong, and a note that fits draws no action at all, so a short one reserves no room. The action
  * is a text action rather than a filled button: it is a small, secondary control under the note, and
  * Material keeps its target at 48 dp even at this size (`BR-012`).
@@ -534,11 +538,11 @@ private fun JobPhotoGalleryTile(
  * photo, which must not be pushed off the screen — and is `null` where the note simply grows inside
  * something that already scrolls, as a Job Activity entry does.
  *
- * The expansion belongs to the photo it was asked for ([collapseKey]), so paging on or looking at
- * another entry's photo starts the next note collapsed.
+ * The expansion belongs to the evidence record it was asked for ([collapseKey]), so paging on or looking
+ * at another entry's evidence starts the next note collapsed.
  */
 @Composable
-internal fun JobPhotoNote(
+internal fun EvidenceNote(
     note: String,
     collapseKey: Any?,
     textColor: Color,

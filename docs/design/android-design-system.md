@@ -338,6 +338,62 @@ the same local removal the X performs before submission, because the two are one
 own copy of a photo the backend does not hold (`BR-041`). A queued or retrying upload draws neither
 control: the API may still accept it.
 
+**A recording is played back, and a recording the API accepted is removed, from the Job's Activity**
+(`BR-091`, `BR-080`, `BR-089`, `ADR-018` A9/A11, `docs/tracker/035-android-audio-evidence.md` Phases 9c/9e).
+A photo is drawn as the photo itself; a recording cannot be, so the `JOB_AUDIO_ADDED` entry carries what
+stands for it: a full-width `secondary` container in `shapes.medium` drawn as **two lines** — on the first,
+left to right, the **play/pause control**, the recording's **position** (`0:04 / 0:18`), its phase badge
+and, for a session holding `evidence.audio.remove`, the removal control; on the second, the full-width
+**seek track** that moves the playhead through the recording (`A11`). The control is the attachment's leading element and the
+one thing that says *this can be listened to*: a filled `primary` circle (40 dp) carrying an `onPrimary`
+lucide `Play`/`Pause` glyph (22 dp) inside a 48 dp `IconButton` target — the shape the device's own
+voice notes already use — and which of the two glyphs is drawn comes from the **device player**, not
+from the tap that asked for it: a recording that ends on its own, fails, or is replaced returns this
+control to *Play* by itself. While an accepted recording's bytes are being read for the first time the
+same target shows a `primary` progress ring in place of the circle, because that read goes through the
+API and a tap still in progress must not look like a tap that did nothing (`BR-042`); a control that
+cannot be used is filled `surfaceContainerHighest` with an `onSurfaceVariant` glyph rather than drawn as
+one that would work if it were tapped. The attachment keeps a `secondary` fill in `shapes.medium`, a
+4 dp inset and a 56 dp least height, so the circle and the controls beside it sit comfortably in a row
+(`BR-012`). The position beside it states **where the recording is and how long it is** — `0:00 / 0:18`
+before anything has played — in the same `bodyLarge`/`FontWeight.Medium` treatment the sheet's review uses,
+where the total is the one the **API read from the recording's own container**, so one
+recording does not state its length two ways
+(`ADR-018` A3, `BR-041`, `A11`); the phase badge is the vocabulary photos and audio share,
+drawn exactly as the gallery, the tray and the review draw it (`A4`). The technician's note is read
+under the container with the shared note treatment, so a recording's note and a photo's note cannot read
+differently. The removal control is the audio kind's own Manager-level action: it is drawn only for a
+session the API would let perform it, it reports its own progress while the API answers, and it asks for
+the same confirmed, reason-carrying dialog the photo removal does, with the audio kind's own wording and
+tags (`BR-089`, `A7`). A recording the manager takes out of ordinary use stops playing.
+
+**The position is a track the technician can move, and it carries no amplitude** (`ADR-018` A11, decided
+2026-09-17; `docs/tracker/035-android-audio-evidence.md` Phase 9e). The attachment's second line is the
+shared `JobAudioSeekTrack`: the platform's Material 3 `Slider`, drawn with the theme's own colours rather
+than the library's default track — a 6 dp line in `onSurfaceVariant` at 30% with the played part and the
+thumb in `primary` — inside a 48 dp interaction height, so the line stays thin while the target is as
+comfortable as the play control's (`BR-012`). The fill follows the recording as it plays and follows the
+thumb as it is moved, and a recording is moved **as the thumb moves** rather than when it is released,
+including through the action a screen reader uses to move a slider (`BR-042`). **No waveform is drawn**: the
+design's *"appropriate audio icon/waveform"* (`Figma/…/servora-job-details-spec.md` §11) remains undrawn,
+which is what *no amplitude* means here. A recording the device player does **not** hold — every recording
+before its first play, and every other entry while one plays — is drawn **quietly**, its track and fill in
+muted `onSurfaceVariant` with the thumb disabled, because a control that cannot be used is not drawn as one
+that would work if it were touched (`BR-042`). One recording is moved at a time, and it is always the one the
+entry names.
+
+**The Add update sheet's review plays the take back too, and states where it is** (`ADR-018` A9, A11,
+`docs/tracker/035-android-audio-evidence.md` Phases 9c/9e). The review row's leading element is that same
+play/pause control — one control, one player, on both surfaces that play a recording — followed by the take's
+**position** in the same `bodyLarge`/`FontWeight.Medium` treatment the timeline states it with (its total
+being the length this device measured, `BR-041`), and under the row the same `JobAudioSeekTrack` the timeline
+draws, so one recording is read one way on both surfaces. The row keeps the 56 dp height the kind's other
+states keep — the track is drawn below it, in its own 48 dp interaction height — so switching between
+*Record*, the live microphone and the review does not move the foot of the sheet. Playing a take
+back needs no capability and no connectivity: the bytes are on the device. **Stop** still ends the
+recording; **Delete** still drops the take; only the glyph that reviewed it became the control that
+plays it.
+
 **A recording the API has not accepted is reported by a notice, not a tray** (`BR-091`, `ADR-018`,
 `docs/tracker/035-android-audio-evidence.md` Phase 9b). The sheet adds one update at a time, so a Job
 holds at most one unattached take and there is nothing to page through: the notice is a
@@ -435,3 +491,35 @@ exactly where they were, and a section with nothing to show carries no chevron a
 Whether a section starts expanded or collapsed is presentation, and belongs to the screen that owns
 the section (`BR-042`).
 
+## Home screens — the manager’s and the technician’s
+
+Servora has two homes, and they answer different questions (`BR-010`, `BR-012`; `ADR-019` D6): the
+manager’s asks *what is happening across the business?*, the technician’s asks *what do I need
+to do next?*. They therefore share **presentation** and not **hierarchy**.
+
+| Shared, because it is the same fact | Manager home | Technician home |
+| --- | --- | --- |
+| Greeting and date in the shell’s one contextual top bar | `homeHeader` (`HomePresentation.kt`) | the same header |
+| A Visit’s status, with the derived overdue condition | `HomeVisitStatusPill` | the same pill |
+| The scheduled time, formatted in the device’s locale | `formatScheduledTime` | the same |
+| A section label with its count | `SectionLabel` over `section_count_format` | the same |
+| Bordered cards, empty states, failure with retry, the last-reported notice | `InfoCard`, `OfflineNotice` | the same |
+
+Two of these are worth stating because they are easy to get wrong. **The status pill is the home’s
+own**, not the status chip in `ui/components`: that one presents a *status*, while a home row also
+presents the one *derived condition* over a Visit’s schedule, which takes the backend’s answer
+rather than comparing the schedule against the device clock (`BR-001`). And **the day both screens
+describe is resolved by the API** from the `timeZone` the client names, so the manager’s screen and
+the technician’s cannot disagree about which Visits are today’s (`BR-041`).
+
+What the technician home does **not** copy from the manager home:
+
+- No counts, KPIs or dashboard summary: the screen leads with the **next Visit** (the largest thing on
+  it, with the time first and one primary action that opens the Job), then **today** in chronological
+  order, then a capped **upcoming** preview whose heading reports the whole count.
+- Its **Needs attention** section is *absent* rather than empty when there is nothing to act on: an
+  all-clear card would compete with the next Visit for the same glance (`BR-012`). The manager
+  home’s all-clear card stays, because there the absence of exceptions is itself the answer.
+- No status control and no scheduling affordance: changing a Visit’s status is a field **write**
+  (`BR-074`, `BR-066`) and belongs beside the Visit on the Job’s screen, which is where every row
+  of this home leads (`BR-012`).

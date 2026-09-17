@@ -22,16 +22,27 @@ is presented as `Authorization: Bearer <accessToken>`. Route paths carry no vers
 
 ## 2. Permissions
 
-| Route           | Permission       |
-| --------------- | ---------------- |
-| `GET /jobs/:id` | `customers.view` |
+| Route           | Permission                                       |
+| --------------- | ------------------------------------------------ |
+| `GET /jobs/:id` | `customers.view` **or** `VISIT_VIEW_ASSIGNED`     |
 
-**Why `customers.view` and not a `jobs.*` capability.** The read returns the organization's Job and
-the Visit that represents it, and `customers.view` is already the capability the API uses for exactly
-that data: `GET /customers/:id/jobs` and `GET /home/manager` are guarded by it, so a caller who can
-open a Job Details screen can already reach every record it returns. The catalogue has **no**
-`jobs.view` capability, and introducing one would be inventing a permission the Jobs feature has not
-defined (`BR-006`, `BR-042`).
+**Why these two, for one projection.** The office caller reads through `customers.view`, the capability
+the API already uses for exactly the data this read returns: `GET /customers/:id/jobs` and
+`GET /home/manager` are guarded by it, so a caller who can open a Job Details screen can already reach
+every record it returns. The field caller reads through `VISIT_VIEW_ASSIGNED`, the capability `BR-009`
+already gives the technician who does the work — and the route carries **one** projection and **one**
+wire contract for both, because a second Job projection would be a second definition of the same Job
+(`BR-041`). The catalogue has **no** `jobs.view` capability, and introducing one would be inventing a
+permission the Jobs feature has not defined (`BR-006`, `BR-042`). The decision, and the any-of guard
+shape it needs, are recorded in `docs/decisions/019-technician-field-experience.md` (D1).
+
+**The field caller's scope (`ADR-019` D2).** A caller admitted by `VISIT_VIEW_ASSIGNED` reads only a Job
+that at least one **current** `visit_technicians` row of their own reaches — including a Visit that has
+already completed, because a completed assignment stays current until a manager removes it (`BR-069`).
+A Job it does not reach is `404`, never `403`, so a Job id cannot be probed for existence. The scope
+follows the capability that admitted the caller: a member who also holds `customers.view` reads the
+organization's Jobs exactly as before, and `GET /customers/:id/jobs` and `GET /home/manager` are not
+affected by this read's widening.
 
 > **OPEN QUESTION (product ownership).** When the Jobs feature lands with its own capability set
 > (`BR-008` names create/view/update/delete jobs as Manager defaults), this route must be re-reviewed
@@ -40,8 +51,11 @@ defined (`BR-006`, `BR-042`).
 
 This controller exposes the read here and the Job and Visit **actions** in the same module. Every Job
 and Visit action is an explicit authorized action (`BR-066`, `BR-067`) and is specified in
-`docs/api/job-actions.md`; the actions are guarded by the existing `JOB_UPDATE` capability for the same
-reason this read reuses `customers.view`, and the same open question covers both.
+`docs/api/job-actions.md`; the **office** actions are guarded by the existing `JOB_UPDATE` capability for
+the same reason this read reuses `customers.view`, while the **field** routes
+(`PATCH /jobs/:id/visits/:visitId/status` and `POST /jobs/:id/visits/:visitId/notes`) are guarded by the
+capabilities `BR-009` gives the technician (`docs/api/job-actions.md` §2, §7). The same open question
+covers the office actions.
 
 > **OPEN QUESTION (product ownership).** The Job capability set — including what each action requires —
 > is recorded in `docs/api/job-actions.md` §2 and `docs/tracker/018-android-job-actions.md` rather than
@@ -84,7 +98,8 @@ One Job with the Visit that represents it and the technicians assigned to that V
     "scheduledStart": "2026-09-14T13:00:00.000Z",
     "scheduledEnd": "2026-09-14T15:00:00.000Z",
     "version": 2,
-    "reschedulable": false
+    "reschedulable": false,
+    "allowedStatusTransitions": ["ON_SITE", "SCHEDULED"]
   },
   "technicians": [
     {
@@ -113,6 +128,7 @@ One Job with the Visit that represents it and the technicians assigned to that V
 | `selectedVisit.scheduledStart` / `scheduledEnd` | The Visit's internal schedule, which is authoritative for dispatch and conflict detection (`BR-072`).                                                              |
 | `selectedVisit.version` | The Visit's version, echoed back by the reschedule and assignment actions (`BR-086`).                                                                 |
 | `selectedVisit.reschedulable` | Whether `BR-073` permits rescheduling this Visit, which it does only while the Visit is `SCHEDULED`. The rule is defined once here so a client does not re-implement the lifecycle. |
+| `selectedVisit.allowedStatusTransitions` | The statuses the Visit's **field** lifecycle may move it to (`BR-074`, `BR-075`): the same structural table `PATCH /jobs/:id/visits/:visitId/status` validates against (`docs/api/job-actions.md` §7), so the technician's action is drawn from the server's own answer rather than a second copy of the lifecycle (`BR-022`, `BR-041`). `CANCELED` and `NO_SHOW` are absent because they are dispatch actions no capability authorizes today (`BR-066`, `ADR-019` D7). It says what the Visit offers, **not** what the caller may do: whether the session holds the field capability is the client's own gate, and the API decides again at the route (`BR-007`, `BR-011`). |
 | `technicians` | The **represented Visit's** current assignments, Lead first (`BR-068`); `[]` when nobody is assigned. `name` is `null` when the member has no profile yet (`BR-020`).                                                          |
 | `technicians[].roleCode` | `LEAD` or `TECHNICIAN`. Exactly one assigned technician is `LEAD` while a Visit has technicians (`BR-068`).                                                                                                       |
 | `address`    | The Job's preserved property address snapshot (`BR-056`). `null` when the Job has no Property yet. A partly known snapshot keeps its absent parts as `null`.                                                                   |
@@ -138,12 +154,13 @@ therefore shows the crew of the Visit that represents it, not of every Visit it 
 | Status | Code              | When                                                       |
 | ------ | ----------------- | ---------------------------------------------------------- |
 | `401`  | `UNAUTHENTICATED` | No usable session.                                         |
-| `403`  | `FORBIDDEN`       | The caller does not hold `customers.view`.                 |
-| `404`  | `JOB_NOT_FOUND`   | The Job does not exist in the caller's organization, or its Customer has been deleted. |
+| `403`  | `FORBIDDEN`       | The caller holds neither `customers.view` nor `VISIT_VIEW_ASSIGNED`. |
+| `404`  | `JOB_NOT_FOUND`   | The Job does not exist in the caller's organization, its Customer has been deleted, or the caller is a field caller whose own assignments do not reach it. |
 | `5xx`  | —                 | Server failure; the client reports it and offers a retry.  |
 
 A Job another organization owns is `404`, never `403`: the API does not confirm that another
-organization's Job exists (`BR-001`).
+organization's Job exists (`BR-001`). A Job a field caller is not assigned to is `404` for the same
+reason (`ADR-019` D2) — the route never uses `403` to say "not yours".
 
 ## 5. Open questions
 
@@ -163,3 +180,7 @@ list with what each one blocks.
    permissions.
 5. **Extra information on a Job** (`BR-027`, `BR-053`): a Job has a description but no notes field, and
    Visit notes live on the Visit (`visit_notes`). Notes and attachments are not part of this read.
+6. **The field read's own open questions** (`ADR-019`): whether the field capabilities should be
+   re-spelled as `resource.action` codes, and whether a field caller should see a narrower projection
+   than the office caller. D1 keeps the existing `VISIT_*` spellings and one projection; both questions
+   are recorded in `docs/decisions/019-technician-field-experience.md`.

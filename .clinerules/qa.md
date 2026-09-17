@@ -4,6 +4,8 @@
 >
 > An agent must provide evidence that its work passes the applicable automated checks before claiming a task is complete.
 >
+> Verification is **scoped to the change** rather than repeated repository-wide by reflex: a task-sized change runs the compile/build and the tests that cover it, and the **full** lint, suites and builds run when the feature completes (§3.1).
+>
 > **Android physical-device acceptance is performed by the product owner.**
 >
 > The agent is responsible for automated Android verification, backend/API testing, Angular testing, builds, linting, and preparing the Android build and manual QA instructions.
@@ -85,6 +87,66 @@ The agent must use the repository's current commands rather than assuming these 
 If a required command does not exist, the agent must report that rather than silently substituting an unrelated command.
 
 **One category of verification is not the agent's to run.** Commands that talk to an Android device or emulator — `adb` itself, and Gradle tasks that drive a device through it (for example `connectedDebugAndroidTest`) — are the product owner's, because the product owner is the Android QA tester. The agent compiles device-test sources (`assembleDebugAndroidTest`) so they are known to build, and reports any test that would need a device as `NOT RUN — device QA is the product owner's`. See §7.3.
+
+---
+
+## 3.1 Verification scope — targeted per task, full when the feature completes
+
+Verification is not free, and repeating the whole of it after every small change is not what makes a
+change correct. A full Android lint or a full Android test run starts the Gradle/Kotlin build daemons and
+costs minutes of machine time on every invocation (`dev.md` §18); a full API suite plus a full e2e suite is
+a PostgreSQL round trip over every test file in the repository. Paying that cost for a one-line correction,
+a review fix or a follow-up inside a feature that is still open buys almost nothing and consumes the
+machine the product owner is working on.
+
+Verification is therefore **tiered by the scope of the change**. The tier changes *what* is run — never
+*whether* verification is run.
+
+| Tier | When it applies | What is run |
+| ---- | --------------- | ----------- |
+| **A — Targeted** (default) | An ordinary task, a correction, a review fix, a small or medium change inside a feature that is not yet complete | Only the **affected application** and only the **affected target**: the compile/build of the application that changed, its type check, and **the tests that cover the changed code** — named unit spec files, named e2e spec files, named test classes/packages. No full lint and no full suite at this tier. |
+| **B — Full, per affected application** | The vertical slice/feature is **complete** — "a big feature is done" — and before the feature is reported Done or handed to the product owner | The full **lint** of every affected application (`make api-lint`, `make android-lint`), the full type check, the full unit suite (`make api-test`, `make android-test`), the full API e2e suite (`make api-test-e2e`), the full build of each affected application (`make api-build`, `make android-build`) and the device-test source compile (`assembleDebugAndroidTest`). |
+| **C — Whole repository** | A milestone or a release, or a change whose blast radius cannot be bounded | Lint, type check, tests, e2e and builds of **every** application. |
+
+Rules that keep the tiering honest:
+
+* **Tier A is mandatory and is not an excuse to skip verification.** Targeted means a smaller scope, never
+  no verification: a change that alters behavior still runs the tests that cover it (§14), and a change
+  with no runnable test states why instead of reporting nothing.
+* **Lint is deferred to Tier B, not dropped.** The full lint of every affected application must pass when
+  the feature completes and before the feature is reported Done (§15). Findings it surfaces in code the
+  feature touched are fixed as part of the feature.
+* **Escalate immediately** from Tier A to Tier B or C when the change touches shared infrastructure (§11),
+  crosses an application boundary or a shared contract (§12), changes authentication or authorization,
+  changes the database schema or a migration, changes offline/synchronization behavior, or when a targeted
+  run fails or its result is inconclusive.
+* **A correction inside an open feature stays Tier A.** Re-run the targeted check after each correction and
+  pay for the full sweep once, when the feature ends.
+* **The tier is reported** together with the exact commands and their results (§16). "Verified" without the
+  commands is not a report, and a Tier B claim requires the Tier B commands to have actually run.
+
+The targeted forms in use in this repository:
+
+```bash
+# Tier A — API: only the spec(s) that cover the change
+cd api && npm run typecheck
+cd api && npm run build
+cd api && npm test -- src/jobs/mp4-audio.spec.ts
+cd api && npm run test:e2e -- test/job-audio-notes.e2e-spec.ts
+
+# Tier A — Android: only the test class/package that covers the change
+cd android && ./gradlew compileDebugKotlin
+cd android && ./gradlew testDebugUnitTest --tests 'com.servora.android.ui.jobs.*'
+cd android && ./gradlew assembleDebugAndroidTest      # device-test sources must still compile (§7.3)
+
+# Tier B — full, per affected application, when the feature completes
+make api-lint && make api-test && make api-test-e2e && make api-build
+make android-lint && make android-test && make android-build
+make android-stop                                     # §7.4 — the daemons this started are the task's
+```
+
+When the Angular client exists, its targets are chosen the same way: the affected project's tests and build
+at Tier A, its full lint, suite and build at Tier B.
 
 ---
 
@@ -315,7 +377,7 @@ The reason is not only caution: the product owner is the Android QA tester and t
 What the agent does instead:
 
 * Compile the device-test sources (`./gradlew assembleDebugAndroidTest`) so they are known to build.
-* Run the device-free Android verification: JVM unit tests (`make android-test`), lint (`make android-lint`) and the debug build (`make android-build`).
+* Run the device-free Android verification: JVM unit tests (`make android-test`), lint (`make android-lint`) and the debug build (`make android-build`) — at the tier the change requires (§3.1), so a task-sized change compiles and runs the tests that cover it rather than the full sweep.
 * Report every test that needs a device as `NOT RUN — device QA is the product owner's`, with the exact command the product owner would run.
 * Hand the product owner the build and the manual runbook described in §7.2, including the `adb` steps the product owner may choose to run themselves.
 
@@ -496,6 +558,10 @@ A behavior-preserving refactor does not necessarily require new tests, but all e
 
 A task may be reported as **Done** only when all applicable items have been verified.
 
+The checklist is applied **at the tier the change warrants** (§3.1): a task-sized change satisfies it with
+targeted verification of the affected application, while the full-lint, full-suite and device-source items
+(*Quality* and *Android* below) are satisfied when the feature completes.
+
 ### Code
 
 * [ ] Implementation follows project development rules.
@@ -513,10 +579,11 @@ A task may be reported as **Done** only when all applicable items have been veri
 * [ ] Required Android automated tests exist when Android is changed.
 * [ ] Regression coverage exists for bug fixes.
 * [ ] Relevant existing tests pass.
+* [ ] The applicable verification tier was run — targeted per task, full when the feature completes (§3.1) — and its exact commands are reported (§16).
 
 ### Quality
 
-* [ ] Lint passes.
+* [ ] Lint passes at the tier the change requires: the full lint of every affected application when the feature completes (§3.1); a task-sized change reports its targeted compile/build instead.
 * [ ] Formatting passes.
 * [ ] Type checking passes where applicable.
 * [ ] Builds pass for affected applications.
@@ -531,9 +598,9 @@ A task may be reported as **Done** only when all applicable items have been veri
 
 ### Android
 
-* [ ] Android automated tests pass.
-* [ ] Android lint passes.
-* [ ] Android build succeeds.
+* [ ] Android automated tests pass at the tier the change requires (§3.1).
+* [ ] Android lint passes at the tier the change requires (§3.1) — the full `lintDebug` when the feature completes.
+* [ ] Android build succeeds for the affected application.
 * [ ] The agent ran no `adb` and no device/emulator command (§7.3), and compiled any device-test sources instead.
 * [ ] Physical-device QA is either completed by the product owner or explicitly marked **Awaiting Physical QA**.
 * [ ] The agent does not claim physical-device acceptance.
@@ -577,6 +644,10 @@ Example:
 ```text
 QA
 
+Scope (§3.1)
+- Tier A — targeted: API only (the changed service, its unit spec and its e2e spec).
+- Full lint and full suites: Tier B, at feature completion.
+
 Backend
 - Unit: PASS
 - API E2E: PASS
@@ -605,6 +676,9 @@ Manual QA required
 
 The agent must never report `PASS` for a test it did not actually execute.
 
+`Scope` records the tier the change was verified at (§3.1), so a reader can tell a targeted run from a full
+one without reading the commands.
+
 If the environment prevents a test from running, report:
 
 ```text
@@ -624,3 +698,5 @@ Command to execute:
 > **Neither replaces the other.**
 >
 > **The agent owns automated verification. The product owner owns Android physical-device acceptance.**
+>
+> **Verification is scoped, not skipped: targeted for the task, full when the feature completes (§3.1).**

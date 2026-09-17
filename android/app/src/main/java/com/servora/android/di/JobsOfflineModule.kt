@@ -18,8 +18,10 @@ import com.servora.android.data.jobs.JobPhotoProcessing
 import com.servora.android.data.jobs.JobPhotoUploadHandler
 import com.servora.android.data.jobs.PrivateJobPhotoFiles
 import com.servora.android.data.jobs.JobAudioFiles
+import com.servora.android.data.jobs.JobAudioPlayer
 import com.servora.android.data.jobs.JobAudioRecorder
 import com.servora.android.data.jobs.JobAudioUploadHandler
+import com.servora.android.data.jobs.MediaPlayerJobAudioPlayer
 import com.servora.android.data.jobs.PrivateJobAudioFiles
 import com.servora.android.data.jobs.MediaRecorderJobAudioRecorder
 import com.servora.android.data.offline.OfflineOperationHandler
@@ -139,6 +141,15 @@ internal abstract class JobsOfflineBindingsModule {
     abstract fun bindJobAudioRecorder(
         implementation: MediaRecorderJobAudioRecorder,
     ): JobAudioRecorder
+
+    /**
+     * The device's own player (`ADR-018` A9): the one collaborator of playback that needs a device, so
+     * both surfaces that play a recording — the sheet's review and the Job Activity timeline — ask this
+     * one port (`qa.md` §6.1).
+     */
+    @Binds
+    @Singleton
+    abstract fun bindJobAudioPlayer(implementation: MediaPlayerJobAudioPlayer): JobAudioPlayer
 
     /**
      * What the tray, the gallery, the review preview and the viewer draw a photo with (`D4b`): the

@@ -1,8 +1,6 @@
 package com.servora.android.ui.home
 
-import android.text.format.DateFormat
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,7 +27,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -39,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -51,21 +46,11 @@ import com.servora.android.R
 import com.servora.android.domain.model.ManagerAttentionItem
 import com.servora.android.domain.model.ManagerAttentionKind
 import com.servora.android.domain.model.ManagerHome
-import com.servora.android.domain.model.ManagerHomeAddress
 import com.servora.android.domain.model.ManagerHomeTodaySummary
 import com.servora.android.domain.model.ManagerHomeVisit
-import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.components.InfoCard
 import com.servora.android.ui.components.SectionLabel
 import com.servora.android.ui.theme.stateColors
-import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeParseException
-import java.time.format.FormatStyle
-import java.util.Locale
 
 /** Identifies the populated home, so a test can assert the state it must show. */
 const val ManagerHomeContentTag = "manager-home-content"
@@ -109,16 +94,9 @@ const val ManagerHomeAttentionToggleTag = "manager-home-attention-toggle"
 fun managerHomeVisitTag(visitId: String): String = "manager-home-visit-$visitId"
 
 /*
- * Metrics the manager home is built from, from `docs/design/android-design-system.md`: the 20 dp
- * page gutter the signed-in shell uses, 16 dp inside a card, and 48 dp touch targets for actions.
+ * The metrics, the greeting header and the Visit status pill are shared with the technician home and
+ * live in `HomePresentation.kt`, so the two screens present the same facts the same way (`BR-041`).
  */
-private val HomePageGutter = 20.dp
-private val HomeSectionSpacing = 20.dp
-private val HomeTouchTarget = 48.dp
-private val HomeAttentionIconSize = 20.dp
-private val HomeChevronSize = 18.dp
-private val HomeStatusDotSize = 8.dp
-private val HomeRefreshIconSize = 14.dp
 
 /**
  * The manager home: what needs the manager, how today is going, and what is happening next
@@ -156,78 +134,6 @@ fun ManagerHomeScreen(
 
         else -> ManagerHomeLoading(modifier = modifier)
     }
-}
-
-/** The header the home destination shows in the shell's contextual top bar (`BR-010`). */
-@Immutable
-data class ManagerHomeHeader(
-    val title: String,
-    val subtitle: String,
-)
-
-/**
- * The greeting and date line the manager home puts in the shell's top bar.
- *
- * The shell already draws exactly one contextual top bar
- * (`docs/decisions/011-android-contextual-top-bar.md`), so the header belongs there rather than in a
- * second bar above the content. The name is the backend's answer for the signed-in member; the date
- * is the device's local date, because that is the day the manager is asking about. The home's *data*
- * is for the day the backend resolved from this device's time zone.
- */
-@Composable
-fun managerHomeHeader(displayName: String?): ManagerHomeHeader {
-    val title = when (greetingPeriod(LocalTime.now().hour)) {
-        GreetingPeriod.MORNING -> greetingResource(
-            named = R.string.home_greeting_morning_named,
-            anonymous = R.string.home_greeting_morning,
-            displayName = displayName,
-        )
-
-        GreetingPeriod.AFTERNOON -> greetingResource(
-            named = R.string.home_greeting_afternoon_named,
-            anonymous = R.string.home_greeting_afternoon,
-            displayName = displayName,
-        )
-
-        GreetingPeriod.EVENING -> greetingResource(
-            named = R.string.home_greeting_evening_named,
-            anonymous = R.string.home_greeting_evening,
-            displayName = displayName,
-        )
-    }
-    return ManagerHomeHeader(title = title, subtitle = homeDateLine(LocalDate.now(), deviceLocale()))
-}
-
-/** A greeting with the member's name when the backend reported one, and without it when it did not. */
-@Composable
-private fun greetingResource(named: Int, anonymous: Int, displayName: String?): String =
-    if (displayName.isNullOrBlank()) {
-        stringResource(anonymous)
-    } else {
-        stringResource(named, displayName)
-    }
-
-/**
- * The current local date, in the order the language writes it.
- *
- * The skeleton is resolved by the platform rather than by a fixed pattern: "MMMM d" reads
- * "September 7" in English and has to become "7 septembre" in French, which a hard-coded pattern
- * would not produce (`BR-028`).
- */
-@Composable
-private fun homeDateLine(date: LocalDate, locale: Locale): String {
-    val pattern = DateFormat.getBestDateTimePattern(locale, "EEEEMMMMd")
-    return date.format(DateTimeFormatter.ofPattern(pattern, locale))
-}
-
-/**
- * The language the device is set to, read from the configuration so a change to it recomposes the
- * screen instead of leaving it formatted in the previous language.
- */
-@Composable
-private fun deviceLocale(): Locale {
-    val locales = LocalConfiguration.current.locales
-    return if (locales.isEmpty) Locale.ROOT else locales[0]
 }
 
 /** The first read, with nothing on screen yet. */
@@ -711,7 +617,7 @@ private fun VisitCard(
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.weight(1f))
-                VisitStatusPill(visit)
+                HomeVisitStatusPill(status = visit.visitStatus, isOverdue = visit.isOverdue)
             }
             Spacer(Modifier.height(6.dp))
             Text(
@@ -729,7 +635,13 @@ private fun VisitCard(
                 overflow = TextOverflow.Ellipsis,
             )
             visit.address?.let { address ->
-                formattedAddress(address)?.let { line ->
+                formattedAddressLine(
+                    addressLine1 = address.addressLine1,
+                    addressLine2 = address.addressLine2,
+                    city = address.city,
+                    province = address.province,
+                    postalCode = address.postalCode,
+                )?.let { line ->
                     Text(
                         text = line,
                         style = MaterialTheme.typography.bodySmall,
@@ -742,69 +654,6 @@ private fun VisitCard(
         }
     }
 }
-
-/**
- * Where the Visit stands, in the shared Visit vocabulary (`BR-074`).
- *
- * The one derived condition the pill also presents is overdue, and it takes the backend's answer
- * rather than comparing the schedule against this device's clock (`BR-001`).
- */
-@Composable
-private fun VisitStatusPill(visit: ManagerHomeVisit) {
-    val overdue = visit.isOverdue
-    val color = when {
-        overdue -> MaterialTheme.colorScheme.error
-        visit.visitStatus == VisitStatus.COMPLETED -> MaterialTheme.stateColors.success
-        visit.visitStatus == VisitStatus.EN_ROUTE ||
-            visit.visitStatus == VisitStatus.ON_SITE ||
-            visit.visitStatus == VisitStatus.IN_PROGRESS -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Surface(
-        color = MaterialTheme.colorScheme.secondary,
-        shape = MaterialTheme.shapes.small,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(HomeStatusDotSize)
-                    .background(color = color, shape = CircleShape),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = stringResource(visitStatusLabel(visit)),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = color,
-            )
-        }
-    }
-}
-
-/**
- * The localized label a Visit status code is presented with (`BR-028`, `BR-041`), including the one
- * derived condition the pill also presents: overdue takes the backend's answer rather than comparing
- * the schedule against this device's clock (`BR-001`).
- */
-private fun visitStatusLabel(visit: ManagerHomeVisit): Int =
-    if (visit.isOverdue) {
-        R.string.home_visit_status_overdue
-    } else {
-        when (visit.visitStatus) {
-            VisitStatus.DRAFT -> R.string.visit_status_draft
-            VisitStatus.SCHEDULED -> R.string.visit_status_scheduled
-            VisitStatus.EN_ROUTE -> R.string.visit_status_en_route
-            VisitStatus.ON_SITE -> R.string.visit_status_on_site
-            VisitStatus.IN_PROGRESS -> R.string.visit_status_in_progress
-            VisitStatus.COMPLETED -> R.string.visit_status_completed
-            VisitStatus.CANCELED -> R.string.visit_status_canceled
-            VisitStatus.NO_SHOW -> R.string.visit_status_no_show
-        }
-    }
 
 /**
  * Who is going to be there.
@@ -829,29 +678,3 @@ private fun technicianSummary(visit: ManagerHomeVisit): String {
     )
 }
 
-/** The Visit's address as one line, or `null` when no part of it was preserved. */
-private fun formattedAddress(address: ManagerHomeAddress): String? {
-    val parts = listOfNotNull(
-        address.addressLine1,
-        address.addressLine2,
-        address.city,
-        address.province,
-        address.postalCode,
-    )
-    return parts.takeIf { it.isNotEmpty() }?.joinToString(separator = ", ")
-}
-
-/**
- * The scheduled time in the device's own locale and time zone.
- *
- * Returns `null` when the value is not an instant this build can read, so the row omits the time
- * rather than showing a fabricated one (`BR-042`).
- */
-private fun formatScheduledTime(scheduledStart: String, locale: Locale): String? =
-    try {
-        Instant.parse(scheduledStart)
-            .atZone(ZoneId.systemDefault())
-            .format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale))
-    } catch (unreadable: DateTimeParseException) {
-        null
-    }

@@ -167,6 +167,18 @@
     <string name="home_retry">Try again</string>
     <string name="home_refreshing">Updating…</string>
     <string name="home_unrefreshed_notice">Couldn\'t refresh. Showing the last update.</string>
+
+    <!-- The technician's own day (`GET /home/technician`, ADR-019 D6). The technician home answers
+         "what do I need to do next?", so it names the next Visit, the day and the preview in that
+         order and adds nothing about the operation. -->
+    <string name="technician_home_next_title">Up next</string>
+    <string name="technician_home_next_open">Open job</string>
+    <string name="technician_home_crew_format">With %1$s</string>
+    <string name="technician_home_upcoming_title">Upcoming</string>
+    <string name="technician_home_nothing_title">No assigned work</string>
+    <string name="technician_home_nothing_detail">Nothing is assigned to you right now.</string>
+    <string name="technician_home_loading">Loading your day…</string>
+    <string name="technician_home_error_title">Couldn\'t load your day</string>
     <string name="customers_title">Customers</string>
     <string name="customers_subtitle">Manage customers and their service properties</string>
     <string name="customers_search_placeholder">Name, phone, address…</string>
@@ -685,4 +697,31 @@
     <string name="job_audio_error_recording_not_saved">The recording could not be saved on this device.</string>
     <string name="job_audio_error_not_queued">The recording could not be saved yet. It is still on this device.</string>
     <string name="job_audio_error_already_submitted">That recording is already queued for upload.</string>
+    <!--
+      Audio evidence playback and removal (`BR-091`, `BR-089`, `ADR-018` A9/A7/A11). A recording the API
+      accepted is played back from the Job's Activity, may be moved through while it plays, and may be
+      taken out of ordinary use by a manager; the phase badge and the length the timeline states come from
+      the API, so nothing here repeats them, and the position is stated as one value of two seconds —
+      where it is, and how long it is.
+    -->
+    <string name="job_audio_activity_added">Added an audio note</string>
+    <string name="job_audio_activity_removed">Removed an audio note from ordinary use</string>
+    <string name="job_audio_play">Play recording</string>
+    <string name="job_audio_pause">Pause recording</string>
+    <string name="job_audio_position_format">%1$s / %2$s</string>
+    <string name="job_audio_seek">Playback position</string>
+    <string name="job_audio_remove_evidence">Remove evidence</string>
+    <string name="job_audio_removed_message">Audio evidence removed. The record and its history were kept.</string>
+    <string name="job_audio_removal_title">Remove this recording?</string>
+    <string name="job_audio_removal_message">This recording was made as evidence, so it cannot be deleted. It will be removed from the job\'s audio notes and from ordinary views, and the reason you give is kept with the record.</string>
+    <string name="job_audio_removal_reason_label">Why is it being removed?</string>
+    <string name="job_audio_removal_confirm">Remove</string>
+    <string name="job_audio_removal_cancel">Cancel</string>
+    <string name="job_audio_error_playback_failed">This device could not play the recording.</string>
+    <string name="job_audio_error_playback_unreachable">That recording is not saved on this device yet. Connect and try again.</string>
+    <string name="job_audio_error_playback_unavailable">That recording could not be read.</string>
+    <string name="job_audio_error_removal_not_permitted">Your role does not allow removing evidence. Ask a manager.</string>
+    <string name="job_audio_error_removal_unavailable">That recording is no longer available to remove.</string>
+    <string name="job_audio_error_removal_unreachable">Removing evidence needs the server. Connect and try again.</string>
+    <string name="job_audio_error_removal_failed">The recording could not be removed, so nothing changed.</string>
 </resources>

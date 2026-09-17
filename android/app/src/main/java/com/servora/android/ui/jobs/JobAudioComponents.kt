@@ -68,12 +68,24 @@ internal fun jobAudioFailureMessage(failure: JobAudioFailure): Int =
         JobAudioFailure.RECORDING_NOT_SAVED -> R.string.job_audio_error_recording_not_saved
         JobAudioFailure.NOT_QUEUED -> R.string.job_audio_error_not_queued
         JobAudioFailure.ALREADY_SUBMITTED -> R.string.job_audio_error_already_submitted
+        // Playback's own failures name what the technician can act on: this device could not play the
+        // recording, the backend could not be reached for bytes it does not hold, or the backend did not
+        // deliver it (`BR-013`, `BR-042`).
+        JobAudioFailure.PLAYBACK_FAILED -> R.string.job_audio_error_playback_failed
+        JobAudioFailure.PLAYBACK_UNREACHABLE -> R.string.job_audio_error_playback_unreachable
+        JobAudioFailure.PLAYBACK_UNAVAILABLE -> R.string.job_audio_error_playback_unavailable
+        // A removal reports through the audio channel for the kind it removed (`BR-089`, `ADR-018` A7).
+        JobAudioFailure.REMOVAL_NOT_PERMITTED -> R.string.job_audio_error_removal_not_permitted
+        JobAudioFailure.REMOVAL_NO_LONGER_AVAILABLE -> R.string.job_audio_error_removal_unavailable
+        JobAudioFailure.REMOVAL_UNREACHABLE -> R.string.job_audio_error_removal_unreachable
+        JobAudioFailure.REMOVAL_FAILED -> R.string.job_audio_error_removal_failed
     }
 
 /** The localized report of what the last audio action did. */
 internal fun jobAudioMessageText(message: JobAudioMessage): Int =
     when (message) {
         JobAudioMessage.QUEUED -> R.string.job_audio_message_queued
+        JobAudioMessage.EVIDENCE_REMOVED -> R.string.job_audio_removed_message
     }
 
 private const val SECONDS_PER_MINUTE = 60

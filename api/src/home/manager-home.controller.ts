@@ -5,11 +5,8 @@ import { CUSTOMER_PERMISSIONS } from '../auth/permissions.js';
 import { RequirePermissions } from '../auth/permissions.decorator.js';
 import { PermissionsGuard } from '../auth/permissions.guard.js';
 import type { PermissionedRequest } from '../auth/permissions.guard.js';
-import {
-  DEFAULT_MANAGER_HOME_TIME_ZONE,
-  normaliseTimeZone,
-  resolveDayWindow,
-} from './manager-home-day.js';
+import { resolveDayWindow } from './home-day.js';
+import { readTimeZoneQuery } from './home-query.js';
 import { toManagerHomeDto } from './manager-home.dto.js';
 import type { ManagerHomeDto } from './manager-home.dto.js';
 import { ManagerHomeService } from './manager-home.service.js';
@@ -45,7 +42,7 @@ export class ManagerHomeController {
       throw AuthApiError.unauthenticated();
     }
 
-    const timeZone = parseTimeZone(query);
+    const timeZone = readTimeZoneQuery(query);
     const now = new Date();
     const day = resolveDayWindow(timeZone, now);
     const read = await this.managerHome.readManagerHome(
@@ -67,24 +64,3 @@ export class ManagerHomeController {
   }
 }
 
-/**
- * Reads the caller's time zone from the query.
- *
- * A request that names no zone is resolved in UTC, which is a defined answer rather than a guess at
- * where the organization is. A zone this runtime cannot format is rejected, so the read never
- * silently answers for a different day than the one the client asked about (`dev.md` §7).
- */
-function parseTimeZone(query: unknown): string {
-  const source = (query ?? {}) as Record<string, unknown>;
-  const value = source.timeZone;
-  if (value === undefined || value === null || value === '') {
-    return DEFAULT_MANAGER_HOME_TIME_ZONE;
-  }
-  const timeZone = normaliseTimeZone(value);
-  if (timeZone === null) {
-    throw AuthApiError.validationFailed(
-      'timeZone must be a time-zone identifier the server can resolve.',
-    );
-  }
-  return timeZone;
-}

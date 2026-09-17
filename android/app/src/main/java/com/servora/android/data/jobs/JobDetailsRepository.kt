@@ -71,6 +71,21 @@ interface JobDetailsRepository {
     ): ActivityWriteResult
 
     /**
+     * Takes one recording out of ordinary use, recording [reason], and returns the refreshed activity
+     * (`BR-088`, `BR-089`).
+     *
+     * The audio kind's own operation, authorized by `evidence.audio.remove` — a capability separate from
+     * the photo one, so a company may withdraw one kind and keep the other (`ADR-018` A7). Like the
+     * photo removal it is **online-only**: the route takes no idempotency key and no conflict policy is
+     * decided for it, so it is never queued (`offline-first-architecture.md` §5, §8, §13.2).
+     */
+    suspend fun removeJobAudioNote(
+        jobId: String,
+        audioNoteId: String,
+        reason: String,
+    ): ActivityWriteResult
+
+    /**
      * Moves the Job to [status] (`BR-058`).
      *
      * [expectedVersion] is the Job version the screen last saw: the API refuses the change when the
@@ -234,6 +249,25 @@ class DefaultJobDetailsRepository @Inject constructor(
             allowRenewal = true,
             call = { token ->
                 api.removeJobPhoto("Bearer $token", jobId, photoId, request)
+            },
+        )
+    }
+
+    override suspend fun removeJobAudioNote(
+        jobId: String,
+        audioNoteId: String,
+        reason: String,
+    ): ActivityWriteResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return ActivityWriteResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        val request = RemoveJobAudioNoteRequestDto(reason = reason.trim())
+        return performActivityWrite(
+            accessToken = accessToken,
+            jobId = jobId,
+            allowRenewal = true,
+            call = { token ->
+                api.removeJobAudioNote("Bearer $token", jobId, audioNoteId, request)
             },
         )
     }
@@ -596,6 +630,7 @@ private const val CODE_COMPLETION_BLOCKED = "JOB_COMPLETION_BLOCKED"
 private const val CODE_VISIT_NOT_RESCHEDULABLE = "VISIT_NOT_RESCHEDULABLE"
 private const val CODE_TECHNICIANS_NOT_ASSIGNABLE = "TECHNICIANS_NOT_ASSIGNABLE"
 private const val CODE_PHOTO_ALREADY_REMOVED = "JOB_PHOTO_ALREADY_REMOVED"
+private const val CODE_AUDIO_NOTE_ALREADY_REMOVED = "JOB_AUDIO_NOTE_ALREADY_REMOVED"
 private const val CODE_SCHEDULE_CONFLICT = "SCHEDULE_CONFLICT"
 private const val CODE_VERSION_CONFLICT = "VERSION_CONFLICT"
 
@@ -653,6 +688,7 @@ private fun HttpException.toActionFailure(errorCode: String? = null): JobActionF
         CODE_VISIT_NOT_RESCHEDULABLE -> JobActionFailure.VISIT_NOT_RESCHEDULABLE
         CODE_TECHNICIANS_NOT_ASSIGNABLE -> JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE
         CODE_PHOTO_ALREADY_REMOVED -> JobActionFailure.PHOTO_ALREADY_REMOVED
+        CODE_AUDIO_NOTE_ALREADY_REMOVED -> JobActionFailure.AUDIO_NOTE_ALREADY_REMOVED
         CODE_VERSION_CONFLICT, CODE_SCHEDULE_CONFLICT ->
             JobActionFailure.VERSION_CONFLICT
 
@@ -758,5 +794,9 @@ private fun JobActivityEventDto.toJobActivityEvent(): JobActivityEvent? {
         photoId = photoId,
         photoPhase = photoPhase,
         photoRemovalReason = photoRemovalReason,
+        audioNoteId = audioNoteId,
+        audioPhase = audioPhase,
+        audioDurationSeconds = audioDurationSeconds,
+        audioRemovalReason = audioRemovalReason,
     )
 }

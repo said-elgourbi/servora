@@ -141,6 +141,38 @@ interface JobDetailsApi {
     ): JobActivityDto
 
     /**
+     * `POST /jobs/{jobId}/audio-notes/{audioNoteId}/removal` — takes accepted audio evidence out of
+     * ordinary use (`BR-088`, `BR-089`, `ADR-018` A7).
+     *
+     * The photo removal's own shape for the audio kind: nothing here edits or deletes a recording, the
+     * API appends a removal record carrying the actor, the instant and the reason, and it answers with
+     * the refreshed timeline. `evidence.audio.remove` authorizes it — a capability separate from the
+     * photo one, so a company may withdraw one kind and keep the other.
+     */
+    @POST("jobs/{jobId}/audio-notes/{audioNoteId}/removal")
+    suspend fun removeJobAudioNote(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("audioNoteId") audioNoteId: String,
+        @Body request: RemoveJobAudioNoteRequestDto,
+    ): JobActivityDto
+
+    /**
+     * `GET /jobs/{jobId}/audio-notes/{audioNoteId}/content` — the recording's bytes (`BR-091`).
+     *
+     * Evidence is read through the API on the API port (`ADR-013` D7). It is streamed, because the
+     * caller writes the bytes to a file it plays from rather than holding the whole recording in
+     * memory.
+     */
+    @Streaming
+    @GET("jobs/{jobId}/audio-notes/{audioNoteId}/content")
+    suspend fun jobAudioNoteContent(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("audioNoteId") audioNoteId: String,
+    ): ResponseBody
+
+    /**
      * `GET /jobs/{jobId}/photos/{photoId}/content` — the photo's bytes (`BR-015`).
      *
      * Evidence is read through the API on the API port, so no storage endpoint, bucket or signature

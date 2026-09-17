@@ -61,3 +61,40 @@ private object InertJobAudioRecorder : JobAudioRecorder {
 
     override fun release() = Unit
 }
+
+/**
+ * A player that plays nothing, for instrumented tests about something else (`ADR-018` A9).
+ *
+ * The device's player is the one collaborator of playback that needs a device, so a navigation test gets
+ * one that reports that nothing is playing rather than a `MediaPlayer` (`qa.md` §6.2).
+ */
+fun inertJobAudioPlayer(): JobAudioPlayer = InertJobAudioPlayer
+
+private object InertJobAudioPlayer : JobAudioPlayer {
+    override val playback: Flow<JobAudioPlayback?> = flowOf(null)
+
+    override val progress: Flow<JobAudioPlaybackProgress?> = flowOf(null)
+
+    override fun play(audioNoteId: String, path: String): Boolean = false
+
+    override fun pause() = Unit
+
+    override fun resume() = Unit
+
+    override fun seekTo(positionMillis: Int) = Unit
+
+    override fun stop() = Unit
+}
+
+/**
+ * A cache that holds no bytes, for instrumented tests about something else (`ADR-018` A9).
+ *
+ * An accepted recording is read through the API on its first play, and a navigation test never plays one,
+ * so this answers that the backend did not deliver the bytes rather than reading anything (`qa.md` §6.2).
+ */
+fun inertJobAudioEvidenceCache(): JobAudioEvidenceCache = InertJobAudioEvidenceCache
+
+private object InertJobAudioEvidenceCache : JobAudioEvidenceCache {
+    override suspend fun read(jobId: String, audioNoteId: String): JobAudioEvidenceRead =
+        JobAudioEvidenceRead.Unavailable
+}

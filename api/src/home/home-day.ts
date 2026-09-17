@@ -1,5 +1,5 @@
 /**
- * The local day the manager home is rendered for.
+ * The local day a home read is rendered for.
  *
  * "Today" is a local-calendar question, so the screen cannot answer it alone and the client cannot
  * be trusted to answer it authoritatively: a device whose clock or zone is wrong would report a
@@ -8,7 +8,9 @@
  * The client therefore names the zone it renders in and the API settles the window, so two clients
  * of the same operation asked at the same moment agree on which Visits are today's.
  *
- * Nothing here is business state: it is a calendar window derived from a zone and an instant.
+ * Nothing here is business state: it is a calendar window derived from a zone and an instant. Both
+ * home reads resolve their day through it — `GET /home/manager` and `GET /home/technician` — so the
+ * two screens cannot disagree about which day they describe (`BR-041`).
  */
 
 /** The half-open instant window `[start, end)` one local calendar day covers. */
@@ -22,10 +24,7 @@ export interface DayWindow {
 }
 
 /** The zone a request that names no zone is resolved in. */
-export const DEFAULT_MANAGER_HOME_TIME_ZONE = 'UTC';
-
-/** How many attention items a home read returns before `attention.total` carries the rest. */
-export const MANAGER_HOME_ATTENTION_LIMIT = 20;
+export const DEFAULT_HOME_TIME_ZONE = 'UTC';
 
 /**
  * The longest zone identifier the API accepts.

@@ -38,6 +38,14 @@ data class CustomerPermissionsUiState(
     // Recording an audio note is its own capability (`ADR-018` A7), so the *Add audio* kind is drawn on
     // it and never on the photo one: a company may grant one kind and withhold the other.
     val canAddEvidenceAudio: Boolean = false,
+    // Removing an accepted recording is the audio kind's own Manager-level capability (`BR-089`,
+    // `ADR-018` A7): it is never inferred from the photo removal capability, so a session may be offered
+    // one kind's removal and not the other's.
+    val canRemoveAudioEvidence: Boolean = false,
+    // Reading and doing one's own assigned work is the field capability `BR-009` names (`ADR-019`
+    // D1, D6). It is what decides which home a signed-in member lands on, and it is never inferred
+    // from the office capabilities: a technician holds it and holds no `customers.view` at all.
+    val canViewAssignedWork: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -61,4 +69,6 @@ fun customerPermissionsUiState(
         canViewEvidence = permissionChecker.has(Permission.EVIDENCE_VIEW),
         canRemoveEvidence = permissionChecker.has(Permission.EVIDENCE_PHOTO_REMOVE),
         canAddEvidenceAudio = permissionChecker.has(Permission.EVIDENCE_AUDIO_ADD),
+        canRemoveAudioEvidence = permissionChecker.has(Permission.EVIDENCE_AUDIO_REMOVE),
+        canViewAssignedWork = permissionChecker.has(Permission.VISIT_VIEW_ASSIGNED),
     )

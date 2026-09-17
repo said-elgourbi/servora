@@ -45,6 +45,17 @@ class PhotoUploadApi : JobDetailsApi {
 
     var addJobAudioNoteCalls = 0
 
+    /**
+     * How the next audio content read answers (`BR-091`). A test about playback's bytes scripts what the
+     * backend delivers, or the failure it reports instead.
+     */
+    var audioContentAnswer: () -> ResponseBody = {
+        FakeJobAudioFiles.M4A_BYTES.toResponseBody("audio/mp4".toMediaType())
+    }
+
+    var audioContentCalls = 0
+    var lastAudioNoteId: String? = null
+
     override suspend fun addJobAudioNote(
         authorization: String,
         jobId: String,
@@ -139,6 +150,25 @@ class PhotoUploadApi : JobDetailsApi {
         photoId: String,
         request: RemoveJobPhotoRequestDto,
     ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
+
+    override suspend fun removeJobAudioNote(
+        authorization: String,
+        jobId: String,
+        audioNoteId: String,
+        request: RemoveJobAudioNoteRequestDto,
+    ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
+
+    override suspend fun jobAudioNoteContent(
+        authorization: String,
+        jobId: String,
+        audioNoteId: String,
+    ): ResponseBody {
+        audioContentCalls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastAudioNoteId = audioNoteId
+        return audioContentAnswer()
+    }
 
     override suspend fun assignableTechnicians(
         authorization: String,

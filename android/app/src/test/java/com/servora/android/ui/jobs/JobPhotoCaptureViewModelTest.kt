@@ -3,6 +3,8 @@ package com.servora.android.ui.jobs
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.AssignableTechniciansResult
 import com.servora.android.data.jobs.AudioCollaborators
+import com.servora.android.data.jobs.FakeJobAudioEvidenceCache
+import com.servora.android.data.jobs.FakeJobAudioPlayer
 import com.servora.android.data.jobs.FakeJobPhotoExporter
 import com.servora.android.data.jobs.FakeJobPhotoFiles
 import com.servora.android.data.jobs.FakeJobPhotoPickedItems
@@ -794,6 +796,10 @@ private fun viewModel(
         jobPhotoImages = JobPhotoImages.None,
         pickedItems = pickedItems,
         exporter = exporter,
+        // These tests are about the photo flow, so playback holds no device and the recordings the
+        // backend holds are never asked for (`ADR-018` A9, `qa.md` §6.1).
+        audioEvidence = FakeJobAudioEvidenceCache(),
+        audioPlayer = FakeJobAudioPlayer(),
         clock = TEST_CLOCK,
     )
 
@@ -885,6 +891,12 @@ private class PhotoJobRepository(
     override suspend fun removeJobPhoto(
         jobId: String,
         photoId: String,
+        reason: String,
+    ): ActivityWriteResult = unsupported()
+
+    override suspend fun removeJobAudioNote(
+        jobId: String,
+        audioNoteId: String,
         reason: String,
     ): ActivityWriteResult = unsupported()
 

@@ -145,6 +145,18 @@
     <string name="home_retry">Réessayer</string>
     <string name="home_refreshing">Mise à jour…</string>
     <string name="home_unrefreshed_notice">Actualisation impossible. Dernière mise à jour affichée.</string>
+
+    <!-- La journée du technicien (`GET /home/technician`, ADR-019 D6). Cet écran répond à
+         « que dois-je faire ensuite? », donc il nomme la prochaine visite, la journée et l’aperçu
+         dans cet ordre, sans rien dire de l’exploitation. -->
+    <string name="technician_home_next_title">Prochaine intervention</string>
+    <string name="technician_home_next_open">Ouvrir l’intervention</string>
+    <string name="technician_home_crew_format">Avec %1$s</string>
+    <string name="technician_home_upcoming_title">À venir</string>
+    <string name="technician_home_nothing_title">Aucune intervention assignée</string>
+    <string name="technician_home_nothing_detail">Aucune intervention ne vous est assignée pour le moment.</string>
+    <string name="technician_home_loading">Chargement de votre journée…</string>
+    <string name="technician_home_error_title">Impossible de charger votre journée</string>
     <string name="customers_title">Clients</string>
     <string name="customers_subtitle">Gérer les clients et leurs propriétés de service</string>
     <string name="customers_search_placeholder">Nom, téléphone, adresse…</string>
@@ -629,4 +641,30 @@
     <string name="job_audio_error_recording_not_saved">L’enregistrement n’a pas pu être sauvegardé sur cet appareil.</string>
     <string name="job_audio_error_not_queued">L’enregistrement n’a pas pu être sauvegardé pour l’instant. Il reste sur cet appareil.</string>
     <string name="job_audio_error_already_submitted">Cet enregistrement est déjà en attente de téléversement.</string>
+    <!--
+      Lecture et retrait d’une preuve audio (`BR-091`, `BR-089`, `ADR-018` A9/A7). Un enregistrement
+      accepté par l’API est réécouté depuis l’activité de l’intervention et peut être retiré de l’usage
+      courant par un gestionnaire ; l’étape et la durée affichées viennent de l’API et ne sont pas
+      répétées ici.
+    -->
+    <string name="job_audio_activity_added">Note audio ajoutée</string>
+    <string name="job_audio_activity_removed">Note audio retirée de l’usage courant</string>
+    <string name="job_audio_play">Lire l’enregistrement</string>
+    <string name="job_audio_pause">Mettre en pause l’enregistrement</string>
+    <string name="job_audio_position_format">%1$s / %2$s</string>
+    <string name="job_audio_seek">Position de lecture</string>
+    <string name="job_audio_remove_evidence">Retirer la preuve</string>
+    <string name="job_audio_removed_message">Preuve audio retirée. L’enregistrement et son historique ont été conservés.</string>
+    <string name="job_audio_removal_title">Retirer cet enregistrement ?</string>
+    <string name="job_audio_removal_message">Cet enregistrement a été réalisé comme preuve et ne peut donc pas être supprimé. Il sera retiré des notes audio de l’intervention et des vues courantes, et la raison que vous indiquez est conservée avec l’enregistrement.</string>
+    <string name="job_audio_removal_reason_label">Pourquoi ce retrait ?</string>
+    <string name="job_audio_removal_confirm">Retirer</string>
+    <string name="job_audio_removal_cancel">Annuler</string>
+    <string name="job_audio_error_playback_failed">Cet appareil n’a pas pu lire l’enregistrement.</string>
+    <string name="job_audio_error_playback_unreachable">Cet enregistrement n’est pas encore sauvegardé sur cet appareil. Connectez-vous et réessayez.</string>
+    <string name="job_audio_error_playback_unavailable">Cet enregistrement n’a pas pu être lu.</string>
+    <string name="job_audio_error_removal_not_permitted">Votre rôle ne permet pas de retirer une preuve. Demandez à un gestionnaire.</string>
+    <string name="job_audio_error_removal_unavailable">Cet enregistrement n’est plus disponible pour un retrait.</string>
+    <string name="job_audio_error_removal_unreachable">Retirer une preuve exige le serveur. Connectez-vous et réessayez.</string>
+    <string name="job_audio_error_removal_failed">L’enregistrement n’a pas pu être retiré : rien n’a changé.</string>
 </resources>

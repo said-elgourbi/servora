@@ -1,7 +1,7 @@
 # ADR-018 — Audio evidence: the model, the vocabulary and the capability
 
 **Status:** Accepted (product-owner decision, 2026-09-16; `A1` decided by the agent under explicit
-delegation, 2026-09-16)
+delegation, 2026-09-16; `A11` decided by product ownership, 2026-09-17)
 
 Date: 2026-09-16
 Tracker: `docs/tracker/035-android-audio-evidence.md` (Phase 9 of `docs/tracker/029-photo-evidence-phases.md`)
@@ -174,7 +174,53 @@ Android plays a recording back with the platform's own media stack (`MediaRecord
 `MediaPlayer` to play). **No media dependency is added** (`dev.md` §4): the requirement is a short mono
 AAC recording played inside a screen Servora already renders, which the platform provides. A richer
 player (waveforms, a scrubber, streaming from a presigned URL) is a later decision, and Phase 8's read
-change is the point at which it would be reconsidered.
+change is the point at which it would be reconsidered. **Amended by `A11` (2026-09-17):** the scrubber and
+the position **are** decided — a seek track with a playhead, stating `0:04 / 0:18` — while the waveform is
+still not drawn and streaming from a presigned URL remains undecided.
+
+### A11 — A seekable playhead, and the position stated
+
+Decided by product ownership on **2026-09-17**, answering what `A9` deferred. A recording now carries a
+**seek track** with a **playhead**, and states **where it is and how long it is** (`0:04 / 0:18`) rather
+than only its length. The requirement in product ownership's own words: *"fill/playahead with seeking …
+also show length of audio and where we are at the moment"*, explicitly **without amplitude**.
+
+- **What this amends.** `A9`'s "no scrubber, no position". That is now decided for the position and the
+  seek. **The waveform is still not drawn** — the design's *"appropriate audio icon/waveform"*
+  (`Figma/…/servora-job-details-spec.md` §11) remains an intent the app deliberately does not draw, exactly
+  as the Phase 9c correction recorded — and streaming from a presigned URL is still not decided (`BR-042`).
+- **The player stays the platform's own** (`MediaPlayer`, `dev.md` §4). No media dependency is added.
+  `JobAudioPlayer` gains `pause`, `resume`, `seekTo`, and where the recording has got to becomes a **second
+  answer** beside which recording the player holds and whether it is moving.
+- **Two answers, two rates.** Which recording the player holds changes when the technician taps; where it
+  has got to changes ten times a second while it plays. The position is therefore reported separately and
+  read where it is drawn — by the playhead and by the elapsed seconds, which are derived in whole seconds —
+  rather than carried in the screen's own state, so a moving playhead does not recompose Job Details, the
+  timeline and every entry around the recording (`BR-012`).
+- **Pause holds the position.** A second tap on the recording the player holds pauses it where it got to,
+  and a third continues from there. It must: a playhead that states a position the technician can move
+  cannot be thrown away by the same control that pauses. A recording that **ends**, fails, is replaced or is
+  removed is still released, and its position is released with it (`BR-042`).
+- **The stated length keeps one source.** The **total** is what the surface already stated: the API's reading
+  of the container for evidence the backend holds (`A3`), and the length this device measured for a take it
+  still holds. The **fill and the seek** are measured in the **player's own** length — the timebase the
+  device seeks in — so a recording never states its length two ways (`BR-041`), and a recording whose length
+  the player cannot state cannot be moved at all (`BR-042`).
+- **Nothing here is a business change.** A position is a device fact: no route, table, payload or Activity
+  kind changes, and nothing about playback enters the outbox, because playing a recording is not a mutation
+  (`BR-001`, `BR-031`, offline standard §13).
+- **A recording the player does not hold cannot be moved**, and its track is drawn quietly rather than as a
+  control that would work if it were touched (`BR-042`). A recording still plays as it did: accepted evidence
+  is read through the API on its first play (`A9`, `BR-013`).
+- **A seek commits as the thumb moves**, including through the action a screen reader uses to move a slider.
+  Committing only when a finger leaves would leave that action previewing a position the recording was never
+  asked to go to (`BR-042`).
+- **A defect corrected while landing this.** The completion and error listeners were registered inside
+  `MediaPlayer.apply { … }`, where an unqualified `release()` resolves to `MediaPlayer.release()`: the sound
+  stopped, but the feature kept reporting a recording that had already ended, so its control stayed on
+  *Pause* and its position kept its last value (`BR-042`). The listeners now release the feature's own
+  player explicitly. This was unreachable in the JVM tests — it needs a device — and is part of Phase 9d's
+  device QA.
 
 ### A10 — Offline: the recording upload uses the existing engine, the removal does not
 
@@ -201,7 +247,7 @@ condition for staying out of the outbox (§5, §8, §13.2).
 | Database | `job_audio_notes` (+ `job_audio_note_removals`), and the two capability rows with their default-role grants |
 | API | `POST /jobs/:id/audio-notes`, `GET /jobs/:id/audio-notes/:audioNoteId/content`, `POST /jobs/:id/audio-notes/:audioNoteId/removal`; `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED` in the Activity read |
 | Contracts | `docs/api/job-audio.md` (new), `docs/api/job-activity.md` §3.2 |
-| Android | the recorder, the draft, the queued upload, the sheet's audio kind becoming reachable, playback (`docs/tracker/035-android-audio-evidence.md`) |
+| Android | the recorder, the draft, the queued upload, the sheet's audio kind becoming reachable, playback (`docs/tracker/035-android-audio-evidence.md`); since `A11` a seekable playhead, seeking and the position stated |
 | Business rules | none amended by this ADR: `BR-091` already states audio is evidence. `BR-008`/`BR-009`'s default-role grants are product ownership's text edit, as `BR-040` requires, and remain outstanding exactly as the photo capability's edit did |
 | Design system | `docs/design/android-design-system.md` (the Add update sheet's audio kind) |
 

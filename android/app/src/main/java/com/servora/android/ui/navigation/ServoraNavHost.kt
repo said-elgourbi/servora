@@ -293,6 +293,11 @@ fun ServoraNavHost(
             // and holds nothing of its own (`BR-001`).
             LaunchedEffect(jobId) { jobDetailsViewModel.start(jobId) }
             val state by jobDetailsViewModel.uiState.collectAsState()
+            // The player's moving answer is collected **without** being read here: it is passed down as a
+            // state, so this destination, the screen and the timeline are not recomposed ten times a second
+            // while a recording plays — only the playhead and the elapsed seconds that read it are
+            // (`ADR-018` A11, `BR-012`).
+            val audioProgress = jobDetailsViewModel.audioPlaybackProgress.collectAsState()
             val context = LocalContext.current
             // Capturing evidence opens the device's camera into a file this app owns, so no storage
             // access and no camera permission are needed (`BR-015`, offline standard §9).
@@ -356,16 +361,25 @@ fun ServoraNavHost(
                 // Recording an audio note is its own capability, so the *Add audio* kind is offered only
                 // to a session the API would accept a recording from (`BR-006`, `BR-007`).
                 canAddAudio = permissions.canAddEvidenceAudio,
+                // Removing an accepted recording is the audio kind's own Manager-level capability, never
+                // inferred from the photo one (`BR-089`, `ADR-018` A7).
+                canRemoveAudioEvidence = permissions.canRemoveAudioEvidence,
                 onSelectAudioPhase = jobDetailsViewModel::selectAudioPhase,
                 onStartAudioRecording = jobDetailsViewModel::startAudioRecording,
                 onStopAudioRecording = jobDetailsViewModel::stopAudioRecording,
                 onCancelAudioRecording = jobDetailsViewModel::cancelAudioRecording,
+                onToggleAudioPlayback = jobDetailsViewModel::toggleAudioPlayback,
+                // Moving through a recording is the player's own operation, not a write to the Job
+                // (`BR-001`, `ADR-018` A11).
+                onSeekAudioPlayback = jobDetailsViewModel::seekAudioPlayback,
                 onAttachAudioNote = jobDetailsViewModel::attachAudioNote,
                 onRemovePendingAudioNote = jobDetailsViewModel::removePendingAudioNote,
+                onRemoveEvidenceAudioNote = jobDetailsViewModel::removeEvidenceAudioNote,
                 onMicrophoneDenied = jobDetailsViewModel::microphoneDenied,
                 onDismissAudioMessage = jobDetailsViewModel::dismissAudioMessage,
                 onDismissPhotoMessage = jobDetailsViewModel::dismissPhotoMessage,
                 photoImages = jobDetailsViewModel.photoImages,
+                audioProgress = audioProgress,
             )
         }
 

@@ -2,14 +2,20 @@ import {
   ACTIVE_VISIT_STATUSES,
   JOB_STATUS_TRANSITIONS,
   TERMINAL_VISIT_STATUSES,
+  VISIT_OUTCOME_CODES,
+  VISIT_STATUS_TRANSITIONS,
   applicableJobStatusTransitions,
+  applicableVisitStatusTransitions,
   isPermittedJobStatusTransition,
+  isPermittedVisitStatusTransition,
   isReschedulableVisitStatus,
   isTerminalVisitStatus,
+  isVisitStatusCorrection,
 } from './job.types.js';
 
 /**
- * The Job and Visit lifecycle vocabulary (`BR-058`, `BR-062`, `BR-073`).
+ * The Job and Visit lifecycle vocabulary (`BR-058`, `BR-062`, `BR-073`, `BR-074`, `BR-075`,
+ * `BR-078`).
  *
  * These tables are the validation contract the API enforces and the list a client draws its actions
  * from, so they are asserted directly rather than only through a route.
@@ -168,5 +174,100 @@ describe('job lifecycle vocabulary', () => {
     ] as const) {
       expect(isReschedulableVisitStatus(status)).toBe(false);
     }
+  });
+});
+
+describe('visit lifecycle vocabulary', () => {
+  it('permits exactly the normal lifecycle plus the one correction BR-075 defines', () => {
+    expect(VISIT_STATUS_TRANSITIONS).toEqual({
+      DRAFT: ['SCHEDULED'],
+      SCHEDULED: ['EN_ROUTE'],
+      EN_ROUTE: ['ON_SITE', 'SCHEDULED'],
+      ON_SITE: ['IN_PROGRESS'],
+      IN_PROGRESS: ['COMPLETED'],
+      COMPLETED: [],
+      CANCELED: [],
+      NO_SHOW: [],
+    });
+  });
+
+  it('walks the normal lifecycle one step at a time', () => {
+    expect(isPermittedVisitStatusTransition('DRAFT', 'SCHEDULED')).toBe(true);
+    expect(isPermittedVisitStatusTransition('SCHEDULED', 'EN_ROUTE')).toBe(true);
+    expect(isPermittedVisitStatusTransition('EN_ROUTE', 'ON_SITE')).toBe(true);
+    expect(isPermittedVisitStatusTransition('ON_SITE', 'IN_PROGRESS')).toBe(true);
+    expect(isPermittedVisitStatusTransition('IN_PROGRESS', 'COMPLETED')).toBe(
+      true,
+    );
+  });
+
+  it('records EN_ROUTE to SCHEDULED as a correction and nothing else as one', () => {
+    // `BR-075`: at minimum a technician who left without arriving may be corrected back to `SCHEDULED`.
+    expect(isVisitStatusCorrection('EN_ROUTE', 'SCHEDULED')).toBe(true);
+    for (const [from, to] of [
+      ['DRAFT', 'SCHEDULED'],
+      ['SCHEDULED', 'EN_ROUTE'],
+      ['EN_ROUTE', 'ON_SITE'],
+      ['ON_SITE', 'IN_PROGRESS'],
+      ['IN_PROGRESS', 'COMPLETED'],
+    ] as const) {
+      expect(isVisitStatusCorrection(from, to)).toBe(false);
+    }
+  });
+
+  it('refuses skipping a step, standing still and every backwards move but the correction', () => {
+    // `BR-074` has no `DRAFT` → `IN_PROGRESS`, no `SCHEDULED` → `ON_SITE`, and a Visit never returns to
+    // an active status once it is historical.
+    expect(isPermittedVisitStatusTransition('DRAFT', 'IN_PROGRESS')).toBe(false);
+    expect(isPermittedVisitStatusTransition('SCHEDULED', 'ON_SITE')).toBe(false);
+    expect(isPermittedVisitStatusTransition('ON_SITE', 'SCHEDULED')).toBe(false);
+    expect(isPermittedVisitStatusTransition('IN_PROGRESS', 'EN_ROUTE')).toBe(
+      false,
+    );
+    for (const status of [
+      'DRAFT',
+      'SCHEDULED',
+      'EN_ROUTE',
+      'ON_SITE',
+      'IN_PROGRESS',
+      'COMPLETED',
+      'CANCELED',
+      'NO_SHOW',
+    ] as const) {
+      expect(isPermittedVisitStatusTransition(status, status)).toBe(false);
+    }
+    for (const status of ['COMPLETED', 'CANCELED', 'NO_SHOW'] as const) {
+      expect(VISIT_STATUS_TRANSITIONS[status]).toEqual([]);
+    }
+  });
+
+  it('offers no route to CANCELED or NO_SHOW, which are dispatch actions', () => {
+    // `BR-066` makes cancelling a Visit and marking `NO_SHOW` dispatch actions and no capability
+    // authorizes one today, so neither is a destination of the field lifecycle (`BR-042`, `ADR-019` D7).
+    for (const status of [
+      'DRAFT',
+      'SCHEDULED',
+      'EN_ROUTE',
+      'ON_SITE',
+      'IN_PROGRESS',
+      'COMPLETED',
+      'CANCELED',
+      'NO_SHOW',
+    ] as const) {
+      expect(applicableVisitStatusTransitions(status)).not.toContain('CANCELED');
+      expect(applicableVisitStatusTransitions(status)).not.toContain('NO_SHOW');
+    }
+  });
+
+  it('exposes exactly the five outcome codes BR-078 defines', () => {
+    // The follow-up expectation is derived from the code rather than stored beside it (`BR-078`), so the
+    // vocabulary is closed and a code Servora does not have is refused at the API boundary (`BR-041`).
+    expect([...VISIT_OUTCOME_CODES]).toEqual([
+      'RESOLVED',
+      'NEEDS_PARTS',
+      'NEEDS_FOLLOWUP',
+      'NEEDS_QUOTE_APPROVAL',
+      'UNABLE_TO_COMPLETE',
+    ]);
   });
 });

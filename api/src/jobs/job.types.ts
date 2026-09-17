@@ -47,6 +47,20 @@ export const ACTIVE_VISIT_STATUSES = [
   'IN_PROGRESS',
 ] as const;
 
+/**
+ * The Visit statuses that are historical: the field attempt is over (`BR-062`, `BR-074`).
+ *
+ * `BR-062` states the classification the Job lifecycle depends on — a Visit is **open** while it is
+ * anything other than these three — and it is exactly the statuses `VISIT_STATUS_TRANSITIONS` leaves
+ * with no destination. Naming it once keeps a read from writing its own `NOT IN (...)` list that
+ * could drift from the lifecycle (`BR-041`).
+ */
+export const HISTORICAL_VISIT_STATUSES = [
+  'COMPLETED',
+  'CANCELED',
+  'NO_SHOW',
+] as const;
+
 /** The assignment role codes a technician can hold on a Visit (`BR-068`). */
 export const ASSIGNMENT_ROLE_CODES = ['LEAD', 'TECHNICIAN'] as const;
 export type AssignmentRoleCode = (typeof ASSIGNMENT_ROLE_CODES)[number];
@@ -130,6 +144,89 @@ export const TERMINAL_VISIT_STATUSES = [
 /** Whether a Visit in [status] is historical, i.e. no longer open work (`BR-074`, `BR-083`). */
 export function isTerminalVisitStatus(status: VisitStatus): boolean {
   return (TERMINAL_VISIT_STATUSES as readonly VisitStatus[]).includes(status);
+}
+
+/**
+ * The Visit outcome vocabulary the API exchanges (`BR-078`).
+ *
+ * An outcome records what resulted from the field attempt; a Visit status records whether the attempt
+ * is over (`BR-074`). The two are separate concepts and are never merged, so the codes are declared
+ * once here and validated at the API boundary rather than only by the database's own check
+ * constraints (`BR-041`). A code Servora does not have is refused, never stored.
+ *
+ * The follow-up expectation is derived from the code (`BR-078`): only `RESOLVED` expects none.
+ */
+export const VISIT_OUTCOME_CODES = [
+  'RESOLVED',
+  'NEEDS_PARTS',
+  'NEEDS_FOLLOWUP',
+  'NEEDS_QUOTE_APPROVAL',
+  'UNABLE_TO_COMPLETE',
+] as const;
+
+export type VisitOutcomeCode = (typeof VISIT_OUTCOME_CODES)[number];
+
+/**
+ * The Visit lifecycle's **structurally** permitted transitions (`BR-074`, `BR-075`).
+ *
+ * This is the authoritative structural validation contract for a Visit: the normal lifecycle's forward
+ * moves, plus the one correction `BR-075` defines. A destination the table does not list is not a
+ * business transition, and the field route refuses it with `VISIT_STATUS_TRANSITION_NOT_ALLOWED`
+ * (`docs/api/job-actions.md`, `ADR-019` D3/D5).
+ *
+ * `CANCELED` and `NO_SHOW` are deliberately absent. `BR-074` lists them as terminal alternatives, but
+ * `BR-066` makes them **dispatch** actions: no capability authorizes an office or field caller to take
+ * them today and `BR-076`'s cancellation-reason catalogue is an `OPEN QUESTION`, so accepting one
+ * would mean inventing both the authority and the vocabulary (`BR-042`, `ADR-019` D7).
+ *
+ * The table answers *which destinations exist* for a Visit; it does not answer *whether a destination
+ * may be entered right now*. That is a runtime eligibility question owned by its own rule — `BR-072`
+ * for a Visit becoming `SCHEDULED` — and the API answers it with that rule's own error rather than by
+ * removing a structurally valid destination (`BR-058`, `BR-061` follow the same split for Jobs).
+ */
+export const VISIT_STATUS_TRANSITIONS: Readonly<
+  Record<VisitStatus, readonly VisitStatus[]>
+> = {
+  DRAFT: ['SCHEDULED'],
+  SCHEDULED: ['EN_ROUTE'],
+  // `SCHEDULED` here is `BR-075`'s correction, not a lifecycle step: a technician may leave without
+  // arriving, and the correction returns the Visit to the status it was scheduled in.
+  EN_ROUTE: ['ON_SITE', 'SCHEDULED'],
+  ON_SITE: ['IN_PROGRESS'],
+  IN_PROGRESS: ['COMPLETED'],
+  // Terminal (`BR-074`): a completed, canceled or no-show Visit never returns to an active status.
+  COMPLETED: [],
+  CANCELED: [],
+  NO_SHOW: [],
+};
+
+/** Whether `BR-074`/`BR-075` permit a Visit to move from [from] to [to]. */
+export function isPermittedVisitStatusTransition(
+  from: VisitStatus,
+  to: VisitStatus,
+): boolean {
+  return VISIT_STATUS_TRANSITIONS[from].includes(to);
+}
+
+/**
+ * Whether the transition is `BR-075`'s correction rather than the normal lifecycle.
+ *
+ * `EN_ROUTE → SCHEDULED` is the one correction product ownership confirms: a technician may leave for
+ * a Property without arriving. It is recorded as a status event that says so (`is_correction`), never
+ * as a rewrite of the status it corrects (`BR-067`, `BR-075`).
+ */
+export function isVisitStatusCorrection(
+  from: VisitStatus,
+  to: VisitStatus,
+): boolean {
+  return from === 'EN_ROUTE' && to === 'SCHEDULED';
+}
+
+/** The destinations a client may select for a Visit in [status]. */
+export function applicableVisitStatusTransitions(
+  status: VisitStatus,
+): readonly VisitStatus[] {
+  return VISIT_STATUS_TRANSITIONS[status];
 }
 
 /**

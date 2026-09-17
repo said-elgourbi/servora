@@ -19,28 +19,34 @@ is presented as `Authorization: Bearer <accessToken>`. Route paths carry no vers
 (`docs/versioning.md` §7).
 
 The read is a **projection** of the histories the domain keeps, so a client that presents it reads it
-again after a successful action rather than patching its own copy (`BR-001`, `BR-080`). An action
-answers with the Job (`docs/api/job-actions.md` §1), not with the timeline, so a client that shows both
-asks for the timeline once the action has been applied — a status change, a reschedule and a crew
-change all record history this read projects (`BR-058`, `BR-069`, `BR-073`). Adding a text update is the
-exception: that write answers with the refreshed timeline itself.
+again after a successful action rather than patching its own copy (`BR-001`, `BR-080`). Most actions
+answer with the Job (`docs/api/job-actions.md` §1), not with the timeline, so a client that shows both
+asks for the timeline once the action has been applied — a Job status change, a reschedule, a crew
+change and a Visit's field status or outcome all record history this read projects (`BR-058`, `BR-069`,
+`BR-073`, `BR-074`, `BR-077`). The two writes that answer with the refreshed timeline itself are the
+exceptions: adding a text update and removing evidence.
 
 ## 2. Permissions
 
 | Route                    | Permission       |
 | ------------------------ | ---------------- |
-| `GET /jobs/:id/activity` | `customers.view` |
-| `GET /jobs/:id/activity?includeRemovedEvidence=true` | `customers.view` **and** an evidence removal capability — `evidence.photo.remove` or `evidence.audio.remove` |
+| `GET /jobs/:id/activity` | `customers.view` **or** `VISIT_VIEW_ASSIGNED` |
+| `GET /jobs/:id/activity?includeRemovedEvidence=true` | `customers.view` or `VISIT_VIEW_ASSIGNED`, **and** an evidence removal capability — `evidence.photo.remove` or `evidence.audio.remove` |
 
-The activity is a projection of the same records `GET /jobs/:id` returns, so it is guarded by the same
-capability. The catalogue has no `jobs.*` capability, and introducing one would invent a permission the
-Jobs feature has not defined (`BR-006`, `BR-042`); the same open question recorded for the Job read
+The activity is a projection of the same records `GET /jobs/:id` returns, so it is reached through the
+same guard: the office caller through `customers.view`, the field caller through `VISIT_VIEW_ASSIGNED`,
+the capability `BR-009` gives the technician who does the work (`ADR-019` D1). It carries the same
+**assignment scope** (`ADR-019` D2): a field caller reads the activity of a Job that at least one of
+their own current assignments reaches, and a Job it does not reach is `404`, never `403`. The catalogue
+has no `jobs.*` capability, and introducing one would invent a permission the Jobs feature has not
+defined (`BR-006`, `BR-042`); the same open question recorded for the Job read
 (`docs/api/job-details.md` §2) covers this read.
 
 The audit/history context (§3.5) is the one exception: it shows evidence a Manager has taken out of
 ordinary use (`BR-089`), so it takes an evidence **removal** capability as well. Either kind's is enough,
 because the flag asks one question about one read rather than one question per kind (`ADR-018` A7). The
-route's own capability is still required, because the read is still the Job's activity.
+route's own capability is still required, because the read is still the Job's activity. A field caller
+therefore cannot ask for it: the default Technician role holds neither removal capability (`BR-089`).
 
 ## 3. `GET /jobs/:id/activity`
 
@@ -176,19 +182,21 @@ optional query value:
 | ------ | ----------------- | ---------------------------------------------------------- |
 | `400`  | `VALIDATION_FAILED` | `includeRemovedEvidence` is neither `true` nor `false`.   |
 | `401`  | `UNAUTHENTICATED` | No usable session.                                         |
-| `403`  | `FORBIDDEN`       | The caller does not hold `customers.view`, or asked for the audit/history context (§3.5) without an evidence removal capability. |
-| `404`  | `JOB_NOT_FOUND`   | The Job does not exist in the caller's organization, or its Customer has been deleted. |
+| `403`  | `FORBIDDEN`       | The caller holds neither `customers.view` nor `VISIT_VIEW_ASSIGNED`, or asked for the audit/history context (§3.5) without an evidence removal capability. |
+| `404`  | `JOB_NOT_FOUND`   | The Job does not exist in the caller's organization, its Customer has been deleted, or the caller is a field caller whose own assignments do not reach it. |
 | `5xx`  | —                 | Server failure; the client reports it and offers a retry.  |
 
-A Job another organization owns is `404`, never `403` (`BR-001`).
+A Job another organization owns is `404`, never `403` (`BR-001`), and a Job a field caller is not
+assigned to is `404` for the same reason (`ADR-019` D2).
 
 ## 5. Open questions
 
 Recorded rather than guessed (`BR-042`); `docs/tracker/022-android-job-activity-timeline.md` carries
 the same list with what each one blocks.
 
-1. **The `jobs.*` capability set** (`BR-006`, `BR-008`): this read reuses `customers.view` until the
-   Jobs feature defines its own capabilities, exactly as `GET /jobs/:id` does.
+1. **The `jobs.*` capability set** (`BR-006`, `BR-008`): this read is reached through `customers.view`
+   or `VISIT_VIEW_ASSIGNED` (`ADR-019` D1) until the Jobs feature defines its own capabilities, exactly
+   as `GET /jobs/:id` is.
 2. **Evidence events** (`BR-027`, `BR-091`): photos and audio notes now have authoritative tables and the
    four kinds above (`docs/api/job-photos.md`, `docs/api/job-audio.md`); generic **files** still have none,
    and no kind is invented for them (`BR-042`, `ADR-018` A8).

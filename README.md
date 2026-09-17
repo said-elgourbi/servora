@@ -89,7 +89,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > refused photo is explicitly discardable) and Phase 6b (removing accepted evidence) are implemented
 > (2026-09-16); the phase to run is Phase 6c (evidence metadata: GPS/EXIF stripping and the phase as draft
 > state), and Phase 8 is startable behind it.** **Phase 9 (audio evidence) now has its own tracker**: the
-> model, the vocabulary and the capability are decided in `docs/decisions/018-audio-evidence.md` (A1–A10)
+> model, the vocabulary and the capability are decided in `docs/decisions/018-audio-evidence.md` (A1–A11)
 > and its **API half landed on 2026-09-16** — `job_audio_notes` + `job_audio_note_removals`,
 > `evidence.audio.add`/`evidence.audio.remove`, the three `/jobs/:id/audio-notes` routes and the
 > `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED` Activity kinds, contracted in `docs/api/job-audio.md`
@@ -97,8 +97,18 @@ Initial supported languages are **English** and **French**. Development rules li
 > microphone as a runtime permission, the audio kind's own controls in the Add update sheet (record, stop,
 > review, delete/re-record, attach), a durable Room draft for a take the API has not accepted, the queued
 > offline upload (`job.audio.add`, beside the photo handler) and the notice that reports an unaccepted take
-> — so the *Add audio* kind is now offered on `evidence.audio.add`. Playback and the Activity surface for a
-> recording are that tracker's Phase 9c, and device QA its Phase 9d.
+> — so the *Add audio* kind is now offered on `evidence.audio.add`. **Phase 9c landed on 2026-09-17 —
+> playback and the Activity surface**: `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED` are drawn in the timeline
+> with the recording's phase, the length the API read from its container and a play/pause control, **one
+> player** serves that entry and the sheet's review (`ADR-018` A9) — so a recording the technician
+> recorded is played back where it was recorded — an accepted recording's bytes are read through the API
+> once into a session-scoped, evictable cache, and a session holding `evidence.audio.remove` may take a
+> recording out of ordinary use behind the same confirmed, reason-carrying dialog the photo removal uses
+> (`evidence.audio.remove` added to the Android capability set). **Phase 9e landed on 2026-09-17 — a
+> seekable playhead**: a recording states where it is and how long it is (`0:04 / 0:18`) and can be moved
+> through with a seek track — the fill and the playhead, **no amplitude**, no waveform (`ADR-018` A11) — and
+> a second tap pauses a recording where it got to rather than letting its position go. Device QA of the audio
+> evidence is that tracker's Phase 9d.
 
 ## Layout
 
@@ -288,7 +298,28 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
 - Development-environment hygiene — the Gradle/Kotlin build daemons Android verification leaves
   behind, and the `make android-stop` / `make tidy` targets that release them:
   `docs/tracker/030-development-environment-hygiene.md`.
+- Verification scope — how much verification an ordinary task runs (the affected application's
+  compile/build and the tests that cover the change) versus what it leaves to the end of the feature
+  (full lint, full suites, full builds), and why:
+  `docs/tracker/036-verification-scope-tiering.md`.
 - The manager's Job status workflow — any permitted destination in one operation and one record, the
   completion invariant, and the confirmation before closing or reopening:
   `docs/tracker/034-manager-job-status-workflow.md`.
+- The technician's field experience — **`ADR-019` accepted (Phase 1), the field read landed (Phase 2a),
+  `GET /home/technician` with the Android technician home landed (Phases 2b and 4) and the Visit field
+  lifecycle landed (Phase 3)**: `GET /jobs/:id` and `/jobs/:id/activity` accept `customers.view` **or**
+  `VISIT_VIEW_ASSIGNED` through a new any-of authorization primitive, with a field caller reading only
+  the Jobs their own current assignments reach; `PATCH /jobs/:id/visits/:visitId/status` applies
+  `BR-074`'s transitions and `BR-075`'s one correction, records every applied change once in
+  append-only history, writes the outcome `BR-077` requires with the completion, and applies the
+  Visit → Job consequence `ADR-019` D4 decides — all guarded by the field capabilities `BR-009` names,
+  scoped to the caller's own current assignment, and replayed exactly once through a client-generated
+  operation id; and the technician's Home is now their own day — the Visit to do next, today in time
+  order, a capped preview of what comes after and the overdue work on their own Visits, readable
+  offline through the working set. **D6 was answered by product ownership on 2026-09-17** (its own
+  screen answering 'what do I need to do next?', not the manager home filtered to one technician).
+  Next: the field action on the Android Job Details screen and on the Home (Phase 5):
+  `docs/tracker/037-technician-field-experience.md`
+  (decision: `docs/decisions/019-technician-field-experience.md`; contracts: `docs/api/job-actions.md`
+  §7, `docs/api/technician-home.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.

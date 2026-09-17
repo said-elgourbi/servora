@@ -107,6 +107,30 @@ class CustomerPermissionsUiStateTest {
     }
 
     @Test
+    fun `maps the audio removal capability on its own`() {
+        // Removing an accepted recording is the audio kind's own Manager-level capability (`BR-089`,
+        // `ADR-018` A7): the photo removal does not grant it, and it does not grant the photo's.
+        val state = customerPermissionsUiState(
+            setOf("evidence.audio.remove", "evidence.audio.add").asPermissionChecker(),
+        )
+
+        assertTrue(state.canRemoveAudioEvidence)
+        assertFalse(state.canRemoveEvidence)
+        assertTrue(state.canAddEvidenceAudio)
+    }
+
+    @Test
+    fun `does not infer the audio removal from the photo removal`() {
+        val state = customerPermissionsUiState(
+            setOf("evidence.photo.remove").asPermissionChecker(),
+        )
+
+        // The two kinds are withdrawn separately, so one kind's removal never stands for the other's.
+        assertTrue(state.canRemoveEvidence)
+        assertFalse(state.canRemoveAudioEvidence)
+    }
+
+    @Test
     fun `does not infer capabilities from missing permissions`() {
         val state = customerPermissionsUiState(emptySet<String>().asPermissionChecker())
 

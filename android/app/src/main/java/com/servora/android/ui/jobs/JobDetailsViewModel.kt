@@ -6,6 +6,10 @@ import com.servora.android.data.jobs.AssignableTechniciansResult
 import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
+import com.servora.android.data.jobs.JobAudioEvidenceCache
+import com.servora.android.data.jobs.JobAudioEvidenceRead
+import com.servora.android.data.jobs.JobAudioPlayer
+import com.servora.android.data.jobs.JobAudioPlaybackProgress
 import com.servora.android.data.jobs.JobAudioRecordResult
 import com.servora.android.data.jobs.JobAudioRefusal
 import com.servora.android.data.jobs.JobAudioSession
@@ -23,6 +27,7 @@ import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CapturedJobPhoto
 import com.servora.android.domain.model.EvidencePhase
+import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PendingJobAudioNote
 import com.servora.android.domain.model.PendingJobPhoto
@@ -33,6 +38,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Clock
 import java.time.Instant
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -69,8 +75,11 @@ import kotlinx.coroutines.launch
  * the upload is queued through the outbox when the technician attaches it — so a recording made in a
  * basement uploads when the connection comes back (`BR-014`, §9). One recording is held at a time: the
  * sheet adds one update at a time, so a re-record is a delete and a new take (`JobAudioSession`).
- * Playback of a recording is not this phase's work, and neither is any timeline entry for one: the
- * API's `JOB_AUDIO_*` events are read by the Activity section when tracker 035's Phase 9c lands.
+ *
+ * **Playback of an audio note** is this screen's too (`ADR-018` A9, A11): one player serves the timeline
+ * and the sheet's review, which one recording is playing and whether it is moving is the device's own
+ * answer, and where it has got to is read apart from the screen's state so a moving playhead does not
+ * recompose the screen.
  *
  * The two **reads** follow the offline standard (`offline-first-architecture.md` §12, §13): the Job and
  * its activity are kept as the last answer the backend reported and re-read from there when the API
@@ -88,6 +97,8 @@ class JobDetailsViewModel @Inject constructor(
     private val jobPhotoImages: JobPhotoImages,
     private val pickedItems: JobPhotoPickedItems,
     private val exporter: JobPhotoExporter,
+    private val audioEvidence: JobAudioEvidenceCache,
+    private val audioPlayer: JobAudioPlayer,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -113,6 +124,37 @@ class JobDetailsViewModel @Inject constructor(
 
     /** Whether the microphone is being started or a recording is being stopped right now. */
     private var audioInFlight = false
+
+    /** Whether an accepted recording's bytes are being read before it can play (`ADR-018` A9). */
+    private var playbackInFlight = false
+
+    /**
+     * Where the recording the device's player holds has got to (`ADR-018` A11).
+     *
+     * It is deliberately **not** part of [uiState]: it changes ten times a second while a recording
+     * plays, and [uiState] is what Job Details, the timeline and every entry around the recording are
+     * composed from. The playhead and the elapsed seconds read this answer instead, so a moving position
+     * costs a moving playhead rather than a recomposed screen (`BR-012`).
+     */
+    private val _audioPlaybackProgress = MutableStateFlow<JobAudioPlaybackProgress?>(null)
+    val audioPlaybackProgress: StateFlow<JobAudioPlaybackProgress?> =
+        _audioPlaybackProgress.asStateFlow()
+
+    init {
+        // The device player's own answer is the playback state (`ADR-018` A9): the screen draws which
+        // recording the player holds, and whether it is moving, from it rather than from a local guess, so
+        // a recording that ends, fails or is replaced returns its own control to its idle state
+        // (`BR-042`).
+        viewModelScope.launch {
+            audioPlayer.playback.collect { playback ->
+                _uiState.update { current -> current.copy(audioPlayback = playback) }
+            }
+        }
+        // Where it has got to is collected apart from the screen's state, for the same reason (`A11`).
+        viewModelScope.launch {
+            audioPlayer.progress.collect { progress -> _audioPlaybackProgress.value = progress }
+        }
+    }
 
     /** Follows the Job's pending recordings for as long as this Job is on screen (`§9`). */
     private var audioCollection: Job? = null
@@ -212,6 +254,9 @@ class JobDetailsViewModel @Inject constructor(
         audioCollection?.cancel()
         audioCollection = null
         audioDiscardedLocally.clear()
+        // Playback is device state rather than Job state: a recording stops with the session it was
+        // started in rather than playing on over the next screen (`ADR-018` A9, §10).
+        audioPlayer.stop()
         // A pick belongs to the Job it was made for: nothing of it is carried to the next session.
         pickedPhotos.clear()
         skippedPhotos.clear()
@@ -1213,6 +1258,180 @@ class JobDetailsViewModel @Inject constructor(
     }
 
     /**
+     * Plays or stops one recording: a take this device still holds, or one of the Job's accepted
+     * recordings (`BR-080`, `BR-091`, `ADR-018` A9).
+     *
+     * It is **one** action over both surfaces — the Add update sheet's review and the timeline — because
+     * the feature owns **one** player: which bytes are played is decided here rather than by the caller.
+     * A take the technician has not attached plays from the file this device holds, so it needs nothing
+     * from the API (`BR-013`); accepted evidence is read through the API on its first play and kept in
+     * this session's own cache, so a recording the device has already played plays again offline and one
+     * it has never held reports that it needs the backend (`BR-013`, `BR-042`).
+     *
+     * A second tap on the recording the player holds **pauses** it and keeps where it had got to, and a
+     * third continues from there, which is what makes one control both the play and the pause (`A11`): the
+     * playhead states a position the technician can move, so pausing must not be the thing that throws it
+     * away.
+     */
+    fun toggleAudioPlayback(audioNoteId: String) {
+        val held = _uiState.value.audioPlayback
+        if (held?.audioNoteId == audioNoteId) {
+            if (held.isPlaying) audioPlayer.pause() else audioPlayer.resume()
+            return
+        }
+        // A recording this device still holds is the technician's own draft: its bytes are here, and the
+        // API has not accepted anything yet (`BR-014`, `BR-088`).
+        val draft = _uiState.value.pendingAudioNotes
+            .firstOrNull { note -> note.audioNoteId == audioNoteId }
+        if (draft != null) {
+            startAudioPlayback(audioNoteId, draft.localPath)
+            return
+        }
+        val jobId = _uiState.value.jobId
+        if (jobId.isEmpty() || playbackInFlight) {
+            return
+        }
+        playbackInFlight = true
+        _uiState.update { it.copy(audioPlaybackLoading = audioNoteId, audioFailure = null) }
+        viewModelScope.launch {
+            val read = readPlaybackBytes(jobId, audioNoteId)
+            playbackInFlight = false
+            _uiState.update { current ->
+                current.copy(
+                    audioPlaybackLoading = null,
+                    audioFailure = read.playbackFailureOrNull(),
+                )
+            }
+            val path = (read as? JobAudioEvidenceRead.Available)?.path ?: return@launch
+            startAudioPlayback(audioNoteId, path)
+        }
+    }
+
+    /**
+     * Moves the recording the device's player holds to [positionMillis] (`ADR-018` A11).
+     *
+     * Only the recording the player holds can be moved: a drag on a recording this screen has not loaded
+     * is not something the device can perform, and its track is drawn as one that cannot be used
+     * (`BR-042`). Nothing is remembered here — the player answers with the position it went to, which is
+     * what the playhead and the elapsed seconds draw.
+     */
+    fun seekAudioPlayback(audioNoteId: String, positionMillis: Int) {
+        if (_uiState.value.audioPlayback?.audioNoteId != audioNoteId) {
+            return
+        }
+        audioPlayer.seekTo(positionMillis)
+    }
+
+    /**
+     * Reads one accepted recording's bytes, reporting a failure this build cannot name as one the
+     * screen can (`BR-042`).
+     *
+     * Starting playback is a tap on a phone in the field, so a read that fails in a way this build did
+     * not foresee is reported as a recording that could not be read rather than taking the screen down
+     * with it (`BR-012`). Cancelling is not a failure: leaving the screen stops the read instead of
+     * reporting it (`dev.md` §1).
+     */
+    private suspend fun readPlaybackBytes(jobId: String, audioNoteId: String): JobAudioEvidenceRead =
+        try {
+            audioEvidence.read(jobId, audioNoteId)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (failure: Exception) {
+            JobAudioEvidenceRead.Unavailable
+        }
+
+    /**
+     * Starts one recording, replacing whatever the player held (`ADR-018` A9).
+     *
+     * One player serves both surfaces, so playing a recording replaces whatever was playing rather than
+     * mixing two voices, and a device that cannot play the recording reports that instead of leaving a
+     * control that looks as though it did something (`BR-042`).
+     */
+    private fun startAudioPlayback(audioNoteId: String, path: String) {
+        if (!audioPlayer.play(audioNoteId, path)) {
+            _uiState.update { it.copy(audioFailure = JobAudioFailure.PLAYBACK_FAILED) }
+        }
+    }
+
+    /**
+     * Takes accepted audio evidence out of ordinary use, recording why (`BR-088`, `BR-089`).
+     *
+     * It is the photo removal's own shape for the other kind (`ADR-018` A7): only evidence the backend
+     * holds can be removed, the manager states the reason the removal is recorded with, and the API
+     * authorizes it with `evidence.audio.remove` — so this layer never decides whether the removal is
+     * allowed (`BR-007`). It is **online-only**: the route takes no idempotency key and no conflict
+     * policy is decided for it, so the decision is never queued (`ADR-018` A10).
+     */
+    fun removeEvidenceAudioNote(audioNoteId: String, reason: String) {
+        // The reason is required, and the dialog asks for it before this is called: a removal records the
+        // actor, the instant and the reason, so a blank one is not sent (`BR-089`).
+        val text = reason.trim()
+        val jobId = _uiState.value.jobId
+        if (text.isEmpty() || jobId.isEmpty() || removalInFlight) {
+            return
+        }
+        // A recording the Activity does not report is not evidence this screen can remove: a take the
+        // technician has not attached is theirs to discard, and one already removed has nothing left to
+        // decide (`BR-042`, `BR-089`).
+        val recorded = _uiState.value.activity.orEmpty().any { event ->
+            event.kind == JobActivityKind.JOB_AUDIO_ADDED && event.audioNoteId == audioNoteId
+        }
+        if (!recorded) {
+            _uiState.update {
+                it.copy(
+                    audioFailure = JobAudioFailure.REMOVAL_NO_LONGER_AVAILABLE,
+                    audioMessage = null,
+                )
+            }
+            return
+        }
+        removalInFlight = true
+        _uiState.update {
+            it.copy(audioRemoval = audioNoteId, audioFailure = null, audioMessage = null)
+        }
+        viewModelScope.launch {
+            val result = repository.removeJobAudioNote(jobId, audioNoteId, text)
+            removalInFlight = false
+            // Evidence that leaves ordinary use does not keep playing (`BR-089`).
+            if (_uiState.value.audioPlayback?.audioNoteId == audioNoteId) {
+                audioPlayer.stop()
+            }
+            _uiState.update { current ->
+                when (result) {
+                    is ActivityWriteResult.Success ->
+                        current.copy(
+                            audioRemoval = null,
+                            // The write's own answer is the backend's, so the timeline — and with it the
+                            // evidence a Job holds — is current again (`§7`, `BR-080`).
+                            activity = result.events,
+                            activitySource = ReadSource.BACKEND,
+                            activityFailure = null,
+                            audioFailure = null,
+                            audioMessage = JobAudioMessage.EVIDENCE_REMOVED,
+                        )
+
+                    is ActivityWriteResult.Failure ->
+                        current.copy(
+                            audioRemoval = null,
+                            audioFailure = result.reason.toAudioRemovalFailure(),
+                        )
+                }
+            }
+        }
+    }
+
+    /**
+     * Releases the device's player when the screen is gone (`ADR-018` A9).
+     *
+     * A recording does not keep playing after the screen that started it has been left, exactly as the
+     * recording in progress is dropped rather than left with the microphone open (`JobAudioSession`).
+     */
+    override fun onCleared() {
+        audioPlayer.stop()
+        super.onCleared()
+    }
+
+    /**
      * Follows the Job's pending recordings for as long as this Job is on screen (`§9`, `BR-091`).
      *
      * The list is the device's own state, so it is observed rather than re-read: an upload the API
@@ -1382,6 +1601,54 @@ private fun JobAudioRefusal.toAudioFailure(): JobAudioFailure =
         JobAudioRefusal.NOT_STORED -> JobAudioFailure.RECORDING_NOT_SAVED
     }
 
+/**
+ * Why an accepted recording could not be played (`BR-013`, `BR-042`).
+ *
+ * `null` when the bytes are on the device and it is about to play: a recording the device already holds
+ * needs nothing from the backend, and one it does not hold says which of the two states it is in — the
+ * backend could not be reached, or it did not deliver the recording.
+ */
+private fun JobAudioEvidenceRead.playbackFailureOrNull(): JobAudioFailure? =
+    when (this) {
+        is JobAudioEvidenceRead.Available -> null
+        JobAudioEvidenceRead.Unreachable -> JobAudioFailure.PLAYBACK_UNREACHABLE
+        JobAudioEvidenceRead.Unavailable -> JobAudioFailure.PLAYBACK_UNAVAILABLE
+    }
+
+/**
+ * Why an audio removal the API refused is reported the way it is (`BR-042`, `BR-089`).
+ *
+ * The photo removal's own mapping for the other kind (`ADR-018` A7), and total for the same reason: a
+ * removal that failed in a way this build cannot name is reported as one that failed, never as one that
+ * succeeded.
+ */
+private fun JobActionFailure.toAudioRemovalFailure(): JobAudioFailure =
+    when (this) {
+        JobActionFailure.FORBIDDEN -> JobAudioFailure.REMOVAL_NOT_PERMITTED
+        JobActionFailure.AUDIO_NOTE_ALREADY_REMOVED,
+        JobActionFailure.NOT_FOUND,
+        JobActionFailure.VERSION_CONFLICT,
+        -> JobAudioFailure.REMOVAL_NO_LONGER_AVAILABLE
+
+        JobActionFailure.NETWORK -> JobAudioFailure.REMOVAL_UNREACHABLE
+        JobActionFailure.UNAUTHENTICATED -> JobAudioFailure.NOT_SIGNED_IN
+
+        // The photo kind's own conflict, the Job and Visit management codes and the rest cannot be
+        // returned by the audio removal route: reporting them as a failure keeps the mapping total
+        // without inventing a meaning for a code this operation cannot produce (`BR-042`).
+        JobActionFailure.PHOTO_ALREADY_REMOVED,
+        JobActionFailure.VALIDATION,
+        JobActionFailure.JOB_TRANSITION_NOT_ALLOWED,
+        JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET,
+        JobActionFailure.JOB_COMPLETION_BLOCKED,
+        JobActionFailure.JOB_CANCELLATION_UNAVAILABLE,
+        JobActionFailure.VISIT_NOT_RESCHEDULABLE,
+        JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE,
+        JobActionFailure.SERVER,
+        JobActionFailure.UNEXPECTED,
+        -> JobAudioFailure.REMOVAL_FAILED
+    }
+
 /** A millisecond count as whole seconds, for the length the review shows (`ADR-018` A3). */
 private const val MILLIS_PER_SECOND = 1_000L
 
@@ -1425,9 +1692,10 @@ private fun JobActionFailure.toRemovalFailure(): JobPhotoFailure =
         JobActionFailure.UNEXPECTED,
         -> JobPhotoFailure.REMOVAL_FAILED
 
-        // The rest belong to the Job and Visit management actions and cannot be returned by the removal
-        // route: reporting them as a failure keeps the mapping total without inventing a meaning for a
-        // code this operation cannot produce (`BR-042`).
+        // The audio kind's own conflict, the Job and Visit management codes and the rest cannot be
+        // returned by the photo removal route: reporting them as a failure keeps the mapping total
+        // without inventing a meaning for a code this operation cannot produce (`BR-042`).
+        JobActionFailure.AUDIO_NOTE_ALREADY_REMOVED,
         JobActionFailure.JOB_TRANSITION_NOT_ALLOWED,
         JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET,
         JobActionFailure.JOB_COMPLETION_BLOCKED,

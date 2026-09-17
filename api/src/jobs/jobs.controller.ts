@@ -23,8 +23,9 @@ import {
   CUSTOMER_PERMISSIONS,
   EVIDENCE_PERMISSIONS,
   JOB_PERMISSIONS,
+  VISIT_PERMISSIONS,
 } from '../auth/permissions.js';
-import { RequirePermissions } from '../auth/permissions.decorator.js';
+import { RequireAnyPermission, RequirePermissions } from '../auth/permissions.decorator.js';
 import { PermissionsGuard } from '../auth/permissions.guard.js';
 import type { PermissionedRequest } from '../auth/permissions.guard.js';
 import { ObjectStorageError } from '../storage/object-storage.js';
@@ -64,11 +65,17 @@ import {
   parseAssignVisitTechniciansDto,
   parseAddVisitNoteDto,
   parseChangeJobStatusDto,
+  parseChangeVisitStatusDto,
   parseRescheduleVisitDto,
 } from './job-action.dto.js';
-import type { ScheduleConflict } from './jobs.service.js';
+import type {
+  AssignedJobViewer,
+  AssignedVisitWriter,
+  ScheduleConflict,
+} from './jobs.service.js';
 import {
   JobCancellationUnavailableError,
+  JobClosedForFieldWorkError,
   JobCompletionBlockedError,
   JobNotFoundError,
   JobReviewConditionNotMetError,
@@ -79,18 +86,23 @@ import {
   TechnicianNotAssignableError,
   VisitNotReschedulableError,
   VisitNotFoundError,
+  VisitOperationReusedError,
+  VisitSchedulingConditionNotMetError,
+  VisitStatusTransitionNotAllowedError,
   VisitVersionConflictError,
 } from './jobs.service.js';
 
 /**
  * The Job read and the Job and Visit management actions (`BR-058` – `BR-079`).
  *
- * The **read** is guarded by `customers.view`, the capability the API already uses for the
- * organization's Job and Visit data: `GET /customers/:id/jobs` is guarded by it, so a caller who can
- * open a Job Details screen can already read the same records. The catalogue has **no** `jobs.*`
- * capability and adding one would invent a permission the Jobs feature has not defined (`BR-006`,
- * `BR-042`); the interim decision is recorded in `docs/api/job-details.md` §2 and
- * `docs/tracker/017-android-job-details.md`.
+ * The **read** is guarded by `customers.view` **or** `VISIT_VIEW_ASSIGNED`: the first is the capability
+ * the API already uses for the organization's Job and Visit data (`GET /customers/:id/jobs` is guarded
+ * by it, so a caller who can open a Job Details screen can already read the same records), and the
+ * second is the capability `BR-009` gives the technician who does the work. A field caller reads only
+ * the Jobs their own assignments reach, and a Job they are not assigned to is reported as not found;
+ * both halves of that decision are recorded in `docs/decisions/019-technician-field-experience.md`
+ * (D1, D2). The catalogue still has **no** `jobs.*` capability, so the guard stays interim until the
+ * Jobs feature defines its own (`BR-006`, `BR-042`; `docs/api/job-details.md` §2).
  *
  * The **actions** are guarded by the existing `JOB_UPDATE` capability, which `BR-008` already names
  * as a Manager default and which the seeded catalogue already grants to that role. Introducing
@@ -103,6 +115,12 @@ import {
  * defines for that purpose (`EVIDENCE_PERMISSIONS`) instead of by a Manager capability. The decision
  * and the per-kind catalogue are recorded in `docs/decisions/015-evidence-capabilities.md` and
  * `docs/api/job-photos.md` §2.
+ *
+ * The **field routes** (`PATCH /jobs/:id/visits/:visitId/status`, `POST /jobs/:id/visits/:visitId/notes`)
+ * are the technician's own lifecycle (`BR-074`, `BR-077`; `ADR-019` D3), so they are guarded by the
+ * capabilities `BR-009` gives that role rather than by the office's `JOB_UPDATE`. The note route accepts
+ * either, because the office has always recorded notes through it and widening a guard must not take a
+ * capability away (`BR-008`, `ADR-019` D2).
  *
  * Every action is an explicit, authorized business action whose outcome the service records in
  * append-only history (`BR-066`, `BR-067`). This controller orchestrates and maps failures onto the
@@ -117,8 +135,18 @@ export class JobsController {
     private readonly audioNotes: JobAudioNotesService,
   ) {}
 
+  /**
+   * One Job, for the office caller or for a field caller whose own crew includes the Job (`ADR-019`
+   * D1, D2).
+   *
+   * Both audiences share one projection and one guard. Which capability admitted the caller is what
+   * decides the scope applied to the read — never a role name (`BR-006`, `BR-007`).
+   */
   @Get(':id')
-  @RequirePermissions(CUSTOMER_PERMISSIONS.VIEW)
+  @RequireAnyPermission(
+    CUSTOMER_PERMISSIONS.VIEW,
+    VISIT_PERMISSIONS.VIEW_ASSIGNED,
+  )
   async findOne(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -127,6 +155,7 @@ export class JobsController {
     const details = await this.jobs.findJobDetailsInOrganization(
       { organizationId: authorization.organizationId },
       id,
+      assignedViewerOf(authorization),
     );
     if (details === null) {
       throw jobNotFound();
@@ -137,9 +166,10 @@ export class JobsController {
   /**
    * One Job's chronological activity, newest first (`BR-080`).
    *
-   * The same `customers.view` capability guards the Job read and its activity, because the activity is
-   * a projection of the same records (`BR-006`). The read stores nothing (`BR-001`) and its event
-   * vocabulary is the one defined in `job-activity.ts` (`BR-041`).
+   * The Job read's own guard covers its activity, because the activity is a projection of the same
+   * records (`BR-006`, `BR-080`): `customers.view` for the office caller, `VISIT_VIEW_ASSIGNED` for the
+   * field caller, with the same scope applied to both (`ADR-019` D1, D2). The read stores nothing
+   * (`BR-001`) and its event vocabulary is the one defined in `job-activity.ts` (`BR-041`).
    *
    * `includeRemovedEvidence=true` asks for the **audit/history context** rather than the ordinary one:
    * evidence a Manager has removed from ordinary use (`BR-089`) is included, of every kind, which is what
@@ -151,7 +181,10 @@ export class JobsController {
    * (`ADR-018` A7).
    */
   @Get(':id/activity')
-  @RequirePermissions(CUSTOMER_PERMISSIONS.VIEW)
+  @RequireAnyPermission(
+    CUSTOMER_PERMISSIONS.VIEW,
+    VISIT_PERMISSIONS.VIEW_ASSIGNED,
+  )
   async findActivity(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -170,6 +203,7 @@ export class JobsController {
       { organizationId: authorization.organizationId },
       id,
       options,
+      assignedViewerOf(authorization),
     );
     if (events === null) {
       throw jobNotFound();
@@ -263,10 +297,65 @@ export class JobsController {
     );
   }
 
-  /** Adds one text update to a Visit and returns the refreshed Job Activity timeline. */
+  /**
+   * Advances one Visit through its field lifecycle (`BR-074`, `BR-075`, `BR-077`; `ADR-019` D3, D4, D5).
+   *
+   * The route applies only the normal lifecycle's forward transitions and `BR-075`'s one correction;
+   * `CANCELED` and `NO_SHOW` are refused because `BR-066` makes them dispatch actions and no capability
+   * authorizes one today (`BR-042`, `BR-076`, `ADR-019` D7). A destination the lifecycle does not permit
+   * is answered with the destinations the Visit has, as the Job status route already does.
+   *
+   * `VISIT_UPDATE_ASSIGNED_STATUS` guards it — the capability `BR-009` gives the technician for their
+   * assigned work — and the caller's scope is their own current assignment: a Visit their crew does not
+   * include is reported as not found, never as forbidden (`ADR-019` D2, D3).
+   */
+  @Patch(':id/visits/:visitId/status')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS)
+  async changeVisitStatus(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('visitId') visitId: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseChangeVisitStatusDto(body));
+    // Completing a Visit records the outcome `BR-077` requires, which the catalogue keeps as its own
+    // capability (`BR-009`). A route declares either an all-of requirement or an any-of one and never
+    // both (`ADR-019` D1), so the second question is asked here, in its own place — exactly as the
+    // activity read asks the question its `includeRemovedEvidence` flag raises.
+    if (
+      input.status === 'COMPLETED' &&
+      !authorization.permissions.includes(VISIT_PERMISSIONS.RECORD_OUTCOME)
+    ) {
+      throw AuthApiError.forbidden();
+    }
+    return this.action(() =>
+      this.jobs.changeVisitStatus(
+        { organizationId: authorization.organizationId },
+        id,
+        visitId,
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
+  /**
+   * Adds one text update to a Visit and returns the refreshed Job Activity timeline (`BR-027`).
+   *
+   * Two capabilities reach it, and each keeps its own reach: `VISIT_ADD_NOTE` for the technician on the
+   * Visit's crew (`BR-009`, `ADR-019` D3), and the office's `JOB_UPDATE`, which is how a manager has
+   * always recorded a note about a Visit (`BR-008`, `docs/api/job-actions.md` §2). The scope follows the
+   * capability that admitted the caller, so widening the guard changes nothing for the office and gives
+   * the technician the action their own capability names.
+   *
+   * The write is idempotent on the device's own operation id when one is supplied (`BR-031`,
+   * `ADR-019` D5).
+   */
   @Post(':id/visits/:visitId/notes')
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermissions(JOB_PERMISSIONS.UPDATE)
+  @RequireAnyPermission(JOB_PERMISSIONS.UPDATE, VISIT_PERMISSIONS.ADD_NOTE)
   async addNote(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -282,6 +371,7 @@ export class JobsController {
         visitId,
         authorization.membershipId,
         input,
+        visitWriterOf(authorization),
       );
       return toJobActivityDto(id, events);
     } catch (error) {
@@ -566,6 +656,45 @@ function authorizationOf(request: PermissionedRequest) {
   return authorization;
 }
 
+/**
+ * The field caller's scope for the two Job reads, or `null` for the office caller (`ADR-019` D2).
+ *
+ * A caller holding the office read capability reads the organization's Jobs — exactly what the route
+ * answered before this slice. A caller admitted by `VISIT_VIEW_ASSIGNED` instead reads only the Jobs
+ * their own current assignments reach, and a Job it does not reach is reported as not found. The scope
+ * is enforced in the service against current assignment rows; it is decided here from the capability
+ * that admitted the caller, never from a role name (`BR-004`, `BR-006`, `BR-007`).
+ */
+function assignedViewerOf(
+  authorization: ReturnType<typeof authorizationOf>,
+): AssignedJobViewer | null {
+  return authorization.permissions.includes(CUSTOMER_PERMISSIONS.VIEW)
+    ? null
+    : { membershipId: authorization.membershipId };
+}
+
+/**
+ * The Visit-level write scope for the note route, or `null` for the office caller (`ADR-019` D2, D3).
+ *
+ * A caller holding the office's Job-update capability keeps exactly the reach it has always had on this
+ * route: recording a note about a Visit is office work `BR-008` names, so the assignment scope is not
+ * imposed on it — `ADR-019` D2 applies the scope only to a caller **without** the office capability, and
+ * the note route follows the same shape as the Job read. A caller admitted by `VISIT_ADD_NOTE` instead
+ * writes only a Visit their own current crew includes, and a Visit their assignments do not reach is
+ * reported as not found.
+ *
+ * Which capability admitted the caller decides the scope, never a role name (`BR-004`, `BR-006`,
+ * `BR-007`). Whether the office may perform a **field** action is `ADR-019` D7's open question and
+ * nothing here decides it.
+ */
+function visitWriterOf(
+  authorization: ReturnType<typeof authorizationOf>,
+): AssignedVisitWriter | null {
+  return authorization.permissions.includes(JOB_PERMISSIONS.UPDATE)
+    ? null
+    : { membershipId: authorization.membershipId };
+}
+
 /** Turns a domain validation failure into the API's validation envelope (`dev.md` §7). */
 function parseInput<T>(parser: () => T): T {
   try {
@@ -726,6 +855,25 @@ function mapActionError(error: unknown): unknown {
   if (error instanceof JobStatusTransitionNotAllowedError) {
     return transitionNotAllowed(error);
   }
+  if (error instanceof VisitStatusTransitionNotAllowedError) {
+    return visitTransitionNotAllowed(error);
+  }
+  if (error instanceof VisitSchedulingConditionNotMetError) {
+    return visitSchedulingConditionNotMet(error);
+  }
+  if (error instanceof JobClosedForFieldWorkError) {
+    return jobClosedForFieldWork();
+  }
+  if (error instanceof VisitOperationReusedError) {
+    return new HttpException(
+      {
+        statusCode: HttpStatus.CONFLICT,
+        code: 'VISIT_OPERATION_REUSED',
+        message: 'That operation id was already used for another visit.',
+      },
+      HttpStatus.CONFLICT,
+    );
+  }
   if (error instanceof JobCancellationUnavailableError) {
     return cancellationUnavailable();
   }
@@ -838,6 +986,76 @@ function visitNotReschedulable(
       code: 'VISIT_NOT_RESCHEDULABLE',
       message: `A visit in ${error.status} cannot be rescheduled.`,
       details: { status: error.status },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+/**
+ * `BR-074` (or `BR-075`) does not permit that Visit destination.
+ *
+ * The permitted destinations travel with the refusal, as the Job status route carries its own, so a
+ * client presents the Visit's real options rather than holding a second copy of the lifecycle
+ * (`BR-041`, `BR-022`).
+ */
+function visitTransitionNotAllowed(
+  error: VisitStatusTransitionNotAllowedError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'VISIT_STATUS_TRANSITION_NOT_ALLOWED',
+      message: `A visit in ${error.from} cannot move to ${error.to}.`,
+      details: {
+        from: error.from,
+        to: error.to,
+        allowed: [...error.allowed],
+      },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+/**
+ * `BR-072`'s conditions for a Visit becoming `SCHEDULED` are not met.
+ *
+ * It is its own code rather than a `VISIT_STATUS_TRANSITION_NOT_ALLOWED`: the destination is
+ * structurally permitted and what refuses it is the state of the Visit's own preparation, so a client
+ * can tell the two apart and say which one happened.
+ */
+function visitSchedulingConditionNotMet(
+  error: VisitSchedulingConditionNotMetError,
+): HttpException {
+  const message =
+    error.reason === 'PROPERTY'
+      ? 'The job has no property yet.'
+      : error.reason === 'SCHEDULE'
+        ? 'The visit has no valid schedule.'
+        : 'The visit needs one lead technician assigned.';
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'VISIT_SCHEDULING_CONDITION_NOT_MET',
+      message,
+      details: { reason: error.reason },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+/**
+ * The Visit's Job is closed, so its field record is final (`BR-062`, `BR-079`).
+ *
+ * `BR-062` prevents the state being reached through completion, so this is the API failing closed
+ * rather than writing field history under a closed Job; the state itself keeps its own open question
+ * (`BR-042`, `ADR-019` D4).
+ */
+function jobClosedForFieldWork(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'JOB_CLOSED_FOR_FIELD_WORK',
+      message: 'The job is closed; its field record is final.',
     },
     HttpStatus.CONFLICT,
   );

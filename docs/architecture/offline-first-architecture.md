@@ -305,18 +305,60 @@ These remain **OPEN QUESTION** and must not be invented:
    audio bytes (§9). A take the backend **permanently refused** is discardable by the technician on the same
    terms a refused photo is (`D6c`), and the notice that reports an unaccepted take is where that discard
    lives. Recorded in `docs/tracker/035-android-audio-evidence.md` (Phase 9b).
+7. **Playing an accepted recording** (`BR-091`, `ADR-018` A9, tracker 035 Phase 9c) — a read, not a
+   mutation, so it queues nothing. It is the audio kind's answer to the same question `D5` answered for
+   photos: the recording's **metadata** (which recordings the Job holds, each one's phase, length and note)
+   is readable offline through the activity adopter above, and its **bytes** are cached best-effort in a
+   session-scoped entry of the app's own cache directory, written from `GET /jobs/:id/audio-notes/:audioNoteId/content`
+   on the first play and read from there afterwards. It is a **cache**: the platform may reclaim it,
+   nothing is promised to survive, and losing it costs a re-download rather than evidence — a recording the
+   device has never held is simply not playable until the backend answers, which the screen says rather
+   than substituting anything (`BR-013`, `BR-042`). A take the technician has **not** attached is not read
+   here at all: its bytes are the app-private draft file, never evictable, because they are the only copy
+   of evidence the API has not accepted yet (`BR-014`, `ADR-018` A2).
+8. **The Visit field transition and the Visit note** (`BR-074`, `BR-075`, `BR-077`, `BR-031`;
+   `ADR-019` D5, tracker 037 Phase 3) — **offline-capable at the API**, with the Android client's outbox
+   adoption landing in that slice's Phase 5, so nothing on the device queues them yet.
+   `PATCH /jobs/:id/visits/:visitId/status` and `POST /jobs/:id/visits/:visitId/notes` accept a
+   client-generated `clientOperationId`, and a repeat is answered from that key rather than performed
+   twice, which is the condition §13.2 states for queueing a mutation (`BR-031`, §5). They are the first
+   adopters whose mutation is a **command against a state machine** rather than a value assignment, and
+   their conflict policy is therefore **refuse-and-reconcile**: the API evaluates the command against the
+   Visit's current state under its own row lock, applies it only if `BR-074` (or `BR-075`) permits it from
+   the status the Visit actually holds, and otherwise refuses it with that status and version — never
+   last-write-wins, and never "as close as possible" (§8;
+   `docs/domain/job-visit-domain-model.md` §15). A refused action keeps the API's own reason, which a
+   client presents and offers to discard (`BR-014`). Recorded in
+   `docs/api/job-actions.md` §7 and `docs/tracker/037-technician-field-experience.md`.
+9. **The technician home read** (`GET /home/technician`, `BR-013`; `ADR-019` D6, tracker 037
+   Phase 4) — served from the working set when the API cannot be reached, so the answer to
+   "what do I need to do next?" survives a loss of connectivity: the next Visit, the day's own
+   Visits, the upcoming preview and the conditions on the caller's own work. It is the shape the
+   read adopters above have — the wire response is kept and mapped on the way out, only a failure
+   that could not reach the backend falls back, and the screen marks the answer as the last one the
+   backend reported (§7) — under its own projection key (`home.technician`). **One row per
+   subject**, because the day is the caller's own work and nothing else scopes it (§10). The
+   **Manager** home stays online-only, and deliberately: it is the operation's day, read from a
+   desk where connectivity is not the constraint, and its attention conditions depend on the server
+   clock rather than on the device's.
 
-What is still **online-only** on Android: Manager Home, the Job photo reads (the Activity gallery's
+What is still **online-only** on Android: the Manager Home (whose read is the operation's day
+rather than one technician's, so a stale copy would be an operational answer the office cannot
+act on), the Job photo reads (the Activity gallery's
 previews, the tray's previews and the full-size viewer, all through
 `GET /jobs/:id/photos/:photoId/content` **when the bytes are on neither the device nor the image
-stack's cache**), **removing accepted evidence** (`POST /jobs/:id/photos/:photoId/removal`: its route
+stack's cache**), **playing an accepted recording this device has never read** (its bytes arrive through
+`GET /jobs/:id/audio-notes/:audioNoteId/content`; once read they are the cache adopter above — `BR-013`,
+`ADR-018` A9), **removing accepted evidence** (`POST /jobs/:id/photos/:photoId/removal`: its route
 accepts no client-generated idempotency key and no conflict policy is decided for it, so it is never
 queued — `BR-089`, tracker 029 Phase 6b), **removing an accepted audio note**
 (`POST /jobs/:id/audio-notes/:audioNoteId/removal`: the same route shape and the same reason,
-`ADR-018` A10), technician assignment, scheduling and rescheduling, Job and
-Visit status actions, notes, Customer and Property writes, and every form. Their routes accept no
-idempotency key yet, or their mutation conflict policy is undecided (§8, §11.1), so they must not be
-queued or invented. The `D5` question about accepted evidence **was answered on 2026-09-16 and
+`ADR-018` A10), technician assignment, scheduling and rescheduling, Customer and Property writes, and
+every form. Their routes accept no idempotency key yet, or their mutation conflict policy is undecided
+(§8, §11.1), so they must not be queued or invented. The **Visit field transition and the Visit note**
+left this list when tracker 037 Phase 3 gave their routes a `clientOperationId` and the
+refuse-and-reconcile policy adopter 8 records; their Android adoption is that slice's Phase 5, so no
+Android write queues them today. The `D5` question about accepted evidence **was answered on 2026-09-16 and
 implemented by tracker 029 Phase 5**: accepted evidence's **metadata** is readable offline through the
 working set (adopter 5) and its **bytes** are cached best-effort by the image stack (§9). The photo
 evidence that **is** offline-capable is also the draft: capture, preparation and upload are queued

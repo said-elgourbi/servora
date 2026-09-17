@@ -23,6 +23,7 @@ import com.servora.android.ui.customers.PropertyDetailViewModel
 import com.servora.android.ui.customers.ServoraHomeScreen
 import com.servora.android.ui.customers.customerPermissionsUiState
 import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.ui.home.TechnicianHomeViewModel
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.passwordreset.PasswordResetScreen
 import com.servora.android.ui.passwordreset.PasswordResetViewModel
@@ -75,6 +76,7 @@ fun AuthFlowScreen(
     propertyDetailViewModel: PropertyDetailViewModel,
     editPropertyViewModel: EditPropertyViewModel,
     managerHomeViewModel: ManagerHomeViewModel,
+    technicianHomeViewModel: TechnicianHomeViewModel,
     jobDetailsViewModel: JobDetailsViewModel,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
@@ -102,6 +104,7 @@ fun AuthFlowScreen(
                 propertyDetailViewModel = propertyDetailViewModel,
                 editPropertyViewModel = editPropertyViewModel,
                 managerHomeViewModel = managerHomeViewModel,
+                technicianHomeViewModel = technicianHomeViewModel,
                 jobDetailsViewModel = jobDetailsViewModel,
                 onSignOut = onSignOut,
                 modifier = modifier,

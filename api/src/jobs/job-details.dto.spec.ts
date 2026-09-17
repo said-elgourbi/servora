@@ -1,5 +1,5 @@
 import { toJobDetailsDto, type JobDetails } from './job-details.dto.js';
-import type { Job } from './job.types.js';
+import type { Job, VisitStatus } from './job.types.js';
 
 const CREATED = new Date('2026-01-01T00:00:00.000Z');
 const ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
@@ -88,6 +88,9 @@ describe('job details projection', () => {
         scheduledEnd: '2026-09-08T15:00:00.000Z',
         // `BR-073` permits rescheduling only while the Visit is `SCHEDULED`.
         reschedulable: true,
+        // The client draws the technician's field action from the same table the field route validates
+        // against (`BR-074`, `BR-041`).
+        allowedStatusTransitions: ['EN_ROUTE'],
       },
       address: {
         propertyName: 'Cedar Lane Building',
@@ -110,6 +113,48 @@ describe('job details projection', () => {
         { membershipId: 'member-3', name: null, roleCode: 'TECHNICIAN' },
       ],
     });
+  });
+
+  it('reports the Visit lifecycle to the client as the API itself enforces it', () => {
+    const visit = (status: VisitStatus) =>
+      toJobDetailsDto({
+        job: jobRow({ status: 'SCHEDULED' }),
+        customerId: CUSTOMER_ID,
+        customerName: 'Martha Reynolds',
+        selectedVisit: {
+          visitId: 'visit-1',
+          status,
+          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          version: 1,
+        },
+        technicians: [],
+      }).selectedVisit?.allowedStatusTransitions;
+
+    // The normal lifecycle, one step at a time, plus `BR-075`'s correction (`BR-074`).
+    expect(visit('DRAFT')).toEqual(['SCHEDULED']);
+    expect(visit('SCHEDULED')).toEqual(['EN_ROUTE']);
+    expect(visit('EN_ROUTE')).toEqual(['ON_SITE', 'SCHEDULED']);
+    expect(visit('ON_SITE')).toEqual(['IN_PROGRESS']);
+    expect(visit('IN_PROGRESS')).toEqual(['COMPLETED']);
+
+    // A historical Visit offers nothing: `BR-074` never returns a Visit to an active status.
+    expect(visit('COMPLETED')).toEqual([]);
+    expect(visit('CANCELED')).toEqual([]);
+    expect(visit('NO_SHOW')).toEqual([]);
+
+    // `CANCELED` and `NO_SHOW` are destinations of no route: `BR-066` makes them dispatch actions and
+    // no capability authorizes one today (`BR-042`, `ADR-019` D7).
+    for (const status of [
+      'DRAFT',
+      'SCHEDULED',
+      'EN_ROUTE',
+      'ON_SITE',
+      'IN_PROGRESS',
+    ] as const) {
+      expect(visit(status)).not.toContain('CANCELED');
+      expect(visit(status)).not.toContain('NO_SHOW');
+    }
   });
 
   it('reports no Visit and no technicians for a Job that has none', () => {
