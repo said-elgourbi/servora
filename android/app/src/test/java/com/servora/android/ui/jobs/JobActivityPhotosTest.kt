@@ -2,7 +2,8 @@ package com.servora.android.ui.jobs
 
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
+import com.servora.android.domain.model.evidencePhaseOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -63,11 +64,11 @@ class JobActivityPhotosTest {
 
     @Test
     fun `resolves a phase the API reports and invents none for a code this build cannot read`() {
-        assertEquals(JobPhotoPhase.BEFORE_WORK, jobPhotoPhaseOrNull("BEFORE_WORK"))
-        assertEquals(JobPhotoPhase.DURING_WORK, jobPhotoPhaseOrNull("DURING_WORK"))
-        assertEquals(JobPhotoPhase.AFTER_WORK, jobPhotoPhaseOrNull("AFTER_WORK"))
-        assertNull("a phase this build does not have is not guessed", jobPhotoPhaseOrNull("NIGHT_WORK"))
-        assertNull(jobPhotoPhaseOrNull(null))
+        assertEquals(EvidencePhase.BEFORE_WORK, evidencePhaseOrNull("BEFORE_WORK"))
+        assertEquals(EvidencePhase.DURING_WORK, evidencePhaseOrNull("DURING_WORK"))
+        assertEquals(EvidencePhase.AFTER_WORK, evidencePhaseOrNull("AFTER_WORK"))
+        assertNull("a phase this build does not have is not guessed", evidencePhaseOrNull("NIGHT_WORK"))
+        assertNull(evidencePhaseOrNull(null))
     }
 }
 

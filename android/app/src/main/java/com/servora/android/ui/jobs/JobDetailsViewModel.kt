@@ -6,6 +6,9 @@ import com.servora.android.data.jobs.AssignableTechniciansResult
 import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
+import com.servora.android.data.jobs.JobAudioRecordResult
+import com.servora.android.data.jobs.JobAudioRefusal
+import com.servora.android.data.jobs.JobAudioSession
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsResult
 import com.servora.android.data.jobs.JobPhotoExportOutcome
@@ -19,8 +22,9 @@ import com.servora.android.data.jobs.JobPhotoSession
 import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CapturedJobPhoto
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.PendingJobAudioNote
 import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
@@ -60,6 +64,14 @@ import kotlinx.coroutines.launch
  * picker (`D3`); the picker's items are taken one at a time, each becoming its own draft, so a photo
  * that cannot be taken is reported while the rest are recorded (`BR-014`).
  *
+ * An **audio note** is the same shape for evidence of its own kind (`BR-091`, `ADR-018`): the device
+ * records it into app-private storage, this holds the durable draft a process death cannot lose, and
+ * the upload is queued through the outbox when the technician attaches it — so a recording made in a
+ * basement uploads when the connection comes back (`BR-014`, §9). One recording is held at a time: the
+ * sheet adds one update at a time, so a re-record is a delete and a new take (`JobAudioSession`).
+ * Playback of a recording is not this phase's work, and neither is any timeline entry for one: the
+ * API's `JOB_AUDIO_*` events are read by the Activity section when tracker 035's Phase 9c lands.
+ *
  * The two **reads** follow the offline standard (`offline-first-architecture.md` §12, §13): the Job and
  * its activity are kept as the last answer the backend reported and re-read from there when the API
  * cannot be reached, so the evidence a Job holds — which photos, with their phase, note and time — and
@@ -72,6 +84,7 @@ import kotlinx.coroutines.launch
 class JobDetailsViewModel @Inject constructor(
     private val repository: JobDetailsRepository,
     private val photos: JobPhotoSession,
+    private val audio: JobAudioSession,
     private val jobPhotoImages: JobPhotoImages,
     private val pickedItems: JobPhotoPickedItems,
     private val exporter: JobPhotoExporter,
@@ -97,6 +110,30 @@ class JobDetailsViewModel @Inject constructor(
     /** Whether accepted evidence is being removed right now, so one removal runs at a time. */
     private var removalInFlight = false
     private var photoCollection: Job? = null
+
+    /** Whether the microphone is being started or a recording is being stopped right now. */
+    private var audioInFlight = false
+
+    /** Follows the Job's pending recordings for as long as this Job is on screen (`§9`). */
+    private var audioCollection: Job? = null
+
+    /**
+     * When the recording in progress began, as this device's clock reads it.
+     *
+     * It is what the length the review shows is measured from. The length is not a product fact: the
+     * API reads the recording's own container and that is what it stores (`ADR-018` A3), so a device
+     * that measures 8 seconds and a container that says 8.4 seconds disagree about nothing that
+     * matters — and nothing here is ever sent as the length.
+     */
+    private var audioRecordingStartedAtMillis: Long = 0L
+
+    /**
+     * Recordings this screen removed locally, so the notice losing one is not read as the API accepting
+     * its upload (`§9`).
+     *
+     * Only a **refused** recording is ever put here, the same rule a photo follows.
+     */
+    private val audioDiscardedLocally = mutableSetOf<String>()
 
     /**
      * Photos this screen removed locally, so the tray losing one of them is not read as the API
@@ -169,6 +206,12 @@ class JobDetailsViewModel @Inject constructor(
         // in the UI (§10).
         photoCollection?.cancel()
         photoCollection = null
+        // The pending recordings belong to the session that made them, and a recording still running
+        // is dropped rather than left with the microphone open (`BR-091`, §10).
+        _uiState.value.audioRecording?.let { capture -> audio.abandonRecording(capture) }
+        audioCollection?.cancel()
+        audioCollection = null
+        audioDiscardedLocally.clear()
         // A pick belongs to the Job it was made for: nothing of it is carried to the next session.
         pickedPhotos.clear()
         skippedPhotos.clear()
@@ -473,7 +516,7 @@ class JobDetailsViewModel @Inject constructor(
      * The phase the technician chose becomes the phase the **next** capture starts in, which is what
      * makes a run of photos of the same phase one tap each (`BR-012`).
      */
-    fun confirmCapturedPhoto(phase: JobPhotoPhase, note: String?) {
+    fun confirmCapturedPhoto(phase: EvidencePhase, note: String?) {
         val captured = _uiState.value.capturedPhoto ?: return
         _uiState.update {
             it.copy(capturedPhoto = null, photoPhase = phase, photoFailure = null)
@@ -1008,6 +1051,229 @@ class JobDetailsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Starts recording an audio note for this Job (`BR-091`).
+     *
+     * The identity and the app-private file are allocated **before** the microphone opens, exactly as a
+     * capture's are (`§5`, `§9`), and a device that cannot start its recorder reports that rather than
+     * leaving a recording nobody is making (`BR-042`).
+     *
+     * The microphone permission is the screen's to ask for, and this is called only once it has been
+     * granted: nothing here can start a recording Android would refuse (`BR-011`).
+     */
+    fun startAudioRecording() {
+        val jobId = _uiState.value.jobId
+        if (jobId.isEmpty() || audioInFlight || _uiState.value.audioRecording != null) {
+            return
+        }
+        val capture = audio.beginRecording()
+        if (capture == null) {
+            _uiState.update { it.copy(audioFailure = JobAudioFailure.NOT_SIGNED_IN) }
+            return
+        }
+        if (!audio.startRecording(capture)) {
+            // A recorder that never started leaves nothing behind, and the technician is told which
+            // failure it was rather than being left with a control that appears to do nothing
+            // (`BR-042`, §9).
+            audio.abandonRecording(capture)
+            _uiState.update { it.copy(audioFailure = JobAudioFailure.RECORDER_UNAVAILABLE) }
+            return
+        }
+        audioRecordingStartedAtMillis = clock.millis()
+        _uiState.update {
+            it.copy(audioRecording = capture, audioFailure = null, audioMessage = null)
+        }
+    }
+
+    /**
+     * Stops the recording in progress and records it as a draft on this device (`BR-014`, `BR-091`).
+     *
+     * What it becomes is the technician's own durable draft — not evidence, and not an upload: the
+     * upload happens when they attach it (`attachAudioNote`). A recorder that could not finish, or a
+     * file it left with no bytes in it, is reported instead, and nothing is recorded.
+     */
+    fun stopAudioRecording() {
+        val capture = _uiState.value.audioRecording ?: return
+        if (audioInFlight) {
+            return
+        }
+        audioInFlight = true
+        val jobId = _uiState.value.jobId
+        val phase = _uiState.value.audioPhase
+        val durationSeconds =
+            ((clock.millis() - audioRecordingStartedAtMillis) / MILLIS_PER_SECOND).toInt()
+        // The microphone is off as soon as the technician stops it, so the sheet stops saying it is
+        // live while the draft is being written (`BR-042`).
+        _uiState.update { it.copy(audioRecording = null) }
+        viewModelScope.launch {
+            val recorded = audio.stopRecording(jobId, capture, phase, durationSeconds)
+            audioInFlight = false
+            _uiState.update { current ->
+                current.copy(
+                    audioFailure = when (recorded) {
+                        is JobAudioRecordResult.Recorded -> null
+                        is JobAudioRecordResult.Refused -> recorded.reason.toAudioFailure()
+                    },
+                )
+            }
+            refreshAudioUploads(jobId)
+        }
+    }
+
+    /**
+     * Drops the recording in progress without recording it: the technician left the sheet.
+     *
+     * Nothing was recorded, so nothing the backend could hold is lost — the recorder is released and
+     * whatever file it created goes with it (`§9`, `BR-042`).
+     */
+    fun cancelAudioRecording() {
+        val capture = _uiState.value.audioRecording ?: return
+        audio.abandonRecording(capture)
+        _uiState.update { it.copy(audioRecording = null) }
+    }
+
+    /** Reports that the microphone permission was declined, so nothing could be recorded (`BR-011`). */
+    fun microphoneDenied() {
+        _uiState.update { it.copy(audioFailure = JobAudioFailure.MICROPHONE_DENIED) }
+    }
+
+    /** Records the phase the technician chose for the recording they are about to attach (`BR-012`). */
+    fun selectAudioPhase(phase: EvidencePhase) {
+        _uiState.update { it.copy(audioPhase = phase) }
+    }
+
+    /**
+     * Removes a recording the technician no longer wants from this device (`BR-014`, `BR-091`).
+     *
+     * A recording that has not been attached is theirs to remove, and so is one whose upload the
+     * backend permanently refused: that upload is finished, so nothing is being decided about evidence
+     * the API might hold (`BR-031`). A queued or retrying upload is refused by the session and reported
+     * instead, because the backend may still accept it.
+     */
+    fun removePendingAudioNote(audioNoteId: String) {
+        val note = _uiState.value.pendingAudioNotes
+            .firstOrNull { it.audioNoteId == audioNoteId } ?: return
+        // A refused recording the technician is about to discard is remembered **before** its row
+        // leaves, so the notice losing it is not read as the API accepting the upload (`§9`).
+        if (note.isRefusedUpload(_uiState.value.audioUploads[audioNoteId])) {
+            audioDiscardedLocally += audioNoteId
+        }
+        viewModelScope.launch {
+            val removed = audio.discard(note)
+            _uiState.update { current ->
+                current.copy(
+                    audioFailure = if (removed) null else JobAudioFailure.ALREADY_SUBMITTED,
+                )
+            }
+        }
+    }
+
+    /**
+     * Attaches the recording the technician made, which queues its upload (`BR-091`, `BR-031`).
+     *
+     * The phase and note they chose are recorded on the draft first, so the queued operation carries
+     * what the technician meant rather than what an earlier attempt happened to hold; the upload is
+     * then queued through the outbox and replayed by the existing trigger (`§5`, `§6`).
+     */
+    fun attachAudioNote(note: String?) {
+        val draft = _uiState.value.audioDraft ?: return
+        val jobId = _uiState.value.jobId
+        if (jobId.isEmpty() || audioInFlight || _uiState.value.isSubmittingAudio) {
+            return
+        }
+        val phase = _uiState.value.audioPhase
+        audioInFlight = true
+        _uiState.update {
+            it.copy(isSubmittingAudio = true, audioFailure = null, audioMessage = null)
+        }
+        viewModelScope.launch {
+            // The reviewed record is what is attached, so the queued operation carries exactly the phase
+            // and note the technician saw in the review (`BR-041`, `BR-091`).
+            val reviewed = audio.review(
+                draft.audioNoteId,
+                phase,
+                note?.trim()?.takeIf { it.isNotEmpty() },
+            ) ?: draft
+            val queued = audio.submit(listOf(reviewed))
+            audioInFlight = false
+            _uiState.update { current ->
+                current.copy(
+                    isSubmittingAudio = false,
+                    audioMessage = if (queued > 0) JobAudioMessage.QUEUED else null,
+                    audioFailure = if (queued > 0) null else JobAudioFailure.NOT_QUEUED,
+                )
+            }
+            refreshAudioUploads(jobId)
+        }
+    }
+
+    /** Releases the last audio report once the screen has shown it. */
+    fun dismissAudioMessage() {
+        _uiState.update { it.copy(audioMessage = null) }
+    }
+
+    /**
+     * Follows the Job's pending recordings for as long as this Job is on screen (`§9`, `BR-091`).
+     *
+     * The list is the device's own state, so it is observed rather than re-read: an upload the API
+     * accepted removes its row, and the notice follows without the screen asking (`BR-001`).
+     */
+    private fun observeAudioNotes(jobId: String) {
+        audioCollection?.cancel()
+        audioCollection = null
+        val flow = audio.pendingNotes(jobId) ?: return
+        audioCollection = viewModelScope.launch {
+            // The notice as it was before this emission, so a recording that leaves it can be told apart
+            // from one that was never there (`§9`).
+            var previous: List<PendingJobAudioNote>? = null
+            flow.collect { pending ->
+                _uiState.update { current ->
+                    if (current.jobId == jobId) {
+                        current.copy(pendingAudioNotes = pending)
+                    } else {
+                        current
+                    }
+                }
+                val accepted = anAudioUploadWasAccepted(previous, pending)
+                previous = pending
+                audioDiscardedLocally.removeAll { audioNoteId ->
+                    pending.none { note -> note.audioNoteId == audioNoteId }
+                }
+                if (accepted) {
+                    // The API holds evidence it did not hold before, so the Activity that projects it is
+                    // read again rather than left showing a Job without the recording just made
+                    // (`BR-001`, `BR-080`).
+                    readActivity(jobId)
+                }
+                refreshAudioUploads(jobId)
+            }
+        }
+    }
+
+    /** Whether an upload left the notice because the API accepted it (`§9`, `BR-001`). */
+    private fun anAudioUploadWasAccepted(
+        previous: List<PendingJobAudioNote>?,
+        pending: List<PendingJobAudioNote>,
+    ): Boolean {
+        val before = previous ?: return false
+        val inNotice = pending.mapTo(mutableSetOf()) { it.audioNoteId }
+        return before.any { note ->
+            note.submitted &&
+                note.audioNoteId !in inNotice &&
+                note.audioNoteId !in audioDiscardedLocally
+        }
+    }
+
+    /** Reads what the queue holds for the Job's recordings, which is what the notice reports (`§7`). */
+    private fun refreshAudioUploads(jobId: String) {
+        viewModelScope.launch {
+            val states = audio.uploadStates(jobId)
+            _uiState.update { current ->
+                if (current.jobId == jobId) current.copy(audioUploads = states) else current
+            }
+        }
+    }
+
     private fun read(jobId: String) {
         readInFlight = true
         _uiState.value = JobDetailsUiState(jobId = jobId, isLoading = true)
@@ -1056,6 +1322,7 @@ class JobDetailsViewModel @Inject constructor(
             if (result is JobDetailsResult.Success) {
                 readActivity(jobId)
                 observePhotos(jobId)
+                observeAudioNotes(jobId)
             }
         }
     }
@@ -1098,6 +1365,25 @@ class JobDetailsViewModel @Inject constructor(
         }
     }
 }
+
+/**
+ * Why a recording was refused, as the screen reports it (`BR-042`).
+ *
+ * The data layer states what its own recorder could not do; this is where that becomes one of the
+ * screen's stable failure codes, so the copy the technician reads is localized and says what happened
+ * rather than that "something went wrong" (`BR-028`, `dev.md` §9).
+ */
+private fun JobAudioRefusal.toAudioFailure(): JobAudioFailure =
+    when (this) {
+        JobAudioRefusal.NOT_SIGNED_IN -> JobAudioFailure.NOT_SIGNED_IN
+        JobAudioRefusal.RECORDER_UNAVAILABLE -> JobAudioFailure.RECORDER_UNAVAILABLE
+        JobAudioRefusal.NOT_RECORDED -> JobAudioFailure.RECORDING_FAILED
+        JobAudioRefusal.NO_BYTES -> JobAudioFailure.RECORDING_EMPTY
+        JobAudioRefusal.NOT_STORED -> JobAudioFailure.RECORDING_NOT_SAVED
+    }
+
+/** A millisecond count as whole seconds, for the length the review shows (`ADR-018` A3). */
+private const val MILLIS_PER_SECOND = 1_000L
 
 /**
  * Why a photo was refused, as the screen reports it (`BR-042`).

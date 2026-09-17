@@ -1,24 +1,6 @@
 package com.servora.android.domain.model
 
 /**
- * The field-work phase a photo was taken in (`BR-027`).
- *
- * The codes are the stable, machine-readable values the API exchanges and stores (`BR-028`,
- * `BR-041`); the screen resolves a localized label for one rather than showing the code, and no
- * translated text is ever sent as the value.
- */
-enum class JobPhotoPhase {
-    /** The state of the work before the technician started. */
-    BEFORE_WORK,
-
-    /** The work in progress. */
-    DURING_WORK,
-
-    /** The result once the work was done. */
-    AFTER_WORK,
-}
-
-/**
  * A photo the technician captured for a Job that the backend has not accepted yet.
  *
  * It is device-local working state: the bytes live in app-private storage and this is the record that
@@ -38,7 +20,7 @@ data class PendingJobPhoto(
      * A photo is never dropped because of it: the tray still shows it, and the upload is refused
      * rather than sent with a phase Servora does not have (`BR-042`, `BR-014`).
      */
-    val phase: JobPhotoPhase?,
+    val phase: EvidencePhase?,
     val note: String?,
     /** The device instant the photo was taken (`BR-031`: display and provenance, never business time). */
     val capturedAt: String,

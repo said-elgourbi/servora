@@ -3,7 +3,7 @@ package com.servora.android.data.jobs
 import com.servora.android.data.offline.OutboxOperation
 import com.servora.android.data.offline.OutboxOperationState
 import com.servora.android.data.offline.OutboxStore
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.PendingJobPhoto
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,7 +39,7 @@ class InMemoryPendingJobPhotoStore(
         publish()
     }
 
-    override suspend fun updateReview(photoId: String, phase: JobPhotoPhase?, note: String?) {
+    override suspend fun updateReview(photoId: String, phase: EvidencePhase?, note: String?) {
         replace(photoId) { it.copy(phase = phase, note = note) }
     }
 

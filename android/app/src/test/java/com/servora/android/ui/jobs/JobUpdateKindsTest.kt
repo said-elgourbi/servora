@@ -8,8 +8,8 @@ import org.junit.Test
  *
  * The kinds a session may add are the part of the sheet that decides what can be reached at all, and it
  * is a rule rather than a drawing: a note is the everyday case and comes first, a kind is offered only
- * where the capability for it exists, and audio is a first-class kind that no call may offer while the
- * API has no capability to accept a recording (`docs/decisions/015-evidence-capabilities.md` D2).
+ * where the capability for it exists, and audio is a first-class kind offered exactly when the session
+ * holds `evidence.audio.add` (`ADR-018` A7).
  */
 class JobUpdateKindsTest {
 
@@ -37,8 +37,9 @@ class JobUpdateKindsTest {
 
     @Test
     fun offersAudioAsAFirstClassKindWhenTheSessionMayAddIt() {
-        // Audio is a peer of the other two rather than a property of the photo kind: when it exists it is
-        // offered alongside them, and the sheet's layout then grows by one segment (`BR-027`).
+        // Audio is a peer of the other two rather than a property of the photo kind: it is offered
+        // alongside them on its own capability, and the sheet's layout then grows by one segment
+        // (`BR-027`, `ADR-018` A7).
         assertEquals(
             listOf(JobUpdateKind.NOTE, JobUpdateKind.PHOTO, JobUpdateKind.AUDIO),
             offeredUpdateKinds(canWriteNote = true, canAddPhoto = true, canAddAudio = true),

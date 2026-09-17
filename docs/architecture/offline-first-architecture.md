@@ -295,13 +295,25 @@ These remain **OPEN QUESTION** and must not be invented:
    **bytes** are not held here: accepted
    evidence's bytes are the image stack's evictable cache, and a pending upload's bytes are its own
    app-private file (§9). Recorded in `docs/tracker/029-photo-evidence-phases.md` (Phase 5, Phase 6b).
+6. **The Job audio note upload** (`BR-091`, `ADR-018`) — offline-capable, carrying a `clientOperationId`,
+   applied by `JobAudioUploadHandler` and queued through the same `OutboxStore`. It is the photo adopter's
+   shape for evidence of its own kind (`ADR-018` A1): the recording is written into app-private storage by
+   the device's own recorder, the outbox row holds the local path and the metadata, and the local copy is
+   deleted only once the API has answered that it holds the recording (`BR-014`). Its own local table holds
+   the takes the technician has **not** attached yet — a draft is removable and must survive process death,
+   which is neither a working-set answer nor a queued mutation — and it holds paths and metadata, never
+   audio bytes (§9). A take the backend **permanently refused** is discardable by the technician on the same
+   terms a refused photo is (`D6c`), and the notice that reports an unaccepted take is where that discard
+   lives. Recorded in `docs/tracker/035-android-audio-evidence.md` (Phase 9b).
 
 What is still **online-only** on Android: Manager Home, the Job photo reads (the Activity gallery's
 previews, the tray's previews and the full-size viewer, all through
 `GET /jobs/:id/photos/:photoId/content` **when the bytes are on neither the device nor the image
 stack's cache**), **removing accepted evidence** (`POST /jobs/:id/photos/:photoId/removal`: its route
 accepts no client-generated idempotency key and no conflict policy is decided for it, so it is never
-queued — `BR-089`, tracker 029 Phase 6b), technician assignment, scheduling and rescheduling, Job and
+queued — `BR-089`, tracker 029 Phase 6b), **removing an accepted audio note**
+(`POST /jobs/:id/audio-notes/:audioNoteId/removal`: the same route shape and the same reason,
+`ADR-018` A10), technician assignment, scheduling and rescheduling, Job and
 Visit status actions, notes, Customer and Property writes, and every form. Their routes accept no
 idempotency key yet, or their mutation conflict policy is undecided (§8, §11.1), so they must not be
 queued or invented. The `D5` question about accepted evidence **was answered on 2026-09-16 and

@@ -2,8 +2,11 @@ package com.servora.android.di
 
 import android.content.Context
 import androidx.room.Room
+import com.servora.android.data.jobs.PendingJobAudioNoteDao
+import com.servora.android.data.jobs.PendingJobAudioNoteStore
 import com.servora.android.data.jobs.PendingJobPhotoDao
 import com.servora.android.data.jobs.PendingJobPhotoStore
+import com.servora.android.data.jobs.RoomPendingJobAudioNoteStore
 import com.servora.android.data.jobs.RoomPendingJobPhotoStore
 import com.servora.android.data.offline.OfflineDatabase
 import com.servora.android.data.offline.OfflineMigrations
@@ -48,6 +51,10 @@ internal object OfflineModule {
     @Provides
     fun providePendingJobPhotoDao(database: OfflineDatabase): PendingJobPhotoDao =
         database.pendingJobPhotoDao()
+
+    @Provides
+    fun providePendingJobAudioNoteDao(database: OfflineDatabase): PendingJobAudioNoteDao =
+        database.pendingJobAudioNoteDao()
 }
 
 /** Binds the local stores to their Room-backed implementations. */
@@ -69,4 +76,11 @@ internal abstract class OfflineStoreModule {
     abstract fun bindPendingJobPhotoStore(
         implementation: RoomPendingJobPhotoStore,
     ): PendingJobPhotoStore
+
+    /** The recordings made on this device the backend has not accepted (`BR-091`, §9). */
+    @Binds
+    @Singleton
+    abstract fun bindPendingJobAudioNoteStore(
+        implementation: RoomPendingJobAudioNoteStore,
+    ): PendingJobAudioNoteStore
 }

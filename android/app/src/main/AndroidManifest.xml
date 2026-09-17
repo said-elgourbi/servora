@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- The only capability this slice needs: reaching the Servora API. Device/GPS permissions arrive
+    <!-- The only capability the app needs to reach the Servora API. Device/GPS permissions arrive
          with the field-work features that use them. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      Recording an audio note (`BR-091`, `ADR-018`) uses the device's microphone, which is a runtime
+      permission: the technician is asked for it when they first record, and a device that declines it
+      can still add every other kind of update. It is asked for **when recording starts**, never at
+      launch (`BR-012`).
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- Photo evidence is captured by the device's own camera application, through
          `ACTION_IMAGE_CAPTURE`, so Servora needs no camera permission and no camera feature: the

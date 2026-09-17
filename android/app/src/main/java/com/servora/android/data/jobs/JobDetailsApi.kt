@@ -102,6 +102,27 @@ interface JobDetailsApi {
     ): JobActivityDto
 
     /**
+     * `POST /jobs/{jobId}/audio-notes` — adds one audio recording to the Job's Activity
+     * (`BR-091`, `ADR-018`).
+     *
+     * The same shape as the photo upload, for the same reason: the bytes travel as a multipart part so
+     * they are never base64-encoded into a request body, and `clientOperationId` is the queued
+     * operation's id, sent unchanged on every retry, which is what makes a replayed upload record the
+     * evidence once (`BR-031`). No length is sent: the API reads it from the container (`ADR-018` A3).
+     */
+    @Multipart
+    @POST("jobs/{jobId}/audio-notes")
+    suspend fun addJobAudioNote(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Part("clientOperationId") clientOperationId: RequestBody,
+        @Part("phase") phase: RequestBody,
+        @Part("note") note: RequestBody?,
+        @Part("capturedAt") capturedAt: RequestBody?,
+        @Part file: MultipartBody.Part,
+    ): JobActivityDto
+
+    /**
      * `POST /jobs/{jobId}/photos/{photoId}/removal` — takes accepted evidence out of ordinary use
      * (`BR-088`, `BR-089`).
      *

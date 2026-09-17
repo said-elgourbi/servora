@@ -452,11 +452,11 @@
     -->
     <string name="job_photo_add_action">Ajouter une photo</string>
     <string name="job_photo_review_title">Ajouter cette photo</string>
-    <string name="job_photo_phase_label">Étape</string>
-    <string name="job_photo_phase_before">Avant le travail</string>
-    <string name="job_photo_phase_during">Pendant le travail</string>
-    <string name="job_photo_phase_after">Après le travail</string>
-    <string name="job_photo_phase_unknown">Étape non enregistrée</string>
+    <string name="evidence_phase_label">Étape</string>
+    <string name="evidence_phase_before">Avant le travail</string>
+    <string name="evidence_phase_during">Pendant le travail</string>
+    <string name="evidence_phase_after">Après le travail</string>
+    <string name="evidence_phase_unknown">Étape non enregistrée</string>
     <string name="job_photo_note_label">Note (facultative)</string>
     <string name="job_photo_note_placeholder">Que montre cette photo ?</string>
     <string name="job_photo_review_confirm">Ajouter</string>
@@ -489,10 +489,10 @@
       est toujours dessinée à côté du refus que la corbeille annonce.
     -->
     <string name="job_photo_tray_discard">Supprimer</string>
-    <string name="job_photo_state_queued">En attente de téléversement</string>
-    <string name="job_photo_state_uploading">Téléversement…</string>
-    <string name="job_photo_state_retrying">Nouvelle tentative</string>
-    <string name="job_photo_state_refused">Refusé par le serveur</string>
+    <string name="evidence_state_queued">En attente de téléversement</string>
+    <string name="evidence_state_uploading">Téléversement…</string>
+    <string name="evidence_state_retrying">Nouvelle tentative</string>
+    <string name="evidence_state_refused">Refusé par le serveur</string>
     <string name="job_photo_saved_message">Photos enregistrées sur cet appareil. Elles seront téléversées dès que le serveur sera joignable.</string>
     <string name="job_photo_error_capture_failed">L’appareil photo n’a enregistré aucune photo.</string>
     <string name="job_photo_error_not_signed_in">Reconnectez-vous pour enregistrer des photos.</string>
@@ -601,4 +601,32 @@
     <string name="job_status_confirm_reopen_title">Rouvrir cette intervention ?</string>
     <string name="job_status_confirm_reopen_message">L’intervention n° %1$d reviendra au statut Nouveau. Ses visites terminées et annulées restent telles quelles.</string>
     <string name="job_status_confirm_accept">Confirmer</string>
+    <!--
+      Preuves audio (`BR-091`, `ADR-018`). Un enregistrement reste la prise du technicien jusqu’à ce
+      qu’il la joigne, donc le type d’ajout énonce les trois états d’une prise — enregistrement en cours,
+      prise faite, révision — et l’avis rapporte ce que l’appareil fait d’une prise que l’API n’a pas
+      encore acceptée. Les libellés d’état de téléversement sont partagés avec les photos
+      (`evidence_state_*`), parce que « en attente de téléversement » est une seule idée (`BR-041`).
+    -->
+    <string name="job_audio_record">Enregistrer</string>
+    <string name="job_audio_stop">Arrêter</string>
+    <string name="job_audio_recording">Enregistrement…</string>
+    <string name="job_audio_hint">Vous pourrez vérifier l’enregistrement avant de le joindre.</string>
+    <string name="job_audio_delete">Supprimer</string>
+    <string name="job_audio_attach">Joindre à la mise à jour</string>
+    <string name="job_audio_duration">%1$d:%2$02d</string>
+    <string name="job_audio_description">Note audio</string>
+    <string name="job_audio_remove">Retirer l’enregistrement</string>
+    <string name="job_audio_discard">Supprimer</string>
+    <string name="job_audio_notice_title">Audio à enregistrer</string>
+    <string name="job_audio_notice_not_attached">Pas encore joint</string>
+    <string name="job_audio_message_queued">Enregistrement sauvegardé. Il sera téléversé dès que le serveur sera joignable.</string>
+    <string name="job_audio_error_microphone_denied">Servora a besoin du microphone pour enregistrer une note.</string>
+    <string name="job_audio_error_not_signed_in">Reconnectez-vous pour enregistrer un audio.</string>
+    <string name="job_audio_error_recorder_unavailable">Cet appareil n’a pas pu démarrer l’enregistrement.</string>
+    <string name="job_audio_error_recording_failed">L’enregistrement n’a pas pu se terminer, donc rien n’a été sauvegardé.</string>
+    <string name="job_audio_error_recording_empty">L’enregistrement est vide, donc rien n’a été sauvegardé.</string>
+    <string name="job_audio_error_recording_not_saved">L’enregistrement n’a pas pu être sauvegardé sur cet appareil.</string>
+    <string name="job_audio_error_not_queued">L’enregistrement n’a pas pu être sauvegardé pour l’instant. Il reste sur cet appareil.</string>
+    <string name="job_audio_error_already_submitted">Cet enregistrement est déjà en attente de téléversement.</string>
 </resources>

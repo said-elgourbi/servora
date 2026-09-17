@@ -1,6 +1,6 @@
 package com.servora.android.data.jobs
 
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -38,13 +38,6 @@ data class JobPhotoOperationPayload(
     @SerialName("mimeType") val mimeType: String,
     @SerialName("fileName") val fileName: String,
 )
-
-/** The phase name stored with a pending photo, or `null` when the photo has no recorded phase. */
-internal fun phaseNameOrNull(phase: JobPhotoPhase?): String? = phase?.name
-
-/** The stable phase codes this build knows, for reading a stored value back. */
-internal fun jobPhotoPhaseOrNull(code: String?): JobPhotoPhase? =
-    JobPhotoPhase.entries.firstOrNull { it.name == code }
 
 /** The name a file part is given when the photo's recorded type cannot be read back. */
 internal const val DEFAULT_PHOTO_FILE_NAME = "photo.jpg"

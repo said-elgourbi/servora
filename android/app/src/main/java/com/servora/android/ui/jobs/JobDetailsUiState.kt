@@ -5,10 +5,13 @@ import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
+import com.servora.android.domain.model.CapturedJobAudioNote
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobDetails
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
+import com.servora.android.domain.model.JobAudioSyncState
 import com.servora.android.domain.model.JobPhotoSyncState
+import com.servora.android.domain.model.PendingJobAudioNote
 import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
@@ -116,6 +119,46 @@ enum class JobPhotoMessage {
 }
 
 /**
+ * Why an audio action could not be completed (`BR-042`).
+ *
+ * They are stable codes the screen resolves to localized copy, so the technician is told what actually
+ * happened rather than that "something went wrong" — a microphone nobody allowed, a recorder the
+ * device would not start, a recording that came out empty, or a draft the device could not keep
+ * (`BR-091`, `dev.md` §9).
+ */
+enum class JobAudioFailure {
+    /** The technician declined the microphone permission, so nothing could be recorded (`BR-012`). */
+    MICROPHONE_DENIED,
+
+    /** No session is held, so the recording cannot be attributed or queued (`§10`). */
+    NOT_SIGNED_IN,
+
+    /** The device's recorder could not be started, so no recording was made. */
+    RECORDER_UNAVAILABLE,
+
+    /** The device's recorder could not finish the recording, so nothing was kept. */
+    RECORDING_FAILED,
+
+    /** The recorder finished without producing any bytes, so no draft was recorded (`BR-014`). */
+    RECORDING_EMPTY,
+
+    /** The recording's bytes could not be kept on this device, so nothing was recorded (`BR-014`). */
+    RECORDING_NOT_SAVED,
+
+    /** The recording could not be queued, so it stays on the device unattached (`BR-014`). */
+    NOT_QUEUED,
+
+    /** The recording has already been queued for upload, so it can no longer be removed here. */
+    ALREADY_SUBMITTED,
+}
+
+/** What the last audio action did, until the screen acknowledges it. */
+enum class JobAudioMessage {
+    /** The recording is queued on the device and will upload when the API can be reached (`§7`). */
+    QUEUED,
+}
+
+/**
  * The evidence action the viewer is carrying out, or `null` when none is running (`D12`, `D13`).
  *
  * Reading a photo's bytes — from the file this device holds, or from the API — is not instant, so the
@@ -185,6 +228,11 @@ sealed interface PendingJobAction {
  * presented separately from [activity] on purpose: the Activity is what the backend reported
  * (`BR-080`), and a pending photo is a local, unconfirmed action (`offline-first-architecture.md`
  * §2, §7).
+ *
+ * [pendingAudioNotes] are the same thing for the other evidence kind (`BR-091`): a recording the
+ * technician made that the API has not answered for yet. It is a separate list rather than one
+ * kind-tagged list, because the two kinds are separate rows on the device and separate capabilities on
+ * the API (`ADR-018` A1), and the notice states which kind it is reporting.
  */
 @Immutable
 data class JobDetailsUiState(
@@ -238,7 +286,7 @@ data class JobDetailsUiState(
     /** How far each queued upload has got, derived from the queue (`§7`). */
     val photoUploads: Map<String, JobPhotoSyncState> = emptyMap(),
     /** The phase the next capture starts in: the one the technician chose last (`BR-012`). */
-    val photoPhase: JobPhotoPhase = JobPhotoPhase.DURING_WORK,
+    val photoPhase: EvidencePhase = EvidencePhase.DURING_WORK,
     /** Whether the pending photos are being queued right now. */
     val isSubmittingPhotos: Boolean = false,
     /** Why the last photo action did not complete, or `null`. */
@@ -264,6 +312,33 @@ data class JobDetailsUiState(
      * evidence, and it must not be asked for twice.
      */
     val photoRemoval: String? = null,
+    /**
+     * The Job's recordings the backend has not accepted yet, oldest first (`§9`, `BR-091`).
+     *
+     * The technician may hold exactly one unattached recording for a Job, which is the draft the sheet
+     * records into and the notice reports (`JobAudioSession`).
+     */
+    val pendingAudioNotes: List<PendingJobAudioNote> = emptyList(),
+    /** How far each queued audio upload has got, derived from the queue (`§7`). */
+    val audioUploads: Map<String, JobAudioSyncState> = emptyMap(),
+    /**
+     * The recording running right now, or `null` (`BR-091`).
+     *
+     * It is held so the sheet can say the microphone is live and how long the recording has been
+     * running. A recording that the process kills before it stops is not recoverable — nothing has been
+     * recorded and the recorder belonged to that process — so the technician records again (`BR-014`).
+     */
+    val audioRecording: CapturedJobAudioNote? = null,
+    /** Whole seconds the recording in progress has been running, for the sheet's own counter. */
+    val audioRecordingSeconds: Int = 0,
+    /** The phase the next recording starts in: the one the technician chose last (`BR-012`). */
+    val audioPhase: EvidencePhase = EvidencePhase.DURING_WORK,
+    /** Whether the unattached recording is being queued right now. */
+    val isSubmittingAudio: Boolean = false,
+    /** Why the last audio action did not complete, or `null`. */
+    val audioFailure: JobAudioFailure? = null,
+    /** What the last audio action did, until the screen acknowledges it. */
+    val audioMessage: JobAudioMessage? = null,
 ) {
     /** Nothing has been read yet: the screen shows its first-load state. */
     val showsInitialLoading: Boolean
@@ -288,4 +363,23 @@ data class JobDetailsUiState(
     /** Whether the activity has been asked for and not answered yet. */
     val showsActivityLoading: Boolean
         get() = details != null && activity == null && activityFailure == null
+
+    /**
+     * The recording the technician has not attached yet, if any (`BR-088`, `BR-091`).
+     *
+     * There is at most one: the sheet adds one update at a time, so a second recording is a re-record
+     * after the first is deleted rather than a queue of drafts (`JobAudioSession`).
+     */
+    val audioDraft: PendingJobAudioNote?
+        get() = pendingAudioNotes.firstOrNull { note -> !note.submitted }
+
+    /**
+     * Whether the screen is holding evidence the backend has not accepted yet (`§9`).
+     *
+     * While it is, the bottom of the screen belongs to that work — the tray or the notice — rather than
+     * to the action that would add another update, exactly as a pending photo already takes it
+     * (`BR-012`).
+     */
+    val holdsUnacceptedEvidence: Boolean
+        get() = pendingPhotos.isNotEmpty() || pendingAudioNotes.isNotEmpty()
 }

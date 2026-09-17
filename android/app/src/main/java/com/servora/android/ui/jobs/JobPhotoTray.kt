@@ -160,7 +160,7 @@ internal fun JobPhotoTray(
                     shape = MaterialTheme.shapes.large,
                     modifier = Modifier
                         .weight(1f)
-                        .height(JobPhotoPhaseButtonHeight)
+                        .height(EvidencePhaseButtonHeight)
                         .testTag(JobPhotoTrayCaptureTag),
                 ) {
                     Icon(
@@ -181,7 +181,7 @@ internal fun JobPhotoTray(
                     shape = MaterialTheme.shapes.large,
                     modifier = Modifier
                         .weight(1f)
-                        .height(JobPhotoPhaseButtonHeight)
+                        .height(EvidencePhaseButtonHeight)
                         .testTag(JobPhotoTraySubmitTag),
                 ) {
                     if (isSubmitting) {
@@ -231,7 +231,7 @@ private fun JobPhotoPendingTile(
                 contentDescription = stringResource(R.string.job_photo_image_description),
                 modifier = Modifier.size(JobPhotoTrayTileSize),
             )
-            JobPhotoPhaseBadge(
+            EvidencePhaseBadge(
                 phase = photo.phase,
                 modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
             )

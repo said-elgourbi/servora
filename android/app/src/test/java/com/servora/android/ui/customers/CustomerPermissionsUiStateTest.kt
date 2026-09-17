@@ -94,6 +94,19 @@ class CustomerPermissionsUiStateTest {
     }
 
     @Test
+    fun `maps the audio capability on its own`() {
+        // Recording an audio note is its own capability, because the catalogue is per kind (`ADR-015`
+        // D2, `ADR-018` A7): a session may be allowed a voice note and not a photo, or the reverse.
+        val state = customerPermissionsUiState(
+            setOf("evidence.audio.add").asPermissionChecker(),
+        )
+
+        assertTrue(state.canAddEvidenceAudio)
+        assertFalse(state.canAddEvidencePhoto)
+        assertFalse(state.canRemoveEvidence)
+    }
+
+    @Test
     fun `does not infer capabilities from missing permissions`() {
         val state = customerPermissionsUiState(emptySet<String>().asPermissionChecker())
 

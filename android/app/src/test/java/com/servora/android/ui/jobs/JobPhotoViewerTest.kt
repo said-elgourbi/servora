@@ -4,7 +4,7 @@ import com.servora.android.data.jobs.JobPhotoBytesUnavailable
 import com.servora.android.data.jobs.JobPhotoBytesUnavailableException
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.PendingJobPhoto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -61,7 +61,7 @@ class JobPhotoViewerTest {
             ViewedJobPhoto.Pending(
                 photoId = "photo-1",
                 localPath = "app-private/job-photos/user-1/photo-1.jpg",
-                phase = JobPhotoPhase.DURING_WORK,
+                phase = EvidencePhase.DURING_WORK,
                 note = "Sawdust on the belt",
             ),
             viewed,
@@ -81,7 +81,7 @@ class JobPhotoViewerTest {
             ViewedJobPhoto.Stored(
                 photoId = "photo-1",
                 jobId = JOB_ID,
-                phase = JobPhotoPhase.BEFORE_WORK,
+                phase = EvidencePhase.BEFORE_WORK,
                 note = "Panel",
             ),
             viewed,
@@ -214,7 +214,7 @@ class JobPhotoViewerTest {
 /** One photo the technician recorded that the backend has not accepted yet (`§9`). */
 private fun pendingPhoto(
     photoId: String = "photo-1",
-    phase: JobPhotoPhase? = JobPhotoPhase.DURING_WORK,
+    phase: EvidencePhase? = EvidencePhase.DURING_WORK,
     note: String? = "Sawdust on the belt",
 ) = PendingJobPhoto(
     photoId = photoId,

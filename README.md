@@ -93,8 +93,12 @@ Initial supported languages are **English** and **French**. Development rules li
 > and its **API half landed on 2026-09-16** — `job_audio_notes` + `job_audio_note_removals`,
 > `evidence.audio.add`/`evidence.audio.remove`, the three `/jobs/:id/audio-notes` routes and the
 > `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED` Activity kinds, contracted in `docs/api/job-audio.md`
-> (`docs/tracker/035-android-audio-evidence.md`). The Android recorder, the offline upload and playback are
-> that tracker's Phases 9b/9c, so the *Add audio* kind stays unoffered in the client until then.
+> (`docs/tracker/035-android-audio-evidence.md`). **Its Android half landed on 2026-09-16 (Phase 9b)**: the
+> microphone as a runtime permission, the audio kind's own controls in the Add update sheet (record, stop,
+> review, delete/re-record, attach), a durable Room draft for a take the API has not accepted, the queued
+> offline upload (`job.audio.add`, beside the photo handler) and the notice that reports an unaccepted take
+> — so the *Add audio* kind is now offered on `evidence.audio.add`. Playback and the Activity surface for a
+> recording are that tracker's Phase 9c, and device QA its Phase 9d.
 
 ## Layout
 

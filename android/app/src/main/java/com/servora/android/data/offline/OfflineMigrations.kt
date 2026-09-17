@@ -46,6 +46,42 @@ internal object OfflineMigrations {
         }
     }
 
+    /**
+     * 2 → 3 adds the pending audio note records (`JobAudioFiles`, `PendingJobAudioNoteStore`).
+     *
+     * The statements are the ones Room derives from `PendingJobAudioNoteEntity`; they are written out
+     * here because the table has to be created on a device that already holds queued work and pending
+     * photos, which is exactly when a destructive fallback would be unacceptable (`BR-014`).
+     */
+    val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "create table if not exists `pending_job_audio_notes` (" +
+                    "`audioNoteId` text not null, " +
+                    "`subjectId` text not null, " +
+                    "`jobId` text not null, " +
+                    "`localPath` text not null, " +
+                    "`phase` text, " +
+                    "`note` text, " +
+                    "`capturedAt` text not null, " +
+                    "`durationSeconds` integer not null, " +
+                    "`mimeType` text not null, " +
+                    "`recordedAt` integer not null, " +
+                    "`submitted` integer not null, " +
+                    "primary key(`audioNoteId`))",
+            )
+            db.execSQL(
+                "create index if not exists " +
+                    "`index_pending_job_audio_notes_subjectId_jobId_recordedAt` " +
+                    "on `pending_job_audio_notes` (`subjectId`, `jobId`, `recordedAt`)",
+            )
+            db.execSQL(
+                "create index if not exists `index_pending_job_audio_notes_submitted` " +
+                    "on `pending_job_audio_notes` (`submitted`)",
+            )
+        }
+    }
+
     /** Every migration the database needs, in the order Room applies them. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 }

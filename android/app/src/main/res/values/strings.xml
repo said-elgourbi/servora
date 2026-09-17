@@ -496,11 +496,11 @@
     -->
     <string name="job_photo_add_action">Add photo</string>
     <string name="job_photo_review_title">Add this photo</string>
-    <string name="job_photo_phase_label">Phase</string>
-    <string name="job_photo_phase_before">Before work</string>
-    <string name="job_photo_phase_during">During work</string>
-    <string name="job_photo_phase_after">After work</string>
-    <string name="job_photo_phase_unknown">Phase not recorded</string>
+    <string name="evidence_phase_label">Phase</string>
+    <string name="evidence_phase_before">Before work</string>
+    <string name="evidence_phase_during">During work</string>
+    <string name="evidence_phase_after">After work</string>
+    <string name="evidence_phase_unknown">Phase not recorded</string>
     <string name="job_photo_note_label">Note (optional)</string>
     <string name="job_photo_note_placeholder">What does this show?</string>
     <string name="job_photo_review_confirm">Add</string>
@@ -533,10 +533,10 @@
       the tray reports, never on its own.
     -->
     <string name="job_photo_tray_discard">Discard</string>
-    <string name="job_photo_state_queued">Waiting to upload</string>
-    <string name="job_photo_state_uploading">Uploading…</string>
-    <string name="job_photo_state_retrying">Will retry</string>
-    <string name="job_photo_state_refused">Refused by the server</string>
+    <string name="evidence_state_queued">Waiting to upload</string>
+    <string name="evidence_state_uploading">Uploading…</string>
+    <string name="evidence_state_retrying">Will retry</string>
+    <string name="evidence_state_refused">Refused by the server</string>
     <string name="job_photo_saved_message">Photos saved on this device. They will upload when the server can be reached.</string>
     <string name="job_photo_error_capture_failed">The camera did not save a photo.</string>
     <string name="job_photo_error_not_signed_in">Sign in again to save photos.</string>
@@ -657,4 +657,32 @@
     <string name="job_status_confirm_accept">Confirm</string>
     <!-- A read served without connectivity (`docs/architecture/offline-first-architecture.md` §2, §7). -->
     <string name="offline_last_reported">Offline — showing the last update the server reported.</string>
+    <!--
+      Audio evidence (`BR-091`, `ADR-018`). A recording is the technician's own take until they attach
+      it, so the kind states the three states a take can be in — recording, recorded, and the review —
+      and the notice reports what the device is doing with a take the API has not accepted. The
+      upload-state labels are shared with the photo kind (`evidence_state_*`), because "waiting to
+      upload" is one idea in either language (`BR-041`).
+    -->
+    <string name="job_audio_record">Record</string>
+    <string name="job_audio_stop">Stop</string>
+    <string name="job_audio_recording">Recording…</string>
+    <string name="job_audio_hint">You can review the recording before attaching it.</string>
+    <string name="job_audio_delete">Delete</string>
+    <string name="job_audio_attach">Attach to update</string>
+    <string name="job_audio_duration">%1$d:%2$02d</string>
+    <string name="job_audio_description">Audio note</string>
+    <string name="job_audio_remove">Remove recording</string>
+    <string name="job_audio_discard">Discard</string>
+    <string name="job_audio_notice_title">Audio to save</string>
+    <string name="job_audio_notice_not_attached">Not attached yet</string>
+    <string name="job_audio_message_queued">Recording saved. It will upload when the server can be reached.</string>
+    <string name="job_audio_error_microphone_denied">Servora needs the microphone to record a note.</string>
+    <string name="job_audio_error_not_signed_in">Sign in again to record audio.</string>
+    <string name="job_audio_error_recorder_unavailable">This device could not start recording.</string>
+    <string name="job_audio_error_recording_failed">The recording could not be finished, so nothing was saved.</string>
+    <string name="job_audio_error_recording_empty">The recording came out empty, so nothing was saved.</string>
+    <string name="job_audio_error_recording_not_saved">The recording could not be saved on this device.</string>
+    <string name="job_audio_error_not_queued">The recording could not be saved yet. It is still on this device.</string>
+    <string name="job_audio_error_already_submitted">That recording is already queued for upload.</string>
 </resources>

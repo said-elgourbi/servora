@@ -5,7 +5,11 @@ import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
 import com.servora.android.data.jobs.AssignableTechniciansResult
+import com.servora.android.data.jobs.AudioCollaborators
 import com.servora.android.data.jobs.FakeJobPhotoExporter
+import com.servora.android.data.jobs.JobAudioOperations
+import com.servora.android.data.jobs.JobAudioSession
+import com.servora.android.data.jobs.JOB_AUDIO_MIME_TYPE
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsResult
 import com.servora.android.data.jobs.JobPhotoExporter
@@ -17,7 +21,9 @@ import com.servora.android.data.jobs.FakeJobPhotoFiles
 import com.servora.android.data.jobs.FakeJobPhotoPickedItems
 import com.servora.android.data.jobs.FakeOfflineSync
 import com.servora.android.data.jobs.InMemoryPendingJobPhotoStore
+import com.servora.android.data.offline.AdjustableClock
 import com.servora.android.data.offline.InMemoryOutboxStore
+import com.servora.android.data.offline.OutboxFailureReason
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.jobs.ActivityWriteResult
@@ -29,11 +35,13 @@ import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitStatus
+import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -577,6 +585,293 @@ class JobDetailsViewModelTest {
     }
 
     @Test
+    fun `records a take as a durable draft when the recorder stops`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val audio = AudioCollaborators()
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        viewModel.stopAudioRecording()
+        advanceUntilIdle()
+
+        // The take is on this device, findable after a process death, and not evidence yet (`BR-014`,
+        // `BR-091`): nothing is queued, nothing is claimed, and the Activity is not read for it.
+        val draft = requireNotNull(viewModel.uiState.value.audioDraft)
+        assertEquals(JOB_AUDIO_MIME_TYPE, draft.mimeType)
+        assertEquals(EvidencePhase.DURING_WORK, draft.phase)
+        assertEquals(JOB_ID, draft.jobId)
+        assertTrue(audio.files.exists(draft.localPath))
+        assertTrue(audio.outbox.stored.isEmpty())
+        assertEquals(listOf(JOB_ID), repository.requestedActivityJobIds)
+    }
+
+    @Test
+    fun `measures the take from the device's clock when the recorder stops`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val clock = AdjustableClock(Instant.parse("2026-09-15T13:05:00Z"))
+        val audio = AudioCollaborators(clock = clock)
+        val viewModel = viewModel(repository, clock = clock, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        clock.advance(Duration.ofSeconds(18))
+        viewModel.stopAudioRecording()
+        advanceUntilIdle()
+
+        // The length is this device's own measurement of the take, for the review to show; the API reads
+        // the authoritative one from the container and that is what it stores (`ADR-018` A3).
+        assertEquals(18, viewModel.uiState.value.audioDraft?.durationSeconds)
+    }
+
+    @Test
+    fun `reports a device whose recorder could not start and records nothing`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val audio = AudioCollaborators()
+        audio.recorder.startSucceeds = false
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        advanceUntilIdle()
+
+        assertEquals(JobAudioFailure.RECORDER_UNAVAILABLE, viewModel.uiState.value.audioFailure)
+        assertNull(viewModel.uiState.value.audioRecording)
+        assertTrue(viewModel.uiState.value.pendingAudioNotes.isEmpty())
+        // The recorder is released and whatever it may have created goes with it (`§9`).
+        assertEquals(1, audio.recorder.releases)
+        assertTrue(audio.files.storedPaths.isEmpty())
+    }
+
+    @Test
+    fun `records nothing for a take the recorder could not finish`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val audio = AudioCollaborators()
+        audio.recorder.stopSucceeds = false
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        viewModel.stopAudioRecording()
+        advanceUntilIdle()
+
+        assertEquals(JobAudioFailure.RECORDING_FAILED, viewModel.uiState.value.audioFailure)
+        assertTrue(viewModel.uiState.value.pendingAudioNotes.isEmpty())
+        assertTrue(audio.files.storedPaths.isEmpty())
+    }
+
+    @Test
+    fun `drops a take the device could not have kept rather than recording an empty one`() =
+        runTest(dispatcher) {
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job()),
+                activityResults = listOf(JobActivityResult.Success(emptyList())),
+            )
+            val audio = AudioCollaborators()
+            // The recorder "finished", but the file it left has no bytes in it: nothing is uploadable, so
+            // nothing is recorded (`BR-014`, `BR-042`).
+            audio.recorder.recordingBytes = ByteArray(0)
+            val viewModel = viewModel(repository, audio = audio.session)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.startAudioRecording()
+            viewModel.stopAudioRecording()
+            advanceUntilIdle()
+
+            assertEquals(JobAudioFailure.RECORDING_EMPTY, viewModel.uiState.value.audioFailure)
+            assertTrue(viewModel.uiState.value.pendingAudioNotes.isEmpty())
+            assertTrue(audio.files.storedPaths.isEmpty())
+        }
+
+    @Test
+    fun `leaves a recording that is still running with nothing recorded`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val audio = AudioCollaborators()
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        viewModel.cancelAudioRecording()
+        advanceUntilIdle()
+
+        // Nothing had been recorded, so nothing is lost, and the microphone is not left open (`BR-091`).
+        assertNull(viewModel.uiState.value.audioRecording)
+        assertTrue(viewModel.uiState.value.pendingAudioNotes.isEmpty())
+        assertEquals(1, audio.recorder.releases)
+        assertTrue(audio.files.storedPaths.isEmpty())
+    }
+
+    @Test
+    fun `attaches the take with the phase and note the technician chose`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val audio = AudioCollaborators()
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        viewModel.stopAudioRecording()
+        advanceUntilIdle()
+        val draft = requireNotNull(viewModel.uiState.value.audioDraft)
+        viewModel.selectAudioPhase(EvidencePhase.AFTER_WORK)
+        viewModel.attachAudioNote("Compressor is noisy")
+        advanceUntilIdle()
+
+        // Attaching queues the upload through the outbox and asks the existing trigger to replay it
+        // (`BR-031`, §5, §6); the take is no longer the technician's to remove.
+        assertEquals(JobAudioMessage.QUEUED, viewModel.uiState.value.audioMessage)
+        assertEquals(1, audio.sync.requests)
+        val queued = audio.outbox.stored.single()
+        assertEquals(draft.audioNoteId, queued.operationId)
+        assertEquals(JobAudioOperations.ADD_AUDIO, queued.operationType)
+        assertTrue(audio.store.find(draft.audioNoteId)?.submitted == true)
+        assertTrue(queued.payload.contains("AFTER_WORK"))
+        assertTrue(queued.payload.contains("Compressor is noisy"))
+        // Queueing is not evidence: the Activity is not read until the backend has accepted it.
+        assertEquals(listOf(JOB_ID), repository.requestedActivityJobIds)
+    }
+
+    @Test
+    fun `reports a take that could not be queued and keeps it on the device`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val audio = AudioCollaborators()
+        audio.store.submitsToQueue = false
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        viewModel.stopAudioRecording()
+        advanceUntilIdle()
+        viewModel.attachAudioNote(null)
+        advanceUntilIdle()
+
+        assertEquals(JobAudioFailure.NOT_QUEUED, viewModel.uiState.value.audioFailure)
+        assertEquals(1, viewModel.uiState.value.pendingAudioNotes.size)
+        assertFalse(viewModel.uiState.value.pendingAudioNotes.single().submitted)
+    }
+
+    @Test
+    fun `removes a take the backend permanently refused`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val audio = AudioCollaborators()
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        viewModel.stopAudioRecording()
+        advanceUntilIdle()
+        val draft = requireNotNull(viewModel.uiState.value.audioDraft)
+        viewModel.attachAudioNote(null)
+        advanceUntilIdle()
+        // What the replay engine does when the API refuses the take for good (§6).
+        audio.outbox.markRejected(draft.audioNoteId, OutboxFailureReason.INVALID, at = 2_000L)
+        viewModel.removePendingAudioNote(draft.audioNoteId)
+        advanceUntilIdle()
+
+        // The refusal is terminal, so the discard clears the file, the draft and the queued refusal
+        // together (`BR-014`, `BR-031`).
+        assertNull(viewModel.uiState.value.audioFailure)
+        assertTrue(viewModel.uiState.value.pendingAudioNotes.isEmpty())
+        assertTrue(audio.files.storedPaths.isEmpty())
+        assertTrue(audio.outbox.rejected("user-1").isEmpty())
+    }
+
+    @Test
+    fun `does not remove a take whose upload may still be accepted`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(JobActivityResult.Success(emptyList())),
+        )
+        val audio = AudioCollaborators()
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        viewModel.stopAudioRecording()
+        advanceUntilIdle()
+        val draft = requireNotNull(viewModel.uiState.value.audioDraft)
+        viewModel.attachAudioNote(null)
+        advanceUntilIdle()
+        viewModel.removePendingAudioNote(draft.audioNoteId)
+        advanceUntilIdle()
+
+        // The backend may still accept a queued upload, so removing it would be a local decision about
+        // evidence that may already exist (`BR-014`, §9).
+        assertEquals(JobAudioFailure.ALREADY_SUBMITTED, viewModel.uiState.value.audioFailure)
+        assertEquals(1, viewModel.uiState.value.pendingAudioNotes.size)
+        assertTrue(audio.files.exists(draft.localPath))
+    }
+
+    @Test
+    fun `reads the Job Activity again once a recording is accepted`() = runTest(dispatcher) {
+        // The event the second read answers with is not an audio one: the timeline entry for a recording
+        // is tracker 035's Phase 9c, and what this test pins is the trigger — an upload the API accepted
+        // reads the timeline again (`BR-001`, `BR-080`).
+        val recorded = activityEvent(id = "audio-1")
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            activityResults = listOf(
+                JobActivityResult.Success(emptyList()),
+                JobActivityResult.Success(listOf(recorded)),
+            ),
+        )
+        val audio = AudioCollaborators()
+        val viewModel = viewModel(repository, audio = audio.session)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.startAudioRecording()
+        viewModel.stopAudioRecording()
+        advanceUntilIdle()
+        val draft = requireNotNull(viewModel.uiState.value.audioDraft)
+        viewModel.attachAudioNote(null)
+        advanceUntilIdle()
+        assertEquals(listOf(JOB_ID), repository.requestedActivityJobIds)
+
+        // What the upload handler does once the API accepts the take (`JobAudioUploadHandler`).
+        audio.store.remove(draft.audioNoteId)
+        advanceUntilIdle()
+
+        // The recording is evidence the Activity projects, so the timeline is read again rather than left
+        // showing a Job without the take the technician just recorded.
+        assertEquals(listOf(JOB_ID, JOB_ID), repository.requestedActivityJobIds)
+        assertEquals(listOf("audio-1"), viewModel.uiState.value.activity?.map { it.id })
+    }
+
+    @Test
     fun `reads the Job Activity again once an upload is accepted so the timeline shows the photo`() =
         runTest(dispatcher) {
             val photo = activityEvent(
@@ -604,7 +899,7 @@ class JobDetailsViewModelTest {
             photos.files.writeCapture(capture.localPath)
             viewModel.photoCaptured(capture)
             advanceUntilIdle()
-            viewModel.confirmCapturedPhoto(JobPhotoPhase.BEFORE_WORK, "Panel before the repair")
+            viewModel.confirmCapturedPhoto(EvidencePhase.BEFORE_WORK, "Panel before the repair")
             viewModel.submitPendingPhotos()
             advanceUntilIdle()
 
@@ -1035,12 +1330,15 @@ private fun viewModel(
     repository: JobDetailsRepository,
     session: JobPhotoSession = PhotoCollaborators().session,
     exporter: JobPhotoExporter = FakeJobPhotoExporter(),
+    audio: JobAudioSession = AudioCollaborators().session,
+    clock: Clock = TEST_CLOCK,
 ) = JobDetailsViewModel(
     repository = repository,
     photos = session,
+    audio = audio,
     jobPhotoImages = JobPhotoImages.None,
     // These tests are about the Job's own actions, so no photo source hands over anything.
     pickedItems = FakeJobPhotoPickedItems(emptyMap()),
     exporter = exporter,
-    clock = TEST_CLOCK,
+    clock = clock,
 )

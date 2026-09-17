@@ -4,8 +4,10 @@ import com.servora.android.data.offline.OutboxOperation
 import com.servora.android.data.offline.OutboxOperationState
 import com.servora.android.data.offline.OutboxStore
 import com.servora.android.data.session.AuthenticatedSubject
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.PendingJobPhoto
+import com.servora.android.domain.model.evidencePhaseNameOrNull
+import com.servora.android.domain.model.evidencePhaseOrNull
 import java.time.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -34,7 +36,7 @@ interface PendingJobPhotoStore {
     suspend fun record(photo: PendingJobPhoto)
 
     /** Records the phase and note the technician chose while reviewing a not-yet-submitted photo. */
-    suspend fun updateReview(photoId: String, phase: JobPhotoPhase?, note: String?)
+    suspend fun updateReview(photoId: String, phase: EvidencePhase?, note: String?)
 
     /**
      * Queues the photo's upload and marks it submitted.
@@ -64,7 +66,7 @@ internal class JobPhotoPayloads @Inject constructor(private val json: Json) {
             JobPhotoOperationPayload.serializer(),
             JobPhotoOperationPayload(
                 localPath = photo.localPath,
-                phase = phaseNameOrNull(photo.phase),
+                phase = evidencePhaseNameOrNull(photo.phase),
                 note = photo.note,
                 capturedAt = photo.capturedAt,
                 mimeType = photo.mimeType,
@@ -110,8 +112,8 @@ internal class RoomPendingJobPhotoStore @Inject constructor(
         dao.insert(photo.toEntity(subjectId))
     }
 
-    override suspend fun updateReview(photoId: String, phase: JobPhotoPhase?, note: String?) {
-        dao.updateReview(photoId, phaseNameOrNull(phase), note)
+    override suspend fun updateReview(photoId: String, phase: EvidencePhase?, note: String?) {
+        dao.updateReview(photoId, evidencePhaseNameOrNull(phase), note)
     }
 
     override suspend fun submit(photo: PendingJobPhoto): Boolean {
@@ -150,7 +152,7 @@ private fun PendingJobPhotoEntity.toPendingPhoto(): PendingJobPhoto =
         photoId = photoId,
         jobId = jobId,
         localPath = localPath,
-        phase = jobPhotoPhaseOrNull(phase),
+        phase = evidencePhaseOrNull(phase),
         note = note,
         capturedAt = capturedAt,
         mimeType = mimeType,
@@ -165,7 +167,7 @@ private fun PendingJobPhoto.toEntity(subjectId: String): PendingJobPhotoEntity =
         subjectId = subjectId,
         jobId = jobId,
         localPath = localPath,
-        phase = phaseNameOrNull(phase),
+        phase = evidencePhaseNameOrNull(phase),
         note = note,
         capturedAt = capturedAt,
         mimeType = mimeType,

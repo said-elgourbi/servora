@@ -35,6 +35,9 @@ data class CustomerPermissionsUiState(
     // the viewer's remove action is drawn on (`BR-089`). It is a Manager-level capability the default
     // Technician role does not hold, and it is never inferred from adding or reading evidence.
     val canRemoveEvidence: Boolean = false,
+    // Recording an audio note is its own capability (`ADR-018` A7), so the *Add audio* kind is drawn on
+    // it and never on the photo one: a company may grant one kind and withhold the other.
+    val canAddEvidenceAudio: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -57,4 +60,5 @@ fun customerPermissionsUiState(
         canAddEvidencePhoto = permissionChecker.has(Permission.EVIDENCE_PHOTO_ADD),
         canViewEvidence = permissionChecker.has(Permission.EVIDENCE_VIEW),
         canRemoveEvidence = permissionChecker.has(Permission.EVIDENCE_PHOTO_REMOVE),
+        canAddEvidenceAudio = permissionChecker.has(Permission.EVIDENCE_AUDIO_ADD),
     )

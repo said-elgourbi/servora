@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Button
@@ -49,6 +50,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.domain.model.EvidencePhase
+import com.servora.android.domain.model.PendingJobAudioNote
 
 /** Identifies the sheet the one Add update action opens (`BR-027`). */
 const val JobUpdateSheetTag = "job-update-sheet"
@@ -88,6 +91,27 @@ const val JobUpdateSaveTag = "job-update-save"
 
 /** Identifies the sheet's cancel action. */
 const val JobUpdateCancelTag = "job-update-cancel"
+
+/** Identifies the audio kind's record action (`BR-091`). */
+const val JobUpdateRecordAudioTag = "job-update-record-audio"
+
+/** Identifies the audio kind's stop action. */
+const val JobUpdateStopAudioTag = "job-update-stop-audio"
+
+/** Identifies the audio kind's statement that the microphone is live. */
+const val JobUpdateAudioRecordingTag = "job-update-audio-recording"
+
+/** Identifies the audio kind's review of a recording that has not been attached yet. */
+const val JobUpdateAudioReviewTag = "job-update-audio-review"
+
+/** Identifies the audio kind's note field, typed while reviewing the take. */
+const val JobUpdateAudioNoteTag = "job-update-audio-note"
+
+/** Identifies the delete that drops a take so another can be recorded (`Delete/re-record`). */
+const val JobUpdateDiscardAudioTag = "job-update-discard-audio"
+
+/** Identifies the action that attaches the recording to the Job's Activity (`BR-091`). */
+const val JobUpdateAttachAudioTag = "job-update-attach-audio"
 
 /*
  * Metrics.
@@ -138,9 +162,19 @@ internal fun JobUpdateSheet(
     canAddPhoto: Boolean,
     canAddAudio: Boolean,
     isSubmitting: Boolean,
+    audioDraft: PendingJobAudioNote?,
+    isRecordingAudio: Boolean,
+    isAttachingAudio: Boolean,
+    audioPhase: EvidencePhase,
     onConfirmNote: (body: String) -> Unit,
     onTakePhoto: () -> Unit,
     onChoosePhotos: () -> Unit,
+    onSelectAudioPhase: (EvidencePhase) -> Unit,
+    onStartAudioRecording: () -> Unit,
+    onStopAudioRecording: () -> Unit,
+    onDiscardAudioDraft: () -> Unit,
+    onAttachAudio: (String?) -> Unit,
+    onMicrophoneDenied: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -224,7 +258,18 @@ internal fun JobUpdateSheet(
                             onChoosePhotos = onChoosePhotos,
                         )
 
-                        JobUpdateKind.AUDIO -> JobUpdateAudioContent()
+                        JobUpdateKind.AUDIO -> JobUpdateAudioContent(
+                            draft = audioDraft,
+                            isRecording = isRecordingAudio,
+                            isAttaching = isAttachingAudio,
+                            phase = audioPhase,
+                            onSelectPhase = onSelectAudioPhase,
+                            onStartRecording = onStartAudioRecording,
+                            onStopRecording = onStopAudioRecording,
+                            onDiscard = onDiscardAudioDraft,
+                            onAttach = onAttachAudio,
+                            onMicrophoneDenied = onMicrophoneDenied,
+                        )
                     }
                 }
             }
@@ -495,23 +540,184 @@ private fun JobUpdateNoteContent(
 }
 
 /**
- * The audio kind's own controls — the seam the recorder lands in (`BR-027`).
+ * The audio kind's own controls: record, stop, review, delete/re-record and attach (`BR-091`, `ADR-018`).
  *
- * Audio is a first-class kind of update in this sheet, and its controls belong here: recording,
- * playback and whatever state they keep are audio's own, so neither the note's nor the photo's layout
- * has to change when they arrive. That is the whole point of stating a kind and then drawing that
- * kind's controls.
+ * It is the design's own list (`Figma/…/servora-job-details-spec.md` §Audio), and it is drawn as one
+ * block because audio is one update: the phase is stated first — the same vocabulary a photo carries
+ * (`ADR-018` A4) — and then the take itself.
  *
- * What it draws now is nothing, deliberately. No product rule accepts an audio recording yet: the API's
- * capability for it is **reserved and not created** (`evidence.audio.add`,
- * `docs/decisions/015-evidence-capabilities.md` D2), and there is no stored evidence, no Activity kind
- * and no playback behind it. A recorder whose recording could not be submitted would be invented
- * behaviour, and an action that cannot be performed is not offered (`BR-042`) — which is why no caller
- * offers this kind yet (`offeredUpdateKinds`). The kind and this seam exist so the recorder is an
- * addition rather than a redesign.
+ * The three states it draws are the three a recording can be in, and each shows only its own controls:
+ * the microphone is **live** (Stop), there is **no take yet** (Record, the one control that asks for the
+ * microphone permission), or the take is **on this device** and is reviewed before it is attached
+ * (`BR-014`). Deleting the take is what makes another possible, so *delete/re-record* is one step back to
+ * the first state rather than a second recorder beside the first.
+ *
+ * **Playback is not here yet.** The recording is a file on this device, and playing it back is tracker
+ * 035's Phase 9c, which adds the player to the sheet and to the Job's timeline together — one port for one
+ * platform stack (`ADR-018` A9) rather than a second one here. What the review states instead is the
+ * take's length, which is what the technician decides to keep or drop on.
  */
 @Composable
-private fun JobUpdateAudioContent() {
-    // Deliberately empty until audio evidence exists (`BR-027`, `ADR-015` D2, `BR-042`).
+private fun JobUpdateAudioContent(
+    draft: PendingJobAudioNote?,
+    isRecording: Boolean,
+    isAttaching: Boolean,
+    phase: EvidencePhase,
+    onSelectPhase: (EvidencePhase) -> Unit,
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit,
+    onDiscard: () -> Unit,
+    onAttach: (note: String?) -> Unit,
+    onMicrophoneDenied: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // The note belongs to the take, so it is keyed by it: a re-record starts with an empty note rather
+    // than with the word the technician wrote about the take they deleted (`BR-042`).
+    var note by rememberSaveable(draft?.audioNoteId) { mutableStateOf(draft?.note.orEmpty()) }
+    // Recording is the one kind that needs a permission, and it is asked for here — when the technician
+    // asks to record, not at launch (`BR-012`).
+    val record = rememberJobAudioRecorder(onGranted = onStartRecording, onDenied = onMicrophoneDenied)
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.evidence_phase_label),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        EvidencePhaseSelector(
+            selected = phase,
+            enabled = !isAttaching,
+            onSelect = onSelectPhase,
+        )
+
+        when {
+            isRecording -> {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = JobUpdateAudioActionHeight)
+                        .testTag(JobUpdateAudioRecordingTag),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_mic),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(JobUpdateAudioIconSize),
+                    )
+                    Text(
+                        text = stringResource(R.string.job_audio_recording),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Button(
+                    onClick = onStopRecording,
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(JobUpdateAudioActionHeight)
+                        .testTag(JobUpdateStopAudioTag),
+                ) {
+                    Text(stringResource(R.string.job_audio_stop))
+                }
+            }
+
+            draft == null -> {
+                Button(
+                    onClick = record,
+                    enabled = !isAttaching,
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(JobUpdateAudioActionHeight)
+                        .testTag(JobUpdateRecordAudioTag),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_mic),
+                        contentDescription = null,
+                        modifier = Modifier.size(JobUpdateAudioIconSize),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.job_audio_record))
+                }
+                Text(
+                    text = stringResource(R.string.job_audio_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            else -> {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(JobUpdateAudioReviewTag),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_mic),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(JobUpdateAudioIconSize),
+                    )
+                    Text(
+                        text = audioDurationLabel(draft.durationSeconds),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { text -> note = text },
+                    enabled = !isAttaching,
+                    label = { Text(stringResource(R.string.job_photo_note_label)) },
+                    minLines = 2,
+                    maxLines = 3,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(JobUpdateAudioNoteTag),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TextButton(
+                        onClick = onDiscard,
+                        enabled = !isAttaching,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(EvidencePhaseButtonHeight)
+                            .testTag(JobUpdateDiscardAudioTag),
+                    ) {
+                        Text(stringResource(R.string.job_audio_delete))
+                    }
+                    Button(
+                        onClick = { onAttach(note) },
+                        enabled = !isAttaching,
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(EvidencePhaseButtonHeight)
+                            .testTag(JobUpdateAttachAudioTag),
+                    ) {
+                        Text(stringResource(R.string.job_audio_attach))
+                    }
+                }
+            }
+        }
+    }
 }
+
+/** The height a recording action keeps, so the kind's controls are comfortable one-handed (`BR-012`). */
+private val JobUpdateAudioActionHeight = 56.dp
+
+/** How large the microphone glyph is drawn in the audio kind's own controls. */
+private val JobUpdateAudioIconSize = 20.dp
 

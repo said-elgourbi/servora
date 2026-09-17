@@ -30,7 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
 import com.servora.android.data.jobs.JobPhotoImages
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.PendingJobPhoto
 
 /**
@@ -56,10 +56,10 @@ import com.servora.android.domain.model.PendingJobPhoto
 @Composable
 internal fun JobPhotoReviewSheet(
     photo: PendingJobPhoto,
-    initialPhase: JobPhotoPhase,
+    initialPhase: EvidencePhase,
     isBusy: Boolean,
     photoImages: JobPhotoImages,
-    onConfirm: (JobPhotoPhase, String?) -> Unit,
+    onConfirm: (EvidencePhase, String?) -> Unit,
     onDiscard: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -100,11 +100,11 @@ internal fun JobPhotoReviewSheet(
             )
 
             Text(
-                text = stringResource(R.string.job_photo_phase_label),
+                text = stringResource(R.string.evidence_phase_label),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            JobPhotoPhaseSelector(
+            EvidencePhaseSelector(
                 selected = phase,
                 enabled = !isBusy,
                 onSelect = { selected -> phase = selected },
@@ -133,7 +133,7 @@ internal fun JobPhotoReviewSheet(
                     enabled = !isBusy,
                     modifier = Modifier
                         .weight(1f)
-                        .height(JobPhotoPhaseButtonHeight)
+                        .height(EvidencePhaseButtonHeight)
                         .testTag(JobPhotoReviewDiscardTag),
                 ) {
                     Text(stringResource(R.string.job_photo_review_discard))
@@ -144,7 +144,7 @@ internal fun JobPhotoReviewSheet(
                     shape = MaterialTheme.shapes.large,
                     modifier = Modifier
                         .weight(1f)
-                        .height(JobPhotoPhaseButtonHeight)
+                        .height(EvidencePhaseButtonHeight)
                         .testTag(JobPhotoReviewConfirmTag),
                 ) {
                     Text(stringResource(R.string.job_photo_review_confirm))

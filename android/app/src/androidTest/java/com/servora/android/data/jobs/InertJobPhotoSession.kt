@@ -5,7 +5,7 @@ import com.servora.android.data.offline.OutboxFailureReason
 import com.servora.android.data.offline.OutboxOperation
 import com.servora.android.data.offline.OutboxStore
 import com.servora.android.data.session.AuthenticatedSubject
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.PendingJobPhoto
 import java.io.File
 import java.time.Clock
@@ -36,7 +36,7 @@ private object InertPendingJobPhotoStore : PendingJobPhotoStore {
 
     override suspend fun record(photo: PendingJobPhoto) = Unit
 
-    override suspend fun updateReview(photoId: String, phase: JobPhotoPhase?, note: String?) = Unit
+    override suspend fun updateReview(photoId: String, phase: EvidencePhase?, note: String?) = Unit
 
     override suspend fun submit(photo: PendingJobPhoto): Boolean = false
 
@@ -67,7 +67,7 @@ private object InertJobPhotoProcessing : JobPhotoProcessing {
     override suspend fun fitToUploadLimit(bytes: ByteArray): ByteArray? = null
 }
 
-private object InertOutboxStore : OutboxStore {
+internal object InertOutboxStore : OutboxStore {
     override suspend fun record(operation: OutboxOperation) = Unit
 
     override suspend fun head(subjectId: String): OutboxOperation? = null
@@ -100,11 +100,11 @@ private object InertOutboxStore : OutboxStore {
         emptyList()
 }
 
-private object InertSubject : AuthenticatedSubject {
+internal object InertSubject : AuthenticatedSubject {
     override fun current(): String? = "inert-subject"
 }
 
-private object InertOfflineSync : OfflineSync {
+internal object InertOfflineSync : OfflineSync {
     override fun requestSync() = Unit
 }
 

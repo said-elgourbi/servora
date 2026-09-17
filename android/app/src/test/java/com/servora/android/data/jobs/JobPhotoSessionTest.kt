@@ -1,7 +1,7 @@
 package com.servora.android.data.jobs
 
 import com.servora.android.data.offline.OutboxFailureReason
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.PendingJobPhoto
 import java.time.Instant
 import kotlinx.coroutines.test.runTest
@@ -270,7 +270,7 @@ class JobPhotoSessionTest {
 
         /** The subject every photo in this file is recorded under (`PhotoCollaborators`' default). */
         const val SUBJECT_ID = "user-1"
-        val PHASE = JobPhotoPhase.DURING_WORK
+        val PHASE = EvidencePhase.DURING_WORK
         val CAPTURED_AT: Instant = Instant.parse("2026-09-15T13:04:05Z")
     }
 }

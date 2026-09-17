@@ -7,7 +7,7 @@ import com.servora.android.data.offline.ReplayOutcome
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.PendingJobPhoto
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -197,7 +197,7 @@ class JobPhotoUploadHandlerTest {
 
     /** One pending photo, as the session records it after a capture. */
     private fun pendingPhoto(
-        phase: JobPhotoPhase? = JobPhotoPhase.DURING_WORK,
+        phase: EvidencePhase? = EvidencePhase.DURING_WORK,
         mimeType: String = "image/jpeg",
     ) = PendingJobPhoto(
         photoId = "photo-1",

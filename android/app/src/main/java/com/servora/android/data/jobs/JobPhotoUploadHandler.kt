@@ -6,6 +6,7 @@ import com.servora.android.data.offline.OutboxOperation
 import com.servora.android.data.offline.ReplayOutcome
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
+import com.servora.android.domain.model.evidencePhaseOrNull
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -44,7 +45,7 @@ internal class JobPhotoUploadHandler @Inject constructor(
     override suspend fun replay(operation: OutboxOperation): ReplayOutcome {
         val payload = payloads.decode(operation.payload)
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.UNEXPECTED)
-        val phase = jobPhotoPhaseOrNull(payload.phase)
+        val phase = evidencePhaseOrNull(payload.phase)
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
         val bytes = files.readBytes(payload.localPath)
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.NOT_FOUND)
@@ -107,7 +108,7 @@ internal class JobPhotoUploadHandler @Inject constructor(
                     SessionRenewal.Unavailable -> PhotoUploadAttempt.Undelivered
                 }
             } else {
-                PhotoUploadAttempt.Refused(httpFailureReason(failure.code()))
+                PhotoUploadAttempt.Refused(uploadFailureReason(failure.code()))
             }
         } catch (failure: IOException) {
             PhotoUploadAttempt.Undelivered
@@ -117,6 +118,14 @@ internal class JobPhotoUploadHandler @Inject constructor(
 
     private companion object {
         /** The multipart part the API reads the bytes from (`POST /jobs/:id/photos`). */
+        const val FILE_PART = "file"
+
+        /** The multipart part type for the request's text fields. */
+        const val TEXT_PART = "text/plain"
+
+        const val HTTP_UNAUTHORIZED = 401
+    }
+}
 
 /**
  * How one upload attempt ended, before the engine decides what happens to the queued row (`§6`).
@@ -146,31 +155,3 @@ private fun PhotoUploadAttempt.toReplayOutcome(): ReplayOutcome =
         PhotoUploadAttempt.Undelivered -> ReplayOutcome.Retryable(OutboxFailureReason.NETWORK)
         PhotoUploadAttempt.Unauthenticated -> ReplayOutcome.Unauthenticated
     }
-
-/** Classifies a refused upload into the reason the technician is shown (`§6`, `dev.md` §7). */
-private fun httpFailureReason(status: Int): OutboxFailureReason =
-    when (status) {
-        HTTP_BAD_REQUEST, HTTP_TOO_LARGE, HTTP_UNPROCESSABLE -> OutboxFailureReason.INVALID
-        HTTP_FORBIDDEN -> OutboxFailureReason.NOT_AUTHORIZED
-        HTTP_NOT_FOUND -> OutboxFailureReason.NOT_FOUND
-        HTTP_CONFLICT -> OutboxFailureReason.STALE
-        in HTTP_SERVER_ERROR..599 -> OutboxFailureReason.SERVER
-        else -> OutboxFailureReason.UNEXPECTED
-    }
-
-private const val HTTP_BAD_REQUEST = 400
-private const val HTTP_FORBIDDEN = 403
-private const val HTTP_NOT_FOUND = 404
-private const val HTTP_CONFLICT = 409
-private const val HTTP_TOO_LARGE = 413
-private const val HTTP_UNPROCESSABLE = 422
-private const val HTTP_SERVER_ERROR = 500
-
-        const val FILE_PART = "file"
-
-        /** The multipart part type for the request's text fields. */
-        const val TEXT_PART = "text/plain"
-
-        const val HTTP_UNAUTHORIZED = 401
-    }
-}

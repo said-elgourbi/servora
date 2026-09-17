@@ -24,10 +24,10 @@ internal enum class JobUpdateKind { NOTE, PHOTO, AUDIO }
  * The kinds a session may add, in the order the sheet offers them: the everyday case first (`BR-012`).
  *
  * A kind is offered only where the session may actually record it, because an update nobody can add is
- * not presented (`BR-042`). Audio is a first-class kind, but no product rule accepts an audio recording
- * yet — the API's capability for it is reserved and deliberately not created (`evidence.audio.add`,
- * `docs/decisions/015-evidence-capabilities.md` D2) — so no caller offers it today, and its controls are
- * the seam the recorder lands in (`JobUpdateAudioContent`).
+ * not presented (`BR-042`). Each evidence kind has its own capability, so a company can let a member
+ * record a photo and not a voice note (`ADR-015` D2, `ADR-018` A7): the audio kind is offered exactly
+ * when the session holds `evidence.audio.add`, and its controls are the recorder
+ * (`JobUpdateAudioContent`).
  */
 internal fun offeredUpdateKinds(
     canWriteNote: Boolean,

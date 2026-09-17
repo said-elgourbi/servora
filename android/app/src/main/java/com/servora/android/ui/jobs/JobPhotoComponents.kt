@@ -53,8 +53,9 @@ import com.servora.android.data.jobs.JobPhotoBytesUnavailableException
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobPhotoSyncState
+import com.servora.android.domain.model.evidencePhaseOrNull
 
 /*
  * The photo-evidence pieces the Job Details screen and the Job Activity section draw
@@ -66,10 +67,10 @@ import com.servora.android.domain.model.JobPhotoSyncState
  */
 
 /** Identifies the large phase control of the review panel. */
-const val JobPhotoPhaseSelectorTag = "job-photo-phase-selector"
+const val EvidencePhaseSelectorTag = "evidence-phase-selector"
 
 /** Identifies one phase the technician can choose. */
-fun jobPhotoPhaseOptionTag(phase: JobPhotoPhase): String = "job-photo-phase-${phase.name}"
+fun evidencePhaseOptionTag(phase: EvidencePhase): String = "evidence-phase-${phase.name}"
 
 /** Identifies the gallery of photos the backend accepted, at the head of Job Activity. */
 const val JobPhotoGalleryTag = "job-photo-gallery"
@@ -107,17 +108,17 @@ fun jobPhotoActivityNoteActionTag(photoId: String): String =
  * at a glance (`BR-012`). The phase is the API's stable code (`BR-041`); only the label is localized.
  */
 @Composable
-internal fun JobPhotoPhaseSelector(
-    selected: JobPhotoPhase?,
+internal fun EvidencePhaseSelector(
+    selected: EvidencePhase?,
     enabled: Boolean,
-    onSelect: (JobPhotoPhase) -> Unit,
+    onSelect: (EvidencePhase) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().testTag(JobPhotoPhaseSelectorTag),
+        modifier = modifier.fillMaxWidth().testTag(EvidencePhaseSelectorTag),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        JobPhotoPhase.entries.forEach { phase ->
+        EvidencePhase.entries.forEach { phase ->
             val isSelected = phase == selected
             Surface(
                 onClick = { onSelect(phase) },
@@ -140,12 +141,12 @@ internal fun JobPhotoPhaseSelector(
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .height(JobPhotoPhaseButtonHeight)
-                    .testTag(jobPhotoPhaseOptionTag(phase)),
+                    .height(EvidencePhaseButtonHeight)
+                    .testTag(evidencePhaseOptionTag(phase)),
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                     Text(
-                        text = stringResource(jobPhotoPhaseLabel(phase)),
+                        text = stringResource(evidencePhaseLabel(phase)),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         textAlign = TextAlign.Center,
@@ -262,7 +263,7 @@ private fun JobPhotoMissingPreview(contentDescription: String?) {
 
 /** The badge that names the phase a photo was taken in, drawn over the photo. */
 @Composable
-internal fun JobPhotoPhaseBadge(phase: JobPhotoPhase?, modifier: Modifier = Modifier) {
+internal fun EvidencePhaseBadge(phase: EvidencePhase?, modifier: Modifier = Modifier) {
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
@@ -270,7 +271,7 @@ internal fun JobPhotoPhaseBadge(phase: JobPhotoPhase?, modifier: Modifier = Modi
         modifier = modifier,
     ) {
         Text(
-            text = stringResource(jobPhotoPhaseShortLabel(phase)),
+            text = stringResource(evidencePhaseShortLabel(phase)),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -279,7 +280,7 @@ internal fun JobPhotoPhaseBadge(phase: JobPhotoPhase?, modifier: Modifier = Modi
     }
 }
 
-internal val JobPhotoPhaseButtonHeight = 56.dp
+internal val EvidencePhaseButtonHeight = 56.dp
 internal val JobPhotoTileSize = 132.dp
 
 /** The height the gallery's heading keeps, so its whole row is a comfortable target (`BR-012`). */
@@ -500,8 +501,8 @@ private fun JobPhotoGalleryTile(
                     .size(JobPhotoTileSize)
                     .clip(MaterialTheme.shapes.large),
             )
-            JobPhotoPhaseBadge(
-                phase = jobPhotoPhaseOrNull(event.photoPhase),
+            EvidencePhaseBadge(
+                phase = evidencePhaseOrNull(event.photoPhase),
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(8.dp),
@@ -614,20 +615,16 @@ internal fun jobActivityPhotos(activity: List<JobActivityEvent>?): List<JobActiv
 internal fun jobPhotoGalleryPreview(photos: List<JobActivityEvent>): List<JobActivityEvent> =
     photos.take(JobPhotoGalleryPreviewCount)
 
-/** The phase code the API reported, or `null` when this build cannot read it (`BR-042`). */
-internal fun jobPhotoPhaseOrNull(code: String?): JobPhotoPhase? =
-    code?.let { value -> JobPhotoPhase.entries.firstOrNull { it.name == value } }
-
 /** A note trimmed to what a tile can show. */
 internal fun jobPhotoNoteSnippet(note: String): String =
     if (note.length <= JobPhotoNoteLength) note else "${note.take(JobPhotoNoteLength - 1)}…"
 
 /** The localized label of a phase the technician chooses from. */
-internal fun jobPhotoPhaseLabel(phase: JobPhotoPhase): Int =
+internal fun evidencePhaseLabel(phase: EvidencePhase): Int =
     when (phase) {
-        JobPhotoPhase.BEFORE_WORK -> R.string.job_photo_phase_before
-        JobPhotoPhase.DURING_WORK -> R.string.job_photo_phase_during
-        JobPhotoPhase.AFTER_WORK -> R.string.job_photo_phase_after
+        EvidencePhase.BEFORE_WORK -> R.string.evidence_phase_before
+        EvidencePhase.DURING_WORK -> R.string.evidence_phase_during
+        EvidencePhase.AFTER_WORK -> R.string.evidence_phase_after
     }
 
 /**
@@ -636,16 +633,16 @@ internal fun jobPhotoPhaseLabel(phase: JobPhotoPhase): Int =
  * It is the same word the selector uses, so the badge and the choice the technician made cannot read
  * differently (`BR-028`). A photo whose phase cannot be read says so rather than showing a guess.
  */
-internal fun jobPhotoPhaseShortLabel(phase: JobPhotoPhase?): Int =
-    phase?.let { jobPhotoPhaseLabel(it) } ?: R.string.job_photo_phase_unknown
+internal fun evidencePhaseShortLabel(phase: EvidencePhase?): Int =
+    phase?.let { evidencePhaseLabel(it) } ?: R.string.evidence_phase_unknown
 
 /** The localized report of what an upload is doing, as the tray shows it (`§7`). */
 internal fun jobPhotoStateLabel(state: JobPhotoSyncState): Int =
     when (state) {
-        JobPhotoSyncState.QUEUED -> R.string.job_photo_state_queued
-        JobPhotoSyncState.UPLOADING -> R.string.job_photo_state_uploading
-        JobPhotoSyncState.RETRYING -> R.string.job_photo_state_retrying
-        JobPhotoSyncState.REFUSED -> R.string.job_photo_state_refused
+        JobPhotoSyncState.QUEUED -> R.string.evidence_state_queued
+        JobPhotoSyncState.UPLOADING -> R.string.evidence_state_uploading
+        JobPhotoSyncState.RETRYING -> R.string.evidence_state_retrying
+        JobPhotoSyncState.REFUSED -> R.string.evidence_state_refused
     }
 
 /** The localized reason a photo action did not complete (`BR-042`). */

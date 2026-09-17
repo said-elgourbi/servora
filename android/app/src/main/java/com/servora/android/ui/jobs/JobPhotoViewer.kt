@@ -44,9 +44,10 @@ import com.servora.android.R
 import com.servora.android.data.jobs.JobPhotoBytesUnavailable
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.domain.model.JobActivityEvent
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.PendingJobPhoto
+import com.servora.android.domain.model.evidencePhaseOrNull
 import me.saket.telephoto.zoomable.ZoomableImageState
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
@@ -170,7 +171,7 @@ internal sealed interface ViewedJobPhoto {
     val photoId: String
 
     /** The field-work phase the photo was taken in, or `null` when this build cannot read it. */
-    val phase: JobPhotoPhase?
+    val phase: EvidencePhase?
 
     /** The technician's note, or `null` when they wrote none. */
     val note: String?
@@ -179,7 +180,7 @@ internal sealed interface ViewedJobPhoto {
     data class Pending(
         override val photoId: String,
         val localPath: String,
-        override val phase: JobPhotoPhase?,
+        override val phase: EvidencePhase?,
         override val note: String?,
     ) : ViewedJobPhoto
 
@@ -187,7 +188,7 @@ internal sealed interface ViewedJobPhoto {
     data class Stored(
         override val photoId: String,
         val jobId: String,
-        override val phase: JobPhotoPhase?,
+        override val phase: EvidencePhase?,
         override val note: String?,
     ) : ViewedJobPhoto
 }
@@ -222,7 +223,7 @@ internal fun viewedJobPhoto(
     return ViewedJobPhoto.Stored(
         photoId = photoId,
         jobId = jobId,
-        phase = jobPhotoPhaseOrNull(event.photoPhase),
+        phase = evidencePhaseOrNull(event.photoPhase),
         note = event.body?.takeIf { it.isNotBlank() },
     )
 }
@@ -425,7 +426,7 @@ internal fun JobPhotoViewer(
                         modifier = Modifier.align(Alignment.TopCenter),
                     )
 
-                    JobPhotoPhaseBadge(
+                    EvidencePhaseBadge(
                         phase = currentPhoto.phase,
                         modifier = Modifier
                             .align(Alignment.BottomStart)

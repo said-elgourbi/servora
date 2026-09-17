@@ -353,6 +353,17 @@ fun ServoraNavHost(
                 // removing recorded evidence is a Manager-level capability of its own (`BR-089`).
                 canViewEvidence = permissions.canViewEvidence,
                 canRemoveEvidence = permissions.canRemoveEvidence,
+                // Recording an audio note is its own capability, so the *Add audio* kind is offered only
+                // to a session the API would accept a recording from (`BR-006`, `BR-007`).
+                canAddAudio = permissions.canAddEvidenceAudio,
+                onSelectAudioPhase = jobDetailsViewModel::selectAudioPhase,
+                onStartAudioRecording = jobDetailsViewModel::startAudioRecording,
+                onStopAudioRecording = jobDetailsViewModel::stopAudioRecording,
+                onCancelAudioRecording = jobDetailsViewModel::cancelAudioRecording,
+                onAttachAudioNote = jobDetailsViewModel::attachAudioNote,
+                onRemovePendingAudioNote = jobDetailsViewModel::removePendingAudioNote,
+                onMicrophoneDenied = jobDetailsViewModel::microphoneDenied,
+                onDismissAudioMessage = jobDetailsViewModel::dismissAudioMessage,
                 onDismissPhotoMessage = jobDetailsViewModel::dismissPhotoMessage,
                 photoImages = jobDetailsViewModel.photoImages,
             )

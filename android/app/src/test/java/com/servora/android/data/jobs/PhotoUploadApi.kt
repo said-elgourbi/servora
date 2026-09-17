@@ -38,6 +38,35 @@ class PhotoUploadApi : JobDetailsApi {
     var lastFileName: String? = null
     var lastFileContentType: String? = null
 
+    /** How the next audio upload answers, and what it was sent (`BR-091`). */
+    var addJobAudioNoteAnswer: (String) -> JobActivityDto = { jobId ->
+        JobActivityDto(jobId = jobId, events = emptyList())
+    }
+
+    var addJobAudioNoteCalls = 0
+
+    override suspend fun addJobAudioNote(
+        authorization: String,
+        jobId: String,
+        clientOperationId: RequestBody,
+        phase: RequestBody,
+        note: RequestBody?,
+        capturedAt: RequestBody?,
+        file: MultipartBody.Part,
+    ): JobActivityDto {
+        addJobAudioNoteCalls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastClientOperationId = clientOperationId.multipartText()
+        lastPhase = phase.multipartText()
+        lastNote = note?.multipartText()
+        lastCapturedAt = capturedAt?.multipartText()
+        lastFileName = file.headers?.get("Content-Disposition")
+        lastFileContentType = file.body.contentType()?.toString()
+        lastFileBytes = file.body.multipartBytes()
+        return addJobAudioNoteAnswer(jobId)
+    }
+
     override suspend fun addJobPhoto(
         authorization: String,
         jobId: String,

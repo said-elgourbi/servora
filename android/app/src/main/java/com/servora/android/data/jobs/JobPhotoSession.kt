@@ -5,7 +5,7 @@ import com.servora.android.data.offline.OutboxStore
 import com.servora.android.data.offline.OfflineSync
 import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.domain.model.CapturedJobPhoto
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.isDiscardable
@@ -77,7 +77,7 @@ class JobPhotoSession @Inject constructor(
     suspend fun recordCapture(
         capture: CapturedJobPhoto,
         jobId: String,
-        phase: JobPhotoPhase?,
+        phase: EvidencePhase?,
         capturedAt: Instant,
     ): JobPhotoRecordResult {
         val subjectId = subject.current()
@@ -124,7 +124,7 @@ class JobPhotoSession @Inject constructor(
     suspend fun recordPickedPhoto(
         jobId: String,
         source: ByteArray,
-        phase: JobPhotoPhase,
+        phase: EvidencePhase,
     ): JobPhotoRecordResult {
         val subjectId = subject.current()
             ?: return JobPhotoRecordResult.Refused(JobPhotoRefusal.NOT_SIGNED_IN)
@@ -163,7 +163,7 @@ class JobPhotoSession @Inject constructor(
         sourcePath: String?,
         source: ByteArray,
         jobId: String,
-        phase: JobPhotoPhase?,
+        phase: EvidencePhase?,
         capturedAt: Instant,
     ): JobPhotoRecordResult {
         // The type step (`D3b`): bytes whose type Servora already accepts keep it; anything else is
@@ -230,7 +230,7 @@ class JobPhotoSession @Inject constructor(
     }
 
     /** Records the phase and the optional note the technician chose while reviewing a photo. */
-    suspend fun reviewCapture(photoId: String, phase: JobPhotoPhase?, note: String?) {
+    suspend fun reviewCapture(photoId: String, phase: EvidencePhase?, note: String?) {
         pending.updateReview(photoId, phase, note?.takeIf { it.isNotBlank() })
     }
 

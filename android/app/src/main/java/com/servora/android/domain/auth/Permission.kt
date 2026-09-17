@@ -33,6 +33,12 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     // default Technician role does not hold it, and it is not implied by adding or reading evidence. A
     // technician's own discard of an unsubmitted draft needs no capability at all (`BR-088`).
     EVIDENCE_PHOTO_REMOVE("evidence.photo.remove"),
+    // Recording an audio note is its own capability, because the catalogue is per kind: a company may
+    // let a member record a photo and not a voice note, and withdrawal is per kind (`ADR-015` D2,
+    // `ADR-018` A7). It is the code `ADR-015` reserved and `ADR-018` created, and it is never implied
+    // by the photo capability. A capability named here is a UI gate only: the backend remains the
+    // authority (`BR-007`, `BR-011`).
+    EVIDENCE_AUDIO_ADD("evidence.audio.add"),
 }
 
 class PermissionChecker(granted: Set<String>) {

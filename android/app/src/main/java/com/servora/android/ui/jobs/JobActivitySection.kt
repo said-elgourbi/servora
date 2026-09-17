@@ -36,6 +36,7 @@ import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.VisitStatus
+import com.servora.android.domain.model.evidencePhaseOrNull
 import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
 import com.servora.android.ui.components.initials
@@ -332,8 +333,8 @@ private fun ActivityPhotoEvidence(
                 contentDescription = stringResource(R.string.job_photo_image_description),
                 modifier = Modifier.fillMaxSize(),
             )
-            JobPhotoPhaseBadge(
-                phase = jobPhotoPhaseOrNull(event.photoPhase),
+            EvidencePhaseBadge(
+                phase = evidencePhaseOrNull(event.photoPhase),
                 modifier = Modifier.align(Alignment.BottomStart).padding(6.dp),
             )
         }

@@ -80,6 +80,7 @@ import com.servora.android.ui.customers.customerDetailJobTag
 import com.servora.android.ui.customers.customerRowTag
 import com.servora.android.ui.home.ManagerHomeViewModel
 import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.jobs.inertJobAudioSession
 import com.servora.android.data.jobs.inertJobPhotoExporter
 import com.servora.android.data.jobs.inertJobPhotoPickedItems
 import com.servora.android.data.jobs.inertJobPhotoSession
@@ -329,6 +330,7 @@ class ServoraHomeNavigationTest {
         val jobDetailsViewModel = JobDetailsViewModel(
             repository = FakeJobDetailsRepository(),
             photos = inertJobPhotoSession(),
+            audio = inertJobAudioSession(),
             jobPhotoImages = JobPhotoImages.None,
             pickedItems = inertJobPhotoPickedItems(),
             exporter = inertJobPhotoExporter(),

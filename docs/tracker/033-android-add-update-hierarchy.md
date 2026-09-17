@@ -97,11 +97,11 @@ Presentation, not product behaviour: no business rule, contract or stored value 
 
 ## What this deliberately does not do
 
-- **No audio recorder.** Audio is a first-class kind, and its controls are `JobUpdateAudioContent` —
-  a composable that draws nothing today, because no rule accepts an audio recording: the API has no
-  `evidence.audio.add` (`ADR-015` D2 deliberately does not create it), no stored evidence, no content
-  type, no Activity kind and no playback. A recorder whose recording could not be submitted would be
-  invented behaviour, and the kind is not offered at all in production (`BR-042`).
+- **No playback.** Audio is a first-class kind whose recorder and draft are `JobUpdateAudioContent`; the
+  recording plays back in tracker 035's Phase 9c, where the player is added to the sheet's review and to
+  the Job's timeline together (`ADR-018` A9). What Phase 9b landed is the record → review → delete/re-record
+  → attach part of the design's list, so the sheet offers the kind on `evidence.audio.add`
+  (`docs/tracker/035-android-audio-evidence.md`).
 - **No permission code invented.** Neither the API catalogue nor the Android `Permission` enum gains an
   audio code: the decision that reserves it explicitly says it is not created until audio exists, and a
   client constant for a code the API does not define would be a second source of truth (`BR-041`).

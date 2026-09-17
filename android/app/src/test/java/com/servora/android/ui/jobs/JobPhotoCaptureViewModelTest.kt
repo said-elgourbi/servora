@@ -2,6 +2,7 @@ package com.servora.android.ui.jobs
 
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.AssignableTechniciansResult
+import com.servora.android.data.jobs.AudioCollaborators
 import com.servora.android.data.jobs.FakeJobPhotoExporter
 import com.servora.android.data.jobs.FakeJobPhotoFiles
 import com.servora.android.data.jobs.FakeJobPhotoPickedItems
@@ -27,7 +28,7 @@ import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobDetails
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
@@ -97,17 +98,17 @@ class JobPhotoCaptureViewModelTest {
         val viewModel = startedViewModel(photos)
 
         // The first capture starts in the working default (`BR-012`).
-        assertEquals(JobPhotoPhase.DURING_WORK, viewModel.uiState.value.photoPhase)
+        assertEquals(EvidencePhase.DURING_WORK, viewModel.uiState.value.photoPhase)
 
         val first = requireNotNull(viewModel.beginPhotoCapture())
         photos.files.writeCapture(first.localPath)
         viewModel.photoCaptured(first)
         advanceUntilIdle()
-        viewModel.confirmCapturedPhoto(JobPhotoPhase.AFTER_WORK, null)
+        viewModel.confirmCapturedPhoto(EvidencePhase.AFTER_WORK, null)
         advanceUntilIdle()
 
-        assertEquals(JobPhotoPhase.AFTER_WORK, viewModel.uiState.value.photoPhase)
-        assertEquals(JobPhotoPhase.AFTER_WORK, photos.store.stored.first().phase)
+        assertEquals(EvidencePhase.AFTER_WORK, viewModel.uiState.value.photoPhase)
+        assertEquals(EvidencePhase.AFTER_WORK, photos.store.stored.first().phase)
         // A note is optional: confirming without one records no note.
         assertNull(photos.store.stored.first().note)
 
@@ -117,7 +118,7 @@ class JobPhotoCaptureViewModelTest {
         viewModel.photoCaptured(second)
         advanceUntilIdle()
 
-        assertEquals(JobPhotoPhase.AFTER_WORK, photos.store.stored.last().phase)
+        assertEquals(EvidencePhase.AFTER_WORK, photos.store.stored.last().phase)
     }
 
     @Test
@@ -147,7 +148,7 @@ class JobPhotoCaptureViewModelTest {
         photos.files.writeCapture(capture.localPath)
         viewModel.photoCaptured(capture)
         advanceUntilIdle()
-        viewModel.confirmCapturedPhoto(JobPhotoPhase.BEFORE_WORK, "Panel before the repair")
+        viewModel.confirmCapturedPhoto(EvidencePhase.BEFORE_WORK, "Panel before the repair")
         viewModel.submitPendingPhotos()
         advanceUntilIdle()
 
@@ -251,7 +252,7 @@ class JobPhotoCaptureViewModelTest {
         photos.files.writeCapture(capture.localPath)
         viewModel.photoCaptured(capture)
         advanceUntilIdle()
-        viewModel.confirmCapturedPhoto(JobPhotoPhase.DURING_WORK, null)
+        viewModel.confirmCapturedPhoto(EvidencePhase.DURING_WORK, null)
         viewModel.submitPendingPhotos()
         advanceUntilIdle()
         assertEquals(1, viewModel.uiState.value.pendingPhotos.size)
@@ -386,14 +387,14 @@ class JobPhotoCaptureViewModelTest {
         assertEquals(listOf("uri-1"), picked.readUris)
         assertEquals(listOf(first.photoId), viewModel.uiState.value.pendingPhotos.map { it.photoId })
 
-        viewModel.confirmCapturedPhoto(JobPhotoPhase.BEFORE_WORK, "Worn filter")
+        viewModel.confirmCapturedPhoto(EvidencePhase.BEFORE_WORK, "Worn filter")
         advanceUntilIdle()
 
         val second = requireNotNull(viewModel.uiState.value.capturedPhoto)
         assertEquals(listOf("uri-1", "uri-2"), picked.readUris)
         assertTrue(first.photoId != second.photoId)
 
-        viewModel.confirmCapturedPhoto(JobPhotoPhase.BEFORE_WORK, null)
+        viewModel.confirmCapturedPhoto(EvidencePhase.BEFORE_WORK, null)
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
@@ -403,7 +404,7 @@ class JobPhotoCaptureViewModelTest {
         assertEquals(2, state.pendingPhotos.size)
         assertEquals(2, state.pendingPhotos.map { it.localPath }.toSet().size)
         assertEquals(2, photos.store.stored.size)
-        assertEquals(JobPhotoPhase.BEFORE_WORK, photos.store.stored.first().phase)
+        assertEquals(EvidencePhase.BEFORE_WORK, photos.store.stored.first().phase)
         assertEquals("Worn filter", photos.store.stored.first().note)
     }
 
@@ -417,7 +418,7 @@ class JobPhotoCaptureViewModelTest {
         photos.files.writeCapture(capture.localPath)
         viewModel.photoCaptured(capture)
         advanceUntilIdle()
-        viewModel.confirmCapturedPhoto(JobPhotoPhase.AFTER_WORK, null)
+        viewModel.confirmCapturedPhoto(EvidencePhase.AFTER_WORK, null)
         advanceUntilIdle()
 
         viewModel.photosPicked(listOf("uri-1"))
@@ -427,8 +428,8 @@ class JobPhotoCaptureViewModelTest {
         // The draft carries the phase in effect, exactly as a capture's does, so a photo the technician
         // never reviews is still one the API can accept (`BR-027`). The review that opened is where
         // they change it.
-        assertEquals(JobPhotoPhase.AFTER_WORK, picked.phase)
-        assertEquals(JobPhotoPhase.AFTER_WORK, photos.store.stored.last().phase)
+        assertEquals(EvidencePhase.AFTER_WORK, picked.phase)
+        assertEquals(EvidencePhase.AFTER_WORK, photos.store.stored.last().phase)
     }
 
     @Test
@@ -445,7 +446,7 @@ class JobPhotoCaptureViewModelTest {
 
         viewModel.photosPicked(listOf("uri-1", "uri-2", "uri-3"))
         advanceUntilIdle()
-        viewModel.confirmCapturedPhoto(JobPhotoPhase.DURING_WORK, null)
+        viewModel.confirmCapturedPhoto(EvidencePhase.DURING_WORK, null)
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
@@ -789,6 +790,7 @@ private fun viewModel(
     JobDetailsViewModel(
         repository = repository,
         photos = photos.session,
+        audio = AudioCollaborators().session,
         jobPhotoImages = JobPhotoImages.None,
         pickedItems = pickedItems,
         exporter = exporter,

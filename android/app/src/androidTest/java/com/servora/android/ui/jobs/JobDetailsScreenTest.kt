@@ -40,7 +40,7 @@ import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PendingJobPhoto
@@ -232,7 +232,7 @@ class JobDetailsScreenTest {
                 jobId = JOB_ID,
                 details = job(),
                 capturedPhoto = pendingPhoto(),
-                photoPhase = JobPhotoPhase.DURING_WORK,
+                photoPhase = EvidencePhase.DURING_WORK,
             ),
         )
 
@@ -244,12 +244,12 @@ class JobDetailsScreenTest {
         composeTestRule.onNodeWithTag(JobPhotoReviewDiscardTag).assertIsDisplayed()
 
         // Three large phase buttons, never radio buttons (`BR-012`).
-        composeTestRule.onNodeWithTag(JobPhotoPhaseSelectorTag).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(jobPhotoPhaseOptionTag(JobPhotoPhase.BEFORE_WORK))
+        composeTestRule.onNodeWithTag(EvidencePhaseSelectorTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(evidencePhaseOptionTag(EvidencePhase.BEFORE_WORK))
             .assertIsDisplayed()
-        composeTestRule.onNodeWithTag(jobPhotoPhaseOptionTag(JobPhotoPhase.DURING_WORK))
+        composeTestRule.onNodeWithTag(evidencePhaseOptionTag(EvidencePhase.DURING_WORK))
             .assertIsDisplayed()
-        composeTestRule.onNodeWithTag(jobPhotoPhaseOptionTag(JobPhotoPhase.AFTER_WORK))
+        composeTestRule.onNodeWithTag(evidencePhaseOptionTag(EvidencePhase.AFTER_WORK))
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Before work").assertIsDisplayed()
         composeTestRule.onNodeWithText("After work").assertIsDisplayed()
@@ -357,7 +357,7 @@ class JobDetailsScreenTest {
         composeTestRule
             .onNode(
                 hasTestTag(jobPhotoActivityPhotoTag("photo-1")) and
-                    hasText(string(R.string.job_photo_phase_before)),
+                    hasText(string(R.string.evidence_phase_before)),
             )
             .assertIsDisplayed()
         // Actor and time are the metadata every other entry carries (`BR-080`).
@@ -482,7 +482,7 @@ class JobDetailsScreenTest {
             .assertIsDisplayed()
         composeTestRule
             .onNode(
-                hasText(string(R.string.job_photo_phase_before)) and
+                hasText(string(R.string.evidence_phase_before)) and
                     hasAnyAncestor(hasTestTag(JobPhotoViewerTag)),
             )
             .assertIsDisplayed()
@@ -683,7 +683,7 @@ class JobDetailsScreenTest {
         // same badge for their own tiles, so the badge this test is about is the viewer's own.
         composeTestRule
             .onNode(
-                hasText(string(R.string.job_photo_phase_during)) and
+                hasText(string(R.string.evidence_phase_during)) and
                     hasAnyAncestor(hasTestTag(JobPhotoViewerTag)),
             )
             .assertIsDisplayed()
@@ -920,7 +920,7 @@ class JobDetailsScreenTest {
             .assertIsDisplayed()
         composeTestRule
             .onNode(
-                hasText(string(R.string.job_photo_phase_before)) and
+                hasText(string(R.string.evidence_phase_before)) and
                     hasAnyAncestor(hasTestTag(JobPhotoViewerTag)),
             )
             .assertIsDisplayed()
@@ -1012,7 +1012,7 @@ class JobDetailsScreenTest {
         onDismissActionMessage: () -> Unit = {},
         onCapturePhoto: () -> Unit = {},
         onChoosePhotos: () -> Unit = {},
-        onConfirmCapturedPhoto: (JobPhotoPhase, String?) -> Unit = { _, _ -> },
+        onConfirmCapturedPhoto: (EvidencePhase, String?) -> Unit = { _, _ -> },
         onDiscardCapturedPhoto: () -> Unit = {},
         onKeepCapturedPhoto: () -> Unit = {},
         onRemovePendingPhoto: (String) -> Unit = {},
@@ -1024,6 +1024,15 @@ class JobDetailsScreenTest {
         onSavePermissionResult: (Boolean) -> Unit = {},
         canViewEvidence: Boolean = false,
         canRemoveEvidence: Boolean = false,
+        canAddAudio: Boolean = false,
+        onSelectAudioPhase: (EvidencePhase) -> Unit = {},
+        onStartAudioRecording: () -> Unit = {},
+        onStopAudioRecording: () -> Unit = {},
+        onCancelAudioRecording: () -> Unit = {},
+        onAttachAudioNote: (String?) -> Unit = {},
+        onRemovePendingAudioNote: (String) -> Unit = {},
+        onMicrophoneDenied: () -> Unit = {},
+        onDismissAudioMessage: () -> Unit = {},
         photoImages: JobPhotoImages = JobPhotoImages.None,
     ) {
         val screenState = state ?: JobDetailsUiState(jobId = JOB_ID, details = details)
@@ -1058,6 +1067,15 @@ class JobDetailsScreenTest {
                     onSharePhoto = onSharePhoto,
                     onRemoveEvidencePhoto = onRemoveEvidencePhoto,
                     onSavePermissionResult = onSavePermissionResult,
+                    canAddAudio = canAddAudio,
+                    onSelectAudioPhase = onSelectAudioPhase,
+                    onStartAudioRecording = onStartAudioRecording,
+                    onStopAudioRecording = onStopAudioRecording,
+                    onCancelAudioRecording = onCancelAudioRecording,
+                    onAttachAudioNote = onAttachAudioNote,
+                    onRemovePendingAudioNote = onRemovePendingAudioNote,
+                    onMicrophoneDenied = onMicrophoneDenied,
+                    onDismissAudioMessage = onDismissAudioMessage,
                     canViewEvidence = canViewEvidence,
                     canRemoveEvidence = canRemoveEvidence,
                     photoImages = photoImages,
@@ -1798,9 +1816,19 @@ class JobDetailsScreenTest {
                     canAddPhoto = canAddPhoto,
                     canAddAudio = canAddAudio,
                     isSubmitting = false,
+                    audioDraft = null,
+                    isRecordingAudio = false,
+                    isAttachingAudio = false,
+                    audioPhase = EvidencePhase.DURING_WORK,
                     onConfirmNote = {},
                     onTakePhoto = {},
                     onChoosePhotos = {},
+                    onSelectAudioPhase = {},
+                    onStartAudioRecording = {},
+                    onStopAudioRecording = {},
+                    onDiscardAudioDraft = {},
+                    onAttachAudio = {},
+                    onMicrophoneDenied = {},
                     onDismiss = {},
                 )
             }
@@ -1933,7 +1961,7 @@ private fun activityEvent(
 /** One photo the technician captured that the backend has not accepted yet (`§9`). */
 private fun pendingPhoto(
     photoId: String = "photo-1",
-    phase: JobPhotoPhase? = JobPhotoPhase.DURING_WORK,
+    phase: EvidencePhase? = EvidencePhase.DURING_WORK,
     note: String? = "Sawdust on the belt",
     submitted: Boolean = false,
 ) = PendingJobPhoto(

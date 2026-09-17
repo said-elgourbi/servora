@@ -17,6 +17,11 @@ import com.servora.android.data.jobs.JobPhotoPickedItems
 import com.servora.android.data.jobs.JobPhotoProcessing
 import com.servora.android.data.jobs.JobPhotoUploadHandler
 import com.servora.android.data.jobs.PrivateJobPhotoFiles
+import com.servora.android.data.jobs.JobAudioFiles
+import com.servora.android.data.jobs.JobAudioRecorder
+import com.servora.android.data.jobs.JobAudioUploadHandler
+import com.servora.android.data.jobs.PrivateJobAudioFiles
+import com.servora.android.data.jobs.MediaRecorderJobAudioRecorder
 import com.servora.android.data.offline.OfflineOperationHandler
 import dagger.Binds
 import dagger.Module
@@ -45,6 +50,13 @@ internal object JobsOfflineModule {
     @IntoSet
     fun provideJobPhotoUploadHandler(
         handler: JobPhotoUploadHandler,
+    ): OfflineOperationHandler = handler
+
+    /** A queued audio upload is the same, for evidence of its own kind (`BR-091`, §9). */
+    @Provides
+    @IntoSet
+    fun provideJobAudioUploadHandler(
+        handler: JobAudioUploadHandler,
     ): OfflineOperationHandler = handler
 }
 
@@ -115,6 +127,18 @@ internal abstract class JobsOfflineBindingsModule {
     @Binds
     @Singleton
     abstract fun bindJobPhotoFiles(implementation: PrivateJobPhotoFiles): JobPhotoFiles
+
+    /** The bytes of a recording live in app-private storage, written by the device's own recorder. */
+    @Binds
+    @Singleton
+    abstract fun bindJobAudioFiles(implementation: PrivateJobAudioFiles): JobAudioFiles
+
+    /** The device's microphone: the one collaborator of the audio feature that needs a device (§9). */
+    @Binds
+    @Singleton
+    abstract fun bindJobAudioRecorder(
+        implementation: MediaRecorderJobAudioRecorder,
+    ): JobAudioRecorder
 
     /**
      * What the tray, the gallery, the review preview and the viewer draw a photo with (`D4b`): the

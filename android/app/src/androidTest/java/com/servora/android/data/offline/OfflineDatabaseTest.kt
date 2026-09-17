@@ -4,11 +4,16 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.servora.android.data.jobs.JOB_AUDIO_MIME_TYPE
+import com.servora.android.data.jobs.JobAudioOperations
+import com.servora.android.data.jobs.JobAudioPayloads
 import com.servora.android.data.jobs.JobPhotoOperations
 import com.servora.android.data.jobs.JobPhotoPayloads
+import com.servora.android.data.jobs.RoomPendingJobAudioNoteStore
 import com.servora.android.data.jobs.RoomPendingJobPhotoStore
 import com.servora.android.data.session.AuthenticatedSubject
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
+import com.servora.android.domain.model.PendingJobAudioNote
 import com.servora.android.domain.model.PendingJobPhoto
 import java.time.Clock
 import java.time.Instant
@@ -217,9 +222,9 @@ class OfflineDatabaseTest {
         val photos = pendingPhotos()
         photos.record(photo("photo-1"))
 
-        photos.updateReview("photo-1", JobPhotoPhase.AFTER_WORK, "Panel closed")
+        photos.updateReview("photo-1", EvidencePhase.AFTER_WORK, "Panel closed")
         assertEquals("Panel closed", photos.find("photo-1")?.note)
-        assertEquals(JobPhotoPhase.AFTER_WORK, photos.find("photo-1")?.phase)
+        assertEquals(EvidencePhase.AFTER_WORK, photos.find("photo-1")?.phase)
 
         assertEquals(true, photos.submit(photo("photo-1")))
         assertEquals(true, photos.find("photo-1")?.submitted)
@@ -234,11 +239,95 @@ class OfflineDatabaseTest {
         photos.record(photo("photo-1"))
         photos.submit(photo("photo-1"))
 
-        photos.updateReview("photo-1", JobPhotoPhase.BEFORE_WORK, "too late")
+        photos.updateReview("photo-1", EvidencePhase.BEFORE_WORK, "too late")
 
-        assertEquals(JobPhotoPhase.DURING_WORK, photos.find("photo-1")?.phase)
+        assertEquals(EvidencePhase.DURING_WORK, photos.find("photo-1")?.phase)
         assertNull(photos.find("photo-1")?.note)
     }
+
+    /**
+     * The pending audio notes on a real device (`BR-091`, `ADR-018`).
+     *
+     * Audio is evidence of its own kind, so its rows have their own table, their own subject scoping and
+     * their own queueing of the upload — the same rules the photo records follow, asserted against the
+     * same SQLite the device runs (`qa.md` §9).
+     */
+    @Test
+    fun keepsPendingAudioNotesPerSubjectAndJobAndQueuesTheUploadOnce() = runTest {
+        val audio = pendingAudioNotes()
+        audio.record(audioNote("audio-1", jobId = "job-1"))
+        audio.record(audioNote("audio-2", jobId = "job-2"))
+
+        assertEquals(
+            listOf("audio-1"),
+            audio.pending(SUBJECT, "job-1").first().map { it.audioNoteId },
+        )
+        assertEquals(
+            listOf("audio-2"),
+            audio.pending(SUBJECT, "job-2").first().map { it.audioNoteId },
+        )
+        // Another subject's pending evidence is never visible to this one (`§10`).
+        assertEquals(
+            emptyList<String>(),
+            audio.pending("user-2", "job-1").first().map { it.audioNoteId },
+        )
+    }
+
+    @Test
+    fun recordsAnAudioReviewAndTheQueueingWhenItIsAttached() = runTest {
+        val audio = pendingAudioNotes()
+        audio.record(audioNote("audio-1"))
+
+        audio.updateReview("audio-1", EvidencePhase.AFTER_WORK, "Compressor is noisy")
+        assertEquals("Compressor is noisy", audio.find("audio-1")?.note)
+        assertEquals(EvidencePhase.AFTER_WORK, audio.find("audio-1")?.phase)
+
+        assertEquals(true, audio.submit(requireNotNull(audio.find("audio-1"))))
+        assertEquals(true, audio.find("audio-1")?.submitted)
+        // The upload is queued with the recording's own id as its idempotency key (`BR-031`).
+        assertEquals("audio-1", outbox.head(SUBJECT)?.operationId)
+        assertEquals(JobAudioOperations.ADD_AUDIO, outbox.head(SUBJECT)?.operationType)
+    }
+
+    @Test
+    fun refusesToReviewAnAudioNoteWhoseUploadIsAlreadyQueued() = runTest {
+        val audio = pendingAudioNotes()
+        audio.record(audioNote("audio-1"))
+        audio.submit(audioNote("audio-1"))
+
+        audio.updateReview("audio-1", EvidencePhase.BEFORE_WORK, "too late")
+
+        assertEquals(EvidencePhase.DURING_WORK, audio.find("audio-1")?.phase)
+        assertNull(audio.find("audio-1")?.note)
+    }
+
+    /** The audio records, over the same database the photo ones are covered on. */
+    private fun pendingAudioNotes(): RoomPendingJobAudioNoteStore = RoomPendingJobAudioNoteStore(
+        dao = database.pendingJobAudioNoteDao(),
+        outbox = outbox,
+        payloads = JobAudioPayloads(Json),
+        subject = object : AuthenticatedSubject {
+            override fun current(): String? = SUBJECT
+        },
+        clock = Clock.fixed(Instant.parse("2026-09-15T13:05:00Z"), ZoneOffset.UTC),
+    )
+
+    private fun audioNote(
+        audioNoteId: String,
+        jobId: String = "job-1",
+        phase: EvidencePhase? = EvidencePhase.DURING_WORK,
+    ): PendingJobAudioNote = PendingJobAudioNote(
+        audioNoteId = audioNoteId,
+        jobId = jobId,
+        localPath = "app-private/job-audio/$SUBJECT/$audioNoteId.m4a",
+        phase = phase,
+        note = null,
+        capturedAt = "2026-09-15T13:04:05Z",
+        durationSeconds = 18,
+        mimeType = JOB_AUDIO_MIME_TYPE,
+        recordedAt = 1_000L,
+        submitted = false,
+    )
 
     private fun pendingPhotos(): RoomPendingJobPhotoStore = RoomPendingJobPhotoStore(
         dao = database.pendingJobPhotoDao(),
@@ -253,7 +342,7 @@ class OfflineDatabaseTest {
     private fun photo(
         photoId: String,
         jobId: String = "job-1",
-        phase: JobPhotoPhase? = JobPhotoPhase.DURING_WORK,
+        phase: EvidencePhase? = EvidencePhase.DURING_WORK,
     ): PendingJobPhoto = PendingJobPhoto(
         photoId = photoId,
         jobId = jobId,

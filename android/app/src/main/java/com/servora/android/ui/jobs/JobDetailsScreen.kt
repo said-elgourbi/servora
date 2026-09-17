@@ -52,7 +52,7 @@ import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
-import com.servora.android.domain.model.JobPhotoPhase
+import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.ui.components.InfoCard
@@ -179,7 +179,7 @@ fun JobDetailsScreen(
     onDismissActionMessage: () -> Unit,
     onCapturePhoto: () -> Unit,
     onChoosePhotos: () -> Unit,
-    onConfirmCapturedPhoto: (JobPhotoPhase, String?) -> Unit,
+    onConfirmCapturedPhoto: (EvidencePhase, String?) -> Unit,
     onDiscardCapturedPhoto: () -> Unit,
     onKeepCapturedPhoto: () -> Unit,
     onRemovePendingPhoto: (String) -> Unit,
@@ -191,6 +191,15 @@ fun JobDetailsScreen(
     onSavePermissionResult: (Boolean) -> Unit,
     canViewEvidence: Boolean,
     canRemoveEvidence: Boolean,
+    canAddAudio: Boolean,
+    onSelectAudioPhase: (EvidencePhase) -> Unit,
+    onStartAudioRecording: () -> Unit,
+    onStopAudioRecording: () -> Unit,
+    onCancelAudioRecording: () -> Unit,
+    onAttachAudioNote: (String?) -> Unit,
+    onRemovePendingAudioNote: (String) -> Unit,
+    onMicrophoneDenied: () -> Unit,
+    onDismissAudioMessage: () -> Unit,
     photoImages: JobPhotoImages = JobPhotoImages.None,
     modifier: Modifier = Modifier,
 ) {
@@ -238,6 +247,8 @@ fun JobDetailsScreen(
     val completedAction = state.completedAction
     val photoFailure = state.photoFailure
     val photoMessage = state.photoMessage
+    val audioFailure = state.audioFailure
+    val audioMessage = state.audioMessage
     val actionMessage = when {
         actionFailure != null -> stringResource(jobActionFailureMessage(actionFailure))
         completedAction != null -> stringResource(jobActionCompletionMessage(completedAction))
@@ -254,6 +265,8 @@ fun JobDetailsScreen(
             }
         }
         photoMessage != null -> stringResource(jobPhotoMessageText(photoMessage))
+        audioFailure != null -> stringResource(jobAudioFailureMessage(audioFailure))
+        audioMessage != null -> stringResource(jobAudioMessageText(audioMessage))
         else -> null
     }
     val dismissLabel = stringResource(R.string.job_action_dismiss)
@@ -262,11 +275,11 @@ fun JobDetailsScreen(
     // presents the change, so the report is shown and released instead of being left standing in the
     // layout (`BR-001`, `BR-042`). A refusal waits for the user, because nothing on screen reflects a
     // change that did not happen and the refusal is the action's only report.
-    LaunchedEffect(actionMessage, actionFailure != null, photoFailure != null) {
+    LaunchedEffect(actionMessage, actionFailure != null, photoFailure != null, audioFailure != null) {
         if (actionMessage == null) {
             return@LaunchedEffect
         }
-        val isFailure = actionFailure != null || photoFailure != null
+        val isFailure = actionFailure != null || photoFailure != null || audioFailure != null
         try {
             snackbarHostState.showSnackbar(
                 visuals = JobActionSnackbarVisuals(
@@ -285,6 +298,7 @@ fun JobDetailsScreen(
             // Job on screen already shows.
             onDismissActionMessage()
             onDismissPhotoMessage()
+            onDismissAudioMessage()
         }
     }
 
@@ -337,8 +351,8 @@ fun JobDetailsScreen(
         // Manager's Job capability (`BR-009`, `docs/decisions/015-evidence-capabilities.md`).
         if (
             details != null &&
-            (canUpdateJob || canAddEvidencePhoto) &&
-            state.pendingPhotos.isEmpty()
+            (canUpdateJob || canAddEvidencePhoto || canAddAudio) &&
+            !state.holdsUnacceptedEvidence
         ) {
             ExtendedFloatingActionButton(
                 modifier = Modifier
@@ -360,21 +374,41 @@ fun JobDetailsScreen(
             }
         }
 
-        // The photo tray is the technician's working state, so while it holds anything it takes the
-        // bottom of the screen: the next thing they want is another capture or saving what they have,
-        // and the floating action would otherwise sit on top of it (`BR-012`).
-        if (state.pendingPhotos.isNotEmpty()) {
-            JobPhotoTray(
-                photos = state.pendingPhotos,
-                uploads = state.photoUploads,
-                isSubmitting = state.isSubmittingPhotos,
-                onCapture = onCapturePhoto,
-                onSubmit = onSubmitPendingPhotos,
-                onRemove = onRemovePendingPhoto,
-                onOpen = { photoId -> viewedPhotoId = photoId },
-                photoImages = photoImages,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
+        // The evidence the backend has not accepted yet is the technician's working state, so while the
+        // device holds any of it the bottom of the screen belongs to it: the next thing they want is to
+        // finish or drop what they have, and the floating action would otherwise sit on top of it
+        // (`BR-012`). Both kinds are stacked rather than one hiding the other, because a Job can hold a
+        // photo waiting to save and a recording waiting to attach at the same time (`§9`).
+        if (state.holdsUnacceptedEvidence) {
+            Column(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(JobEvidenceStackSpacing),
+            ) {
+                if (state.pendingAudioNotes.isNotEmpty()) {
+                    JobAudioNotice(
+                        notes = state.pendingAudioNotes,
+                        uploads = state.audioUploads,
+                        isAttaching = state.isSubmittingAudio,
+                        // The notice is not the sheet, so it attaches the take with the note already
+                        // recorded on it: what the technician typed in the review is what it sends
+                        // (`BR-091`).
+                        onAttach = { onAttachAudioNote(state.audioDraft?.note) },
+                        onRemove = onRemovePendingAudioNote,
+                    )
+                }
+                if (state.pendingPhotos.isNotEmpty()) {
+                    JobPhotoTray(
+                        photos = state.pendingPhotos,
+                        uploads = state.photoUploads,
+                        isSubmitting = state.isSubmittingPhotos,
+                        onCapture = onCapturePhoto,
+                        onSubmit = onSubmitPendingPhotos,
+                        onRemove = onRemovePendingPhoto,
+                        onOpen = { photoId -> viewedPhotoId = photoId },
+                        photoImages = photoImages,
+                    )
+                }
+            }
         }
     }
 
@@ -387,12 +421,15 @@ fun JobDetailsScreen(
             // A photo is authorized by the evidence capability, which the technician who records the
             // field evidence holds (`BR-006`, `BR-009`).
             canAddPhoto = canAddEvidencePhoto,
-            // Audio is a first-class kind of update in the sheet's hierarchy, and no session may add one
-            // yet: the API's capability for it is reserved and not created (`evidence.audio.add`,
-            // `ADR-015` D2), so no kind is offered for it and no recorder is drawn (`BR-042`). When that
-            // capability exists, this reads it — the sheet's own structure does not change.
-            canAddAudio = false,
+            // Audio is its own capability, so the kind is offered to a session that may record one and
+            // withheld from a session that may not — the API enforces the same code on the route
+            // (`BR-006`, `BR-007`, `ADR-018` A7).
+            canAddAudio = canAddAudio,
             isSubmitting = state.isSubmitting,
+            audioDraft = state.audioDraft,
+            isRecordingAudio = state.audioRecording != null,
+            isAttachingAudio = state.isSubmittingAudio,
+            audioPhase = state.audioPhase,
             onConfirmNote = { body ->
                 showAddActivity = false
                 onAddActivityText(body)
@@ -408,7 +445,28 @@ fun JobDetailsScreen(
                 showAddActivity = false
                 onChoosePhotos()
             },
-            onDismiss = { showAddActivity = false },
+            onSelectAudioPhase = onSelectAudioPhase,
+            onStartAudioRecording = onStartAudioRecording,
+            onStopAudioRecording = onStopAudioRecording,
+            // Deleting the take is the device's own removal of evidence the backend has not accepted;
+            // it needs no capability, because nothing has been recorded yet (`BR-088`, `BR-091`).
+            onDiscardAudioDraft = {
+                state.audioDraft?.let { draft -> onRemovePendingAudioNote(draft.audioNoteId) }
+            },
+            onAttachAudio = { note ->
+                showAddActivity = false
+                onAttachAudioNote(note)
+            },
+            onMicrophoneDenied = onMicrophoneDenied,
+            onDismiss = {
+                // Leaving the sheet ends a recording that is still running: nothing was recorded, so
+                // nothing is lost, and the microphone does not stay open behind a closed sheet
+                // (`BR-091`).
+                if (state.audioRecording != null) {
+                    onCancelAudioRecording()
+                }
+                showAddActivity = false
+            },
         )
     }
 
@@ -1023,6 +1081,14 @@ private fun readInstant(value: String): ZonedDateTime? =
     } catch (unreadable: DateTimeParseException) {
         null
     }
+
+/**
+ * The gap between the two pieces of unaccepted evidence the screen stacks at its bottom.
+ *
+ * They are separate surfaces rather than one, because they are different kinds with different actions
+ * (`§9`); the gap is what keeps them readable as two reports.
+ */
+private val JobEvidenceStackSpacing = 8.dp
 
 /**
  * The language the device is set to, read from the configuration so a change to it recomposes the

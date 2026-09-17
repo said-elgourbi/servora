@@ -1193,6 +1193,22 @@ private class FakeJobDetailsApi(
         lastJobId = jobId
         return "".toResponseBody("image/jpeg".toMediaType())
     }
+
+    /**
+     * The audio route is not used by these tests. They cover the Job read and the management actions;
+     * the audio upload is covered where it lives (`JobAudioUploadHandlerTest`).
+     */
+    override suspend fun addJobAudioNote(
+        authorization: String,
+        jobId: String,
+        clientOperationId: RequestBody,
+        phase: RequestBody,
+        note: RequestBody?,
+        capturedAt: RequestBody?,
+        file: MultipartBody.Part,
+    ): JobActivityDto {
+        throw NotImplementedError("Not used by these tests.")
+    }
 }
 
 private class FakeSessionAuthenticator(
