@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
   CUSTOMER_PERMISSIONS,
+  VISIT_PERMISSIONS,
   type PermissionCode,
 } from '../src/auth/permissions.js';
 import {
@@ -21,6 +22,7 @@ import {
   visitNotes,
   visits,
   visitStatusHistory,
+  visitTechnicians,
 } from '../src/database/schema.js';
 import { hashPassword } from '../src/users/password-hasher.js';
 import {
@@ -200,6 +202,16 @@ describe('job activity (e2e)', () => {
     return visit;
   }
 
+  /** Puts a member on a Visit's crew, as a dispatcher would (`BR-068`). */
+  async function assign(visitId: string, technicianMembershipId: string) {
+    await database.db.insert(visitTechnicians).values({
+      organizationId,
+      visitId,
+      technicianMembershipId,
+      roleCode: 'LEAD',
+    });
+  }
+
   /** A Job with two Visits and a Job status change, a Visit status change and a Visit note. */
   async function activityFixture() {
     const actor = await newNamedMembership('John', 'Smith');
@@ -264,6 +276,40 @@ describe('job activity (e2e)', () => {
       .get(`/jobs/${fixture.job.id}/activity`)
       .set('Authorization', `Bearer ${session.accessToken}`)
       .expect(403);
+  });
+
+  /*
+   * The field caller (`BR-009`; `ADR-019` D1, D2). The activity is a projection of the same records the
+   * Job read answers with, so it is reached through the Job read's guard and carries the same
+   * assignment scope: a field caller reads the activity of a Job their own crew includes, and a Job it
+   * does not reach is reported as not found rather than forbidden.
+   */
+
+  it('answers the activity to a field caller assigned to one of the Job Visits', async () => {
+    const fixture = await activityFixture();
+    const session = await signInFor([VISIT_PERMISSIONS.VIEW_ASSIGNED]);
+    await assign(fixture.secondVisit.id, session.membershipId);
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}/activity`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(response.body.jobId).toBe(fixture.job.id);
+    expect(response.body.events).toHaveLength(3);
+  });
+
+  it('answers not found for an activity of a Job a field caller is not assigned to', async () => {
+    const fixture = await activityFixture();
+    const session = await signInFor([VISIT_PERMISSIONS.VIEW_ASSIGNED]);
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}/activity`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404)
+      .expect((response) => {
+        expect(response.body.code).toBe('JOB_NOT_FOUND');
+      });
   });
 
   it('answers not found for a Job the caller organization does not own', async () => {

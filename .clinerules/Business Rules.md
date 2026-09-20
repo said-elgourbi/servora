@@ -300,10 +300,22 @@ Android, Angular, API
   - Update assigned Visit field status.
   - Add Visit notes.
   - Record Visit outcomes.
+  - View the Customer of a Job the technician is currently assigned to, view-only (BR-092).
 - A Technician cannot gain Manager CRUD capabilities merely because the frontend exposes a corresponding screen.
 
 **Exceptions:**
 None.
+
+**Notes:**
+**Changed decision (recorded under BR-040):** product ownership added one capability to the default
+Technician set. A technician in the field has to reach the Customer they are working for — to call ahead
+before arriving, confirm the visit, or read what the office recorded about them — and the default
+Technician role previously held no Customer capability at all, so a technician who could open a Job
+Details screen still had no way to reach the Customer that Job belongs to. BR-092 defines that read:
+view-only, the Customer's own name, phone number, email address and notes, and only through a Job the
+technician's own current crew includes. It is a **distinct capability** rather than an inference from
+the Visit capabilities, so a company may withdraw a member's customer visibility without withdrawing
+their assigned field work (BR-006).
 
 **Status:**
 **CONFIRMED**
@@ -405,11 +417,12 @@ Offline-capable workflows may include:
 - Capturing photos/evidence
 - Recording relevant timestamps
 - Recording relevant field/location information
+- Viewing evidence already recorded on the technician's work: its **metadata** (phase, note, time) is required to be readable offline, and its **bytes** are available on a best-effort basis (`BR-015`, `BR-088`)
 
 Offline work is stored locally and synchronized with the backend when connectivity becomes available.
 
 **Exceptions:**
-Operations that fundamentally require current server information may require connectivity.
+Operations that fundamentally require current server information may require connectivity, except that accepted evidence's **metadata** must be readable offline while its bytes are best-effort (`BR-015`).
 
 **Status:**
 **CONFIRMED**
@@ -459,6 +472,9 @@ Android, API
 
 **Exceptions:**
 None.
+
+**Notes:**
+A photo is **draft material** until the backend accepts it and **immutable historical evidence** from that moment; the whole evidence lifecycle — immutability, removal, retention, metadata and kinds — is defined by `BR-088` – `BR-091`. The metadata of accepted evidence must be readable offline, with its bytes available best-effort (`BR-013`).
 
 **Status:**
 **CONFIRMED**
@@ -968,6 +984,9 @@ None.
 **Notes:**
 Example of a valid Job with no Property and no Visit: Customer "John Smith", Job "Repair furnace", status `NEW`.
 
+The **product's supported create operation** requires a Property and an active Customer instead (`BR-094`).
+This rule states what the Job model permits, which `BR-094` does not change.
+
 **Status:**
 **CONFIRMED**
 
@@ -1104,6 +1123,9 @@ None.
 **Notes:**
 After a Job is `COMPLETED`, its Property cannot be changed (BR-062). Historical location changes are governed by BR-057. Archiving a Property never changes a Job's Property reference or its address snapshot (BR-083).
 
+The **supported create operation** requires a Property the selected Customer currently holds, and writes the
+snapshot at creation (`BR-094`).
+
 **Status:**
 **CONFIRMED**
 
@@ -1159,8 +1181,20 @@ Permitted transitions:
 
 ```text
 NEW             → SCHEDULED
+NEW             → IN_PROGRESS
+NEW             → PENDING_REVIEW
+NEW             → COMPLETED
+
 SCHEDULED       → IN_PROGRESS
+SCHEDULED       → PENDING_REVIEW
+SCHEDULED       → COMPLETED
+
+IN_PROGRESS     → SCHEDULED
 IN_PROGRESS     → PENDING_REVIEW
+IN_PROGRESS     → COMPLETED
+
+PENDING_REVIEW  → SCHEDULED
+PENDING_REVIEW  → IN_PROGRESS
 PENDING_REVIEW  → COMPLETED
 
 NEW             → CANCELED
@@ -1172,8 +1206,15 @@ COMPLETED       → NEW
 CANCELED        → NEW
 ```
 
-- Reopening never produces `IN_PROGRESS` directly (BR-063).
-- Job status advances as a consequence of Visit lifecycle events (BR-074) and the conditions in BR-060 and BR-061; the backend applies and validates the transition.
+- **Any structurally permitted destination may be selected directly.** While a Job is open (`NEW`, `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW`) an authorized user may select **any other open status, forwards or backwards**, or `COMPLETED`. The Job reaches that status in **one** business operation, and that operation records **one** transition; a client must not reach a destination by issuing a series of transitions.
+- A Job is therefore never forced through the lifecycle one step at a time. `SCHEDULED → COMPLETED` and `IN_PROGRESS → SCHEDULED` are each one permitted transition.
+- A Job may not "change" to the status it already holds; that is not a transition.
+- `NEW` is not a destination for an open Job. It is reached only by reopening a terminal Job (BR-063).
+- `COMPLETED` and `CANCELED` are terminal. The **only** destination from either is `NEW`, through the explicit reopen (BR-063). No other destination is reachable from a terminal status.
+- The transition list is **structural**. Whether a listed destination may be entered right now is a runtime eligibility question owned by its own rule: BR-061 for `PENDING_REVIEW` and BR-062 for `COMPLETED`. A destination is therefore offered even when the Job does not currently qualify for it, and the operation is refused with that rule's own outcome. Eligibility must never be expressed by removing a structurally valid destination from the list.
+- Every status change records, in append-only history, the previous status, the new status, the user who made the change and the timestamp (BR-033, BR-067, BR-080).
+- Changing a Job's status **never** changes a Visit's status and never rewrites Visit history. The Job's business lifecycle and the field execution lifecycle are separate state machines (BR-059).
+- Job status advances as a consequence of Visit lifecycle events (BR-074) and the conditions in BR-060 and BR-061, and by the explicit authorized action above; the backend applies and validates the transition either way.
 - `COMPLETED`, `CANCELED` and reopening are explicit authorized actions (BR-062, BR-064, BR-063).
 - Clients must not invent their own Job status vocabulary (BR-041).
 
@@ -1181,7 +1222,9 @@ CANCELED        → NEW
 None.
 
 **Notes:**
-This rule defines the lifecycle required by BR-022.
+This rule defines the lifecycle required by BR-022. Job cancellation appears above as a permitted transition but is not applied while BR-064's structured reason catalogue is undefined.
+
+**Changed decision (recorded under BR-040):** the transition list previously permitted only the next step forward, so a manager had to move a Job through every status in order and could not move one backwards. Product ownership confirmed that an authorized user selects any permitted destination in one operation, and that `NEW` is not a destination for an open Job. BR-061 and BR-062 remain runtime eligibility conditions over this list, and BR-062 now carries the completion invariant.
 
 **Status:**
 **CONFIRMED**
@@ -1261,6 +1304,12 @@ A Job may enter `PENDING_REVIEW` only when:
   because no further Visit is required, that decision resolves the follow-up requirement for the
   purpose of review entry (BR-FV-004, BR-FV-007).
 - `PENDING_REVIEW` is a review state and does not itself complete the Job (BR-062).
+- These conditions apply to **every** transition into `PENDING_REVIEW`, whatever status the Job moves from (BR-058). They are runtime eligibility, not a structural limit: `PENDING_REVIEW` remains a permitted destination and is offered to authorized users even when the Job does not currently qualify.
+- **A Job must not await review while its field work is unfinished.** `PENDING_REVIEW` is reached
+  because no Visit remained active; when a Visit is moved back into a working status, the condition no
+  longer holds, so the Job leaves `PENDING_REVIEW` and returns to `IN_PROGRESS`. This is the invariant
+  the entry conditions describe, applied in the other direction, and it is what keeps an actively worked
+  Visit from coexisting with a Job awaiting completion review (BR-074).
 
 **Exceptions:**
 None.
@@ -1285,10 +1334,19 @@ Android, Angular, API, Database
 **Expected behavior:**
 
 - Only a Manager/authorized office user can close a Job.
-- Closing is `PENDING_REVIEW → COMPLETED` (BR-058) and requires an explicit business action.
+- Closing requires an explicit business action and is a transition **into** `COMPLETED` (BR-058). `PENDING_REVIEW → COMPLETED` remains the normal path, and an open Job may also be closed directly from `SCHEDULED`, `IN_PROGRESS` or `NEW`, in one operation.
+- A consequential transition such as closing a Job requires the user to confirm it explicitly before it is applied; a confirmation is a presentation of the decision, never a substitute for the rules below.
+- **A Job must not transition to `COMPLETED` while it has any open Visit.** A Visit is open while its status is not historical — that is, while it is anything other than `COMPLETED`, `CANCELED` or `NO_SHOW` (BR-074; the same classification BR-083 uses for an active Visit). The check is enforced by the backend as part of applying the transition and cannot be overridden by a client confirmation.
+  - `IN_PROGRESS` Job with an `IN_PROGRESS` Visit → refused.
+  - `SCHEDULED` Job with a `SCHEDULED` Visit → refused.
+  - A `DRAFT` Visit is a field attempt that has not happened yet, so it is remaining work and the Job cannot be closed while it exists.
+  - `SCHEDULED` Job whose Visits are all `COMPLETED`, `CANCELED` or `NO_SHOW` → permitted.
+  - A Job with no Visit at all → permitted (administrative closure).
+  - The refusal is reported as its own outcome so a client can say why, and it is not a transition refusal: the destination is structurally permitted by BR-058.
+- Closing a Job changes only the Job. It never changes or reopens a Visit's status and never rewrites Visit history (BR-059).
 - `final_outcome` is an optional Job field recording the overall result of the Job, set when the Job is closed; it must never be copied automatically from the latest Visit outcome.
-- Historical `CANCELED` or `NO_SHOW` Visits do not prevent Job completion.
-- The governing condition is that no remaining work requires another Visit.
+- Historical `CANCELED`, `NO_SHOW` or `COMPLETED` Visits do not prevent Job completion.
+- The governing condition is that no remaining work requires another Visit, which the open-Visit invariant above makes checkable.
 - Once completed:
   - the Job's terminal business history is preserved;
   - Visit outcomes become immutable (BR-079);
@@ -1318,6 +1376,7 @@ Android, Angular, API, Database
 **Expected behavior:**
 
 - Reopening transitions `COMPLETED → NEW` or `CANCELED → NEW` (BR-058).
+- Reopening is the **only** way a Job reaches `NEW`: an open Job is never moved back to `NEW` (BR-058).
 - Reopening never produces `IN_PROGRESS`; it does not imply that work is currently underway.
 - Reopening does not modify or reopen historical completed or canceled Visits.
 - Reopening does not create a Visit automatically; a new Visit represents the new field attempt (BR-051).
@@ -1344,6 +1403,7 @@ Android, Angular, API, Database
 **Expected behavior:**
 
 - A Job may be canceled from `NEW`, `SCHEDULED`, `IN_PROGRESS` or `PENDING_REVIEW`, including after field work has started.
+- Cancellation is a separate explicit action with its own requirements. It is not folded into the ordinary status selector, and it is not applied as a plain destination while the structured reason catalogue remains undefined.
 - Every Job cancellation requires a structured cancellation reason and a mandatory explanation.
 - The explanation is especially important when field work has already occurred.
 - When a Job is canceled:
@@ -1405,17 +1465,23 @@ Android, Angular, API
 **Expected behavior:**
 
 - Authorization is enforced by the API; UI restrictions are convenience only (BR-007).
-- Technicians can operate the field execution lifecycle of their assigned Visits: `SCHEDULED → EN_ROUTE → ON_SITE → IN_PROGRESS → COMPLETED` (BR-074).
+- Technicians can operate the field execution lifecycle of their assigned Visits: they may move a Visit directly between any working status, in either direction, including reopening a `COMPLETED` Visit (BR-074).
 - Technicians cannot perform Job-level or dispatch-management actions, including: cancel a Job, cancel a Visit, mark `NO_SHOW`, reopen a Job, change Job status, assign or remove technicians, or change a Job's Property.
 - The exception is an explicit direct scheduling permission: a technician granted that permission may schedule a follow-up Visit directly under BR-FV-011. The permission is granted through the normal permission model and is not implied by the default Technician role.
 - Managers/authorized users perform those actions according to their permissions (BR-006).
+- The **Visit status route** is the one place the two scopes meet, and BR-093 keeps them distinct there: a
+  technician drives a Visit through their own crew membership, and an office member holding the office
+  capability drives it without being on the crew. Neither authorization gives a technician a Job-level
+  action, and neither turns an office member into a member of the field crew.
 - The implementation must support custom roles and direct member permissions rather than hard-coding these actions to the Manager system role alone (BR-004).
 
 **Exceptions:**
 None.
 
 **Notes:**
-The exact permission required for each manager action is part of the permission model (BR-006).
+The exact permission required for each manager action is part of the permission model (BR-006). The
+capability that reaches the Visit status route for each authorization is named by BR-093; the Job
+capability set as a whole remains the permission-model decision recorded in `docs/api/job-actions.md` §2.
 
 **Status:**
 **CONFIRMED**
@@ -1682,6 +1748,68 @@ None.
 
 ---
 
+## BR-094 — The supported Job-creation operation requires an active Property of the selected Customer
+
+**Description:**
+Creating a Job through Servora's supported create operation states **both** the Customer the Job is for
+and the Property the work is performed at. A Job is work for a party receiving service (`BR-048`)
+performed at a location (`BR-049`), so the operation that creates the work request asks for both, and the
+Property must currently belong to that Customer.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The supported Job-creation operation requires:
+  1. a Customer that exists in the caller's organization, has not been deleted and is `ACTIVE`;
+  2. a Property that exists in the caller's organization, is `ACTIVE`, and is **currently related to the
+     selected Customer** by an active `property_customer_relationships` row (`BR-050`);
+  3. a title (`BR-053`).
+- A create request that names a Customer or a Property which does not satisfy those conditions is refused
+  by the backend: the Customer and the Property checks are the backend's, never a client's (`BR-001`,
+  `BR-007`).
+- The Property's address is frozen into the Job's immutable snapshot when the Job is created
+  (`BR-056`, `BR-057`).
+- The Job is created in `NEW` with the backend-owned values: identifier, organization-scoped Job number,
+  status, address snapshot and version (`BR-052`, `BR-058`). A client never supplies any of them.
+- **Creating a Job never creates a Visit.** A Visit is one field attempt (`BR-047`, `BR-051`), and
+  creating the work request is not scheduling field execution. A new Job has no Visit and no schedule.
+- The create does not decide, and does not accept, a priority, an owner, a type/category or an assignment
+  (`BR-053`, `BR-054`, `BR-055`, `BR-068`).
+- The operation is authorized by the existing `JOB_CREATE` capability `BR-008` already names as a Manager
+  default; no new capability is implied.
+- The Customer, the Property check, the Job-number allocation and the Job insert are one atomic operation
+  (`BR-067`, `BR-086`). The initial `NEW` state is recorded as append-only history whose previous status is
+  **null** (`BR-033`, `BR-067`): the Job entered `NEW` from no status.
+- The number allocation is organization-scoped and safe under concurrent requests, and a Job number is
+  never duplicated within an organization (`BR-052`).
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- **This rule constrains the supported create operation, not the Job model.** `BR-051` and `BR-056` still
+  permit a Job with no Property — a property-less Job remains valid, a Property may still be added to a Job
+  after it is created, and a Job created by another path or an earlier one is unaffected. What is decided
+  here is that the product's own create operation requires the Property, so no supported workflow creates
+  a Job without one (`BR-042`).
+- The Property address snapshot timing `BR-056` leaves open is therefore answered **for this operation**:
+  the snapshot is written when the Job is created, from the Property's address at that moment.
+- Whether a Property may be created as part of creating a Job (a single form that creates both) is not
+  decided here, and neither is a Job-creation path from an organization-level Jobs list. Both remain
+  **OPEN QUESTION** and are not implemented.
+- Recorded under `BR-040`: this is a new Product decision about the create operation. It is implemented by
+  `POST /jobs` (`docs/api/job-details.md` §6), the Android Create Job screen
+  (`docs/tracker/043-create-job.md`) and the domain model's create section
+  (`docs/domain/job-visit-domain-model.md` §6.5).
+
+**Status:**
+**CONFIRMED**
+
+---
+
 # 9. Customers
 
 ## BR-023 — Customers are a core Servora entity
@@ -1701,8 +1829,11 @@ Android, Angular, API, Database
 - Customers may have optional email, phone, billing email, billing phone, notes, preferred contact method, and language.
 - Preferred contact method is one of `EMAIL`, `PHONE`, `SMS`, `NONE`.
 - Customer language is one of `en-CA`, `fr-CA`.
-- Customers may have multiple contacts.
-- Customer contacts may be marked primary, billing contact, or job contact.
+- Customers may have any number of contact persons, and none is required.
+- A contact person carries its own first name, last name, phone number and email address (`BR-095`).
+- At most one contact person per customer is primary, enforced by the database, and zero primary contacts is a legal state (`BR-095`).
+- A company customer's primary is the contact person recorded for it; an individual customer is their own primary and holds no contact person row (`BR-095`).
+- Customer contacts may be marked primary, billing contact, or job contact; no rule defines what makes a billing or a job contact.
 - Customers may have multiple addresses.
 - Customer address type is one of `SERVICE`, `BILLING`, `OTHER`.
 - A customer may have at most one default service address and at most one default billing address.
@@ -1715,8 +1846,208 @@ Android, Angular, API, Database
 **Exceptions:**
 Customer address management and Property management remain separate. Properties are the service-location model for Jobs and Visits.
 
+**Notes:**
+**Changed decision (recorded under BR-040):** product ownership completed this rule's contact behaviour on
+2026-09-18. The rule previously said only that a Customer "may have multiple contacts" and that contacts
+"may be marked primary, billing contact, or job contact", which left the primary flag unenforced by
+anything and said nothing about what a contact person owns. `BR-095` now defines the contact person: it
+carries its own first name, last name, phone number and email address; at most one contact per Customer is
+primary, enforced by the database; zero primary contacts is a legal state; and an individual Customer is
+their own primary and holds no contact person row. The expected behaviour above states those outcomes, and
+`BR-095` states the capabilities, the soft removal, the version check and the client surfaces that go with
+them. Nothing in this rule's Customer-level behaviour changed with it.
+
 **Status:**
 **CONFIRMED**
+
+---
+
+## BR-092 — A technician may read the customer of an assigned Job
+
+**Description:**
+A Technician needs to reach the Customer they are working for while they are in the field. Servora
+therefore lets a Technician read that Customer's own contact details — view-only — and only through a Job
+they are assigned to.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- A Technician may read the Customer of a Job they are **currently assigned to**: the assignment scope is
+  the crew records a Visit carries (BR-068), the same scope the assigned-Jobs read already applies
+  (BR-009).
+- The read is **scoped by the assignment, never by the Customer**. The Customer is reachable only
+  through a Job the technician's own current crew includes. A Customer with no such Job is not reachable
+  by any request, and a Job the Technician is not assigned to is reported as not found rather than as
+  forbidden.
+- The read is **view-only**. A Technician may not create, edit, archive or delete a Customer, and may not
+  change any Customer field (BR-023, BR-067).
+- The Customer data a Technician may read is the Customer's own **name, phone number, email address and
+  notes**, together with the Customer's **contact persons** — their names, phone numbers and email
+  addresses, **and which of them is primary** (`BR-095`). The Customer's billing email, billing phone, the
+  billing-contact flag, preferred contact method, language, addresses, Properties and Jobs are **not**
+  part of this read.
+- A deleted Customer is not disclosed: a Job whose Customer the organization has deleted is not reachable
+  by id at all (BR-023).
+- The capability is granted to the default Technician role, so a Technician holds it **by default**. Like
+  every capability it is grantable and revocable per member and per role, and it is never inferred from
+  another capability (BR-004, BR-006).
+- Authorization is the API's (BR-001, BR-007). A client that hides or omits the section is not
+  authorization.
+- The Customer's contact details are readable offline, because a Technician in the field may have no
+  connectivity (BR-013, BR-014, BR-031).
+
+**Exceptions:**
+None.
+
+**Notes:**
+**Changed decision (recorded under BR-040):** product ownership answered the open question this rule's
+Notes carried. A Technician has to be able to reach the *people* at the Customer, not only the Customer
+record — "who do I call before I knock" — so the read now includes **all** of the Customer's contact
+persons (`BR-095`), with their names, phone numbers and email addresses, inside the same existing block and
+under the same assignment scope. The billing fields and the billing-contact flag stay out: they say how
+Servora bills the Customer, not who the Technician should speak to. **No new route, no new capability and
+no new authorization question** — the block's shape is unchanged, so the addition is backward compatible
+for every caller.
+
+**Changed decision (recorded under BR-040):** the read's contact persons now also report **which of them
+holds the primary flag**. The flag is not new information — the office read has carried `isPrimary` since
+`BR-095` — but the field read did not, and a list ordered primary-first cannot distinguish a Customer whose
+primary contact is recorded from one whose contacts are all secondary, so the Job Details customer block
+could not present the effective primary and the numbers it collapses by default (`BR-095`). Nothing else
+about this read changed: the same assignment scope, the same second authorization question, the same
+view-only read, and the billing fields and the billing-contact flag stay out.
+
+Whether `preferredContactMethod` and `language` belong in the field read remains **OPEN QUESTION** and is
+not implemented: they describe how Servora communicates with the Customer rather than telling the
+Technician who to call.
+
+**Status:**
+**CONFIRMED** — the read's scope, the Customer fields, the contact persons, and which of them is primary
+
+---
+
+## BR-095 — Customer contact persons
+
+**Description:**
+A Customer's contact persons are the people at that Customer the organization speaks to. An authorized
+office user records who they are, and a Technician in the field reaches them through a Job they are
+assigned to (BR-092). A contact person owns its own name, phone number and email address rather than
+borrowing the Customer's.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- A Customer may have **any number** of contact persons, and **none is required** (BR-023).
+- A contact person carries its **own** first name, last name, phone number and email address. Those four
+  fields are the feature: the Customer's own `phone` and `email` remain the Customer's general line and are
+  never a contact's details (BR-023).
+- A contact person requires a first name and a last name. Its phone number and email address are optional.
+- **At most one contact person per Customer is primary.** The invariant is enforced by the database with a
+  partial unique index over the Customer restricted to primary rows, so two simultaneous primary contacts
+  cannot be stored by any write path (BR-001). A client never decides the invariant (BR-007).
+- **Zero primary contacts is a legal state.** Because contacts are optional, a Customer may have no contact
+  at all, or contacts of which none is primary.
+- A **COMPANY** Customer's primary is the contact person recorded for it — and when no contact person is
+  flagged, the COMPANY itself is the primary, exactly as an INDIVIDUAL is (see the effective-primary rule
+  below).
+- An **INDIVIDUAL** Customer is their own primary. The person *is* the Customer, so **no contact person row
+  is written for them** and none is expected: the individual is never duplicated into the contact table,
+  because two writable copies of one fact are two answers to the same question (BR-041).
+- **The Customer's effective primary contact** is the contact person flagged primary when one is flagged.
+  When no contact person is flagged — a legal state, because contacts are optional — the **Customer itself
+  is the primary**: its own phone number is the number a surface presents as the primary one, for an
+  INDIVIDUAL and a COMPANY alike. Nothing is created, promoted or inferred to fill the gap.
+- The **Primary marker** a surface draws marks that effective primary and nothing else: the flagged contact
+  person's row when one is flagged, and otherwise the Customer's own phone line.
+- A surface that presents **one** primary contact presents the effective primary's phone, and presents the
+  remaining numbers — the other contact persons, and the Customer's own general line when it is not the
+  primary — behind an explicit disclosure that is **collapsed and hidden by default**. The Job Details
+  customer block is such a surface (BR-092, BR-012).
+- Every read that returns a Customer's contact persons reports **which of them is primary**, so a client
+  resolves the effective primary from the API's answer instead of inferring it from the list's order
+  (BR-041).
+- **Changing which contact person is primary is one operation in one transaction**: the previous primary is
+  cleared and the new one set together, so no stored state exists in which two contacts are primary or the
+  Customer has briefly none (BR-067).
+- Contact persons are maintained with **their own capability set**, not with `customers.edit`.
+
+The permission catalogue defines these stable, machine-readable capabilities:
+
+| Permission                  | Capability                                                   |
+| --------------------------- | ------------------------------------------------------------ |
+| `customers.contacts.create` | Add a contact person to a Customer.                          |
+| `customers.contacts.edit`   | Edit a Customer's contact person, its primary flag included. |
+| `customers.contacts.remove` | Remove a Customer's contact person.                          |
+
+- The codes follow the resource-prefixed `resource.action` convention (`BR-006`, `BR-041`) and carry
+  bilingual catalogue rows like every permission (`BR-005`). They are granted to the default **Manager**
+  role and **not** to the default Technician role, and they remain grantable and revocable per role and per
+  member: authorization never depends on the Manager role or on any role name (BR-004, BR-006). A dedicated
+  set rather than `customers.edit` follows `BR-085`'s Property set — a role may legitimately maintain a
+  Customer without being trusted to change or delete the people the organization calls — and
+  `customers.edit` no longer authorizes any contact write.
+- **No read capability is added.** Reading a Customer's contacts in the office stays under `customers.view`,
+  and a Technician's read stays under the capability `BR-092` already grants. Contacts are part of the
+  Customer projections those reads already return, never a route of their own.
+- **Removal is soft.** Removal records when it happened and which member performed it, and takes the contact
+  out of ordinary views, while the record itself survives so "who removed this person, and when" stays
+  answerable (BR-033, BR-067). A removal is added history, never a rewrite of what the record previously
+  held. Removing the primary contact leaves **zero** primary and **never promotes another contact
+  automatically** — the authorized user decides, as no technician is promoted automatically when a Lead is
+  removed (BR-069). No removal reason is required and no reason catalogue is invented (BR-042).
+- **Concurrent changes are refused rather than overwritten.** A contact person carries a version, and an
+  edit or a removal states the version its caller read. A mutation naming a version the contact has left is
+  rejected instead of applied (BR-001, BR-032, BR-086); a client never silently overwrites newer state.
+- Every create, edit, removal and primary change is an explicit action performed by an authenticated,
+  authorized member and is recorded through the audit/history architecture (BR-033, BR-067).
+- **Contact writes are online-only.** A create, edit or removal is executed against the API and is never
+  queued as an offline operation, because the create route accepts no client-generated idempotency key and
+  no conflict policy has been decided for it (BR-014, BR-031, BR-032). Contact reads travel in projections
+  that are already offline-capable (BR-013).
+- Localized labels and messages are provided for every contact surface (BR-028). A contact person's own
+  values are user-entered content and are never translated.
+- The API is authoritative for the contact lifecycle, its invariant and every authorization decision
+  (BR-001, BR-007). A hidden or disabled control in a client is never the boundary.
+
+**Exceptions:**
+None.
+
+**Notes:**
+
+- Editing or removing a contact person never touches the Customer, its Jobs, its Properties or any preserved
+  address snapshot (BR-056, BR-057, BR-087).
+- The contact `role` (free text, for example "Site manager") remains in the model and in the API but is not
+  captured or edited by any client in v1.
+- `isBillingContact` and the Customer's billing email and phone are named by BR-023 while no rule defines
+  what makes a billing contact, whether it must be unique, or what it changes. Nothing is implemented for
+  them.
+- No uniqueness constraint is imposed on a contact person's phone number or email address
+  (`docs/domain/foundation-domain-model.md` §8): two contacts may share one, and two Customers may share
+  one.
+- Where a client manages contacts, and whether a removed contact is readable in an audit view, are
+  client-surface and audit questions; BR-033's detailed audit rules remain open.
+
+**Changed decision (recorded under BR-040):** product ownership defined what "primary" means when no
+contact person holds the flag. This rule previously said a COMPANY Customer's primary is the contact person
+recorded for it, and that zero primary contacts is a legal state, but it did not say what a surface
+presents as the primary in that state. It now does: the Customer itself is the primary, the Primary marker
+follows the effective primary — the Customer's own phone line included — and a surface that presents one
+primary contact keeps the remaining numbers behind a disclosure that is collapsed and hidden by default.
+The field read was extended to report which contact person is primary, because the Job Details customer
+block cannot resolve the effective primary without it (BR-092).
+
+**Status:**
+**CONFIRMED** — `customers.contacts.create`, `customers.contacts.edit`, `customers.contacts.remove`, the
+one-primary invariant enforced by the database, the individual-customer rule, soft removal and the version
+check
+**CONFIRMED** — the effective primary contact (the flagged contact person, or the Customer itself when none
+is flagged), the Primary marker that follows it, and the collapsed presentation of the remaining numbers
+**OPEN QUESTION** — a removed-contacts or audit view for the office; the `customers.*` capability set's
+re-review; whether the contact `role` should be captured by a client
 
 ---
 
@@ -2004,13 +2335,40 @@ A Visit has exactly one status from a shared, backend-validated vocabulary:
 | `CANCELED`    | Canceled (BR-076)                        |
 | `NO_SHOW`     | The field attempt could not be performed |
 
-Normal lifecycle:
+**Working statuses** — the field attempt is not over:
+
+```text
+DRAFT, SCHEDULED, EN_ROUTE, ON_SITE, IN_PROGRESS, COMPLETED
+```
+
+**Historical statuses** — the field attempt is over:
+
+```text
+CANCELED, NO_SHOW
+```
+
+The normal progression is the order a successful field attempt usually follows:
 
 ```text
 DRAFT → SCHEDULED → EN_ROUTE → ON_SITE → IN_PROGRESS → COMPLETED
 ```
 
-Terminal alternatives:
+That order is the **usual path, not a required one.** Servora does not enforce a strict next-status
+chain on field actions: field reality requires correcting a status mistake, catching up after a missed
+tap, and moving backward when the work genuinely goes back a step.
+
+- **Free movement between working statuses.** An authorized field user may move a Visit **directly**
+  between any two working statuses, in either direction, in **one** operation. A Visit does not have to
+  be advanced one step at a time, and `SCHEDULED → IN_PROGRESS`, `ON_SITE → EN_ROUTE` and
+  `IN_PROGRESS → SCHEDULED` are each one permitted transition.
+- **A `COMPLETED` Visit may be reopened.** A Visit completed by mistake, or one whose work must
+  continue, may be moved from `COMPLETED` back into any other working status. Reopening is simply the
+  `COMPLETED → working status` direction of the same free movement; it is not a separate operation and
+  it is not a hidden lifecycle of its own.
+- A Visit may not "change" to the status it already holds; that is not a transition.
+- **`CANCELED` and `NO_SHOW` remain truly terminal and are not field destinations.** They are dispatch
+  actions (BR-066): a Technician never takes either, and no working status is reachable from them.
+  They stay the terminal alternatives they always were:
 
 ```text
 SCHEDULED   → CANCELED
@@ -2021,15 +2379,43 @@ IN_PROGRESS → CANCELED
 SCHEDULED   → NO_SHOW
 ```
 
-- Once a Visit is `COMPLETED`, `CANCELED` or `NO_SHOW` it is historical and cannot return to an active state.
-- Every transition is validated by the backend (BR-022); clients must not invent their own Visit status vocabulary (BR-041).
-- Status history is append-only.
+- `CANCELED` and `NO_SHOW` are taken with the structured reason BR-076 requires. The reason
+  requirements are unchanged by this rule.
+- Free movement is **structural**. Whether a destination may be entered right now is runtime
+  eligibility owned by its own rule — BR-072 for a Visit becoming `SCHEDULED` — so a destination is
+  offered even when the Visit does not currently qualify for it, and the operation is refused with that
+  rule's own outcome. Eligibility must never be expressed by removing a structurally valid destination
+  from the list.
+- A Visit that reaches `COMPLETED` still records the outcome BR-077 requires, and a Visit completed
+  **again** after a reopen requires a **new** outcome (BR-077, BR-078).
+- Reopening a `COMPLETED` Visit preserves the previous completion, its status events and its recorded
+  outcome in append-only history, but that outcome is **no longer the Visit's current outcome**: the
+  Visit holds no current outcome until it is completed again.
+- **A Job must not await review while its field work is unfinished** (BR-061). If a Visit is moved into
+  a working status while its Job is `PENDING_REVIEW`, the Job leaves `PENDING_REVIEW` and returns to
+  `IN_PROGRESS`.
+- Every transition is validated by the backend (BR-022); clients must not invent their own Visit status
+  vocabulary (BR-041).
+- Status history is append-only, and every status change records the previous status, the new status,
+  the actor and the timestamp (BR-033, BR-067).
+- Ordinary field status changes and reversals require **no** reason dialog. A reason remains required
+  only where its own rule requires one (`CANCELED` and `NO_SHOW` — BR-076).
+- Clients must not invent a stricter lifecycle than this rule. The API projects the Visit's permitted
+  destinations so a client draws the technician's action from the backend's own answer (BR-041).
 
 **Exceptions:**
-None.
+A Job that is `COMPLETED` or `CANCELED` refuses field actions entirely: its Visit outcomes are
+immutable (BR-079) and the explicit reopen (BR-063) is the only way back.
 
 **Notes:**
 Who may drive each transition is defined by BR-066 and the permission model (BR-006).
+
+**Changed decision (recorded under BR-040):** the lifecycle was previously a chain in which a Visit
+could only be advanced to the next status, plus the single backward correction `EN_ROUTE → SCHEDULED`
+(BR-075). Product ownership confirmed that a Technician may move a Visit directly between any working
+statuses in either direction, reopening a `COMPLETED` Visit included, because the chain did not account
+for the reality of field work. `CANCELED` and `NO_SHOW` were deliberately left unchanged: they remain
+office-only dispatch actions and remain truly terminal.
 
 **Status:**
 **CONFIRMED**
@@ -2046,20 +2432,37 @@ Android, Angular, API
 
 **Expected behavior:**
 
-- At minimum, `EN_ROUTE → SCHEDULED` is allowed as an explicit correction (a technician may leave without arriving).
-- A correction preserves the original status event, records the correction, does not create a new Visit, and does not change the Visit identity.
-- Status history remains append-only.
+- A Visit status **correction** is a status change that is not the normal progression — a backward move,
+  a skipped step, or a reopen of a `COMPLETED` Visit.
+- Which corrections are permitted is BR-074's answer, not this rule's: free movement between the working
+  statuses. This rule states what a correction must do to the record.
+- A correction preserves the original status event, records the correction, does not create a new Visit,
+  and does not change the Visit identity.
+- Status history remains append-only, and a correction records the previous status, the new status, the
+  actor and the timestamp (BR-033, BR-067).
 - Corrections are performed by an authorized user according to permissions (BR-006, BR-066).
+- A correction requires **no** reason. A reason is required only where its own rule states one
+  (`CANCELED` and `NO_SHOW` — BR-076).
 
 **Exceptions:**
 None.
 
 **Notes:**
-The complete set of permitted corrections and the exact permission required for each are not defined.
+The correction flag (`is_correction`) records the `EN_ROUTE → SCHEDULED` case this rule originally named
+— a technician who left for a Property without arriving — and nothing else. BR-074's free movement is
+fully auditable from the status history alone, because every event carries its previous status, its new
+status, its actor and its timestamp. Generalizing the flag to mark every reversal is therefore not
+required, and was deliberately left undone rather than implemented as an assumption.
+
+**Changed decision (recorded under BR-040).** The permission question this rule left open — which
+capability an **office** caller needs to drive a Visit status — is answered by BR-093 (`ADR-019` D7 was
+settled by product ownership on 2026-09-18): a technician drives a Visit through
+`VISIT_UPDATE_ASSIGNED_STATUS` and their own current crew (BR-009), an office member drives it through the
+office capability `JOB_UPDATE` without crew membership, and a completion still requires
+`VISIT_RECORD_OUTCOME` of every caller. Nothing in this rule's own behaviour changed.
 
 **Status:**
-**CONFIRMED** — the explicit `EN_ROUTE → SCHEDULED` correction
-**OPEN QUESTION** — the complete set of permitted corrections and their permissions
+**CONFIRMED** — corrections, their history, and both authorizations (BR-093)
 
 ---
 
@@ -2149,7 +2552,10 @@ The initial outcome types are:
 
 - Outcome describes what resulted from the field attempt; Visit status describes whether the attempt has completed (BR-074). They must not be merged.
 - Follow-up expectation is derived from the outcome type; no separate `follow_up_required` boolean is modelled.
-- A new field attempt is represented by a new Visit, not by reopening or editing a completed Visit (BR-071).
+- A new field attempt is represented by a new Visit, not by editing a completed one. **Reopening** a
+  `COMPLETED` Visit (BR-074) is not a new attempt: it corrects the status of the field attempt that
+  already exists, and the optional reopen reason stays unmodelled. When the attempt is genuinely over
+  and different work is needed, that is a new Visit (BR-071).
 - Outcome codes are stable, machine-readable values; their labels are localized (BR-028, BR-041).
 
 **Exceptions:**
@@ -2177,6 +2583,11 @@ Android, Angular, API, Database
 - Managers/authorized office users may edit outcomes according to their permissions (BR-006, BR-066).
 - Every outcome change preserves: previous outcome, new outcome, actor, timestamp, and an optional reason.
 - Once the Job is `COMPLETED` (BR-062), Visit outcomes are immutable.
+- Reopening a `COMPLETED` Visit (BR-074) does not rewrite its outcome: the recorded outcome stays in
+  append-only outcome history, while the Visit itself holds **no current outcome** until it is completed
+  again. The next completion records its own outcome, which is then the Visit's current one (BR-077).
+- A Job that is `COMPLETED` or `CANCELED` refuses field status changes entirely (BR-062, BR-063), so an
+  outcome never becomes mutable by reopening a Visit of a closed Job.
 
 **Exceptions:**
 None.
@@ -2187,6 +2598,75 @@ The technician self-edit time window/policy is not defined. It is independent of
 **Status:**
 **CONFIRMED** — recorded corrections and immutability after Job completion
 **OPEN QUESTION** — the technician self-edit window/policy
+
+---
+
+## BR-093 — Office Visit completion
+
+**Description:**
+An authorized office member may complete a Visit from Job Details even when they are not a member of the
+Visit crew, so the office can close field attempts it is responsible for — a technician who telephoned
+dispatch instead of using the application, a technician who lost connectivity or device access, a Visit
+left open by accident, or operational clean-up after the work was confirmed finished — without making
+every office user behave like a field crew member.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The Visit status route has **two authorizations**, and they stay distinct:
+  - **Crew authorization.** A technician drives a Visit's field lifecycle when they hold the field
+    capability and their own membership is on the Visit's **current crew** (BR-009, BR-074, BR-075). A
+    Visit their crew does not include is reported as not found, never as forbidden.
+  - **Office capability authorization.** An office member who holds the capability the catalogue already
+    requires of every other office action on a Job or Visit (`JOB_UPDATE`, BR-008) may drive the Visit
+    **without being assigned to its crew**. The office capability is an alternative to crew membership; it
+    is never a substitute for the capabilities the route already asks for.
+- An office member holding that capability may take **any** otherwise-valid working destination the Visit
+  offers — `COMPLETED` included — because the route applies one of BR-074's transitions and BR-074 does
+  not distinguish who may take one working destination from another.
+- Office completion uses the same requirements as technician completion: a valid completion outcome
+  (BR-077, BR-078) is required, the normal transition rules, validation and scheduling eligibility run,
+  and the downstream Job state behaviour is identical (BR-058, BR-061, BR-074). Nothing about a completion
+  changes because an office member performed it.
+- The completion's own capability is **not** bypassed: recording the outcome requires
+  `VISIT_RECORD_OUTCOME` of every caller, the office included (BR-009, BR-077). Holding the office
+  capability alone does not authorize the outcome — that capability admits the caller to the route, and
+  the completion keeps its own question.
+- The action retains the **actual acting member** and is represented accurately in Visit status history,
+  Visit outcome history and Job Activity (BR-033, BR-067, BR-080). An office completion names the office
+  member who performed it, never the crew's Lead or any other technician.
+- Crew membership continues to govern technician access. A caller who does not hold the office capability
+  is bounded by their own current crew exactly as before, and no technician gains an office action from
+  this rule (BR-066).
+- The Job Details projection exposes only the destinations the calling member is authorized to execute:
+  none for a caller who may not drive the Visit at all, and no `COMPLETED` for a caller who does not hold
+  the outcome capability. A destination the caller cannot execute is not offered to a client to refuse
+  later (BR-007, BR-041).
+- Authorization remains the API's (BR-001, BR-007). A hidden or disabled control is never the boundary.
+
+**Exceptions:**
+`CANCELED` and `NO_SHOW` are unaffected. They remain office/dispatch actions with a structured reason, no
+capability authorizes one today, and they stay destinations of no Visit status route (BR-066, BR-076).
+This rule authorizes entering the **working** statuses, completion included — not the dispatch pair.
+
+**Notes:**
+
+- **Recorded under BR-040.** Product ownership settled `ADR-019` D7 with this rule on 2026-09-18; the
+  decision, its rationale and what it does not change are recorded in
+  `docs/decisions/019-technician-field-experience.md` (the decision update of that date).
+- The rule is deliberately narrower than "the office may behave like field crew": an office member drives
+  a Visit because they hold an office capability, and the crew remains the technician's authorization.
+- Whether the office should instead have a dedicated capability of its own — and what the Job/Visit
+  capability set as a whole should be — remains the permission-model open question recorded in
+  `docs/api/job-actions.md` §2. Until it is decided, every office action on a Job or Visit requires
+  `JOB_UPDATE`, which is the capability this rule uses for the office authorization.
+- No new permission and no schema change: the capabilities and the append-only history the rule needs
+  already exist (BR-009, BR-074, BR-077), so nothing is invented to implement it.
+
+**Status:**
+**CONFIRMED**
 
 ---
 
@@ -2480,14 +2960,14 @@ Android, Angular, API, Database
 - Retention and audit behavior must be defined explicitly rather than inferred.
 
 **Exceptions:**
-Specific retention, deletion, visibility, and audit rules remain open.
+None — retention, removal, visibility and audit of evidence are defined by `BR-088` – `BR-091`.
 
 **Notes:**
-Photos, audio and files are optional Visit evidence in v1 unless a future business workflow explicitly requires them (BR-077). Job Activity is a derived read model over the authoritative records (BR-080).
+Photos, audio and files are optional Visit evidence in v1 unless a future business workflow explicitly requires them (BR-077). Job Activity is a derived read model over the authoritative records (BR-080). The evidence lifecycle — what makes evidence immutable, how it may be removed, how long it is kept, and what metadata it carries — is defined by `BR-088` – `BR-091`.
 
 **Status:**
 **CONFIRMED** — evidence-preservation principle
-**OPEN QUESTION** — detailed retention/audit rules
+**CONFIRMED** — retention, removal, visibility and audit defined by `BR-088` – `BR-091`
 
 ---
 
@@ -2587,6 +3067,124 @@ None.
 
 **Status:**
 **CONFIRMED**
+
+---
+
+## BR-088 — Evidence is immutable once it is accepted
+
+**Description:**
+A captured photo or audio recording is **draft material** until the update it belongs to is submitted and the backend accepts it. From the moment the backend has recorded it, evidence is **immutable historical evidence**. Servora's guiding position for evidence is: append-only once accepted, offline-first for the technician, and a storage lifecycle that follows the Job/evidence lifecycle rather than UI convenience.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Before submission evidence is draft material: the technician may discard it, re-take it, change its phase and change its note. Nothing has been recorded and nothing is evidence yet.
+- **Acceptance is the boundary.** Evidence becomes immutable when the API has recorded it (BR-001). A client's own confirmation is not the boundary; the backend's acceptance is.
+- After acceptance, no operation may overwrite the evidence, replace its bytes, change its phase, edit its note in place, or silently delete it.
+- Servora provides **no edit-evidence operation**. A correction is a new, explicit, audited action — a new update, or a removal under BR-089 — never a mutation of what was recorded.
+- A note or caption correction is recorded as new Activity, so the original remains readable (BR-067, BR-080).
+- The API is the authority for both the acceptance boundary and the immutability that follows it (BR-007).
+
+**Exceptions:**
+None.
+
+**Notes:**
+Discarding a draft is not a removal: a photo the technician discards before submitting was never evidence, and BR-014 governs it while it is pending. Job Activity is a derived read model (BR-080) and never the record it derives from.
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-089 — Removing accepted evidence is explicit, authorized and audited
+
+**Description:**
+Accepted evidence may be taken out of ordinary use, but only through an explicit, authorized, recorded action. A removal never rewrites history.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- A Technician cannot remove accepted evidence. A technician may only discard their own unsubmitted draft (BR-088).
+- Removing accepted evidence requires the dedicated capability `evidence.photo.remove`, which follows BR-006's `resource.action` convention and is a **Manager-level** capability: it is granted to the default Manager role and not to the default Technician role.
+- Removal is **soft**: the evidence disappears from ordinary views — technician field views in particular — while its record and its history are preserved.
+- The removal records the actor, the timestamp and the reason (BR-033, BR-067).
+- The record stays append-only: a removal is added history, never a deletion of the record or of what it previously held.
+- Soft-removed evidence remains visible in an audit/history context to authorized managers.
+- Physically purging the stored object is a retention concern (BR-090) and is separate from the removal itself.
+- The API enforces the capability; a hidden or disabled control is never the boundary (BR-007).
+
+**Exceptions:**
+None.
+
+**Notes:**
+The exact default-role grant and the bilingual capability name and description (BR-005) are recorded when the capability is created. A structured removal-reason catalogue is not defined; if one is required it is a product decision, not something an implementation invents (BR-042).
+
+**Status:**
+**CONFIRMED**
+
+---
+
+## BR-090 — Evidence retention and visibility follow the Job's lifecycle
+
+**Description:**
+Evidence belongs to the historical Job record, and its retention follows that record rather than UI convenience.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Archiving or canceling a Job **never deletes its evidence**.
+- Archived Jobs and their evidence remain readable to members whose permissions allow viewing archived Jobs (BR-082, BR-083).
+- In v1 retention is **indefinite for as long as the tenant/account exists**. Servora does not invent a regulatory retention period it cannot universally justify.
+- Configurable retention is a later capability for tenants with their own compliance requirements; it is not implemented in v1.
+- Servora does **not** support hard Job deletion in normal product flows: a Job is archived or canceled, not deleted. Evidence objects therefore never become orphaned through Job deletion.
+- If a future administrative or GDPR-style hard purge is introduced, it is a deliberate **cascading purge** — Job → Visits → evidence records → storage objects and derived objects — with object deletion performed asynchronously and idempotently.
+- A storage object must never outlive its database record accidentally.
+
+**Exceptions:**
+None.
+
+**Notes:**
+Job deletion itself remains an open question (BR-021). This rule confirms only that normal product flows do not hard-delete Jobs, and defines the shape any future purge must take.
+
+**Status:**
+**CONFIRMED**
+**OPEN QUESTION** — configurable per-tenant retention, and the administrative purge workflow itself
+
+---
+
+## BR-091 — Evidence classification, metadata and evidence kinds
+
+**Description:**
+Evidence carries only the classification and metadata Servora needs, and the kinds of evidence are explicit.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- `phase` — `BEFORE_WORK`, `DURING_WORK`, `AFTER_WORK` — is the **only** structured classification of a photo in v1. No tags or categories are introduced; the technician's note covers anything further.
+- The selected phase is **draft state for the update in progress**: it survives a sheet or process recreation while that update is unfinished, and it must not become a global preference that leaks into another Job or another update.
+- Servora strips **GPS/location EXIF and other metadata it does not need** from uploaded evidence by default. Only what the application explicitly needs is preserved — normalized orientation and dimensions, and Servora's own capture/upload timestamps.
+- EXIF GPS is **never** treated as Job-location evidence. Location would require an explicit product feature with clear disclosure (BR-038).
+- **Audio notes are evidence** of their own kind, using the same storage abstraction, offline outbox, upload lifecycle, authorization and immutable-history rules as photos. Audio's capability (`evidence.audio.add`) is activated when the audio feature is implemented.
+- **Generic file attachments** — documents, PDFs, arbitrary files — are **out of scope in v1**.
+- A kind's capability and affordance are not exposed in any client before the kind actually works (BR-042).
+
+**Exceptions:**
+None.
+
+**Notes:**
+How audio is modelled (a kind on one evidence model versus a parallel structure), its content-type and size vocabulary, and its playback surfaces are that feature's design decisions, recorded in an ADR when it lands. Label localization is unchanged (BR-028).
+
+**Status:**
+**CONFIRMED** — `phase` is the only photo classification, phase as draft state, metadata stripping, audio is evidence, generic files out of scope
+**OPEN QUESTION** — the audio evidence data model, its content types and its size limits
 
 ---
 

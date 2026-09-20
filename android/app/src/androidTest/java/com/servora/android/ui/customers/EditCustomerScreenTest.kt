@@ -10,6 +10,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.servora.android.R
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.domain.model.CustomerContact
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.ui.theme.ServoraTheme
@@ -182,6 +183,30 @@ class EditCustomerScreenTest {
         assertEquals(1, saved)
     }
 
+    @Test
+    fun showsTheCustomersContactsReadOnlyWithTheHintThatSaysWhereTheyAreManaged() {
+        render(state = loadedState(contacts = listOf(contact())))
+
+        // The edit form writes the customer's own fields and nothing else, so its contacts are shown
+        // as the backend reported them and the hint says where they are maintained (`ADR-022` D5).
+        composeTestRule.onNodeWithTag(EditCustomerContactsTag).assertExists()
+        composeTestRule.onNodeWithText("John Smith").assertExists()
+        composeTestRule
+            .onNodeWithText(string(R.string.customers_contacts_primary))
+            .assertExists()
+        composeTestRule
+            .onNodeWithText(string(R.string.customers_edit_contacts_hint))
+            .assertExists()
+    }
+
+    @Test
+    fun omitsTheContactsBlockWhenTheCustomerHasNoneButKeepsTheHint() {
+        render(state = loadedState())
+
+        composeTestRule.onNodeWithTag(EditCustomerContactsTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(EditCustomerContactsHintTag).assertExists()
+    }
+
     private fun render(
         state: EditCustomerUiState = loadedState(),
         onTypeChange: (CustomerType) -> Unit = {},
@@ -226,6 +251,7 @@ private fun loadedState(
     storedType: CustomerType = CustomerType.COMPANY,
     companyName: String = "Cedar Property Management Ltd.",
     saveAttempted: Boolean = false,
+    contacts: List<CustomerContact> = emptyList(),
 ) = EditCustomerUiState(
     customerId = "customer-1",
     isLoading = false,
@@ -240,4 +266,27 @@ private fun loadedState(
     notes = "Gate code 4412.",
     status = CustomerStatus.ACTIVE,
     saveAttempted = saveAttempted,
+    contacts = contacts,
+)
+
+/** One contact person as the backend reports it (`BR-095`). */
+private fun contact(
+    id: String = "contact-1",
+    firstName: String = "John",
+    lastName: String = "Smith",
+    isPrimary: Boolean = true,
+) = CustomerContact(
+    id = id,
+    customerId = "customer-1",
+    firstName = firstName,
+    lastName = lastName,
+    email = "john@example.com",
+    phone = "+15559876543",
+    role = null,
+    isPrimary = isPrimary,
+    isBillingContact = false,
+    isJobContact = false,
+    version = 1,
+    createdAt = "2025-01-12T10:31:00Z",
+    updatedAt = "2025-01-12T10:31:00Z",
 )

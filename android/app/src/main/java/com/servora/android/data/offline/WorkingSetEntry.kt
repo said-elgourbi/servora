@@ -50,4 +50,42 @@ object WorkingSetEntityTypes {
 
     /** One Property's lifecycle detail. */
     const val PROPERTY_DETAIL = "property.detail"
+
+    /**
+     * One Job as its details screen reads it (`GET /jobs/:id`).
+     *
+     * It is what makes a Job readable without connectivity, and with it the evidence that Job holds:
+     * the Job's activity names its photo ids with their phase, note and time (`D5`, `BR-013`, `BR-080`).
+     * The bytes are a separate question and are never held here (`§9`).
+     */
+    const val JOB_DETAILS = "job.details"
+
+    /** One Job's chronological activity (`GET /jobs/:id/activity`, `BR-080`). */
+    const val JOB_ACTIVITY = "job.activity"
+
+    /**
+     * The signed-in technician's own working day (`GET /home/technician`, `BR-013`).
+     *
+     * It is what makes "what do I need to do next?" a question the app answers without connectivity:
+     * the day the backend last reported — the next Visit, the day's own Visits, the preview and the
+     * conditions on the caller's own work — is kept here and served when the API cannot be reached
+     * (`§2`, `§7`). It is keyed by the authenticated subject like every other row, so one
+     * technician's day is never served to whoever signs in next (`§10`).
+     */
+    const val TECHNICIAN_HOME = "home.technician"
+
+    /**
+     * One local day of the signed-in technician's own schedule (`GET /schedule`, `BR-013`).
+     *
+     * `BR-013` names "viewing assigned work" as field work that has to survive a loss of
+     * connectivity, and the technician's schedule is exactly that seen over days rather than over
+     * one day. One row is held **per local date**, because the answer depends on the date the
+     * backend was asked about: browsing back to a day already read answers from here when the API
+     * cannot be reached, and a row read for another date is never served for this one (§13.4).
+     *
+     * Only a **field-scoped** answer is kept: the office board is a dispatcher's read and stays
+     * online-only (`ADR-020` D6), so a schedule read that answered for the whole organization is
+     * never written here.
+     */
+    const val TECHNICIAN_SCHEDULE = "schedule.technician"
 }

@@ -778,7 +778,7 @@ At project level:
 
 * TypeScript remains strict.
 * Existing formatting standards must be followed.
-* Linting must pass.
+* Linting must pass at the scope `qa.md` §3.1 defines: the affected application's targeted checks for an ordinary task, the full lint of every affected application when the feature completes.
 * Type checking must pass.
 * Builds must pass.
 * Existing architectural patterns must be followed.
@@ -805,6 +805,8 @@ Expected testing may include:
 * Android Compose UI tests;
 * migration verification;
 * offline/synchronization tests where applicable.
+
+Verification is scoped to the change: targeted per task, full when the feature completes (`qa.md` §3.1).
 
 Detailed testing policy and Definition of Done are defined in `qa.md`.
 
@@ -887,6 +889,7 @@ The agent must:
 * follow established patterns;
 * update tests;
 * update documentation;
+* stop the processes and build daemons the task started, and leave the workspace clean (`dev.md` §18);
 * stop when the approved scope is complete.
 
 ## The agent must NOT
@@ -901,6 +904,8 @@ The agent must:
 * modify database structure without a migration;
 * bypass authentication or authorization;
 * treat UI behavior as a substitute for server-side enforcement;
+* leave the build daemons, background servers or other long-running processes it started behind when the task ends (`dev.md` §18);
+* leave scratch files, logs or files it did not change open in the product owner's editor;
 * claim work is complete without verification.
 
 ---
@@ -985,10 +990,11 @@ A feature is Done only when:
 * French localization works;
 * the implementation does not prevent future languages;
 * appropriate domain codes/identifiers are used instead of language-specific business values;
-* tests exist and pass;
-* lint passes;
+* tests exist and pass at the tier the change requires (`qa.md` §3.1);
+* lint passes — the full lint of every affected application when the feature completes;
 * type checking passes;
 * affected builds pass;
+* the build daemons and background processes the task started are stopped, and no scratch files remain (`dev.md` §18);
 * documentation is updated;
 * tracker status is updated;
 * no known unrelated regressions were introduced;

@@ -20,7 +20,7 @@ import {
   visits,
   visitTechnicians,
 } from '../src/database/schema.js';
-import { resolveDayWindow } from '../src/home/manager-home-day.js';
+import { resolveDayWindow } from '../src/home/home-day.js';
 import { ManagerHomeModule } from '../src/home/manager-home.module.js';
 import { ManagerHomeService } from '../src/home/manager-home.service.js';
 import { hashPassword } from '../src/users/password-hasher.js';

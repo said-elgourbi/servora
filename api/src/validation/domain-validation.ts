@@ -173,6 +173,14 @@ export function optionalInstant(value: unknown, field: string): string | null {
   return text;
 }
 
+/** Requires an integer greater than zero. */
+export function requirePositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    fail(field, 'must be a positive integer');
+  }
+  return value;
+}
+
 /** Accepts an optional integer greater than zero. */
 export function optionalPositiveInteger(
   value: unknown,

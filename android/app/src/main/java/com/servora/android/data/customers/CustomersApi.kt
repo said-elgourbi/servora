@@ -1,7 +1,9 @@
 package com.servora.android.data.customers
 
+import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.HTTP
 import retrofit2.http.Header
 import retrofit2.http.PATCH
 import retrofit2.http.POST
@@ -96,9 +98,9 @@ interface CustomersApi {
     ): CreatedCustomerDto
 
     /**
-     * `POST /customers/{id}/contacts` — records a contact on an existing customer (`BR-023`).
+     * `POST /customers/{id}/contacts` — records a contact on an existing customer (`BR-095`).
      *
-     * The route requires `customers.edit`; the backend decides, and a customer the caller's
+     * The route requires `customers.contacts.create`; the backend decides, and a customer the caller's
      * organization does not own is reported as not found (`BR-001`).
      */
     @POST("customers/{id}/contacts")
@@ -107,6 +109,43 @@ interface CustomersApi {
         @Path("id") id: String,
         @Body request: CreateCustomerContactRequest,
     ): CustomerContactDto
+
+    /**
+     * `PATCH /customers/{id}/contacts/{contactId}` — edits one of the customer's contacts (`BR-095`).
+     *
+     * The route requires `customers.contacts.edit`. The edit is partial and states the version the
+     * caller read, so the backend applies it only against the state it was read from and refuses a
+     * version the contact has left rather than writing over newer state (`BR-032`, `BR-086`). A contact
+     * id that is not this customer's, or one that has been removed, is reported as not found.
+     */
+    @PATCH("customers/{id}/contacts/{contactId}")
+    suspend fun updateContact(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: String,
+        @Path("contactId") contactId: String,
+        @Body request: UpdateCustomerContactRequest,
+    ): CustomerContactDto
+
+    /**
+     * `DELETE /customers/{id}/contacts/{contactId}` — removes a contact from ordinary use
+     * (`BR-095`, `customers.contacts.remove`).
+     *
+     * The removal is soft and its only input is the version the caller read, so that version travels in
+     * the body like every other mutation this API accepts (`docs/api/customers.md` §5.2.3). The answer
+     * is inspected through [Response] because the route answers `204` with no body.
+     *
+     * It is declared with [HTTP] rather than [retrofit2.http.DELETE] because Retrofit's `@DELETE` is a
+     * body-less method: Retrofit refuses a `@Body` on it when it parses the method, which this app's
+     * configuration does at the method's first call rather than at compile time. `hasBody = true` states
+     * what this route really takes.
+     */
+    @HTTP(method = "DELETE", path = "customers/{id}/contacts/{contactId}", hasBody = true)
+    suspend fun removeContact(
+        @Header("Authorization") authorization: String,
+        @Path("id") id: String,
+        @Path("contactId") contactId: String,
+        @Body request: RemoveCustomerContactRequest,
+    ): Response<Unit>
 
     /**
      * `PATCH /customers/{id}` — edits an organization-owned customer (`BR-023`).

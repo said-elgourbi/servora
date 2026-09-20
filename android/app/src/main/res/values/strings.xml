@@ -37,6 +37,16 @@
     <string name="sign_in_sms_action">Sign in with SMS</string>
 
     <!--
+      Temporary local-development sign-in shortcut (`docs/tracker/049-android-dev-sign-in-buttons.md`).
+      The accounts it offers exist only in a build that carries them, so a release build renders
+      none of this. Labels are localized like every other label (`BR-028`); the account's address is
+      data and is shown as the API stored it.
+    -->
+    <string name="dev_sign_in_label">Development account</string>
+    <string name="dev_sign_in_manager">Sign in as Manager</string>
+    <string name="dev_sign_in_technician">Sign in as Technician</string>
+
+    <!--
       Appearance controls in the sign-in top bar (`BR-028`): the app language and the light/dark
       theme. The two-letter codes are shown exactly as designed, so they are never translated;
       the full names are the labels a screen reader announces for them.
@@ -167,6 +177,86 @@
     <string name="home_retry">Try again</string>
     <string name="home_refreshing">Updating…</string>
     <string name="home_unrefreshed_notice">Couldn\'t refresh. Showing the last update.</string>
+
+    <!-- The technician's own day (`GET /home/technician`, ADR-019 D6). The technician home answers
+         "what do I need to do next?", so it names the next Visit, the day and the preview in that
+         order and adds nothing about the operation. -->
+    <string name="technician_home_next_title">Up next</string>
+    <string name="technician_home_next_open">Open job</string>
+    <string name="technician_home_crew_format">With %1$s</string>
+    <string name="technician_home_upcoming_title">Upcoming</string>
+    <string name="technician_home_nothing_title">No assigned work</string>
+    <string name="technician_home_nothing_detail">Nothing is assigned to you right now.</string>
+    <string name="technician_home_loading">Loading your day…</string>
+    <string name="technician_home_error_title">Couldn\'t load your day</string>
+
+    <!--
+      The manager's schedule (`GET /schedule`): the week strip and the selected day's agenda. The
+      screen answers "what is happening that day, and who is doing it?", so it names the day, the two
+      lanes, the technician filter and the cards' own facts — never a Job status, which is a
+      different state machine from the Visit's (`BR-059`, `BR-074`).
+    -->
+    <string name="schedule_lane_schedule">Schedule</string>
+    <string name="schedule_lane_unassigned">Unassigned</string>
+    <string name="schedule_lane_requests">Requests</string>
+    <plurals name="schedule_unassigned_more">
+        <item quantity="one">%1$d more waiting for a technician</item>
+        <item quantity="other">%1$d more waiting for a technician</item>
+    </plurals>
+    <string name="schedule_today">Today</string>
+    <!-- The "now" cue: the label, the time it is there, and an accessible name for the date picker. -->
+    <string name="schedule_now_at">Now · %1$s</string>
+    <string name="schedule_date_pick">Choose a date</string>
+    <string name="schedule_date_picker_confirm">Select</string>
+    <string name="schedule_date_picker_cancel">Cancel</string>
+    <string name="schedule_filter_title">Technician</string>
+    <string name="schedule_filter_subtitle">Select technicians for the schedule</string>
+    <string name="schedule_filter_close">Close</string>
+    <string name="schedule_filter_all">All technicians</string>
+    <string name="schedule_filter_unnamed">Unnamed technician</string>
+    <string name="schedule_filter_open">Choose a technician</string>
+    <string name="schedule_filter_search">Search technicians</string>
+    <string name="schedule_filter_no_results">No technicians match your search.</string>
+    <string name="schedule_filter_apply">Apply</string>
+    <string name="schedule_filter_apply_count">Apply (%1$d)</string>
+    <string name="schedule_filter_clear">Clear</string>
+    <!-- The collapsed filter's own summary when several technicians are selected (`BR-012`). -->
+    <plurals name="schedule_filter_selected_technicians">
+        <item quantity="one">%1$d technician</item>
+        <item quantity="other">%1$d technicians</item>
+    </plurals>
+    <string name="schedule_empty_day_title">Nothing scheduled</string>
+    <string name="schedule_empty_day_detail">Nothing is scheduled for this day.</string>
+    <string name="schedule_empty_unassigned_title">All visits have been assigned</string>
+    <string name="schedule_empty_unassigned_detail">Nothing is waiting for a technician.</string>
+    <string name="schedule_empty_requests_title">No pending requests</string>
+    <string name="schedule_empty_requests_detail">No follow-up visits are waiting for review.</string>
+    <string name="schedule_request_same_technician">Same technician preferred</string>
+    <string name="schedule_request_open_job">Open job</string>
+    <string name="schedule_request_clarify">Clarify</string>
+    <string name="schedule_request_reject">Reject</string>
+    <!-- A crew longer than the card's one line: the names that fit, then how many more are assigned. -->
+    <string name="schedule_crew_more">%1$s +%2$d</string>
+    <string name="schedule_customer_property_format">%1$s · %2$s</string>
+    <string name="schedule_loading">Loading the schedule…</string>
+    <string name="schedule_error_title">Couldn\'t load the schedule</string>
+    <!--
+      The technician's schedule (`GET /schedule` answered for the caller's own work): the week, the day
+      and the Visits assigned to the signed-in technician. The screen answers "what is assigned to me,
+      and what am I doing next?", so it names the week and the day, the caller's own crew line and the
+      honest empty state — never the office's lanes, technician filter or unassigned work.
+    -->
+    <string name="nav_my_schedule">My Schedule</string>
+    <string name="technician_schedule_week_range">%1$s–%2$s</string>
+    <string name="technician_schedule_previous_week">Previous week</string>
+    <string name="technician_schedule_next_week">Next week</string>
+    <string name="technician_schedule_day_today">Today · %1$s</string>
+    <string name="technician_schedule_day_tomorrow">Tomorrow · %1$s</string>
+    <string name="technician_schedule_you">You</string>
+    <string name="technician_schedule_empty_title">No visits assigned</string>
+    <string name="technician_schedule_empty_detail">Nothing is assigned to you on this day.</string>
+    <string name="technician_schedule_loading">Loading your schedule…</string>
+    <string name="technician_schedule_error_title">Couldn\'t load your schedule</string>
     <string name="customers_title">Customers</string>
     <string name="customers_subtitle">Manage customers and their service properties</string>
     <string name="customers_search_placeholder">Name, phone, address…</string>
@@ -317,6 +407,54 @@
     <string name="customers_job_status_canceled">Canceled</string>
 
     <!--
+      A customer's contact persons on its detail screen (`BR-023`, `BR-095`; `ADR-022` D6). The card
+      lists the primary contact first, as the API orders them, and every row states the person's own
+      phone and email — never the customer header's. Edit and Remove are drawn only for the capability
+      that would perform the write, so a session that may read a customer without maintaining its
+      contacts is offered neither (`BR-007`, `BR-011`).
+    -->
+    <string name="customers_detail_contacts">Contact persons</string>
+    <string name="customers_contacts_empty">No contact persons recorded.</string>
+    <string name="customers_contacts_primary">Primary</string>
+    <string name="customers_contacts_add">Add more contact persons</string>
+    <string name="customers_contacts_remove">Remove</string>
+    <string name="customers_contacts_remove_confirm_title">Remove this contact person?</string>
+    <string name="customers_contacts_remove_confirm_message">%1$s will no longer be shown on this customer. The record is kept for history.</string>
+    <string name="customers_contacts_remove_confirm_action">Remove</string>
+    <string name="customers_contacts_remove_failure">The contact person was not removed: %1$s</string>
+    <string name="customers_edit_contacts_hint">Contact persons are managed from the customer detail screen.</string>
+
+    <!--
+      Add/Edit Contact (`BR-023`, `BR-095`). The form draws the four fields a contact person owns —
+      first name, last name, phone and email — plus the primary flag that makes this person the one
+      the organization calls first. A contact's phone and email are its own: they are never the
+      customer header's (`BR-095`).
+    -->
+    <string name="contact_add_title">Add Contact</string>
+    <string name="contact_edit_title">Edit Contact</string>
+    <string name="contact_add_action">Add Contact</string>
+    <string name="contact_edit_action">Save Changes</string>
+    <string name="contact_section_person">Contact person</string>
+    <string name="contact_first_name_label">First name</string>
+    <string name="contact_first_name_placeholder">John</string>
+    <string name="contact_last_name_label">Last name</string>
+    <string name="contact_last_name_placeholder">Smith</string>
+    <string name="contact_phone_label">Phone</string>
+    <string name="contact_phone_placeholder">555-123-4567</string>
+    <string name="contact_email_label">Email</string>
+    <string name="contact_email_placeholder">john@example.com</string>
+    <string name="contact_primary_label">Primary contact</string>
+    <string name="contact_primary_hint">The primary contact is the person the organization calls first.</string>
+    <string name="contact_form_incomplete">Please fill in the contact person\'s first and last name.</string>
+    <string name="contact_error_unauthenticated">Your session has expired. Sign in again.</string>
+    <string name="contact_error_forbidden">You do not have permission to manage contact persons.</string>
+    <string name="contact_error_validation">Check the details you entered.</string>
+    <string name="contact_error_conflict">This contact person changed since you opened them. Reopen and try again.</string>
+    <string name="contact_error_not_found">This contact person no longer exists.</string>
+    <string name="contact_error_network">Check your network and try again.</string>
+    <string name="contact_error_server">Please try again.</string>
+
+    <!--
       Add Property (`BR-049`, `BR-050`). The form draws only the authoritative Property fields:
       street, unit, city, province and postal code, then the optional name and notes. The province is
       a picker over the stable Canadian codes, whose names are localized below (`BR-028`, `BR-041`).
@@ -439,6 +577,19 @@
     <string name="job_details_no_address">No address yet</string>
     <string name="job_details_open_in_maps">Open in maps</string>
     <string name="job_details_customer_label">Customer</string>
+    <string name="job_details_customer_phone_label">Phone</string>
+    <string name="job_details_customer_email_label">Email</string>
+    <string name="job_details_customer_notes_label">Notes</string>
+    <!--
+      The Customer's other ways of being reached on the Job card (`BR-095`): the disclosure holding them
+      is closed by default, so the number a technician came for is the one on screen.
+    -->
+    <plurals name="job_details_customer_other_contacts">
+        <item quantity="one">%1$d other contact</item>
+        <item quantity="other">%1$d other contacts</item>
+    </plurals>
+    <string name="job_details_customer_other_contacts_show">Show other contacts</string>
+    <string name="job_details_customer_other_contacts_hide">Hide other contacts</string>
     <string name="job_details_technicians_label">Technicians</string>
     <string name="job_details_technician_name_unknown">Name unavailable</string>
     <string name="job_details_unassigned_detail">No technician is assigned to this visit yet.</string>
@@ -448,6 +599,42 @@
     <string name="job_details_retry">Try again</string>
 
     <!--
+      The redesigned Job Details screen (`BR-047`, `BR-059`): the page presents the Job's own
+      information, the Visit that represents the Job, and the Job's activity grouped by the Visit each
+      update belongs to. Each section is labelled for what it belongs to, so one is never read as
+      another, and a Visit's activity group is headed `Visit N · date`.
+    -->
+    <string name="job_details_overview_label">Job overview</string>
+    <!--
+      The label of the section presenting the Visit the read represents (`BR-081`). It states when that
+      field attempt is for, as of the device's own clock and zone, so the section never tells the reader
+      a Visit two days away is happening now (`BR-072`, `BR-074`).
+    -->
+    <string name="job_details_current_visit_label">Current visit</string>
+    <string name="job_details_today_visit_label">Today\'s visit</string>
+    <string name="job_details_tomorrow_visit_label">Tomorrow\'s visit</string>
+    <string name="job_details_upcoming_visit_label">Upcoming visit</string>
+    <string name="job_details_previous_visit_label">Previous visit</string>
+    <string name="job_details_no_selected_visit_detail">This job has no visit with a schedule yet.</string>
+    <string name="job_details_visit_activity_label">Visit activity</string>
+    <string name="job_details_visit_activity_empty">Nothing has been recorded on this visit yet.</string>
+    <string name="job_details_visit_time_label">Scheduled time</string>
+    <string name="job_details_visit_time_range">%1$s – %2$s</string>
+    <!--
+      What the field attempt resulted in (`BR-077`, `BR-078`). It is the Visit's own **current** outcome
+      the API reports, so the row is drawn only when the Visit holds one: a Visit that was reopened after
+      completion holds none, and a Visit that has not been completed holds none either (`BR-079`).
+    -->
+    <string name="job_details_visit_outcome_label">Outcome</string>
+    <!--
+      The crew a Visit's group states is the crew the read reports, which is who **is assigned** to the
+      field attempt (`BR-068`): Servora does not record who attended one, so the label never claims it.
+    -->
+    <string name="job_details_assigned_technicians_label">Assigned technicians</string>
+    <string name="job_details_job_updates_label">General job updates</string>
+    <string name="job_details_job_updates_empty">No job-wide updates yet.</string>
+
+    <!--
       Job Activity (`BR-080`): the Job's unified, chronological timeline, newest first. A Job-level
       event carries no Visit; a Visit-level event carries the Visit's human-readable sequence
       (`Visit 1`, `Visit 2`, …), never a database id. Status, outcome and role values are the API's
@@ -455,10 +642,31 @@
     -->
     <string name="job_activity_label">Job Activity</string>
     <string name="job_activity_visit_format">Visit %1$d</string>
+    <!--
+      The heading of one Visit's group in the section: the Visit's number and the date it was for. The
+      number stays part of the heading because two field attempts can fall on dates that read alike,
+      and the date is what the group was for (`BR-052`, `BR-072`).
+    -->
+    <string name="job_activity_visit_title_format">Visit %1$d · %2$s</string>
+    <string name="job_activity_visit_expand_label">Expand visit %1$d</string>
+    <string name="job_activity_visit_collapse_label">Collapse visit %1$d</string>
+    <!-- The group holding the updates that belong to the Job and to no Visit (`BR-080`). -->
+    <string name="job_activity_general_expand_label">Expand general job updates</string>
+    <string name="job_activity_general_collapse_label">Collapse general job updates</string>
+    <!-- The state a collapsed or expanded group reports to a screen reader (`BR-028`). -->
+    <string name="job_activity_group_expanded">Expanded</string>
+    <string name="job_activity_group_collapsed">Collapsed</string>
     <string name="job_activity_empty_title">No activity yet</string>
     <string name="job_activity_empty_message">Updates from the team will appear here.</string>
     <string name="job_activity_error_message">Couldn\'t load activity.</string>
     <string name="job_activity_add_update">Add update</string>
+    <!--
+      The kinds of update the Add update sheet offers, as peers in one choice, and the controls each
+      kind owns. The label states what the choice is (`BR-012`, `BR-027`).
+    -->
+    <string name="job_activity_update_type_label">Update type</string>
+    <string name="job_activity_update_note">Write note</string>
+    <string name="job_activity_update_audio">Add audio</string>
     <string name="job_activity_text_label">Update</string>
     <string name="job_activity_text_placeholder">Type a text update…</string>
     <string name="job_activity_save_update">Save update</string>
@@ -481,6 +689,102 @@
     <string name="job_activity_outcome_needs_followup">Needs follow-up</string>
     <string name="job_activity_outcome_needs_quote_approval">Needs quote approval</string>
     <string name="job_activity_outcome_unable_to_complete">Unable to complete</string>
+
+    <!--
+      Job photo evidence (`BR-015`, `BR-027`). The phase codes are stable domain values; only these
+      labels are language-specific, and the badges reuse the same labels as the selector so a photo and
+      the choice made about it can never read differently (`BR-028`, `BR-041`).
+    -->
+    <string name="job_photo_add_action">Add photo</string>
+    <string name="job_photo_review_title">Add this photo</string>
+    <string name="evidence_phase_label">Phase</string>
+    <string name="evidence_phase_before">Before work</string>
+    <string name="evidence_phase_during">During work</string>
+    <string name="evidence_phase_after">After work</string>
+    <string name="evidence_phase_unknown">Phase not recorded</string>
+    <string name="job_photo_note_label">Note (optional)</string>
+    <string name="job_photo_note_placeholder">What does this show?</string>
+    <string name="job_photo_review_confirm">Add</string>
+    <string name="job_photo_review_discard">Discard</string>
+    <string name="job_photo_remove">Remove photo</string>
+    <string name="job_photo_image_description">Job photo</string>
+    <string name="job_photo_viewer_open">View photo</string>
+    <string name="job_photo_gallery_label">Photos</string>
+    <string name="job_photo_gallery_expand">Show photos</string>
+    <string name="job_photo_gallery_collapse">Hide photos</string>
+    <string name="job_photo_viewer_close">Close photo</string>
+    <string name="job_photo_viewer_unavailable">This photo could not be shown.</string>
+    <!--
+      A photo that is not on this device and cannot be read without connectivity (`D5`, `BR-013`). The
+      technician can act on it, which is why it is not the generic failure above; the short form is the
+      glyph a tile draws (`BR-028`).
+    -->
+    <string name="job_photo_viewer_unavailable_offline">This photo is not available offline. Connect to view it.</string>
+    <string name="job_photo_offline_description">Not available offline</string>
+    <string name="job_photo_viewer_notes_label">Notes</string>
+    <string name="job_photo_notes_more">More</string>
+    <string name="job_photo_notes_less">Less</string>
+    <string name="job_photo_tray_title">Photos to save</string>
+    <string name="job_photo_tray_unsaved">%1$d not saved</string>
+    <string name="job_photo_tray_capture">Take another</string>
+    <string name="job_photo_tray_submit">Save photos</string>
+    <!--
+      The one action a permanently refused upload leaves the technician (`D6c`). It clears the photo
+      from this device — its file and its queued refusal together — and it is drawn beside the refusal
+      the tray reports, never on its own.
+    -->
+    <string name="job_photo_tray_discard">Discard</string>
+    <string name="evidence_state_queued">Waiting to upload</string>
+    <string name="evidence_state_uploading">Uploading…</string>
+    <string name="evidence_state_retrying">Will retry</string>
+    <string name="evidence_state_refused">Refused by the server</string>
+    <string name="job_photo_saved_message">Photos saved on this device. They will upload when the server can be reached.</string>
+    <string name="job_photo_error_capture_failed">The camera did not save a photo.</string>
+    <string name="job_photo_error_not_signed_in">Sign in again to save photos.</string>
+    <string name="job_photo_error_not_queued">The photos could not be saved yet. They are still on this device.</string>
+    <string name="job_photo_error_already_submitted">That photo is already queued for upload.</string>
+    <string name="job_photo_error_type_not_accepted">That photo is not a format Servora accepts. Take or choose a JPEG, PNG or WebP image.</string>
+    <string name="job_photo_error_too_large">That photo is too large to upload. Retake it at a smaller size.</string>
+    <string name="job_photo_error_not_saved">The photo could not be saved on this device.</string>
+    <string name="job_photo_error_not_read">That photo could not be read from this device.</string>
+    <string name="job_photo_error_picker_unavailable">The device\'s photo picker could not be opened.</string>
+    <!--
+      Taking a photo out of Servora: the viewer's position and its two evidence actions, and what each
+      reports (`D11`, `D12`, `D13`). Both actions read evidence the API authorizes; nothing here records
+      or changes a photo (`BR-027`).
+    -->
+    <string name="job_photo_viewer_position">%1$d / %2$d</string>
+    <string name="job_photo_viewer_save">Save to device</string>
+    <string name="job_photo_viewer_share">Share</string>
+    <string name="job_photo_viewer_share_title">Share photo</string>
+    <string name="job_photo_saved_to_device_message">Photo saved on this device.</string>
+    <string name="job_photo_shared_message">Photo handed to the application you chose.</string>
+    <!--
+      Taking accepted evidence out of ordinary use (`BR-088`, `BR-089`). It is a Manager action on a
+      recorded photo, so it is confirmed and a reason is stated before anything is applied; the photo
+      is not deleted, its record and history are preserved, and the removal itself is recorded.
+    -->
+    <string name="job_photo_viewer_remove">Remove evidence</string>
+    <string name="job_photo_removal_title">Remove this photo?</string>
+    <string name="job_photo_removal_message">This photo was recorded as evidence, so it cannot be deleted. It will be removed from the job\'s photos and from ordinary views, and the reason you give is kept with the record.</string>
+    <string name="job_photo_removal_reason_label">Why is it being removed?</string>
+    <string name="job_photo_removal_confirm">Remove</string>
+    <string name="job_photo_removal_cancel">Cancel</string>
+    <string name="job_photo_removed_message">Photo evidence removed. The record and its history were kept.</string>
+    <string name="job_photo_activity_removed">Removed a photo from ordinary use</string>
+    <string name="job_photo_error_removal_not_permitted">Your role does not allow removing evidence. Ask a manager.</string>
+    <string name="job_photo_error_removal_unavailable">That photo is no longer available to remove.</string>
+    <string name="job_photo_error_removal_unreachable">Removing evidence needs the server. Connect and try again.</string>
+    <string name="job_photo_error_removal_failed">The photo could not be removed, so nothing changed.</string>
+    <string name="job_photo_error_export_unreadable">That photo could not be read, so it was not saved or shared.</string>
+    <string name="job_photo_error_export_failed">The photo could not be saved on this device.</string>
+    <string name="job_photo_error_share_unavailable">No application on this device can share the photo.</string>
+    <string name="job_photo_error_save_permission">Servora needs permission to save photos on this device.</string>
+    <string name="job_photo_error_item">Photo %1$d of %2$d: %3$s</string>
+    <string name="job_update_photo_sources_label">Add photos from</string>
+    <string name="job_update_photo_camera">Take photo</string>
+    <string name="job_update_photo_library">Choose from device</string>
+    <string name="job_photo_activity_added">Added a photo</string>
 
     <!--
       Job management actions (`BR-058`, `BR-066`, `BR-068`, `BR-070`, `BR-073`).
@@ -512,12 +816,36 @@
     <string name="job_action_error_version_conflict">The job changed since you opened it. Reopen it and try again.</string>
     <string name="job_action_error_transition">The job cannot move to that status from where it is.</string>
     <string name="job_action_error_review_condition">The job cannot await review yet: work is still open or the last visit did not resolve it.</string>
+    <string name="job_action_error_completion_blocked">This job can\'t be completed while it has active visits.</string>
     <string name="job_action_error_cancellation_unavailable">Cancelling a job is not available yet.</string>
     <string name="job_action_error_visit_not_reschedulable">Only a scheduled visit can be rescheduled.</string>
     <string name="job_action_error_technicians_not_assignable">One or more technicians cannot be assigned.</string>
     <string name="job_action_error_network">Check your connection and try again.</string>
     <string name="job_action_error_server">The service could not complete the change. Try again.</string>
     <string name="job_action_error_unexpected">The change could not be completed.</string>
+    <string name="job_action_error_visit_transition">The visit can\'t move to that status from where it is.</string>
+    <string name="job_action_error_visit_scheduling">The visit can\'t be scheduled yet: it needs a location, a schedule and a crew with exactly one lead.</string>
+    <string name="job_action_error_job_closed">This job is closed, so no visit work can be recorded on it.</string>
+    <string name="job_action_error_visit_operation_reused">This update was already used for another visit.</string>
+    <string name="job_action_change_visit_status">Change visit status</string>
+    <string name="job_action_done_visit_status">Visit status updated</string>
+    <string name="job_action_queued_visit_status">Saved on this device. The visit will be updated when you\'re back online.</string>
+    <string name="job_action_queued_activity_text">Saved on this device. The update will be sent when you\'re back online.</string>
+    <string name="job_action_queued_generic">Saved on this device. It will be applied when you\'re back online.</string>
+    <string name="job_visit_complete_title">Complete visit</string>
+    <string name="job_visit_complete_outcome_label">Outcome</string>
+    <string name="job_visit_complete_summary_label">Summary</string>
+    <string name="job_visit_complete_summary_placeholder">What happened on site?</string>
+    <string name="job_visit_complete_summary_required">Required: state what resulted from the visit.</string>
+    <string name="job_visit_complete_confirm">Complete visit</string>
+    <string name="job_visit_pending_title">Waiting to sync</string>
+    <string name="job_visit_pending_action">Visit → %1$s</string>
+    <string name="job_visit_pending_queued">Saved on this device</string>
+    <string name="job_visit_pending_sending">Sending…</string>
+    <string name="job_visit_pending_retrying">Couldn\'t send. It will be tried again.</string>
+    <string name="job_visit_pending_refused">Not applied</string>
+    <string name="job_visit_pending_stale">The visit changed, or the new time conflicts with another visit. Reopen the job and try again.</string>
+    <string name="job_visit_pending_discard">Discard</string>
 
     <!-- Rescheduling a visit (`BR-073`). -->
     <string name="job_reschedule_title">Reschedule visit</string>
@@ -540,6 +868,117 @@
     <string name="job_conflict_title">This time overlaps another visit</string>
     <string name="job_conflict_message">The same technician is already booked. You can still schedule this visit.</string>
     <string name="job_conflict_confirm">Schedule anyway</string>
+
+    <!--
+      The consequential Job status changes the user confirms before the change is sent (`BR-058`,
+      `BR-062`, `BR-063`). Closing a Job ends its field work and reopening one returns it to the
+      scheduling workflow, so neither happens from a single tap on the status menu.
+    -->
+    <string name="job_status_confirm_close_title">Close this job?</string>
+    <string name="job_status_confirm_close_message">Job #%1$d will be closed. Closing it ends the job\'s field work and makes its visit outcomes final.</string>
+    <string name="job_status_confirm_reopen_title">Reopen this job?</string>
+    <string name="job_status_confirm_reopen_message">Job #%1$d will return to New. Its completed and canceled visits stay as they are.</string>
+    <string name="job_status_confirm_accept">Confirm</string>
     <!-- A read served without connectivity (`docs/architecture/offline-first-architecture.md` §2, §7). -->
     <string name="offline_last_reported">Offline — showing the last update the server reported.</string>
+    <!--
+      Audio evidence (`BR-091`, `ADR-018`). A recording is the technician's own take until they attach
+      it, so the kind states the three states a take can be in — recording, recorded, and the review —
+      and the notice reports what the device is doing with a take the API has not accepted. The
+      upload-state labels are shared with the photo kind (`evidence_state_*`), because "waiting to
+      upload" is one idea in either language (`BR-041`).
+    -->
+    <string name="job_audio_record">Record</string>
+    <string name="job_audio_stop">Stop</string>
+    <string name="job_audio_recording">Recording…</string>
+    <string name="job_audio_hint">You can review the recording before attaching it.</string>
+    <string name="job_audio_delete">Delete</string>
+    <string name="job_audio_attach">Attach to update</string>
+    <string name="job_audio_duration">%1$d:%2$02d</string>
+    <string name="job_audio_description">Audio note</string>
+    <string name="job_audio_remove">Remove recording</string>
+    <string name="job_audio_discard">Discard</string>
+    <string name="job_audio_notice_title">Audio to save</string>
+    <string name="job_audio_notice_not_attached">Not attached yet</string>
+    <string name="job_audio_message_queued">Recording saved. It will upload when the server can be reached.</string>
+    <string name="job_audio_error_microphone_denied">Servora needs the microphone to record a note.</string>
+    <string name="job_audio_error_not_signed_in">Sign in again to record audio.</string>
+    <string name="job_audio_error_recorder_unavailable">This device could not start recording.</string>
+    <string name="job_audio_error_recording_failed">The recording could not be finished, so nothing was saved.</string>
+    <string name="job_audio_error_recording_empty">The recording came out empty, so nothing was saved.</string>
+    <string name="job_audio_error_recording_not_saved">The recording could not be saved on this device.</string>
+    <string name="job_audio_error_not_queued">The recording could not be saved yet. It is still on this device.</string>
+    <string name="job_audio_error_already_submitted">That recording is already queued for upload.</string>
+    <!--
+      Audio evidence playback and removal (`BR-091`, `BR-089`, `ADR-018` A9/A7/A11). A recording the API
+      accepted is played back from the Job's Activity, may be moved through while it plays, and may be
+      taken out of ordinary use by a manager; the phase badge and the length the timeline states come from
+      the API, so nothing here repeats them, and the position is stated as one value of two seconds —
+      where it is, and how long it is.
+    -->
+    <string name="job_audio_activity_added">Added an audio note</string>
+    <string name="job_audio_activity_removed">Removed an audio note from ordinary use</string>
+    <string name="job_audio_play">Play recording</string>
+    <string name="job_audio_pause">Pause recording</string>
+    <string name="job_audio_position_format">%1$s / %2$s</string>
+    <string name="job_audio_seek">Playback position</string>
+    <string name="job_audio_remove_evidence">Remove evidence</string>
+    <string name="job_audio_removed_message">Audio evidence removed. The record and its history were kept.</string>
+    <string name="job_audio_removal_title">Remove this recording?</string>
+    <string name="job_audio_removal_message">This recording was made as evidence, so it cannot be deleted. It will be removed from the job\'s audio notes and from ordinary views, and the reason you give is kept with the record.</string>
+    <string name="job_audio_removal_reason_label">Why is it being removed?</string>
+    <string name="job_audio_removal_confirm">Remove</string>
+    <string name="job_audio_removal_cancel">Cancel</string>
+    <string name="job_audio_error_playback_failed">This device could not play the recording.</string>
+    <string name="job_audio_error_playback_unreachable">That recording is not saved on this device yet. Connect and try again.</string>
+    <string name="job_audio_error_playback_unavailable">That recording could not be read.</string>
+    <string name="job_audio_error_removal_not_permitted">Your role does not allow removing evidence. Ask a manager.</string>
+    <string name="job_audio_error_removal_unavailable">That recording is no longer available to remove.</string>
+    <string name="job_audio_error_removal_unreachable">Removing evidence needs the server. Connect and try again.</string>
+    <string name="job_audio_error_removal_failed">The recording could not be removed, so nothing changed.</string>
+
+    <!--
+      Create Job (`BR-094`, `docs/api/job-details.md` §6). The form states the Customer, the Property and
+      the title, plus an optional description; nothing else a Job carries is asked for, because the
+      backend owns the number, the status and the address snapshot. The failure copy is the create's own:
+      this route answers a customer that is not active and a property that is archived, which the shared
+      property copy would describe as something else (`BR-028`, `BR-041`).
+    -->
+    <string name="job_create_title">Create job</string>
+    <string name="job_create_action">Create job</string>
+    <string name="job_create_section_customer">Customer</string>
+    <string name="job_create_customer_label">Customer</string>
+    <string name="job_create_customer_placeholder">Select a customer</string>
+    <string name="job_create_customer_unknown">Customer unavailable</string>
+    <string name="job_create_customer_picker_title">Select customer</string>
+    <string name="job_create_customer_search_placeholder">Name, email or phone…</string>
+    <string name="job_create_customer_empty">No customer matches this search.</string>
+    <string name="job_create_section_property">Property</string>
+    <string name="job_create_property_label">Property</string>
+    <string name="job_create_property_placeholder">Select a property</string>
+    <string name="job_create_property_needs_customer">Choose a customer first</string>
+    <string name="job_create_property_picker_title">Select property</string>
+    <string name="job_create_property_search_placeholder">Name or address…</string>
+    <string name="job_create_property_empty">No property matches this search.</string>
+    <string name="job_create_properties_loading">Loading properties…</string>
+    <string name="job_create_no_properties">This customer has no active property. A job needs one, so add a property to this customer first.</string>
+    <string name="job_create_section_details">Job details</string>
+    <string name="job_create_title_label">Title</string>
+    <string name="job_create_title_placeholder">What needs to be done?</string>
+    <string name="job_create_description_label">Description</string>
+    <string name="job_create_description_placeholder">Anything the technician should know</string>
+    <string name="job_create_form_incomplete">Choose a customer and a property, and give the job a title.</string>
+    <string name="job_create_retry">Try again</string>
+    <string name="job_create_picker_close">Close</string>
+    <string name="job_create_error_unauthenticated">Your session has expired. Sign in again.</string>
+    <string name="job_create_error_forbidden">Your role does not allow creating jobs. Ask a manager.</string>
+    <string name="job_create_error_validation">Check the details you entered.</string>
+    <string name="job_create_error_customer_not_found">That customer is no longer available. Choose another one.</string>
+    <string name="job_create_error_customer_inactive">That customer is not active and cannot take new work.</string>
+    <string name="job_create_error_property_not_found">That property is no longer available for this customer. Choose another one.</string>
+    <string name="job_create_error_property_unavailable">That property is archived and cannot take new work. Choose another one.</string>
+    <string name="job_create_error_not_found">The customer or the property is no longer available.</string>
+    <string name="job_create_error_conflict">The customer or the property cannot take new work right now.</string>
+    <string name="job_create_error_network">Check your network and try again.</string>
+    <string name="job_create_error_server">The job could not be created. Please try again.</string>
 </resources>

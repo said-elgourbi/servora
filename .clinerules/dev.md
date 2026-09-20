@@ -647,6 +647,11 @@ Consider:
 
 A change that modifies behavior must include appropriate verification.
 
+Verification is **scoped to the change** rather than repeated repository-wide by reflex: an ordinary task
+runs the compile/build and the tests that cover the code it touched, and the full lint, suites and builds of
+the affected applications run when the feature completes (`qa.md` §3.1). Re-running the whole set after every
+small correction is not what makes a change correct, and it is what leaves the machine unusable (§18).
+
 Do not weaken or delete tests merely because they make implementation inconvenient.
 
 Detailed verification requirements belong in `qa.md`.
@@ -751,6 +756,7 @@ A good change is:
 * localized where required
 * compatible with offline requirements where applicable
 * documented where necessary
+* clean — no build daemons, background processes, editor tabs or scratch files left behind (§18)
 * free of unrelated modifications
 * honest about its verification status
 
@@ -760,7 +766,35 @@ The goal is the **smallest correct, maintainable, and complete change** that sat
 
 ---
 
-## 18. Final Rule
+## 18. Environment Hygiene
+
+Development commands leave heavyweight processes behind. The clearest example is the Android build:
+`./gradlew` starts a **Gradle daemon** (roughly 5 GB resident) and a **Kotlin daemon** (roughly
+2.4 GB), and both are designed to outlive the command that started them — they idle for hours.
+Nothing about a successful build signals that they are still there, so a day of tasks accumulates
+gigabytes of idle JVMs until the machine stops being usable.
+
+Hygiene is part of finishing a task, not an optional courtesy.
+
+### Processes
+
+* Release the build daemons when the last Android verification of a task is finished: `make android-stop` (`./gradlew --stop`). It stops the Gradle daemon, and the Kotlin daemon that belongs to it exits with it (verified in this repository with Gradle 9.7.1 and Kotlin 2.3.21).
+* `make tidy` does the same and then reports what else is still running. It is a report, not a cleanup: it never stops the foundation stack and never touches a device session.
+* Do not start a long-running process (API watch mode, a dev server, a file watcher, a browser-automation run) unless the task needs it, and stop what you started before reporting completion.
+* Never stop a process you did not start: the product owner's foundation stack (`make up`), their `adb`/device session (`qa.md` §7.3) and their editor's own helper processes are not yours. If a build you did not start is in progress, leave the daemons alone and say so.
+* Do not leave a daemon running "for the next task". A cold Gradle daemon costs seconds; a forgotten one costs memory all day. `org.gradle.daemon.idletimeout` in `android/gradle.properties` is the safety net, not the plan.
+* Send background output to a temporary file and delete it with the task; do not leave a shell writing to a log nobody reads.
+
+### Workspace
+
+* Leave the working tree showing only the changes the task intended; `git status` is the check. Remove the scratch scripts, captured logs, screenshots and dumps you created.
+* Read files without taking over the product owner's editor: do not open a file in their editor for your own inspection, and close the tabs/documents a task opened before reporting completion. An agent that cannot close them says so in the completion summary rather than implying they are gone.
+* Do not stop the docker compose foundation the product owner may be using, and do not delete the database or storage volumes. Report any state the task changed.
+* Report what was left running, and why, in the completion summary (`qa.md` §16).
+
+---
+
+## 19. Final Rule
 
 When deciding between two valid implementations:
 

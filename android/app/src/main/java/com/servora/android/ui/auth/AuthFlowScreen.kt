@@ -14,18 +14,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.servora.android.data.session.AuthState
 import com.servora.android.domain.auth.asPermissionChecker
+import com.servora.android.ui.customers.AddContactViewModel
 import com.servora.android.ui.customers.AddCustomerViewModel
 import com.servora.android.ui.customers.AddPropertyViewModel
 import com.servora.android.ui.customers.CustomersViewModel
+import com.servora.android.ui.customers.EditContactViewModel
 import com.servora.android.ui.customers.EditCustomerViewModel
 import com.servora.android.ui.customers.EditPropertyViewModel
 import com.servora.android.ui.customers.PropertyDetailViewModel
+import com.servora.android.ui.customers.RemoveContactViewModel
 import com.servora.android.ui.customers.ServoraHomeScreen
 import com.servora.android.ui.customers.customerPermissionsUiState
 import com.servora.android.ui.home.ManagerHomeViewModel
+import com.servora.android.ui.home.TechnicianHomeViewModel
+import com.servora.android.ui.jobs.CreateJobViewModel
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.passwordreset.PasswordResetScreen
 import com.servora.android.ui.passwordreset.PasswordResetViewModel
+import com.servora.android.ui.schedule.ScheduleViewModel
+import com.servora.android.ui.schedule.TechnicianScheduleViewModel
 import com.servora.android.ui.signin.SignInScreen
 import com.servora.android.ui.signin.SignInViewModel
 import com.servora.android.ui.sms.SmsSignInScreen
@@ -74,8 +81,15 @@ fun AuthFlowScreen(
     addPropertyViewModel: AddPropertyViewModel,
     propertyDetailViewModel: PropertyDetailViewModel,
     editPropertyViewModel: EditPropertyViewModel,
+    addContactViewModel: AddContactViewModel,
+    editContactViewModel: EditContactViewModel,
+    removeContactViewModel: RemoveContactViewModel,
     managerHomeViewModel: ManagerHomeViewModel,
+    technicianHomeViewModel: TechnicianHomeViewModel,
     jobDetailsViewModel: JobDetailsViewModel,
+    createJobViewModel: CreateJobViewModel,
+    scheduleViewModel: ScheduleViewModel,
+    technicianScheduleViewModel: TechnicianScheduleViewModel,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -101,8 +115,15 @@ fun AuthFlowScreen(
                 addPropertyViewModel = addPropertyViewModel,
                 propertyDetailViewModel = propertyDetailViewModel,
                 editPropertyViewModel = editPropertyViewModel,
+                addContactViewModel = addContactViewModel,
+                editContactViewModel = editContactViewModel,
+                removeContactViewModel = removeContactViewModel,
                 managerHomeViewModel = managerHomeViewModel,
+                technicianHomeViewModel = technicianHomeViewModel,
                 jobDetailsViewModel = jobDetailsViewModel,
+                createJobViewModel = createJobViewModel,
+                scheduleViewModel = scheduleViewModel,
+                technicianScheduleViewModel = technicianScheduleViewModel,
                 onSignOut = onSignOut,
                 modifier = modifier,
             )

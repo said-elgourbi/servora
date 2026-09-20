@@ -5,7 +5,8 @@ import type {
   JobStatus,
   VisitStatus,
 } from '../jobs/job.types.js';
-import type { DayWindow } from './manager-home-day.js';
+import type { DayWindow } from './home-day.js';
+import { hasVisitStarted } from './home-visit-conditions.js';
 
 /**
  * The Visit status vocabulary the API exchanges (`BR-074`, `BR-041`).
@@ -64,14 +65,14 @@ export const NEEDS_SCHEDULING_ACTIVE_VISIT_STATUSES = [
  */
 export const NEEDS_SCHEDULING_JOB_STATUSES = ['NEW', 'IN_PROGRESS'] as const;
 
-/**
- * The Visit statuses that are not work happening today (`BR-074`).
- *
- * A `CANCELED` or `NO_SHOW` Visit is an attempt that did not happen, so it is excluded from the
- * day's schedule and from its counts rather than being presented as an attempt the manager must
- * account for. A `COMPLETED` Visit stays: it is what the day has produced so far.
+/*
+ * The two derived Visit conditions this read presents — the attempts that did not happen and the
+ * overdue one — are defined in `home-visit-conditions.ts`, because the technician home presents the
+ * same two questions and a condition two screens show must have one answer (`BR-041`).
  */
-export const NOT_DAY_WORK_VISIT_STATUSES = ['CANCELED', 'NO_SHOW'] as const;
+
+/** How many attention items this read returns before `attention.total` carries the rest. */
+export const MANAGER_HOME_ATTENTION_LIMIT = 20;
 
 /** The technician assigned to a Visit, as a manager-home row renders them (`BR-068`). */
 export interface ManagerHomeTechnician {
@@ -194,11 +195,7 @@ function presentationRank(
   visit: ManagerHomeVisit,
 ): (typeof VISIT_PRESENTATION_RANK)[keyof typeof VISIT_PRESENTATION_RANK] {
   const status = visit.visitStatus;
-  if (
-    status === 'EN_ROUTE' ||
-    status === 'ON_SITE' ||
-    status === 'IN_PROGRESS'
-  ) {
+  if (hasVisitStarted(status)) {
     return VISIT_PRESENTATION_RANK.ACTIVE;
   }
   if (status === 'COMPLETED') {
@@ -224,25 +221,6 @@ export function compareVisits(
     return bySchedule;
   }
   return left.jobNumber - right.jobNumber;
-}
-
-/**
- * Whether a Visit is overdue: still `SCHEDULED` after the window it was scheduled for has ended
- * (`BR-072`, `BR-074`).
- *
- * The scheduled *end* decides, not the start: a Visit whose window is still open has not yet gone
- * wrong, so a technician who has not tapped `EN_ROUTE` inside their own window is not reported as a
- * problem. Nothing outside the schedule is considered — no travel time and no location
- * (`BR-070`, `BR-038`), because Servora has no confirmed rule for either.
- */
-export function isVisitOverdue(
-  visit: { readonly visitStatus: VisitStatus; readonly scheduledEnd: Date },
-  now: Date,
-): boolean {
-  return (
-    visit.visitStatus === 'SCHEDULED' &&
-    visit.scheduledEnd.getTime() < now.getTime()
-  );
 }
 
 export interface ManagerHomeTechnicianDto {

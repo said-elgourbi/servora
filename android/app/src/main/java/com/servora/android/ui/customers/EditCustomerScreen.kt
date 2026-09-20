@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,8 +31,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.domain.model.CustomerContact
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerType
+import com.servora.android.ui.components.InfoCard
 import com.servora.android.ui.theme.stateColors
 
 /** Root of the Edit Customer form. */
@@ -51,6 +54,10 @@ const val EditCustomerNotesTag = "edit-customer-notes"
 const val EditCustomerStatusActiveTag = "edit-customer-status-active"
 const val EditCustomerStatusInactiveTag = "edit-customer-status-inactive"
 const val EditCustomerPropertiesHintTag = "edit-customer-properties-hint"
+
+/** The customer's contact persons, shown read-only, and the hint that says where they are managed. */
+const val EditCustomerContactsTag = "edit-customer-contacts"
+const val EditCustomerContactsHintTag = "edit-customer-contacts-hint"
 const val EditCustomerSaveTag = "edit-customer-save"
 const val EditCustomerCancelTag = "edit-customer-cancel"
 
@@ -225,7 +232,12 @@ private fun CustomerEditForm(
                 onStatusChange = onStatusChange,
             )
 
+            if (state.contacts.isNotEmpty()) {
+                CustomerContactsReadOnly(contacts = state.contacts)
+            }
+
             CustomerPropertiesHint()
+            CustomerContactsHint()
 
             Spacer(Modifier.height(EditCustomerFormFooterSpacing))
         }
@@ -409,6 +421,83 @@ private fun CustomerPropertiesHint() {
     Text(
         modifier = Modifier.fillMaxWidth().testTag(EditCustomerPropertiesHintTag),
         text = stringResource(R.string.customers_edit_properties_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
+}
+
+/**
+ * The customer's contact persons, shown read-only (`BR-095`, `ADR-022` D5).
+ *
+ * The edit form writes the customer's own fields and nothing else: a contact person is maintained from
+ * the customer detail screen, where the capability that would perform the write is checked. The values
+ * are the backend's, drawn so the user can see who is recorded without this form pretending to own
+ * them (`BR-001`, `BR-042`).
+ */
+@Composable
+private fun CustomerContactsReadOnly(contacts: List<CustomerContact>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(EditCustomerContactsTag),
+    ) {
+        CustomerFieldGroupLabel(labelRes = R.string.customers_detail_contacts)
+        Spacer(Modifier.height(PropertyFormFieldSpacing))
+        InfoCard {
+            contacts.forEachIndexed { index, contact ->
+                if (index > 0) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            modifier = Modifier.weight(1f),
+                            text = listOf(contact.firstName, contact.lastName)
+                                .filter { it.isNotBlank() }
+                                .joinToString(" "),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (contact.isPrimary) {
+                            Text(
+                                text = stringResource(R.string.customers_contacts_primary),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    contact.phone?.takeIf { it.isNotBlank() }?.let { phone ->
+                        Text(
+                            text = phone,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    contact.email?.takeIf { it.isNotBlank() }?.let { email ->
+                        Text(
+                            text = email,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The note that says contacts are maintained from the customer's own screen (`ADR-022` D5). */
+@Composable
+private fun CustomerContactsHint() {
+    Text(
+        modifier = Modifier.fillMaxWidth().testTag(EditCustomerContactsHintTag),
+        text = stringResource(R.string.customers_edit_contacts_hint),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,

@@ -1,12 +1,18 @@
 package com.servora.android.data.jobs
 
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.Multipart
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
+import retrofit2.http.Streaming
 
 /**
  * Retrofit contract for the Job read and the Job and Visit management actions.
@@ -19,6 +25,20 @@ import retrofit2.http.Path
  * rather than a locally patched copy (`BR-001`).
  */
 interface JobDetailsApi {
+    /**
+     * `POST /jobs` — creates a Job for a Customer at a Property (`BR-047` – `BR-056`, `BR-094`).
+     *
+     * The caller names the Customer, the Property and the title; the backend owns the identifier, the
+     * organization-scoped Job number, the `NEW` status, the address snapshot and the version, and
+     * refuses a Customer or a Property that is not usable (`BR-001`, `BR-007`). The answer is the same
+     * projection `GET /jobs/{jobId}` returns, so no second representation of a Job exists (`BR-041`).
+     */
+    @POST("jobs")
+    suspend fun createJob(
+        @Header("Authorization") authorization: String,
+        @Body request: CreateJobRequest,
+    ): JobDetailsDto
+
     /** `GET /jobs/{jobId}` — one Job of the caller's organization, as its details screen shows it. */
     @GET("jobs/{jobId}")
     suspend fun jobDetails(
@@ -59,6 +79,26 @@ interface JobDetailsApi {
         @Body request: AssignVisitTechniciansRequestDto,
     ): JobDetailsDto
 
+    /**
+     * `PATCH /jobs/{jobId}/visits/{visitId}/status` — the Visit's field lifecycle (`BR-074`, `BR-093`).
+     *
+     * Two authorizations reach it (`BR-093`): `VISIT_UPDATE_ASSIGNED_STATUS`, which scopes the caller to
+     * their own current crew, and the office's `JOB_UPDATE`, which admits an office member to any Visit
+     * of the organization **without** crew membership — that is how a manager completes a Visit from Job
+     * Details. The completion's own capability is required of every caller, so the API asks for
+     * `VISIT_RECORD_OUTCOME` again when the destination is `COMPLETED` (`BR-009`, `BR-066`, `BR-077`,
+     * `ADR-019` D1–D3, D7). A completion carries the outcome `BR-077` requires in the same body, and the
+     * answer is the Job as it now stands, so the screen presents the backend's state including the
+     * Visit's new status.
+     */
+    @PATCH("jobs/{jobId}/visits/{visitId}/status")
+    suspend fun changeVisitStatus(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("visitId") visitId: String,
+        @Body request: ChangeVisitStatusRequestDto,
+    ): JobDetailsDto
+
     /** `POST /jobs/{jobId}/visits/{visitId}/notes` — adds a text Activity update. */
     @POST("jobs/{jobId}/visits/{visitId}/notes")
     suspend fun addVisitNote(
@@ -73,4 +113,111 @@ interface JobDetailsApi {
     suspend fun assignableTechnicians(
         @Header("Authorization") authorization: String,
     ): List<AssignableTechnicianDto>
+
+    /**
+     * `POST /jobs/{jobId}/photos` — adds one photo to the Job's Activity (`BR-015`, `BR-027`).
+     *
+     * The photo is sent as multipart rather than JSON so the bytes are never base64-encoded into a
+     * request body, and the parts are `RequestBody`s rather than scalars so the client controls
+     * exactly what each text part contains. `clientOperationId` is the queued operation's id, sent
+     * unchanged on every retry, which is what makes a replayed upload store the evidence once
+     * (`BR-031`).
+     */
+    @Multipart
+    @POST("jobs/{jobId}/photos")
+    suspend fun addJobPhoto(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Part("clientOperationId") clientOperationId: RequestBody,
+        @Part("phase") phase: RequestBody,
+        @Part("note") note: RequestBody?,
+        @Part("capturedAt") capturedAt: RequestBody?,
+        @Part file: MultipartBody.Part,
+    ): JobActivityDto
+
+    /**
+     * `POST /jobs/{jobId}/audio-notes` — adds one audio recording to the Job's Activity
+     * (`BR-091`, `ADR-018`).
+     *
+     * The same shape as the photo upload, for the same reason: the bytes travel as a multipart part so
+     * they are never base64-encoded into a request body, and `clientOperationId` is the queued
+     * operation's id, sent unchanged on every retry, which is what makes a replayed upload record the
+     * evidence once (`BR-031`). No length is sent: the API reads it from the container (`ADR-018` A3).
+     */
+    @Multipart
+    @POST("jobs/{jobId}/audio-notes")
+    suspend fun addJobAudioNote(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Part("clientOperationId") clientOperationId: RequestBody,
+        @Part("phase") phase: RequestBody,
+        @Part("note") note: RequestBody?,
+        @Part("capturedAt") capturedAt: RequestBody?,
+        @Part file: MultipartBody.Part,
+    ): JobActivityDto
+
+    /**
+     * `POST /jobs/{jobId}/photos/{photoId}/removal` — takes accepted evidence out of ordinary use
+     * (`BR-088`, `BR-089`).
+     *
+     * It is not a delete: nothing here edits or deletes a recorded photo. The API appends a removal
+     * record carrying the actor, the instant and the reason, and answers with the refreshed timeline,
+     * so the evidence stops appearing in ordinary views while its record and history are preserved
+     * (`BR-067`). `evidence.photo.remove` authorizes it, and the API enforces that whatever this client
+     * draws (`BR-007`).
+     */
+    @POST("jobs/{jobId}/photos/{photoId}/removal")
+    suspend fun removeJobPhoto(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("photoId") photoId: String,
+        @Body request: RemoveJobPhotoRequestDto,
+    ): JobActivityDto
+
+    /**
+     * `POST /jobs/{jobId}/audio-notes/{audioNoteId}/removal` — takes accepted audio evidence out of
+     * ordinary use (`BR-088`, `BR-089`, `ADR-018` A7).
+     *
+     * The photo removal's own shape for the audio kind: nothing here edits or deletes a recording, the
+     * API appends a removal record carrying the actor, the instant and the reason, and it answers with
+     * the refreshed timeline. `evidence.audio.remove` authorizes it — a capability separate from the
+     * photo one, so a company may withdraw one kind and keep the other.
+     */
+    @POST("jobs/{jobId}/audio-notes/{audioNoteId}/removal")
+    suspend fun removeJobAudioNote(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("audioNoteId") audioNoteId: String,
+        @Body request: RemoveJobAudioNoteRequestDto,
+    ): JobActivityDto
+
+    /**
+     * `GET /jobs/{jobId}/audio-notes/{audioNoteId}/content` — the recording's bytes (`BR-091`).
+     *
+     * Evidence is read through the API on the API port (`ADR-013` D7). It is streamed, because the
+     * caller writes the bytes to a file it plays from rather than holding the whole recording in
+     * memory.
+     */
+    @Streaming
+    @GET("jobs/{jobId}/audio-notes/{audioNoteId}/content")
+    suspend fun jobAudioNoteContent(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("audioNoteId") audioNoteId: String,
+    ): ResponseBody
+
+    /**
+     * `GET /jobs/{jobId}/photos/{photoId}/content` — the photo's bytes (`BR-015`).
+     *
+     * Evidence is read through the API on the API port, so no storage endpoint, bucket or signature
+     * host is configured in or visible to the client (`ADR-013` D7). It is streamed, because the
+     * caller decodes a thumbnail from it rather than holding the whole image in memory.
+     */
+    @Streaming
+    @GET("jobs/{jobId}/photos/{photoId}/content")
+    suspend fun jobPhotoContent(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("photoId") photoId: String,
+    ): ResponseBody
 }

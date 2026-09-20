@@ -32,6 +32,16 @@
     <string name="sign_in_forgot_password">Mot de passe oublié ?</string>
     <string name="sign_in_sms_action">Se connecter par SMS</string>
 
+    <!--
+      Raccourci temporaire de connexion pour le développement local
+      (`docs/tracker/049-android-dev-sign-in-buttons.md`). Les comptes qu'il propose n'existent que
+      dans une compilation qui les porte : une compilation de production n'affiche rien de tout
+      cela. L'adresse du compte est une donnée, affichée telle que l'API l'a enregistrée.
+    -->
+    <string name="dev_sign_in_label">Compte de développement</string>
+    <string name="dev_sign_in_manager">Se connecter en tant que gestionnaire</string>
+    <string name="dev_sign_in_technician">Se connecter en tant que technicien</string>
+
     <!-- Commandes d'apparence de la barre supérieure de connexion (`BR-028`). -->
     <string name="appearance_theme_light">Thème clair</string>
     <string name="appearance_theme_dark">Thème sombre</string>
@@ -145,6 +155,81 @@
     <string name="home_retry">Réessayer</string>
     <string name="home_refreshing">Mise à jour…</string>
     <string name="home_unrefreshed_notice">Actualisation impossible. Dernière mise à jour affichée.</string>
+
+    <!-- La journée du technicien (`GET /home/technician`, ADR-019 D6). Cet écran répond à
+         « que dois-je faire ensuite? », donc il nomme la prochaine visite, la journée et l’aperçu
+         dans cet ordre, sans rien dire de l’exploitation. -->
+    <string name="technician_home_next_title">Prochaine intervention</string>
+    <string name="technician_home_next_open">Ouvrir l’intervention</string>
+    <string name="technician_home_crew_format">Avec %1$s</string>
+    <string name="technician_home_upcoming_title">À venir</string>
+    <string name="technician_home_nothing_title">Aucune intervention assignée</string>
+    <string name="technician_home_nothing_detail">Aucune intervention ne vous est assignée pour le moment.</string>
+    <string name="technician_home_loading">Chargement de votre journée…</string>
+    <string name="technician_home_error_title">Impossible de charger votre journée</string>
+
+    <!--
+      L'horaire du gestionnaire (`GET /schedule`) : la bande hebdomadaire et l'agenda du jour
+      sélectionné. L'écran répond à « que se passe-t-il ce jour-là, et qui s'en occupe? », donc il
+      nomme le jour, les deux vues, le filtre par technicien et les faits de chaque carte — jamais un
+      statut d'intervention, qui est une autre machine à états que celui de la visite (`BR-059`,
+      `BR-074`).
+    -->
+    <string name="schedule_lane_schedule">Horaire</string>
+    <string name="schedule_lane_unassigned">Non assignés</string>
+    <string name="schedule_lane_requests">Demandes</string>
+    <plurals name="schedule_unassigned_more">
+        <item quantity="one">%1$d autre en attente d’un technicien</item>
+        <item quantity="other">%1$d autres en attente d’un technicien</item>
+    </plurals>
+    <string name="schedule_today">Aujourd’hui</string>
+    <!-- Le repère « maintenant » : son libellé, l’heure qu’il indique. -->
+    <string name="schedule_now_at">Maintenant · %1$s</string>
+    <string name="schedule_date_pick">Choisir une date</string>
+    <string name="schedule_date_picker_confirm">Sélectionner</string>
+    <string name="schedule_date_picker_cancel">Annuler</string>
+    <string name="schedule_filter_title">Technicien</string>
+    <string name="schedule_filter_subtitle">Sélectionnez des techniciens pour l’horaire</string>
+    <string name="schedule_filter_close">Fermer</string>
+    <string name="schedule_filter_all">Tous les techniciens</string>
+    <string name="schedule_filter_unnamed">Technicien sans nom</string>
+    <string name="schedule_filter_open">Choisir un technicien</string>
+    <string name="schedule_filter_search">Rechercher un technicien</string>
+    <string name="schedule_filter_no_results">Aucun technicien ne correspond à votre recherche.</string>
+    <string name="schedule_filter_apply">Appliquer</string>
+    <string name="schedule_filter_apply_count">Appliquer (%1$d)</string>
+    <string name="schedule_filter_clear">Effacer</string>
+    <!-- Le résumé du filtre replié lorsque plusieurs techniciens sont sélectionnés (`BR-012`). -->
+    <plurals name="schedule_filter_selected_technicians">
+        <item quantity="one">%1$d technicien</item>
+        <item quantity="other">%1$d techniciens</item>
+    </plurals>
+    <string name="schedule_empty_day_title">Rien de planifié</string>
+    <string name="schedule_empty_day_detail">Rien n’est planifié pour ce jour.</string>
+    <string name="schedule_empty_unassigned_title">Toutes les visites sont assignées</string>
+    <string name="schedule_empty_unassigned_detail">Rien n’attend un technicien.</string>
+    <string name="schedule_empty_requests_title">Aucune demande en attente</string>
+    <string name="schedule_empty_requests_detail">Aucune visite de suivi n’attend une révision.</string>
+    <string name="schedule_request_same_technician">Même technicien préféré</string>
+    <string name="schedule_request_open_job">Ouvrir l’intervention</string>
+    <string name="schedule_request_clarify">Clarifier</string>
+    <string name="schedule_request_reject">Rejeter</string>
+    <string name="schedule_crew_more">%1$s +%2$d</string>
+    <string name="schedule_customer_property_format">%1$s · %2$s</string>
+    <string name="schedule_loading">Chargement de l’horaire…</string>
+    <string name="schedule_error_title">Impossible de charger l’horaire</string>
+    <!-- L’horaire du technicien : la semaine, le jour et les visites assignées au technicien connecté. -->
+    <string name="nav_my_schedule">Mon horaire</string>
+    <string name="technician_schedule_week_range">%1$s–%2$s</string>
+    <string name="technician_schedule_previous_week">Semaine précédente</string>
+    <string name="technician_schedule_next_week">Semaine suivante</string>
+    <string name="technician_schedule_day_today">Aujourd’hui · %1$s</string>
+    <string name="technician_schedule_day_tomorrow">Demain · %1$s</string>
+    <string name="technician_schedule_you">Vous</string>
+    <string name="technician_schedule_empty_title">Aucune visite assignée</string>
+    <string name="technician_schedule_empty_detail">Rien ne vous est assigné pour ce jour.</string>
+    <string name="technician_schedule_loading">Chargement de votre horaire…</string>
+    <string name="technician_schedule_error_title">Impossible de charger votre horaire</string>
     <string name="customers_title">Clients</string>
     <string name="customers_subtitle">Gérer les clients et leurs propriétés de service</string>
     <string name="customers_search_placeholder">Nom, téléphone, adresse…</string>
@@ -274,6 +359,52 @@
     <string name="customers_job_status_canceled">Annulé</string>
 
     <!--
+      Les personnes-ressources d\'un client sur sa fiche (`BR-023`, `BR-095` ; `ADR-022` D6). La carte
+      présente le contact principal en premier, dans l\'ordre rapporté par l\'API, et chaque ligne
+      affiche le téléphone et le courriel propres à la personne — jamais ceux de l\'en-tête du client.
+      Modifier et Retirer ne sont affichés que pour la capacité qui effectuerait l\'écriture.
+    -->
+    <string name="customers_detail_contacts">Personnes-ressources</string>
+    <string name="customers_contacts_empty">Aucune personne-ressource au dossier.</string>
+    <string name="customers_contacts_primary">Principal</string>
+    <string name="customers_contacts_add">Ajouter d\'autres personnes-ressources</string>
+    <string name="customers_contacts_remove">Retirer</string>
+    <string name="customers_contacts_remove_confirm_title">Retirer cette personne-ressource ?</string>
+    <string name="customers_contacts_remove_confirm_message">%1$s ne figurera plus sur ce client. Le dossier est conservé pour l\'historique.</string>
+    <string name="customers_contacts_remove_confirm_action">Retirer</string>
+    <string name="customers_contacts_remove_failure">La personne-ressource n\'a pas été retirée : %1$s</string>
+    <string name="customers_edit_contacts_hint">Les personnes-ressources se gèrent depuis la fiche client.</string>
+
+    <!--
+      Ajouter ou modifier une personne-ressource (`BR-023`, `BR-095`). Le formulaire affiche les
+      quatre champs propres à la personne — prénom, nom, téléphone et courriel — ainsi que l\'indicateur
+      principal qui en fait la personne que l\'organisation appelle en premier.
+    -->
+    <string name="contact_add_title">Ajouter une personne-ressource</string>
+    <string name="contact_edit_title">Modifier la personne-ressource</string>
+    <string name="contact_add_action">Ajouter</string>
+    <string name="contact_edit_action">Enregistrer les modifications</string>
+    <string name="contact_section_person">Personne-ressource</string>
+    <string name="contact_first_name_label">Prénom</string>
+    <string name="contact_first_name_placeholder">Jean</string>
+    <string name="contact_last_name_label">Nom</string>
+    <string name="contact_last_name_placeholder">Tremblay</string>
+    <string name="contact_phone_label">Téléphone</string>
+    <string name="contact_phone_placeholder">555-123-4567</string>
+    <string name="contact_email_label">Courriel</string>
+    <string name="contact_email_placeholder">jean@exemple.com</string>
+    <string name="contact_primary_label">Contact principal</string>
+    <string name="contact_primary_hint">Le contact principal est la personne que l\'organisation appelle en premier.</string>
+    <string name="contact_form_incomplete">Veuillez remplir le prénom et le nom de la personne-ressource.</string>
+    <string name="contact_error_unauthenticated">Votre session a expiré. Reconnectez-vous.</string>
+    <string name="contact_error_forbidden">Vous n\'avez pas la permission de gérer les personnes-ressources.</string>
+    <string name="contact_error_validation">Vérifiez les renseignements saisis.</string>
+    <string name="contact_error_conflict">Cette personne-ressource a changé depuis son ouverture. Rouvrez-la et réessayez.</string>
+    <string name="contact_error_not_found">Cette personne-ressource n\'existe plus.</string>
+    <string name="contact_error_network">Vérifiez votre réseau et réessayez.</string>
+    <string name="contact_error_server">Veuillez réessayer.</string>
+
+    <!--
       Ajouter une propriété (`BR-049`, `BR-050`). Le formulaire n'affiche que les champs autoritatifs
       de la propriété; la province est un sélecteur sur les codes canadiens stables (`BR-028`,
       `BR-041`).
@@ -394,6 +525,15 @@
     <string name="job_details_no_address">Aucune adresse pour l\'instant</string>
     <string name="job_details_open_in_maps">Ouvrir dans la carte</string>
     <string name="job_details_customer_label">Client</string>
+    <string name="job_details_customer_phone_label">Téléphone</string>
+    <string name="job_details_customer_email_label">Courriel</string>
+    <string name="job_details_customer_notes_label">Notes</string>
+    <plurals name="job_details_customer_other_contacts">
+        <item quantity="one">%1$d autre contact</item>
+        <item quantity="other">%1$d autres contacts</item>
+    </plurals>
+    <string name="job_details_customer_other_contacts_show">Afficher les autres contacts</string>
+    <string name="job_details_customer_other_contacts_hide">Masquer les autres contacts</string>
     <string name="job_details_technicians_label">Techniciens</string>
     <string name="job_details_technician_name_unknown">Nom indisponible</string>
     <string name="job_details_unassigned_detail">Aucun technicien n\'est encore assigné à cette visite.</string>
@@ -401,6 +541,45 @@
     <string name="job_details_error_title">Impossible de charger cette intervention</string>
     <string name="job_details_error_message">Vérifiez votre réseau et réessayez.</string>
     <string name="job_details_retry">Réessayer</string>
+
+    <!--
+      L'écran remanié des détails de l'intervention (`BR-047`, `BR-059`) : la page présente les
+      renseignements propres à l'intervention, la visite qui la représente, et l'activité de
+      l'intervention regroupée par la visite à laquelle chaque mise à jour appartient. Chaque section est
+      étiquetée selon ce à quoi elle appartient, pour qu'aucune ne soit lue comme une autre, et le groupe
+      d'activité d'une visite est intitulé `Visite N · date`.
+    -->
+    <string name="job_details_overview_label">Aperçu de l\'intervention</string>
+    <!--
+      L'étiquette de la section qui présente la visite que la lecture représente (`BR-081`). Elle énonce
+      quand cette tentative a lieu, selon l'horloge et le fuseau de l'appareil, pour que la section ne
+      dise jamais au lecteur qu'une visite prévue dans deux jours est en cours (`BR-072`, `BR-074`).
+    -->
+    <string name="job_details_current_visit_label">Visite en cours</string>
+    <string name="job_details_today_visit_label">Visite d\'aujourd\'hui</string>
+    <string name="job_details_tomorrow_visit_label">Visite de demain</string>
+    <string name="job_details_upcoming_visit_label">Prochaine visite</string>
+    <string name="job_details_previous_visit_label">Visite précédente</string>
+    <string name="job_details_no_selected_visit_detail">Cette intervention n\'a encore aucune visite planifiée.</string>
+    <string name="job_details_visit_activity_label">Activité de la visite</string>
+    <string name="job_details_visit_activity_empty">Rien n\'a encore été consigné pour cette visite.</string>
+    <string name="job_details_visit_time_label">Heure prévue</string>
+    <string name="job_details_visit_time_range">%1$s – %2$s</string>
+    <!--
+      Ce qui est résulté de la tentative sur place (`BR-077`, `BR-078`). C'est le résultat **courant** de
+      la visite que l'API rapporte, donc la ligne n'est dessinée que lorsque la visite en détient un : une
+      visite rouverte après avoir été terminée n'en détient aucun, et une visite jamais terminée non plus
+      (`BR-079`).
+    -->
+    <string name="job_details_visit_outcome_label">Résultat</string>
+    <!--
+      L'équipe qu'un groupe de visite énonce est celle que la lecture rapporte, c'est-à-dire les
+      techniciens **assignés** à la tentative (`BR-068`) : Servora ne consigne pas qui était présent, donc
+      l'étiquette ne l'affirme jamais.
+    -->
+    <string name="job_details_assigned_technicians_label">Techniciens assignés</string>
+    <string name="job_details_job_updates_label">Mises à jour générales de l\'intervention</string>
+    <string name="job_details_job_updates_empty">Aucune mise à jour générale pour l\'instant.</string>
 
     <!--
       Activité de l'intervention (`BR-080`) : la chronologie unifiée de l'intervention, la plus
@@ -411,10 +590,31 @@
     -->
     <string name="job_activity_label">Activité de l\'intervention</string>
     <string name="job_activity_visit_format">Visite %1$d</string>
+    <!--
+      Le titre d'un groupe de visite : le numéro de la visite et la date pour laquelle elle était prévue.
+      Le numéro reste dans le titre parce que deux tentatives peuvent tomber à des dates qui se lisent
+      pareil, et la date énonce ce pour quoi le groupe existait (`BR-052`, `BR-072`).
+    -->
+    <string name="job_activity_visit_title_format">Visite %1$d · %2$s</string>
+    <string name="job_activity_visit_expand_label">Développer la visite %1$d</string>
+    <string name="job_activity_visit_collapse_label">Réduire la visite %1$d</string>
+    <!-- Le groupe qui contient les mises à jour propres à l'intervention, sans visite (`BR-080`). -->
+    <string name="job_activity_general_expand_label">Développer les mises à jour générales</string>
+    <string name="job_activity_general_collapse_label">Réduire les mises à jour générales</string>
+    <!-- L'état qu'un groupe replié ou déployé annonce à un lecteur d'écran (`BR-028`). -->
+    <string name="job_activity_group_expanded">Déployé</string>
+    <string name="job_activity_group_collapsed">Replié</string>
     <string name="job_activity_empty_title">Aucune activité pour l\'instant</string>
     <string name="job_activity_empty_message">Les mises à jour de l\'équipe apparaîtront ici.</string>
     <string name="job_activity_error_message">Impossible de charger l\'activité.</string>
     <string name="job_activity_add_update">Ajouter une mise à jour</string>
+    <!--
+      Les types de mise à jour que la feuille propose, à titre de choix unique, et les commandes
+      propres à chacun. L'étiquette énonce ce qui est choisi (`BR-012`, `BR-027`).
+    -->
+    <string name="job_activity_update_type_label">Type de mise à jour</string>
+    <string name="job_activity_update_note">Écrire une note</string>
+    <string name="job_activity_update_audio">Ajouter un audio</string>
     <string name="job_activity_text_label">Mise à jour</string>
     <string name="job_activity_text_placeholder">Saisir une mise à jour texte…</string>
     <string name="job_activity_save_update">Enregistrer</string>
@@ -438,6 +638,103 @@
     <string name="job_activity_outcome_needs_quote_approval">Approbation de soumission requise</string>
     <string name="job_activity_outcome_unable_to_complete">Impossible de terminer</string>
 
+    <!--
+      Job photo evidence (`BR-015`, `BR-027`). The phase codes are stable domain values; only these
+      labels are language-specific, and the badges reuse the same labels as the selector so a photo and
+      the choice made about it can never read differently (`BR-028`, `BR-041`).
+    -->
+    <string name="job_photo_add_action">Ajouter une photo</string>
+    <string name="job_photo_review_title">Ajouter cette photo</string>
+    <string name="evidence_phase_label">Étape</string>
+    <string name="evidence_phase_before">Avant le travail</string>
+    <string name="evidence_phase_during">Pendant le travail</string>
+    <string name="evidence_phase_after">Après le travail</string>
+    <string name="evidence_phase_unknown">Étape non enregistrée</string>
+    <string name="job_photo_note_label">Note (facultative)</string>
+    <string name="job_photo_note_placeholder">Que montre cette photo ?</string>
+    <string name="job_photo_review_confirm">Ajouter</string>
+    <string name="job_photo_review_discard">Supprimer</string>
+    <string name="job_photo_remove">Retirer la photo</string>
+    <string name="job_photo_image_description">Photo de l’intervention</string>
+    <string name="job_photo_viewer_open">Voir la photo</string>
+    <string name="job_photo_gallery_label">Photos</string>
+    <string name="job_photo_gallery_expand">Afficher les photos</string>
+    <string name="job_photo_gallery_collapse">Masquer les photos</string>
+    <string name="job_photo_viewer_close">Fermer la photo</string>
+    <string name="job_photo_viewer_unavailable">Cette photo n’a pas pu être affichée.</string>
+    <!--
+      Une photo absente de cet appareil et illisible sans connectivité (`D5`, `BR-013`). Le technicien
+      peut agir sur cet état, c’est pourquoi il diffère de l’échec générique ci-dessus ; la forme courte
+      est celle que dessine une vignette (`BR-028`).
+    -->
+    <string name="job_photo_viewer_unavailable_offline">Cette photo n’est pas disponible hors ligne. Connectez-vous pour la voir.</string>
+    <string name="job_photo_offline_description">Non disponible hors ligne</string>
+    <string name="job_photo_viewer_notes_label">Notes</string>
+    <string name="job_photo_notes_more">Plus</string>
+    <string name="job_photo_notes_less">Moins</string>
+    <string name="job_photo_tray_title">Photos à enregistrer</string>
+    <string name="job_photo_tray_unsaved">%1$d non enregistrée(s)</string>
+    <string name="job_photo_tray_capture">Prendre une autre</string>
+    <string name="job_photo_tray_submit">Enregistrer les photos</string>
+    <!--
+      La seule action qu’un téléversement définitivement refusé laisse au technicien (`D6c`). Elle
+      retire la photo de cet appareil — son fichier et son refus en file d’attente ensemble — et elle
+      est toujours dessinée à côté du refus que la corbeille annonce.
+    -->
+    <string name="job_photo_tray_discard">Supprimer</string>
+    <string name="evidence_state_queued">En attente de téléversement</string>
+    <string name="evidence_state_uploading">Téléversement…</string>
+    <string name="evidence_state_retrying">Nouvelle tentative</string>
+    <string name="evidence_state_refused">Refusé par le serveur</string>
+    <string name="job_photo_saved_message">Photos enregistrées sur cet appareil. Elles seront téléversées dès que le serveur sera joignable.</string>
+    <string name="job_photo_error_capture_failed">L’appareil photo n’a enregistré aucune photo.</string>
+    <string name="job_photo_error_not_signed_in">Reconnectez-vous pour enregistrer des photos.</string>
+    <string name="job_photo_error_not_queued">Les photos n’ont pas pu être enregistrées pour l’instant. Elles restent sur cet appareil.</string>
+    <string name="job_photo_error_already_submitted">Cette photo est déjà en attente de téléversement.</string>
+    <string name="job_photo_error_type_not_accepted">Ce format de photo n’est pas accepté par Servora. Prenez ou choisissez une image JPEG, PNG ou WebP.</string>
+    <string name="job_photo_error_too_large">Cette photo est trop volumineuse pour être téléversée. Reprenez-la dans un format plus petit.</string>
+    <string name="job_photo_error_not_saved">La photo n’a pas pu être enregistrée sur cet appareil.</string>
+    <string name="job_photo_error_not_read">Cette photo n’a pas pu être lue sur cet appareil.</string>
+    <string name="job_photo_error_picker_unavailable">Le sélecteur de photos de l’appareil n’a pas pu être ouvert.</string>
+    <!--
+      Sortir une photo de Servora : la position dans le visionneur et ses deux actions, ainsi que ce que
+      chacune rapporte (`D11`, `D12`, `D13`). Les deux lisent une preuve que l’API autorise ; rien ici
+      n’enregistre ni ne modifie une photo (`BR-027`).
+    -->
+    <string name="job_photo_viewer_position">%1$d / %2$d</string>
+    <string name="job_photo_viewer_save">Enregistrer sur l’appareil</string>
+    <string name="job_photo_viewer_share">Partager</string>
+    <string name="job_photo_viewer_share_title">Partager la photo</string>
+    <string name="job_photo_saved_to_device_message">Photo enregistrée sur cet appareil.</string>
+    <string name="job_photo_shared_message">Photo transmise à l’application choisie.</string>
+    <!--
+      Retirer une preuve acceptée de l’usage courant (`BR-088`, `BR-089`). C’est une action de
+      gestionnaire sur une photo enregistrée : elle est confirmée et une raison est donnée avant toute
+      application ; la photo n’est pas supprimée, son enregistrement et son historique sont conservés,
+      et le retrait lui-même est consigné.
+    -->
+    <string name="job_photo_viewer_remove">Retirer la preuve</string>
+    <string name="job_photo_removal_title">Retirer cette photo ?</string>
+    <string name="job_photo_removal_message">Cette photo a été enregistrée comme preuve et ne peut donc pas être supprimée. Elle sera retirée des photos de l’intervention et des vues courantes, et la raison que vous indiquez est conservée avec l’enregistrement.</string>
+    <string name="job_photo_removal_reason_label">Pourquoi ce retrait ?</string>
+    <string name="job_photo_removal_confirm">Retirer</string>
+    <string name="job_photo_removal_cancel">Annuler</string>
+    <string name="job_photo_removed_message">Preuve photo retirée. L’enregistrement et son historique ont été conservés.</string>
+    <string name="job_photo_activity_removed">Photo retirée de l’usage courant</string>
+    <string name="job_photo_error_removal_not_permitted">Votre rôle ne permet pas de retirer une preuve. Demandez à un gestionnaire.</string>
+    <string name="job_photo_error_removal_unavailable">Cette photo n’est plus disponible pour un retrait.</string>
+    <string name="job_photo_error_removal_unreachable">Retirer une preuve exige le serveur. Connectez-vous et réessayez.</string>
+    <string name="job_photo_error_removal_failed">La photo n’a pas pu être retirée : rien n’a changé.</string>
+    <string name="job_photo_error_export_unreadable">Cette photo n’a pas pu être lue : elle n’a donc été ni enregistrée ni partagée.</string>
+    <string name="job_photo_error_export_failed">La photo n’a pas pu être enregistrée sur cet appareil.</string>
+    <string name="job_photo_error_share_unavailable">Aucune application de cet appareil ne peut partager la photo.</string>
+    <string name="job_photo_error_save_permission">Servora a besoin de la permission d’enregistrer des photos sur cet appareil.</string>
+    <string name="job_photo_error_item">Photo %1$d sur %2$d : %3$s</string>
+    <string name="job_update_photo_sources_label">Ajouter des photos depuis</string>
+    <string name="job_update_photo_camera">Prendre une photo</string>
+    <string name="job_update_photo_library">Choisir sur l\'appareil</string>
+    <string name="job_photo_activity_added">Photo ajoutée</string>
+
     <!-- Actions sur l'intervention (`BR-058`, `BR-066`, `BR-068`, `BR-070`, `BR-073`). -->
     <string name="job_action_change_status">Changer le statut</string>
     <string name="job_action_reschedule">Replanifier</string>
@@ -457,12 +754,36 @@
     <string name="job_action_error_version_conflict">L’intervention a changé depuis son ouverture. Rouvrez-la et réessayez.</string>
     <string name="job_action_error_transition">L’intervention ne peut pas passer à ce statut depuis le statut actuel.</string>
     <string name="job_action_error_review_condition">L’intervention ne peut pas encore être en révision : du travail est toujours ouvert ou la dernière visite ne l’a pas résolue.</string>
+    <string name="job_action_error_completion_blocked">Cette intervention ne peut pas être terminée tant qu’elle a des visites en cours.</string>
     <string name="job_action_error_cancellation_unavailable">L’annulation d’une intervention n’est pas encore disponible.</string>
     <string name="job_action_error_visit_not_reschedulable">Seule une visite planifiée peut être replanifiée.</string>
     <string name="job_action_error_technicians_not_assignable">Un ou plusieurs techniciens ne peuvent pas être assignés.</string>
     <string name="job_action_error_network">Vérifiez votre réseau et réessayez.</string>
     <string name="job_action_error_server">Le service n’a pas pu terminer le changement. Réessayez.</string>
     <string name="job_action_error_unexpected">Le changement n’a pas pu être effectué.</string>
+    <string name="job_action_error_visit_transition">La visite ne peut pas passer à ce statut depuis le statut actuel.</string>
+    <string name="job_action_error_visit_scheduling">La visite ne peut pas encore être planifiée : il lui faut un lieu, un horaire et une équipe avec un seul responsable.</string>
+    <string name="job_action_error_job_closed">Cette intervention est fermée ; aucun travail de visite ne peut y être enregistré.</string>
+    <string name="job_action_error_visit_operation_reused">Cette mise à jour a déjà servi pour une autre visite.</string>
+    <string name="job_action_change_visit_status">Changer le statut de la visite</string>
+    <string name="job_action_done_visit_status">Statut de la visite mis à jour</string>
+    <string name="job_action_queued_visit_status">Enregistré sur cet appareil. La visite sera mise à jour dès le retour de la connexion.</string>
+    <string name="job_action_queued_activity_text">Enregistré sur cet appareil. La mise à jour sera envoyée dès le retour de la connexion.</string>
+    <string name="job_action_queued_generic">Enregistré sur cet appareil. Ce sera appliqué dès le retour de la connexion.</string>
+    <string name="job_visit_complete_title">Terminer la visite</string>
+    <string name="job_visit_complete_outcome_label">Résultat</string>
+    <string name="job_visit_complete_summary_label">Résumé</string>
+    <string name="job_visit_complete_summary_placeholder">Que s’est-il passé sur place ?</string>
+    <string name="job_visit_complete_summary_required">Obligatoire : indiquez le résultat de la visite.</string>
+    <string name="job_visit_complete_confirm">Terminer la visite</string>
+    <string name="job_visit_pending_title">En attente de synchronisation</string>
+    <string name="job_visit_pending_action">Visite → %1$s</string>
+    <string name="job_visit_pending_queued">Enregistré sur cet appareil</string>
+    <string name="job_visit_pending_sending">Envoi…</string>
+    <string name="job_visit_pending_retrying">Envoi impossible. Une nouvelle tentative suivra.</string>
+    <string name="job_visit_pending_refused">Non appliqué</string>
+    <string name="job_visit_pending_stale">La visite a changé, ou la nouvelle heure entre en conflit avec une autre visite. Rouvrez l’intervention et réessayez.</string>
+    <string name="job_visit_pending_discard">Supprimer</string>
 
     <!-- Replanification d’une visite (`BR-073`). -->
     <string name="job_reschedule_title">Replanifier la visite</string>
@@ -485,4 +806,111 @@
     <string name="job_conflict_title">Cette plage horaire chevauche une autre visite</string>
     <string name="job_conflict_message">Le même technicien est déjà occupé. Vous pouvez tout de même planifier cette visite.</string>
     <string name="job_conflict_confirm">Planifier quand même</string>
+
+    <!--
+      Les changements de statut conséquents que l’utilisateur confirme avant l’envoi (`BR-058`,
+      `BR-062`, `BR-063`). Terminer une intervention met fin à son travail terrain et la rouvrir la
+      renvoie dans le flux de planification : ni l’un ni l’autre ne se produit sur une seule touche.
+    -->
+    <string name="job_status_confirm_close_title">Terminer cette intervention ?</string>
+    <string name="job_status_confirm_close_message">L’intervention n° %1$d sera terminée. Cela met fin à son travail terrain et rend ses résultats de visite définitifs.</string>
+    <string name="job_status_confirm_reopen_title">Rouvrir cette intervention ?</string>
+    <string name="job_status_confirm_reopen_message">L’intervention n° %1$d reviendra au statut Nouveau. Ses visites terminées et annulées restent telles quelles.</string>
+    <string name="job_status_confirm_accept">Confirmer</string>
+    <!--
+      Preuves audio (`BR-091`, `ADR-018`). Un enregistrement reste la prise du technicien jusqu’à ce
+      qu’il la joigne, donc le type d’ajout énonce les trois états d’une prise — enregistrement en cours,
+      prise faite, révision — et l’avis rapporte ce que l’appareil fait d’une prise que l’API n’a pas
+      encore acceptée. Les libellés d’état de téléversement sont partagés avec les photos
+      (`evidence_state_*`), parce que « en attente de téléversement » est une seule idée (`BR-041`).
+    -->
+    <string name="job_audio_record">Enregistrer</string>
+    <string name="job_audio_stop">Arrêter</string>
+    <string name="job_audio_recording">Enregistrement…</string>
+    <string name="job_audio_hint">Vous pourrez vérifier l’enregistrement avant de le joindre.</string>
+    <string name="job_audio_delete">Supprimer</string>
+    <string name="job_audio_attach">Joindre à la mise à jour</string>
+    <string name="job_audio_duration">%1$d:%2$02d</string>
+    <string name="job_audio_description">Note audio</string>
+    <string name="job_audio_remove">Retirer l’enregistrement</string>
+    <string name="job_audio_discard">Supprimer</string>
+    <string name="job_audio_notice_title">Audio à enregistrer</string>
+    <string name="job_audio_notice_not_attached">Pas encore joint</string>
+    <string name="job_audio_message_queued">Enregistrement sauvegardé. Il sera téléversé dès que le serveur sera joignable.</string>
+    <string name="job_audio_error_microphone_denied">Servora a besoin du microphone pour enregistrer une note.</string>
+    <string name="job_audio_error_not_signed_in">Reconnectez-vous pour enregistrer un audio.</string>
+    <string name="job_audio_error_recorder_unavailable">Cet appareil n’a pas pu démarrer l’enregistrement.</string>
+    <string name="job_audio_error_recording_failed">L’enregistrement n’a pas pu se terminer, donc rien n’a été sauvegardé.</string>
+    <string name="job_audio_error_recording_empty">L’enregistrement est vide, donc rien n’a été sauvegardé.</string>
+    <string name="job_audio_error_recording_not_saved">L’enregistrement n’a pas pu être sauvegardé sur cet appareil.</string>
+    <string name="job_audio_error_not_queued">L’enregistrement n’a pas pu être sauvegardé pour l’instant. Il reste sur cet appareil.</string>
+    <string name="job_audio_error_already_submitted">Cet enregistrement est déjà en attente de téléversement.</string>
+    <!--
+      Lecture et retrait d’une preuve audio (`BR-091`, `BR-089`, `ADR-018` A9/A7). Un enregistrement
+      accepté par l’API est réécouté depuis l’activité de l’intervention et peut être retiré de l’usage
+      courant par un gestionnaire ; l’étape et la durée affichées viennent de l’API et ne sont pas
+      répétées ici.
+    -->
+    <string name="job_audio_activity_added">Note audio ajoutée</string>
+    <string name="job_audio_activity_removed">Note audio retirée de l’usage courant</string>
+    <string name="job_audio_play">Lire l’enregistrement</string>
+    <string name="job_audio_pause">Mettre en pause l’enregistrement</string>
+    <string name="job_audio_position_format">%1$s / %2$s</string>
+    <string name="job_audio_seek">Position de lecture</string>
+    <string name="job_audio_remove_evidence">Retirer la preuve</string>
+    <string name="job_audio_removed_message">Preuve audio retirée. L’enregistrement et son historique ont été conservés.</string>
+    <string name="job_audio_removal_title">Retirer cet enregistrement ?</string>
+    <string name="job_audio_removal_message">Cet enregistrement a été réalisé comme preuve et ne peut donc pas être supprimé. Il sera retiré des notes audio de l’intervention et des vues courantes, et la raison que vous indiquez est conservée avec l’enregistrement.</string>
+    <string name="job_audio_removal_reason_label">Pourquoi ce retrait ?</string>
+    <string name="job_audio_removal_confirm">Retirer</string>
+    <string name="job_audio_removal_cancel">Annuler</string>
+    <string name="job_audio_error_playback_failed">Cet appareil n’a pas pu lire l’enregistrement.</string>
+    <string name="job_audio_error_playback_unreachable">Cet enregistrement n’est pas encore sauvegardé sur cet appareil. Connectez-vous et réessayez.</string>
+    <string name="job_audio_error_playback_unavailable">Cet enregistrement n’a pas pu être lu.</string>
+    <string name="job_audio_error_removal_not_permitted">Votre rôle ne permet pas de retirer une preuve. Demandez à un gestionnaire.</string>
+    <string name="job_audio_error_removal_unavailable">Cet enregistrement n’est plus disponible pour un retrait.</string>
+    <string name="job_audio_error_removal_unreachable">Retirer une preuve exige le serveur. Connectez-vous et réessayez.</string>
+    <string name="job_audio_error_removal_failed">L’enregistrement n’a pas pu être retiré : rien n’a changé.</string>
+
+    <!--
+      Create Job (`BR-094`, `docs/api/job-details.md` §6). Same shape as the English block: the three
+      values a job is created with, and the create’s own failure copy (`BR-028`).
+    -->
+    <string name="job_create_title">Créer une intervention</string>
+    <string name="job_create_action">Créer une intervention</string>
+    <string name="job_create_section_customer">Client</string>
+    <string name="job_create_customer_label">Client</string>
+    <string name="job_create_customer_placeholder">Sélectionner un client</string>
+    <string name="job_create_customer_unknown">Client indisponible</string>
+    <string name="job_create_customer_picker_title">Sélectionner un client</string>
+    <string name="job_create_customer_search_placeholder">Nom, courriel ou téléphone…</string>
+    <string name="job_create_customer_empty">Aucun client ne correspond à cette recherche.</string>
+    <string name="job_create_section_property">Propriété</string>
+    <string name="job_create_property_label">Propriété</string>
+    <string name="job_create_property_placeholder">Sélectionner une propriété</string>
+    <string name="job_create_property_needs_customer">Choisissez d’abord un client</string>
+    <string name="job_create_property_picker_title">Sélectionner une propriété</string>
+    <string name="job_create_property_search_placeholder">Nom ou adresse…</string>
+    <string name="job_create_property_empty">Aucune propriété ne correspond à cette recherche.</string>
+    <string name="job_create_properties_loading">Chargement des propriétés…</string>
+    <string name="job_create_no_properties">Ce client n’a aucune propriété active. Une intervention en exige une : ajoutez d’abord une propriété à ce client.</string>
+    <string name="job_create_section_details">Détails de l’intervention</string>
+    <string name="job_create_title_label">Titre</string>
+    <string name="job_create_title_placeholder">Quel travail faut-il effectuer ?</string>
+    <string name="job_create_description_label">Description</string>
+    <string name="job_create_description_placeholder">Tout ce que le technicien doit savoir</string>
+    <string name="job_create_form_incomplete">Choisissez un client et une propriété, puis donnez un titre à l’intervention.</string>
+    <string name="job_create_retry">Réessayer</string>
+    <string name="job_create_picker_close">Fermer</string>
+    <string name="job_create_error_unauthenticated">Votre session a expiré. Reconnectez-vous.</string>
+    <string name="job_create_error_forbidden">Votre rôle ne permet pas de créer des interventions. Demandez à un gestionnaire.</string>
+    <string name="job_create_error_validation">Vérifiez les renseignements saisis.</string>
+    <string name="job_create_error_customer_not_found">Ce client n’est plus disponible. Choisissez-en un autre.</string>
+    <string name="job_create_error_customer_inactive">Ce client n’est pas actif et ne peut pas recevoir de nouveaux travaux.</string>
+    <string name="job_create_error_property_not_found">Cette propriété n’est plus disponible pour ce client. Choisissez-en une autre.</string>
+    <string name="job_create_error_property_unavailable">Cette propriété est archivée et ne peut pas recevoir de nouveaux travaux. Choisissez-en une autre.</string>
+    <string name="job_create_error_not_found">Le client ou la propriété n’est plus disponible.</string>
+    <string name="job_create_error_conflict">Le client ou la propriété ne peut pas recevoir de nouveaux travaux pour le moment.</string>
+    <string name="job_create_error_network">Vérifiez votre réseau et réessayez.</string>
+    <string name="job_create_error_server">L’intervention n’a pas pu être créée. Veuillez réessayer.</string>
 </resources>

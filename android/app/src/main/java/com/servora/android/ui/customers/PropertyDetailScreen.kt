@@ -516,13 +516,23 @@ private fun LastReportedNotice() {
     )
 }
 
-/** A refusal the user needs to see, with an explicit way to clear it. */
+/**
+ * A refusal the user needs to see, with an explicit way to clear it.
+ *
+ * The Property lifecycle screen and the customer detail's contact removal share this surface, so a
+ * refused action is reported the same way wherever it is taken; each caller passes the tag its own
+ * tests address (`BR-028`, `BR-042`).
+ */
 @Composable
-private fun ActionAttention(message: String, onDismiss: () -> Unit) {
+internal fun ActionAttention(
+    message: String,
+    onDismiss: () -> Unit,
+    testTag: String = PropertyDetailActionMessageTag,
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag(PropertyDetailActionMessageTag)
+            .testTag(testTag)
             .clickable(onClick = onDismiss),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.errorContainer,

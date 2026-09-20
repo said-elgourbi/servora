@@ -119,6 +119,38 @@ class SignInViewModelTest {
     }
 
     @Test
+    fun `signs in with a development account in one step`() = runTest(dispatcher) {
+        val repository = FakeAuthRepository(result = SignInResult.Success(SESSION))
+        val viewModel = SignInViewModel(repository)
+
+        viewModel.onDevSignIn(DEV_EMAIL, DEV_PASSWORD)
+        advanceUntilIdle()
+
+        assertEquals(listOf(DEV_EMAIL to DEV_PASSWORD), repository.attempts)
+        assertEquals("", viewModel.uiState.value.password)
+    }
+
+    @Test
+    fun `a development sign-in during an attempt changes nothing`() = runTest(dispatcher) {
+        val repository = FakeAuthRepository().apply { holdNextAttempt() }
+        val viewModel = SignInViewModel(repository)
+
+        viewModel.onDevSignIn(DEV_EMAIL, DEV_PASSWORD)
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.isSubmitting)
+
+        viewModel.onDevSignIn("second-account@servora.test", "second-password")
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(listOf(DEV_EMAIL to DEV_PASSWORD), repository.attempts)
+        assertEquals(DEV_EMAIL, state.email)
+
+        repository.release()
+        advanceUntilIdle()
+    }
+
+    @Test
     fun `reports the failure the repository returned`() = runTest(dispatcher) {
         val repository = FakeAuthRepository(
             result = SignInResult.Failure(AuthFailureReason.SERVER),
@@ -220,6 +252,11 @@ class SignInViewModelTest {
     private companion object {
         const val EMAIL = "tech@servora.test"
         const val PASSWORD = "correct-horse-battery-staple"
+
+        // The development shortcut submits whatever account it was handed; that it reaches the
+        // repository unchanged is what these tests pin, so the values need not be the seeded ones.
+        const val DEV_EMAIL = "manager@servora.test"
+        const val DEV_PASSWORD = "development-account-password"
 
         val SESSION = IssuedSession(
             sessionId = "0f9a2c1e-0000-4000-8000-000000000001",

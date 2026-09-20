@@ -24,6 +24,26 @@ internal fun CustomersFailureReason.messageRes(): Int =
     }
 
 /**
+ * The message a contact-person operation failure is reported with (`BR-095`).
+ *
+ * A contact write is authorized by its own capability set, so its refusals are explained in the
+ * terms of the record it addresses — the `customers.*` copy names Properties and would name the
+ * wrong record (`BR-028`, `BR-041`). The reason stays a stable code; only its presentation is
+ * localized here.
+ */
+internal fun CustomersFailureReason.contactMessageRes(): Int =
+    when (this) {
+        CustomersFailureReason.UNAUTHENTICATED -> R.string.contact_error_unauthenticated
+        CustomersFailureReason.FORBIDDEN -> R.string.contact_error_forbidden
+        CustomersFailureReason.VALIDATION -> R.string.contact_error_validation
+        CustomersFailureReason.VERSION_CONFLICT -> R.string.contact_error_conflict
+        CustomersFailureReason.NOT_FOUND -> R.string.contact_error_not_found
+        CustomersFailureReason.NETWORK -> R.string.contact_error_network
+        CustomersFailureReason.SERVER -> R.string.contact_error_server
+        CustomersFailureReason.UNEXPECTED -> R.string.contact_error_server
+    }
+
+/**
  * The explanation of why a queued operation was refused.
  *
  * The codes are the replay engine's (`offline-first-architecture.md` §6). Their explanations reuse

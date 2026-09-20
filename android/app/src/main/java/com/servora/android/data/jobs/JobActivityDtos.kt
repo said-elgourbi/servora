@@ -33,4 +33,11 @@ data class JobActivityEventDto(
     val outcomeCode: String? = null,
     val outcomeSummary: String? = null,
     val body: String? = null,
+    val photoId: String? = null,
+    val photoPhase: String? = null,
+    val photoRemovalReason: String? = null,
+    val audioNoteId: String? = null,
+    val audioPhase: String? = null,
+    val audioDurationSeconds: Int? = null,
+    val audioRemovalReason: String? = null,
 )

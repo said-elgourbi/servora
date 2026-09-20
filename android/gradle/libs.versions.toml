@@ -21,6 +21,13 @@ retrofit = "3.0.0"
 okhttp = "5.5.0"
 kotlinxSerialization = "1.11.0"
 coroutines = "1.11.0"
+# The image stack the photo evidence is drawn with (`D4b`, `docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
+# Pinned deliberately, like every other version here (`dev.md` §4).
+coil = "3.6.2"
+# The zoom and pan the full-size viewer draws its photo through (`D9`, ADR-016). Telephoto sub-samples
+# the file the stack cached, so a zoomed photo is the photo's own pixels rather than a scaled decode.
+# Pinned deliberately, like every other version here (`dev.md` §4).
+telephoto = "0.19.0"
 junit = "4.13.2"
 androidxTestJunit = "1.3.0"
 espresso = "3.7.0"
@@ -46,6 +53,14 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
+
+# The image stack behind the `JobPhotoImages` port (`D4b`): its memory and disk cache, its sampling
+# and its EXIF handling replace the app's hand-rolled decode and cache.
+coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
+
+# The viewer's pinch-zoom and pan over that stack (`D9`). This is Telephoto's **Coil 3** integration:
+# it loads the request the port answers with, through the app's own `ImageLoader`.
+telephoto-zoomable-image-coil3 = { group = "me.saket.telephoto", name = "zoomable-image-coil3", version.ref = "telephoto" }
 
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 retrofit-kotlinx-serialization = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }

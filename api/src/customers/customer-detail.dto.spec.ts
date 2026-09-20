@@ -212,6 +212,9 @@ describe('customer detail projections', () => {
       isPrimary: true,
       isBillingContact: false,
       isJobContact: false,
+      removedAt: null,
+      removedByMembershipId: null,
+      version: 1,
       createdAt: CREATED,
       updatedAt: CREATED,
     };

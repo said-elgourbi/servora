@@ -1,6 +1,8 @@
 package com.servora.android.ui.customers
 
 import com.servora.android.data.customers.ContactCreateResult
+import com.servora.android.data.customers.ContactRemoveResult
+import com.servora.android.data.customers.ContactUpdateResult
 import com.servora.android.data.customers.CreateCustomerContactRequest
 import com.servora.android.data.customers.CreateCustomerRequest
 import com.servora.android.data.customers.CreatePropertyRequest
@@ -11,6 +13,8 @@ import com.servora.android.data.customers.CustomersRepository
 import com.servora.android.data.customers.CustomersResult
 import com.servora.android.data.customers.CustomerUpdateResult
 import com.servora.android.data.customers.PropertyCreateResult
+import com.servora.android.data.customers.RemoveCustomerContactRequest
+import com.servora.android.data.customers.UpdateCustomerContactRequest
 import com.servora.android.data.customers.UpdateCustomerRequest
 import com.servora.android.domain.model.CustomerFilters
 import com.servora.android.domain.model.CustomerProperty
@@ -370,4 +374,18 @@ private class RecordingRepository(
         customerId: String,
         request: CreateCustomerContactRequest,
     ): ContactCreateResult = ContactCreateResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    // The contact edit and removal are not what this fake scripts; they answer the same outcome an
+    // unrepresentable reply would.
+    override suspend fun updateContact(
+        customerId: String,
+        contactId: String,
+        request: UpdateCustomerContactRequest,
+    ): ContactUpdateResult = ContactUpdateResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun removeContact(
+        customerId: String,
+        contactId: String,
+        request: RemoveCustomerContactRequest,
+    ): ContactRemoveResult = ContactRemoveResult.Failure(CustomersFailureReason.UNEXPECTED)
 }

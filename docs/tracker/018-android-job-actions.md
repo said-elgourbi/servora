@@ -2,6 +2,12 @@
 
 **Status: COMPLETE for API and Android implementation; physical-device QA is the product owner's**
 
+**Refined by `docs/tracker/034-manager-job-status-workflow.md`:** the status route now accepts any
+structurally permitted destination (forwards, backwards or straight to `COMPLETED`) as one operation,
+`BR-062` gained the invariant that blocks completion while an open Visit exists, and the client confirms
+a close or a reopen. The routes, the permissions and the rest of this slice's contract are unchanged;
+the manual QA below describes the transition list as it was built **by this slice**.
+
 **Continued by `docs/tracker/019-android-job-details-hierarchy.md`**, which moves these actions from the
 screen's global action row to the record each one affects, replaces **Reassign** with
 **Manage technicians**, and replaces the standing action banner with a transient Snackbar. The actions
@@ -169,7 +175,7 @@ Expected limitations
 
 | # | Question | Rule | How it is handled now | Blocks |
 | - | -------- | ---- | --------------------- | ------ |
-| 1 | The `jobs.*` capability set, and what each Visit action should require | `BR-006`, `BR-008` | Every action requires the existing `JOB_UPDATE`; `GET /technicians` requires `TECHNICIAN_VIEW` | Per-action authorization, and re-guarding the read |
+| 1 | The `jobs.*` capability set, and what each Visit action should require | `BR-006`, `BR-008` | Every **office** action requires the existing `JOB_UPDATE`; `GET /technicians` requires `TECHNICIAN_VIEW`. The Visit **field** routes added by tracker 037 Phase 3 are guarded by the `VISIT_*` capabilities `BR-009` names, and the note route accepts `JOB_UPDATE` **or** `VISIT_ADD_NOTE` (`docs/api/job-actions.md` §2, §7) | Per-action authorization, and re-guarding the read |
 | 2 | The Job cancellation reason catalogue | `BR-064` | Cancellation is refused (`409 JOB_CANCELLATION_UNAVAILABLE`) and is absent from the client's status menu | Cancelling a Job from any client |
 | 3 | The Job-status effect of `NEEDS_QUOTE_APPROVAL` | `BR-061`, `BR-078` | Not treated as resolvable, so `PENDING_REVIEW` is refused for it | Completing a Job whose last visit needed a quote |
 | 4 | Offline behaviour of these actions | `BR-031`, `BR-032`, `BR-086` | Online-only: the screen holds no offline working set yet, so an action is never queued | Field work with no connectivity |

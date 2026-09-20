@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   compareAttentionItems,
   compareVisits,
-  isVisitOverdue,
   toManagerHomeDto,
 } from './manager-home.dto.js';
 import type {
@@ -32,37 +31,6 @@ function visit(
     ...overrides,
   };
 }
-
-describe('isVisitOverdue', () => {
-  it('reports a Visit still SCHEDULED after its window as overdue', () => {
-    expect(isVisitOverdue(visit({ visitStatus: 'SCHEDULED' }), NOW)).toBe(true);
-  });
-
-  it('does not report a Visit whose window is still open', () => {
-    const open = visit({
-      visitStatus: 'SCHEDULED',
-      scheduledStart: new Date('2026-09-14T14:30:00.000Z'),
-      scheduledEnd: new Date('2026-09-14T16:00:00.000Z'),
-    });
-
-    expect(isVisitOverdue(open, NOW)).toBe(false);
-  });
-
-  it('does not report a Visit that has progressed past SCHEDULED', () => {
-    // A technician who has started work is not "late"; the status is the authority (`BR-074`).
-    expect(isVisitOverdue(visit({ visitStatus: 'EN_ROUTE' }), NOW)).toBe(false);
-    expect(isVisitOverdue(visit({ visitStatus: 'ON_SITE' }), NOW)).toBe(false);
-    expect(isVisitOverdue(visit({ visitStatus: 'IN_PROGRESS' }), NOW)).toBe(
-      false,
-    );
-  });
-
-  it('does not report a completed Visit as overdue', () => {
-    expect(isVisitOverdue(visit({ visitStatus: 'COMPLETED' }), NOW)).toBe(
-      false,
-    );
-  });
-});
 
 describe('compareVisits', () => {
   it('orders overdue work, then work under way, then what is to come, then completed', () => {

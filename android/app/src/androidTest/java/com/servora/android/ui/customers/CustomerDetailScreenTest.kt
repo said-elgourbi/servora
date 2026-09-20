@@ -2,9 +2,11 @@ package com.servora.android.ui.customers
 
 import android.content.Context
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -26,6 +28,7 @@ import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PropertyStatus
 import com.servora.android.ui.theme.ServoraTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,11 +46,12 @@ class CustomerDetailScreenTest {
     @get:Rule val composeTestRule = createComposeRule()
 
     @Test
-    fun showsTheCustomerIdentityAndItsContacts() {
+    fun showsTheCustomerIdentityAndItsOwnContactDetails() {
         render(state = loaded())
 
         composeTestRule.onNodeWithText("ABC Property Management").assertIsDisplayed()
-        composeTestRule.onNodeWithText(CONTACT_NAME).assertIsDisplayed()
+        // The customer header's own phone and email are the customer's general line, not a contact
+        // person's, and they stay where they are (`BR-095`, `ADR-022` D2).
         composeTestRule.onNodeWithText(PHONE).assertIsDisplayed()
         composeTestRule.onNodeWithText(EMAIL).assertIsDisplayed()
         composeTestRule
@@ -57,9 +61,22 @@ class CustomerDetailScreenTest {
 
     @Test
     fun offersCreateJobAsAFloatingAction() {
-        render(state = loaded())
+        var created = 0
+        render(state = loaded(), onCreateJob = { created += 1 })
 
         composeTestRule.onNodeWithTag(CustomerDetailCreateJobTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(CustomerDetailCreateJobTag).performClick()
+
+        assertEquals(1, created)
+    }
+
+    @Test
+    fun hidesCreateJobWithoutTheCreateCapability() {
+        render(state = loaded(), canCreateJob = false)
+
+        // Creating a Job is its own capability (`BR-008`, `BR-094`), so the affordance is drawn only
+        // for a session the API would accept the create from (`BR-007`, `BR-011`).
+        composeTestRule.onNodeWithTag(CustomerDetailCreateJobTag).assertDoesNotExist()
     }
 
     @Test
@@ -237,6 +254,166 @@ class CustomerDetailScreenTest {
         assertEquals(1, retried)
     }
 
+    @Test
+    fun rendersEachContactPersonWithTheirOwnPhoneAndEmail() {
+        render(
+            state = loaded(
+                contacts = listOf(
+                    contact(),
+                    contact(
+                        id = SECOND_CONTACT_ID,
+                        firstName = "Alex",
+                        lastName = "Nguyen",
+                        isPrimary = false,
+                        phone = null,
+                        email = null,
+                    ),
+                ),
+            ),
+        )
+
+        // The card draws every contact the API returned, in the API's order — the primary first —
+        // and each row states the person's own details rather than the customer header's
+        // (`BR-095`, `ADR-022` D6).
+        composeTestRule.onNodeWithTag(CustomerDetailContactsTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(customerDetailContactTag(CONTACT_ID), useUnmergedTree = true)
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(customerDetailContactTag(SECOND_CONTACT_ID), useUnmergedTree = true)
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText(CONTACT_PHONE).assertIsDisplayed()
+        composeTestRule.onNodeWithText(CONTACT_EMAIL).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Alex Nguyen").assertIsDisplayed()
+        // At most one contact is primary, so exactly one row wears the badge (`BR-095`).
+        composeTestRule
+            .onAllNodesWithText(string(R.string.customers_contacts_primary))
+            .assertCountEquals(1)
+    }
+
+    @Test
+    fun marksTheCustomersOwnPhoneAsThePrimaryWhenNoContactPersonIsFlagged() {
+        // Zero primary contacts is a legal state (`BR-095`): the customer is then its own primary, so its
+        // own phone line wears the badge and no contact row does.
+        render(state = loaded(contacts = listOf(contact(isPrimary = false))))
+
+        composeTestRule.onNodeWithTag(CustomerDetailCustomerPhoneBadgeTag).assertIsDisplayed()
+        composeTestRule
+            .onAllNodesWithText(string(R.string.customers_contacts_primary))
+            .assertCountEquals(1)
+    }
+
+    @Test
+    fun leavesTheCustomersOwnPhoneUnmarkedWhileAContactPersonIsPrimary() {
+        // The badge follows the effective primary and nothing else (`BR-095`): while a contact person
+        // holds the flag, the customer's own general line carries no marker.
+        render(state = loaded())
+
+        composeTestRule.onNodeWithTag(CustomerDetailCustomerPhoneBadgeTag).assertDoesNotExist()
+        composeTestRule
+            .onAllNodesWithText(string(R.string.customers_contacts_primary))
+            .assertCountEquals(1)
+    }
+
+    @Test
+    fun showsAnEmptyStateRatherThanAnEmptyCard() {
+        render(state = loaded(contacts = emptyList()))
+
+        composeTestRule
+            .onNodeWithText(string(R.string.customers_contacts_empty))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun offersAddContactWhenTheSessionMayRecordOne() {
+        var adds = 0
+        render(state = loaded(), onAddContact = { adds += 1 })
+
+        scrollTo(CustomerDetailAddContactTag)
+        composeTestRule.onNodeWithTag(CustomerDetailAddContactTag).performClick()
+
+        assertEquals(1, adds)
+    }
+
+    @Test
+    fun hidesAddContactWithoutTheCreateCapability() {
+        // Recording a contact is its own capability (`BR-095`), so the affordance is drawn only for a
+        // session the API would accept the write from (`BR-007`, `BR-011`).
+        render(state = loaded(), canCreateContact = false)
+
+        scrollTo(CustomerDetailContactsTag)
+        composeTestRule.onNodeWithTag(CustomerDetailAddContactTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun offersEditAndRemoveForTheCapabilitiesThatPerformThem() {
+        var edited: String? = null
+        var removed: CustomerContact? = null
+        render(
+            state = loaded(),
+            onEditContact = { edited = it },
+            onRemoveContact = { removed = it },
+        )
+
+        scrollTo(customerDetailContactEditTag(CONTACT_ID))
+        composeTestRule.onNodeWithTag(customerDetailContactEditTag(CONTACT_ID)).performClick()
+        assertEquals(CONTACT_ID, edited)
+
+        // The removal is confirmed before it is taken, and the version the row was read with travels
+        // with it so a contact that moved on is refused (`BR-032`, `BR-067`, `BR-095`).
+        composeTestRule.onNodeWithTag(customerDetailContactRemoveTag(CONTACT_ID)).performClick()
+        composeTestRule.onNodeWithTag(CustomerDetailContactRemoveDialogTag).assertIsDisplayed()
+        assertNull(removed)
+        composeTestRule.onNodeWithTag(CustomerDetailContactRemoveConfirmTag).performClick()
+
+        assertEquals(CONTACT_ID, removed?.id)
+        assertEquals(1, removed?.version)
+    }
+
+    @Test
+    fun drawsNoRowActionWithoutItsCapability() {
+        render(state = loaded(), canEditContact = false, canRemoveContact = false)
+
+        scrollTo(CustomerDetailContactsTag)
+        composeTestRule.onNodeWithTag(customerDetailContactEditTag(CONTACT_ID)).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(customerDetailContactRemoveTag(CONTACT_ID)).assertDoesNotExist()
+    }
+
+    @Test
+    fun reportsARefusedRemovalAndClearsIt() {
+        var dismissals = 0
+        render(
+            state = loaded(),
+            contactRemoval = RemoveContactUiState(
+                customerId = CUSTOMER_ID,
+                failureReason = CustomersFailureReason.VERSION_CONFLICT,
+            ),
+            onDismissContactRemovalFailure = { dismissals += 1 },
+        )
+
+        scrollTo(CustomerDetailContactRemovalMessageTag)
+        composeTestRule
+            .onNodeWithText(string(R.string.contact_error_conflict), substring = true)
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(CustomerDetailContactRemovalMessageTag).performClick()
+
+        assertEquals(1, dismissals)
+    }
+
+    @Test
+    fun reportsTheRemovalOnceTheBackendAcceptedIt() {
+        var removedSignals = 0
+        render(
+            state = loaded(),
+            contactRemoval = RemoveContactUiState(customerId = CUSTOMER_ID, isRemoved = true),
+            onContactRemoved = { removedSignals += 1 },
+        )
+
+        composeTestRule.waitForIdle()
+
+        assertEquals(1, removedSignals)
+    }
+
     /**
      * Scrolls the detail's list until [tag] is composed, so a section below the fold can be
      * asserted on a phone-sized screen.
@@ -251,10 +428,21 @@ class CustomerDetailScreenTest {
         state: CustomerDetailUiState,
         canViewProperties: Boolean = true,
         canAddProperty: Boolean = true,
+        canCreateJob: Boolean = true,
+        canCreateContact: Boolean = true,
+        canEditContact: Boolean = true,
+        canRemoveContact: Boolean = true,
+        contactRemoval: RemoveContactUiState = RemoveContactUiState(),
         onAddProperty: () -> Unit = {},
+        onCreateJob: () -> Unit = {},
         onRetry: () -> Unit = {},
         onSeeAllJobs: () -> Unit = {},
         onOpenProperty: (String) -> Unit = {},
+        onAddContact: () -> Unit = {},
+        onEditContact: (String) -> Unit = {},
+        onRemoveContact: (CustomerContact) -> Unit = {},
+        onDismissContactRemovalFailure: () -> Unit = {},
+        onContactRemoved: () -> Unit = {},
     ) {
         composeTestRule.setContent {
             ServoraTheme {
@@ -262,8 +450,19 @@ class CustomerDetailScreenTest {
                     state = state,
                     canViewProperties = canViewProperties,
                     canAddProperty = canAddProperty,
+                    canCreateJob = canCreateJob,
+                    canCreateContact = canCreateContact,
+                    canEditContact = canEditContact,
+                    canRemoveContact = canRemoveContact,
+                    contactRemoval = contactRemoval,
                     onAddProperty = onAddProperty,
+                    onCreateJob = onCreateJob,
                     onSeeAllJobs = onSeeAllJobs,
+                    onAddContact = onAddContact,
+                    onEditContact = onEditContact,
+                    onRemoveContact = onRemoveContact,
+                    onDismissContactRemovalFailure = onDismissContactRemovalFailure,
+                    onContactRemoved = onContactRemoved,
                     onRetry = onRetry,
                     onOpenProperty = onOpenProperty,
                     modifier = Modifier,
@@ -276,30 +475,45 @@ class CustomerDetailScreenTest {
         properties: List<CustomerProperty> = listOf(property()),
         archivedProperties: List<CustomerProperty> = emptyList(),
         jobs: List<CustomerJob> = listOf(job()),
+        contacts: List<CustomerContact> = listOf(contact()),
     ) = CustomerDetailUiState(
         customerId = CUSTOMER_ID,
         detail = CustomerDetail(
             customer = customer(),
-            contacts = listOf(
-                CustomerContact(
-                    id = "contact-1",
-                    customerId = CUSTOMER_ID,
-                    firstName = "John",
-                    lastName = "Smith",
-                    email = EMAIL,
-                    phone = PHONE,
-                    role = null,
-                    isPrimary = true,
-                    isBillingContact = false,
-                    isJobContact = false,
-                    createdAt = "2025-01-12T10:30:00Z",
-                    updatedAt = "2025-01-12T10:30:00Z",
-                ),
-            ),
+            contacts = contacts,
             properties = properties,
             jobs = jobs,
             archivedProperties = archivedProperties,
         ),
+    )
+
+    /**
+     * One contact person as the backend reports it (`BR-095`).
+     *
+     * The person's own phone and email are deliberately different from the customer header's, because
+     * they are separate facts: the header keeps the customer's general line (`ADR-022` D2).
+     */
+    private fun contact(
+        id: String = CONTACT_ID,
+        firstName: String = "John",
+        lastName: String = "Smith",
+        isPrimary: Boolean = true,
+        phone: String? = CONTACT_PHONE,
+        email: String? = CONTACT_EMAIL,
+    ) = CustomerContact(
+        id = id,
+        customerId = CUSTOMER_ID,
+        firstName = firstName,
+        lastName = lastName,
+        email = email,
+        phone = phone,
+        role = null,
+        isPrimary = isPrimary,
+        isBillingContact = false,
+        isJobContact = false,
+        version = 1,
+        createdAt = "2025-01-12T10:30:00Z",
+        updatedAt = "2025-01-12T10:30:00Z",
     )
 
     private fun customer() = Customer(
@@ -379,7 +593,11 @@ class CustomerDetailScreenTest {
         const val ARCHIVED_PROPERTY_ID = "property-2"
         const val JOB_ID = "job-1"
         const val JOB_NUMBER = 1042
+        const val CONTACT_ID = "contact-1"
+        const val SECOND_CONTACT_ID = "contact-2"
         const val CONTACT_NAME = "John Smith"
+        const val CONTACT_PHONE = "555-987-6543"
+        const val CONTACT_EMAIL = "john.smith@example.com"
         const val PHONE = "555-123-4567"
         const val EMAIL = "john@example.com"
     }

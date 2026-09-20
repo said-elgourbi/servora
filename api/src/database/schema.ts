@@ -384,6 +384,13 @@ export const customerCompanies = pgTable('customer_companies', {
 
 // ------------------------------------------------------- customer_contacts
 
+/**
+ * Contact people for a customer (`BR-023`, `BR-095`).
+ *
+ * Two invariants live in the database rather than in the code path that happens to remember them
+ * (`BR-001`, `Project.md` §17): at most one contact per customer is primary, and a removal records
+ * both when it happened and which member performed it.
+ */
 export const customerContacts = pgTable(
   'customer_contacts',
   {
@@ -399,10 +406,24 @@ export const customerContacts = pgTable(
     isPrimary: boolean('is_primary').notNull().default(false),
     isBillingContact: boolean('is_billing_contact').notNull().default(false),
     isJobContact: boolean('is_job_contact').notNull().default(false),
+    /** Soft removal (`BR-095`; `ADR-022` D8): the record survives so who removed it stays answerable. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedByMembershipId: uuid('removed_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    version: integer('version').notNull().default(1),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
+    uniqueIndex('customer_contacts_primary_unique')
+      .on(table.customerId)
+      .where(sql`${table.isPrimary}`),
+    check('customer_contacts_version_check', sql`${table.version} > 0`),
+    check(
+      'customer_contacts_removal_state_check',
+      sql`(${table.removedAt} is not null) = (${table.removedByMembershipId} is not null)`,
+    ),
     index('customer_contacts_customer_id_idx').on(table.customerId),
     index('customer_contacts_email_idx').on(table.email),
   ],
@@ -843,6 +864,224 @@ export const jobPropertyHistory = pgTable(
   ],
 );
 
+// --------------------------------------------------------------- job photos
+
+/**
+ * One photo a field technician attached to a Job — evidence, not a Job field (`BR-015`, `BR-027`).
+ *
+ * The photo is recorded on the **Job**, so it can be captured whether or not the Job has a Visit: a
+ * Job may exist with no Visit at all (`BR-051`), and the technician's camera must not depend on a
+ * Visit existing. The row holds the object's **key**, never a URL and never a signed URL, because
+ * read URLs are derived when they are needed and stay provider-agnostic (`ADR-013` D6.4).
+ *
+ * `client_operation_id` is the idempotency key the device generated once, before its first attempt
+ * (`BR-031`, offline standard §5): it is unique per organization, so a replay after a timeout returns
+ * the original row instead of recording the evidence twice.
+ *
+ * `phase` is the stable field-work phase the technician chose (`BEFORE_WORK`, `DURING_WORK` or
+ * `AFTER_WORK` — codes, never localized text, `BR-028`, `BR-041`). `captured_at` is the device
+ * instant the photo was taken: display and provenance only, never business time (`BR-031`) —
+ * `recorded_at` is the backend's own.
+ */
+export const jobPhotos = pgTable(
+  'job_photos',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    uploaderMembershipId: uuid('uploader_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    phase: varchar('phase', { length: 20 }).notNull(),
+    note: text('note'),
+    objectKey: varchar('object_key', { length: 512 }).notNull(),
+    contentType: varchar('content_type', { length: 100 }).notNull(),
+    byteSize: integer('byte_size').notNull(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'job_photos_phase_check',
+      sql`${table.phase} in ('BEFORE_WORK', 'DURING_WORK', 'AFTER_WORK')`,
+    ),
+    check(
+      'job_photos_content_type_check',
+      sql`${table.contentType} in ('image/jpeg', 'image/png', 'image/webp')`,
+    ),
+    check('job_photos_byte_size_check', sql`${table.byteSize} > 0`),
+    index('job_photos_organization_job_recorded_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.recordedAt,
+    ),
+    uniqueIndex('job_photos_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+/**
+ * One removal of accepted photo evidence — the record that takes a photo out of ordinary use
+ * (`BR-088`, `BR-089`).
+ *
+ * A photo becomes immutable historical evidence the moment the API accepts it (`BR-088`), so nothing
+ * edits or deletes it: `job_photos` stays **append-only** and a removal is added history beside it,
+ * carrying who removed the photo, when, and why (`BR-067`, `BR-089`). Ordinary reads exclude a photo
+ * that has a removal row here — the technician's field views in particular — while an audit/history
+ * read still shows the evidence and states that it was removed, by whom, when and why
+ * (`BR-080`, tracker 029 D6d).
+ *
+ * The row is **soft**: the stored object is untouched, and physically purging it is a retention
+ * concern that this table does not implement (`BR-090`). One photo has at most one removal, because
+ * no restore is defined: the unique index below refuses a second one rather than recording a
+ * removal of evidence that is already out of ordinary use.
+ *
+ * `reason` is free text — a structured catalogue is not defined, and inventing one would be product
+ * behaviour this schema is not allowed to decide (`BR-042`) — but it is required, because `BR-089`
+ * states that the removal records a reason beside the actor and the timestamp.
+ */
+export const jobPhotoRemovals = pgTable(
+  'job_photo_removals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobPhotoId: uuid('job_photo_id')
+      .notNull()
+      .references(() => jobPhotos.id, { onDelete: 'cascade' }),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    reason: text('reason').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'job_photo_removals_reason_check',
+      sql`length(btrim(${table.reason})) > 0`,
+    ),
+    uniqueIndex('job_photo_removals_photo_unique').on(
+      table.organizationId,
+      table.jobPhotoId,
+    ),
+  ],
+);
+
+/**
+ * One audio note recorded against a Job — evidence of its own kind (`BR-027`, `BR-091`, `ADR-018`).
+ *
+ * The row is the same shape a `job_photos` row is, for the same reason: evidence is append-only,
+ * immutable once the API has accepted it (`BR-088`), written under the device's idempotency key and never
+ * edited. The kind is a **parallel table** rather than a `kind` column because the capability, the
+ * Activity kind and the removal are all per kind (`ADR-018` A1); nothing above the database names a
+ * table, so a later unification stays reachable as a data migration.
+ *
+ * `duration_seconds` is the only field a photo has no counterpart for, and it is **derived from the
+ * recording's bytes** at the API boundary, never declared by a client (`ADR-018` A3): the length limits
+ * are applied to what the container says, so the stored value is the one that was validated.
+ */
+export const jobAudioNotes = pgTable(
+  'job_audio_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    uploaderMembershipId: uuid('uploader_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    phase: varchar('phase', { length: 20 }).notNull(),
+    note: text('note'),
+    objectKey: varchar('object_key', { length: 512 }).notNull(),
+    contentType: varchar('content_type', { length: 100 }).notNull(),
+    byteSize: integer('byte_size').notNull(),
+    durationSeconds: integer('duration_seconds').notNull(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'job_audio_notes_phase_check',
+      sql`${table.phase} in ('BEFORE_WORK', 'DURING_WORK', 'AFTER_WORK')`,
+    ),
+    check(
+      'job_audio_notes_content_type_check',
+      sql`${table.contentType} in ('audio/mp4')`,
+    ),
+    check('job_audio_notes_byte_size_check', sql`${table.byteSize} > 0`),
+    check('job_audio_notes_duration_check', sql`${table.durationSeconds} > 0`),
+    index('job_audio_notes_organization_job_recorded_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.recordedAt,
+    ),
+    uniqueIndex('job_audio_notes_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+/**
+ * One removal of accepted audio evidence (`BR-088`, `BR-089`, `ADR-018` A7).
+ *
+ * Exactly what a `job_photo_removals` row is, for the same reasons: the audio note's own row stays
+ * append-only and a removal is **added history** beside it, carrying who removed the recording, when and
+ * why; ordinary reads exclude a recording that has a removal row here while the audit/history context
+ * still shows it. The row is soft — the stored object is untouched, and purging it is a retention concern
+ * this table does not implement (`BR-090`) — and one recording has at most one removal, because no
+ * restore is defined.
+ */
+export const jobAudioNoteRemovals = pgTable(
+  'job_audio_note_removals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobAudioNoteId: uuid('job_audio_note_id')
+      .notNull()
+      .references(() => jobAudioNotes.id, { onDelete: 'cascade' }),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    reason: text('reason').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'job_audio_note_removals_reason_check',
+      sql`length(btrim(${table.reason})) > 0`,
+    ),
+    uniqueIndex('job_audio_note_removals_note_unique').on(
+      table.organizationId,
+      table.jobAudioNoteId,
+    ),
+  ],
+);
+
 // ------------------------------------------------------------------- visits
 
 export const visits = pgTable(
@@ -929,6 +1168,87 @@ export const visits = pgTable(
       table.organizationId,
       table.scheduledStart,
     ),
+  ],
+);
+
+// --------------------------------------------------- follow-up visit requests
+
+export const followUpVisitRequests = pgTable(
+  'follow_up_visit_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    sourceVisitId: uuid('source_visit_id').references(() => visits.id, {
+      onDelete: 'set null',
+    }),
+    requestingTechnicianMembershipId: uuid(
+      'requesting_technician_membership_id',
+    )
+      .notNull()
+      .references(() => organizationMembers.id),
+    proposedStart: timestamp('proposed_start', { withTimezone: true }).notNull(),
+    proposedEnd: timestamp('proposed_end', { withTimezone: true }).notNull(),
+    reason: text('reason').notNull(),
+    sameTechnicianPreferred: boolean('same_technician_preferred')
+      .notNull()
+      .default(false),
+    status: varchar('status', { length: 30 }).notNull().default('PENDING'),
+    reviewerMembershipId: uuid('reviewer_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewNote: text('review_note'),
+    createdVisitId: uuid('created_visit_id').references(() => visits.id, {
+      onDelete: 'set null',
+    }),
+    version: integer('version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      'follow_up_visit_requests_status_check',
+      sql`${table.status} in ('PENDING', 'NEEDS_CLARIFICATION', 'APPROVED', 'REJECTED')`,
+    ),
+    check(
+      'follow_up_visit_requests_schedule_order_check',
+      sql`${table.proposedEnd} > ${table.proposedStart}`,
+    ),
+    check(
+      'follow_up_visit_requests_reason_check',
+      sql`length(btrim(${table.reason})) > 0`,
+    ),
+    check(
+      'follow_up_visit_requests_review_pair_check',
+      sql`(${table.reviewerMembershipId} is null) = (${table.reviewedAt} is null)`,
+    ),
+    check(
+      'follow_up_visit_requests_created_visit_status_check',
+      sql`${table.createdVisitId} is null or ${table.status} = 'APPROVED'`,
+    ),
+    check('follow_up_visit_requests_version_check', sql`${table.version} > 0`),
+    index('follow_up_visit_requests_organization_status_idx').on(
+      table.organizationId,
+      table.status,
+      table.createdAt,
+    ),
+    index('follow_up_visit_requests_job_idx').on(
+      table.organizationId,
+      table.jobId,
+    ),
+    index('follow_up_visit_requests_requester_idx').on(
+      table.organizationId,
+      table.requestingTechnicianMembershipId,
+      table.createdAt,
+    ),
+    uniqueIndex('follow_up_visit_requests_created_visit_unique')
+      .on(table.organizationId, table.createdVisitId)
+      .where(sql`${table.createdVisitId} is not null`),
   ],
 );
 

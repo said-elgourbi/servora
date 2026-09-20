@@ -1,5 +1,5 @@
 /**
- * The local day the manager home is rendered for.
+ * The local day a home read is rendered for.
  *
  * "Today" is a local-calendar question, so the screen cannot answer it alone and the client cannot
  * be trusted to answer it authoritatively: a device whose clock or zone is wrong would report a
@@ -8,7 +8,9 @@
  * The client therefore names the zone it renders in and the API settles the window, so two clients
  * of the same operation asked at the same moment agree on which Visits are today's.
  *
- * Nothing here is business state: it is a calendar window derived from a zone and an instant.
+ * Nothing here is business state: it is a calendar window derived from a zone and an instant. Both
+ * home reads resolve their day through it — `GET /home/manager` and `GET /home/technician` — so the
+ * two screens cannot disagree about which day they describe (`BR-041`).
  */
 
 /** The half-open instant window `[start, end)` one local calendar day covers. */
@@ -22,10 +24,7 @@ export interface DayWindow {
 }
 
 /** The zone a request that names no zone is resolved in. */
-export const DEFAULT_MANAGER_HOME_TIME_ZONE = 'UTC';
-
-/** How many attention items a home read returns before `attention.total` carries the rest. */
-export const MANAGER_HOME_ATTENTION_LIMIT = 20;
+export const DEFAULT_HOME_TIME_ZONE = 'UTC';
 
 /**
  * The longest zone identifier the API accepts.
@@ -85,32 +84,80 @@ export function normaliseTimeZone(value: unknown): string | null {
 }
 
 /**
- * Resolves the local calendar day that contains [now] in [timeZone].
+ * One local calendar date, as a read names it (`BR-072`).
+ *
+ * A date is a calendar fact rather than an instant, so a client that lets the user pick a day from a
+ * month or a week strip has to name it as one. The API resolves the day's instants from it, so the
+ * window never depends on the device's own idea of a day's offset (`BR-001`).
+ */
+export interface LocalDate {
+  readonly year: number;
+  /** 1-12, as a person writes it — not the 0-based month a JavaScript `Date` carries. */
+  readonly month: number;
+  readonly day: number;
+}
+
+/** The local calendar date [instant] falls on in [timeZone]. */
+export function localDateIn(timeZone: string, instant: Date): LocalDate {
+  const local = localWallClock(timeZone, instant);
+  return {
+    year: local.getUTCFullYear(),
+    month: local.getUTCMonth() + 1,
+    day: local.getUTCDate(),
+  };
+}
+
+/** The local calendar date [date] names, in the `YYYY-MM-DD` form a client sends and a read echoes. */
+export function formatLocalDate(date: LocalDate): string {
+  const month = date.month.toString().padStart(2, '0');
+  const day = date.day.toString().padStart(2, '0');
+  return `${date.year.toString().padStart(4, '0')}-${month}-${day}`;
+}
+
+/**
+ * Resolves the local calendar date that contains [now] in [timeZone].
+ *
+ * It is expressed over [resolveLocalDayWindow] so the day a home resolves from the clock and the day
+ * a schedule resolves from a chosen date are resolved by one implementation, and the two cannot
+ * disagree about where a local day begins (`BR-041`).
+ */
+export function resolveDayWindow(timeZone: string, now: Date): DayWindow {
+  return resolveLocalDayWindow(timeZone, localDateIn(timeZone, now));
+}
+
+/**
+ * The half-open instant window the local calendar date [date] covers in [timeZone].
  *
  * The offset is taken twice: a first pass lands inside the local day and the second pass corrects
  * for a zone whose offset changed between the instant being asked about and that day's midnight, so
  * a day that starts on a daylight-saving boundary still starts at 00:00 local.
  */
-export function resolveDayWindow(timeZone: string, now: Date): DayWindow {
-  const local = localWallClock(timeZone, now);
-  const year = local.getUTCFullYear();
-  const month = local.getUTCMonth();
-  const day = local.getUTCDate();
-
+export function resolveLocalDayWindow(
+  timeZone: string,
+  date: LocalDate,
+): DayWindow {
   return {
     timeZone,
-    start: instantOfLocalMidnight(timeZone, now, Date.UTC(year, month, day)),
-    end: instantOfLocalMidnight(timeZone, now, Date.UTC(year, month, day + 1)),
+    start: instantOfLocalMidnight(timeZone, Date.UTC(date.year, date.month - 1, date.day)),
+    end: instantOfLocalMidnight(
+      timeZone,
+      Date.UTC(date.year, date.month - 1, date.day + 1),
+    ),
   };
 }
 
-/** The instant a local midnight (expressed as a wall-clock UTC timestamp) begins. */
+/**
+ * The instant a local midnight (expressed as a wall-clock UTC timestamp) begins.
+ *
+ * The wall clock itself is the first pass's reference instant: it is at most a day away from the
+ * midnight being resolved, so the correction pass lands on the offset that midnight really has.
+ */
 function instantOfLocalMidnight(
   timeZone: string,
-  now: Date,
   wallClockMidnight: number,
 ): Date {
-  const first = new Date(wallClockMidnight - offsetAt(timeZone, now));
+  const atWallClock = new Date(wallClockMidnight);
+  const first = new Date(wallClockMidnight - offsetAt(timeZone, atWallClock));
   return new Date(wallClockMidnight - offsetAt(timeZone, first));
 }
 

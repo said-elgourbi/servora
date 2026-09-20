@@ -46,7 +46,7 @@ NAME ?= migration
 migration: api-build ## Generate a new migration, e.g. `make migration NAME=add_technician_profile`
 	cd $(API_DIR) && npm run db:generate -- --name $(NAME)
 
-seed: api-build ## Seed the local development database with the two foundation QA accounts
+seed: api-build ## Seed the local database: the two QA accounts and the demo dataset (replaces it)
 	cd $(API_DIR) && npm run db:seed
 
 # ------------------------------------------------------------ object storage
@@ -104,6 +104,32 @@ android-test: ## Run the Android JVM unit tests
 
 android-lint: ## Run Android lint on the debug variant
 	cd android && ./$(GRADLEW) lintDebug
+
+# -------------------------------------------------------------------- hygiene
+
+# Android verification (and any Gradle build) leaves two heavyweight daemons behind: the Gradle
+# daemon (~5 GB resident) and the Kotlin daemon (~2.4 GB). Both are built to outlive the command
+# that started them — they idle for hours — so a few Android targets in a row quietly consume the
+# machine. `android-stop` releases them; `tidy` is the end-of-task check
+# (`dev.md` §18, `qa.md` §7.4, `docs/development/setup.md` §8).
+
+.PHONY: android-stop tidy
+android-stop: ## Stop the Gradle/Kotlin build daemons the Android targets leave running
+	cd android && ./$(GRADLEW) --stop
+
+tidy: android-stop ## Stop the build daemons, then report anything else a task may have left running
+	@echo "Java build daemons:"; \
+	  found=$$(pgrep -af 'Gradle[D]aemon|Kotlin[C]ompileDaemon' || true); \
+	  if [ -n "$$found" ]; then \
+	    echo "$$found" | sed 's/^/  /'; \
+	    echo "  NOTE: a daemon is still running — a build may be in progress"; \
+	  else echo "  none"; fi
+	@echo "Node/API processes:"; \
+	  found=$$(pgrep -af 'nest [s]tart|start:[d]ev|vites[t]|playwrigh[t]' || true); \
+	  if [ -n "$$found" ]; then echo "$$found" | sed 's/^/  /'; else echo "  none"; fi
+	@echo "Foundation containers:"; \
+	  states=$$($(COMPOSE) ps --format '  {{.Service}}: {{.State}}' 2>/dev/null || true); \
+	  if [ -n "$$states" ]; then echo "$$states"; else echo "  none running"; fi
 
 # ------------------------------------------------------------------- aliases
 

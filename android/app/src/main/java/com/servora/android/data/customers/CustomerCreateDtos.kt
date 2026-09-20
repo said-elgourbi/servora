@@ -7,7 +7,8 @@ import kotlinx.serialization.Serializable
  *
  * `POST /customers` is a discriminated create: the request carries `type` and exactly one subtype
  * payload, and it answers with the created customer header plus the subtype record the backend
- * stored. `POST /customers/{id}/contacts` answers with the created contact.
+ * stored. The three contact routes answer with the created contact (`POST`), the updated contact
+ * (`PATCH`) and no body (`DELETE`, `docs/api/customers.md` §5.2).
  *
  * The two request shapes are concrete classes rather than one polymorphic type, so the discriminator
  * the API reads is the `type` member and nothing else (`BR-041`). Values stay in the stable codes the
@@ -15,7 +16,9 @@ import kotlinx.serialization.Serializable
  *
  * The shared `Json` configuration ignores unknown fields, so a later API addition does not break
  * this build (`dev.md` §7). Optional members default to `null`/`false`, and the configuration omits
- * members that keep their default, so an unfilled optional field is simply absent from the request.
+ * members that keep their default, so an unfilled optional field is simply absent from the request and
+ * the API leaves what it does not state as the contact holds it (`BR-095`, `ADR-022` D9) — the same
+ * shape `UpdateCustomerRequest` and `UpdatePropertyRequest` already use.
  */
 
 /** The `individual` payload of an `INDIVIDUAL` customer create (`BR-023`). */
@@ -75,11 +78,11 @@ data class CreatedCustomerDto(
 )
 
 /**
- * `POST /customers/{id}/contacts` — the primary contact recorded while a business customer is
- * created (`BR-023`).
+ * `POST /customers/{id}/contacts` — a contact person recorded on an existing customer (`BR-023`,
+ * `BR-095`).
  *
- * A contact's own email and phone are separate from the customer header's, which the form already
- * captures, so those members are left absent rather than duplicating the header's values.
+ * A contact's own email and phone are separate from the customer header's, which the create form
+ * already captures, so those members are sent only when the form recorded them for the contact.
  */
 @Serializable
 data class CreateCustomerContactRequest(
@@ -91,6 +94,41 @@ data class CreateCustomerContactRequest(
     val isPrimary: Boolean = false,
     val isBillingContact: Boolean = false,
     val isJobContact: Boolean = false,
+)
+
+/**
+ * `PATCH /customers/{id}/contacts/{contactId}` — the fields an edit supplies (`BR-095`).
+ *
+ * The edit is **partial**: a member the request does not carry is left as the contact holds it, which
+ * is what protects a value no client edits — the free-text `role` — from being cleared by an edit that
+ * never knew about it (`ADR-022` D9). `isPrimary` is nullable for the same reason: an edit that states
+ * it changes the customer's primary contact in one operation, and one that omits it leaves the flag
+ * alone.
+ *
+ * `expectedVersion` is **required**: it is the version the caller read, and a mutation naming none would
+ * write over newer state blindly (`BR-032`, `BR-086`).
+ */
+@Serializable
+data class UpdateCustomerContactRequest(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val email: String? = null,
+    val phone: String? = null,
+    val role: String? = null,
+    val isPrimary: Boolean? = null,
+    val expectedVersion: Int,
+)
+
+/**
+ * `DELETE /customers/{id}/contacts/{contactId}` — what a removal states (`BR-095`).
+ *
+ * The removal is **soft** and its acting member comes from the request's own authorization, so the only
+ * thing the caller states is the version it read (`ADR-022` D8, D9). No reason is required and none is
+ * modelled (`BR-042`).
+ */
+@Serializable
+data class RemoveCustomerContactRequest(
+    val expectedVersion: Int,
 )
 
 /**

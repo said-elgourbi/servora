@@ -159,6 +159,16 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
 
+    // The image stack the photo evidence is drawn with: it samples, turns by the photo's own EXIF
+    // orientation, and caches what it decoded, in place of the hand-rolled decode
+    // (`docs/decisions/016-android-image-stack-and-viewer-zoom.md`, `D4b`).
+    implementation(libs.coil.compose)
+
+    // The full-size viewer's pinch-zoom and pan (`D9`), over that same stack: it sub-samples the file
+    // the stack cached, so a zoomed photo shows the photo's own pixels instead of scaling a bitmap
+    // that was decoded to fit the screen (`docs/decisions/016-android-image-stack-and-viewer-zoom.md`).
+    implementation(libs.telephoto.zoomable.image.coil3)
+
     // The offline local store: the working set and the outbox
     // (`docs/architecture/offline-first-architecture.md` §2–§4).
     implementation(libs.androidx.room.runtime)

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_MANAGER_HOME_TIME_ZONE,
+  DEFAULT_HOME_TIME_ZONE,
   normaliseTimeZone,
   resolveDayWindow,
-} from './manager-home-day.js';
+} from './home-day.js';
 
 /**
- * The local-day window the manager home is resolved for.
+ * The local-day window a home read is resolved for.
  *
  * The window decides which Visits count as "today", so it is asserted directly: the boundary
  * instants of a day in a zone whose offset is not UTC, and a day that contains a daylight-saving
@@ -125,6 +125,6 @@ describe('normaliseTimeZone', () => {
 
 describe('the default zone', () => {
   it('is UTC, so a request that names no zone is answered rather than guessed', () => {
-    expect(DEFAULT_MANAGER_HOME_TIME_ZONE).toBe('UTC');
+    expect(DEFAULT_HOME_TIME_ZONE).toBe('UTC');
   });
 });

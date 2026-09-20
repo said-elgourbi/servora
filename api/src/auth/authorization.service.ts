@@ -38,6 +38,27 @@ export class AuthorizationService {
     );
   }
 
+  /**
+   * The first `ACTIVE` membership holding **at least one** of the codes (`ADR-019` D1).
+   *
+   * The all-of resolution above answers "may this caller do this?". This one answers the different
+   * question a route reaches two audiences with: "may this caller reach it as either?". Memberships
+   * keep their `joinedAt` order, so both resolutions select the same membership when both would
+   * qualify. An empty list matches nothing, so a route that declares no alternative is never admitted
+   * by accident.
+   */
+  async resolveMembershipForUserWithAnyPermission(
+    userId: string,
+    anyOf: readonly PermissionCode[],
+  ): Promise<AuthorizedMembership | null> {
+    const memberships = await this.resolveMembershipsForUser(userId);
+    return (
+      memberships.find((membership) =>
+        this.hasAnyPermission(membership, anyOf),
+      ) ?? null
+    );
+  }
+
   async resolveEffectivePermissionCodesForUser(
     userId: string,
   ): Promise<readonly PermissionCode[]> {
@@ -118,5 +139,14 @@ export class AuthorizationService {
   ): boolean {
     const granted = new Set(membership.permissions);
     return required.every((permission) => granted.has(permission));
+  }
+
+  /** Whether the membership holds any one of the codes (`ADR-019` D1). */
+  hasAnyPermission(
+    membership: AuthorizedMembership,
+    anyOf: readonly PermissionCode[],
+  ): boolean {
+    const granted = new Set(membership.permissions);
+    return anyOf.some((permission) => granted.has(permission));
   }
 }

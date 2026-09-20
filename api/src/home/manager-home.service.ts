@@ -28,13 +28,19 @@ import type {
   JobStatus,
 } from '../customers/customer-detail.dto.js';
 import {
+  MANAGER_HOME_ATTENTION_LIMIT,
   NEEDS_SCHEDULING_ACTIVE_VISIT_STATUSES,
   NEEDS_SCHEDULING_JOB_STATUSES,
-  NOT_DAY_WORK_VISIT_STATUSES,
   compareAttentionItems,
   compareVisits,
-  isVisitOverdue,
 } from './manager-home.dto.js';
+import {
+  NOT_DAY_WORK_VISIT_STATUSES,
+  hasVisitStarted,
+  isVisitOverdue,
+} from './home-visit-conditions.js';
+import { readViewerDisplayName } from './home-viewer.js';
+import type { DayWindow } from './home-day.js';
 import type {
   ManagerAttentionItem,
   ManagerHomeDaySummary,
@@ -42,8 +48,6 @@ import type {
   ManagerHomeVisit,
   VisitStatus,
 } from './manager-home.dto.js';
-import { MANAGER_HOME_ATTENTION_LIMIT } from './manager-home-day.js';
-import type { DayWindow } from './manager-home-day.js';
 
 /** Everything one manager home read assembles. */
 export interface ManagerHomeRead {
@@ -117,7 +121,7 @@ export class ManagerHomeService {
       schedulingJobs,
       reviewJobs,
     ] = await Promise.all([
-      this.findViewerDisplayName(scope, userId),
+      readViewerDisplayName(this.db, scope, userId),
       this.findDayVisits(scope, day),
       this.findOverdueVisits(scope, now),
       this.findSchedulingCandidates(scope),
@@ -149,50 +153,6 @@ export class ManagerHomeService {
       today: summarize(visits),
       visits: [...visits].sort(compareVisits),
     };
-  }
-
-  /**
-   * The signed-in member's display name, or `null` when they have no profile yet.
-   *
-   * It is read inside the caller's membership, so the name belongs to the member the request is
-   * authorized for rather than to a member of another organization.
-   */
-  private async findViewerDisplayName(
-    scope: OrganizationScope,
-    userId: string,
-  ): Promise<string | null> {
-    const [row] = await this.db
-      .select({
-        displayName: userProfiles.displayName,
-        firstName: userProfiles.firstName,
-        lastName: userProfiles.lastName,
-      })
-      .from(organizationMembers)
-      .leftJoin(
-        userProfiles,
-        eq(userProfiles.userId, organizationMembers.userId),
-      )
-      .where(
-        and(
-          eq(organizationMembers.organizationId, scope.organizationId),
-          eq(organizationMembers.userId, userId),
-          eq(organizationMembers.status, 'ACTIVE'),
-        ),
-      )
-      .orderBy(asc(organizationMembers.joinedAt))
-      .limit(1);
-
-    if (row === undefined) {
-      return null;
-    }
-    if (row.displayName !== null) {
-      return row.displayName;
-    }
-    const composed = [row.firstName, row.lastName]
-      .filter((part): part is string => part !== null)
-      .join(' ')
-      .trim();
-    return composed.length === 0 ? null : composed;
   }
 
   /**
@@ -528,11 +488,7 @@ function summarize(visits: readonly ManagerHomeVisit[]): ManagerHomeDaySummary {
   for (const visit of visits) {
     if (visit.visitStatus === 'COMPLETED') {
       completed += 1;
-    } else if (
-      visit.visitStatus === 'EN_ROUTE' ||
-      visit.visitStatus === 'ON_SITE' ||
-      visit.visitStatus === 'IN_PROGRESS'
-    ) {
+    } else if (hasVisitStarted(visit.visitStatus)) {
       inProgress += 1;
     } else {
       upcoming += 1;

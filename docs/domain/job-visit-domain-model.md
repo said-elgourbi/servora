@@ -10,8 +10,11 @@
 > first read over them — one Job with the Visit that represents it and that Visit's technicians — is
 > `GET /jobs/:id` (`docs/api/job-details.md`,
 > `docs/tracker/017-android-job-details.md`). Their **write** behaviour (scheduling, assignment,
-> status transitions, outcomes) is not implemented, because no `jobs.*` capability exists yet
-> (`BR-006`, `BR-042`).
+> status transitions, outcomes) is implemented by `docs/api/job-actions.md`: the office actions
+> (Job status, rescheduling, crew assignment) reuse the existing `JOB_UPDATE` capability because no
+> `jobs.*` capability exists yet (`BR-006`, `BR-042`), and the Visit **field** lifecycle (status
+> transitions, completion with its outcome, notes) is enforced by the `VISIT_*` capabilities `BR-009`
+> already names (`docs/decisions/019-technician-field-experience.md`).
 >
 > - Business rules: `Business Rules.md` — principally BR-047 – BR-086 and BR-FV-001 – BR-FV-013
 >   (and BR-001, BR-007, BR-013 – BR-015, BR-022, BR-028, BR-031, BR-033, BR-041, BR-042).
@@ -466,8 +469,12 @@ Constraints and indexes:
   address snapshot (`BR-056`, §6.3).
 - **No customer duplication.** The Job references `customers.id`; it does not copy customer name,
   phone or email. Customer data is read through the Customer.
-- Evidence (photos, audio, files) is attached to Visits and is out of scope for this slice
-  (`BR-027`, `BR-077`, §18).
+- **Evidence is Job-level.** Photos are recorded against the **Job** (`job_photos.job_id`), not a Visit: a
+  Job may carry evidence with no Visit at all (`BR-051`), a technician records a before/during/after photo
+  without a Visit having to exist, and the Activity projection reports each one as a Job-level event
+  (`JOB_PHOTO_ADDED`, `BR-080`). An optional link from evidence to a Visit is available later if a
+  requirement names one. Decided by product ownership on 2026-09-15 (`docs/tracker/029-photo-evidence-phases.md` D2).
+- Audio and files do not exist yet and remain out of scope (`BR-027`, `D8`).
 
 ### 6.3 Property on the Job and the address snapshot
 
@@ -560,6 +567,38 @@ whatever the ORM defaults to.
   is defined, so neither is invented. The open decision is recorded in §16 and must be resolved
   before any delete endpoint or tombstone column is designed.
 
+### 6.5 Creating a Job (`BR-047`, `BR-051`, `BR-056`, `BR-094`)
+
+The model permits a Job with `property_id = NULL` (§6.3). The **supported create operation** does not:
+`BR-094` decides that the product's own Job-creation operation requires an active Customer **and** an
+active Property that Customer currently holds, because a Job is work for a party receiving service
+(`BR-048`) performed at a location (`BR-049`). Nothing in the schema changes — the nullable
+`property_id` and the `jobs_property_snapshot_check` stay exactly as they are, and the create simply
+always writes both.
+
+What the create does, in one transaction:
+
+1. Resolve the Customer by `(organization_id, id)` with `deleted_at IS NULL`; refuse as **not found**
+   when it is absent, and as a **conflict** when `customers.status` is not `ACTIVE` (`BR-023`).
+2. Resolve the Property inside that Customer's context — `(organization_id, id)` **and** an active
+   `property_customer_relationships` row for that Customer (`BR-050`) — refusing as not found when
+   either does not hold, and lock the Property row so a concurrent archive is serialized against the
+   creation (`BR-083`, `BR-086`).
+3. Refuse as a conflict when the Property is not `ACTIVE`: archiving blocks *new* Jobs
+   (`BR-083`).
+4. Allocate the organization-scoped Job number (§13) and insert the Job `NEW`, `version = 1`, with
+   `property_address_snapshot` written from the Property's address at that moment (`BR-052`, `BR-056`,
+   `BR-058`).
+5. Append the initial `job_status_history` row: `to_status = 'NEW'`, `from_status = NULL` — the Job
+   entered `NEW` from no status, which is what the null-permitting column exists for (`BR-033`,
+   `BR-067`).
+
+It creates **no Visit** and records no schedule, crew, owner, priority or category: a Visit is one field
+attempt (`BR-047`, `BR-051`), assignment is Visit-scoped (`BR-068`), and `BR-054` removes priority from
+v1. The operation is authorized by the existing `JOB_CREATE` capability (`BR-008`) and is **online-only**:
+the request carries no idempotency key, so the offline standard's §13 forbids queueing it
+(`docs/architecture/offline-first-architecture.md` §13).
+
 ## 7. Job history
 
 History tables are **append-only**: no update and no delete path exists for them, and they are
@@ -639,30 +678,55 @@ code; labels are localized (`BR-028`, `BR-041`).
 
 Clients must not invent their own Job status vocabulary (`BR-022`, `BR-041`).
 
-### 8.2 Permitted transitions
+### 8.2 Permitted transitions (`BR-058`)
 
-| From             | To               | Trigger                                                                      |
-| ---------------- | ---------------- | ---------------------------------------------------------------------------- |
-| `NEW`            | `SCHEDULED`      | A Visit on the Job becomes `SCHEDULED` (`BR-072`)                            |
-| `SCHEDULED`      | `IN_PROGRESS`    | A Visit on the Job becomes `EN_ROUTE`, `ON_SITE` or `IN_PROGRESS` (`BR-074`) |
-| `IN_PROGRESS`    | `PENDING_REVIEW` | The `BR-061` conditions are met (§8.4)                                       |
-| `PENDING_REVIEW` | `COMPLETED`      | Explicit close by an authorized office user (`BR-062`)                       |
-| `NEW`            | `CANCELED`       | Explicit authorized cancellation (`BR-064`)                                  |
-| `SCHEDULED`      | `CANCELED`       | Explicit authorized cancellation (`BR-064`)                                  |
-| `IN_PROGRESS`    | `CANCELED`       | Explicit authorized cancellation (`BR-064`)                                  |
-| `PENDING_REVIEW` | `CANCELED`       | Explicit authorized cancellation (`BR-064`)                                  |
-| `COMPLETED`      | `NEW`            | Explicit authorized reopen (`BR-063`)                                        |
-| `CANCELED`       | `NEW`            | Explicit authorized reopen (`BR-063`)                                        |
+The table is **structural**: it states which destinations exist. Whether a listed destination may be
+entered right now is runtime eligibility owned by `BR-061` (`PENDING_REVIEW`) and `BR-062`
+(`COMPLETED`), which the API applies as it applies the change and reports with its own outcome.
 
-- Every other combination is **rejected by the backend** (`BR-022`). There is no transition out of
-  `COMPLETED` or `CANCELED` other than reopening to `NEW`, and no transition into `IN_PROGRESS`
-  from a reopen (`BR-058`, `BR-063`).
+| From             | To                                                                    | Trigger                                                            |
+| ---------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `NEW`            | `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW`, `COMPLETED`             | Explicit authorized selection by an office user (`BR-058`, `BR-066`) |
+| `SCHEDULED`      | `IN_PROGRESS`, `PENDING_REVIEW`, `COMPLETED`                          | Explicit authorized selection by an office user (`BR-058`, `BR-066`) |
+| `IN_PROGRESS`    | `SCHEDULED`, `PENDING_REVIEW`, `COMPLETED`                            | Explicit authorized selection by an office user (`BR-058`, `BR-066`) |
+| `PENDING_REVIEW` | `SCHEDULED`, `IN_PROGRESS`, `COMPLETED`                               | Explicit authorized selection by an office user (`BR-058`, `BR-066`) |
+| `NEW`            | `CANCELED`                                                            | Explicit authorized cancellation (`BR-064`)                         |
+| `SCHEDULED`      | `CANCELED`                                                            | Explicit authorized cancellation (`BR-064`)                         |
+| `IN_PROGRESS`    | `CANCELED`                                                            | Explicit authorized cancellation (`BR-064`)                         |
+| `PENDING_REVIEW` | `CANCELED`                                                            | Explicit authorized cancellation (`BR-064`)                         |
+| `COMPLETED`      | `NEW`                                                                 | Explicit authorized reopen (`BR-063`)                               |
+| `CANCELED`       | `NEW`                                                                 | Explicit authorized reopen (`BR-063`)                               |
+
+- Every other combination is **rejected by the backend** (`BR-022`). A Job may not "change" to the
+  status it already holds, `NEW` is not a destination for an open Job, and there is no transition out
+  of `COMPLETED` or `CANCELED` other than reopening to `NEW` (`BR-058`, `BR-063`).
+- An open Job reaches **any** permitted destination in **one** operation, forwards or backwards, and
+  that operation records **one** transition. A client never reaches a destination by issuing a series
+  of transitions, and it never decides the destination set itself: the Job read reports the list
+  (`allowedStatusTransitions`) from this table (`BR-041`).
+- `CANCELED` is absent from the list the read reports while `BR-064`'s structured reason catalogue is
+  an **OPEN QUESTION**, because the API does not apply a cancellation it cannot record properly
+  (`BR-042`).
 - The transition table above is the single source of truth for Job transitions. It belongs in one
-  place in the service layer, keyed only by the Job status and the triggering event, rather than in
+  place in the service layer, keyed only by the Job status and the destination, rather than in
   scattered `if` statements.
-- Job status advances **as a consequence of Visit lifecycle events** and the `BR-060`/`BR-061`
-  conditions; the backend applies and validates the transition. A client never sets a Job status
-  directly (`BR-022`, `BR-058`).
+- Job status advances **either** as a consequence of Visit lifecycle events and the `BR-060`/`BR-061`
+  conditions, **or** through the explicit authorized action above; the backend applies and validates
+  the transition either way. Whatever the path, the change is recorded as one transition and moves the
+  Job alone: no Visit status and no Visit history is written by a Job status change (`BR-033`,
+  `BR-059`, `BR-067`).
+
+**Runtime eligibility over the table**
+
+| Destination      | Condition                                                                                                        | Refusal                        |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `PENDING_REVIEW` | `BR-061`: no active or scheduled Visit and the latest completed Visit resolved the Job (§8.4)                      | `JOB_REVIEW_CONDITION_NOT_MET` |
+| `COMPLETED`      | `BR-062`: no open Visit — no Visit other than `COMPLETED`, `CANCELED` or `NO_SHOW` (`BR-074`, §9.1)                | `JOB_COMPLETION_BLOCKED`       |
+| `CANCELED`       | `BR-064`: a structured cancellation reason, whose catalogue is undefined                                           | `JOB_CANCELLATION_UNAVAILABLE` |
+
+- A refusal is never expressed by removing a structurally valid destination from
+  `allowedStatusTransitions`: a client offers the destination and presents the API's answer
+  (`BR-041`, `BR-042`).
 
 ### 8.3 Who may act
 
@@ -670,9 +734,30 @@ Clients must not invent their own Job status vocabulary (`BR-022`, `BR-041`).
   below describe the permission split, not a hard-coded `Manager` role.
 - Technicians **never** change Job status (`BR-059`, `BR-066`). A technician drives the Visit
   lifecycle (§9); the resulting Job status change is applied by the backend as a consequence.
+- **A field caller's read is scoped by their own current assignments** (`ADR-019` D2): a caller admitted
+  by `VISIT_VIEW_ASSIGNED` rather than by the office read capability reads only a Job that at least one
+  current `visit_technicians` row of their own reaches (§10.2), and a Job it does not reach is reported
+  as **not found** rather than forbidden, so a Job id cannot be probed for existence. The projection is
+  unchanged — one Job, one contract (`BR-041`) — and the scope is enforced by the API, never by a client
+  (`BR-001`, `BR-007`).
+- **A field caller reads the Customer behind an assigned Job, view-only** (`BR-092`; `ADR-021`). The
+  Customer's own name, phone, email and notes are part of the Job projection when the caller holds
+  `customers.view` or `customers.view_assigned`, and the block is reported **absent** when they hold
+  neither — the Job itself is still returned, because it is theirs to work. The Customer is therefore
+  reached only **through** an assigned Job, so the scope above is what bounds it; the Customer's billing
+  fields, its preferred contact method, its language, its addresses, its contacts (`BR-023`), its
+  Properties and its Jobs are not part of the read at all (`ADR-021` D3).
 - Job-level actions — cancel a Job, reopen a Job, close a Job, change a Job's Property, assign or
   remove technicians, cancel a Visit, mark `NO_SHOW` — require the corresponding office/dispatch
   permission (`BR-066`). The API enforces this; UI hiding is convenience only (`BR-007`).
+- **The Visit status route has two authorizations, and they stay distinct** (`BR-093`; `ADR-019` D7). A
+  technician drives a Visit's field lifecycle through their own **current crew** (§9.1, §10.2); an office
+  member holding the office capability that reaches Visit writes (`JOB_UPDATE`, the capability every other
+  office action on a Job or Visit requires) drives it **without** being assigned to the crew, which is how
+  the office completes a Visit from Job Details. The office capability is an alternative to crew
+  membership, never a replacement for a destination's own capability: a completion requires
+  `VISIT_RECORD_OUTCOME` of every caller. Whichever authorization admitted the caller, the append-only
+  history records the member who actually performed the action (`BR-033`, `BR-067`).
 - The implementation must support custom roles and direct member permissions rather than hard-coding
   these actions to the Manager system role (`BR-004`, `BR-066`).
 
@@ -805,7 +890,102 @@ decides one:
   or Visit of another organization is reachable (`BR-023`, `BR-001`).
 - The list is capped at `MANAGER_HOME_ATTENTION_LIMIT` items and reports the full count alongside it.
 
+**Technician home projection (`GET /home/technician`)**
+
+The technician home (`docs/api/technician-home.md`) projects **one technician's own working day** —
+the screen answers "what do I need to do next?", which is deliberately not the manager's question
+"what is happening across the business?" (`BR-010`, `BR-012`; product-ownership decision of
+2026-09-17, `ADR-019` D6). Nothing is stored, and every condition is one this section already
+defines (`BR-080`, `BR-042`).
+
+*Scope* — the caller's **own current assignments**: `visit_technicians` rows whose
+`technician_membership_id` is the membership the route was reached with (§10.2, `ADR-019` D2). A Visit
+that membership is not on the crew of is absent from the payload, and no Job or Visit of another
+organization is reachable (`BR-001`, `BR-007`). Work of a Customer the organization has deleted is
+excluded (`BR-023`).
+
+*Day window* — the same resolved `[local midnight, next local midnight)` window the manager home uses,
+so the two screens cannot disagree about which day they describe (`BR-041`).
+
+*Today's list* — the caller's own Visits whose `scheduled_start` falls inside the window and whose
+status is not `CANCELED` or `NO_SHOW` (`BR-074`) — the same set the manager's day uses. A `COMPLETED`
+Visit stays, because it is what the day has produced so far. The order is **chronological**
+(scheduled start, then Job number): a technician reads their day in time order, which is not the
+manager's operational order above.
+
+*Next Visit* — chosen over the caller's own **open** Visits that carry a schedule, where *open* is
+`BR-062`'s classification (a Visit that is not `COMPLETED`, `CANCELED` or `NO_SHOW`):
+
+```text
+1. started  = status IN ('EN_ROUTE', 'ON_SITE', 'IN_PROGRESS')   (work being executed, BR-074)
+2. otherwise the smallest scheduled_start, then the smallest Job number
+```
+
+- The order is presentation over authoritative statuses, defined by the API so two clients cannot
+  disagree about which Visit is "next" (`BR-041`). It is not the manager home's order, which leads
+  with the overdue Visit because the office scans for what has gone wrong (`BR-012`).
+- The next Visit may be after today: a technician with nothing left today is answered with what they
+  do next rather than with nothing.
+- A Visit with no schedule is not a candidate: a `DRAFT` Visit the office has not scheduled yet has no
+  time to be "next" at, and scheduling it is the office's work, not the technician's
+  (`BR-060`, `BR-072`).
+
+*Upcoming preview* — the caller's own open Visits whose `scheduled_start` is at or after the end of
+the window, chronologically, capped for the payload with the full count reported beside it. It is a
+preview of the Schedule surface (`GET /schedule`, below), which is the office's read rather than the
+technician's.
+
+*Attention list.* One condition, already defined above (the overdue-Visit condition the customer-list
+filters define), applied to the caller's own Visits:
+
+| Kind            | Condition                                                                    |
+| --------------- | ---------------------------------------------------------------------------- |
+| `VISIT_OVERDUE` | Visit still `SCHEDULED` (`BR-074`) whose scheduled end has passed (`BR-072`). |
+
+- It is not restricted to the requested day, for the manager home's reason: an attempt that never
+  happened on an earlier day is still work the technician has to resolve.
+- The kinds the section *could* carry are recorded rather than invented (`BR-042`): a pending
+  follow-up request belongs to `BR-FV-001` – `BR-FV-013` and is not modelled, and evidence waiting to
+  be synchronized is a device-local fact (`BR-014`, `BR-031`) the API cannot see.
+
+**Manager schedule projection (`GET /schedule`, `BR-072`, `BR-074`, `BR-068`)**
+
+One local day's schedule, the technician filter's options and the work that still needs a crew, all
+derived from the tables above. Nothing is stored and nothing is a new status (`BR-080`, `BR-042`).
+
+*The day's schedule* — the Visits scheduled inside the requested local day:
+
+```text
+visits.scheduled_start ∈ [day.start, day.end)
+AND visits.status NOT IN ('CANCELED', 'NO_SHOW')      -- the day's worked attempts (`BR-074`)
+AND jobs.customer_id → customers.deleted_at IS NULL   -- `BR-023`
+```
+
+- The day's window is resolved by the API from the local date and zone the client names, through the
+  same module the two home reads use, so a local day begins in exactly one place (`BR-041`).
+- A `COMPLETED` Visit stays in the day: it is what the day has produced so far.
+- The technician filter narrows the day to the Visits that membership is **currently** assigned to
+  (§10), applied inside the tenant scope, so a filter can only narrow what the caller could already
+  read.
+- Order: scheduled start, then Job number (`BR-052`).
+
+*The unassigned lane* — the absence of an assignment on a Visit that is still open:
+
+```text
+visits.status NOT IN ('COMPLETED', 'CANCELED', 'NO_SHOW')   -- `BR-062`'s open Visit
+AND NOT EXISTS (visit_technicians WHERE visit_id = visits.id)
+```
+
+- It is **not** day-scoped: a Visit with no agreed time belongs to no day, and work waiting for a crew
+  is waiting whoever's day it lands on. `BR-071`/`BR-072` explicitly allow such a Visit to exist while
+  it is being arranged.
+- An attempt in the lane may carry no schedule at all, which is why the row's schedule fields are
+  optional on the wire.
+- Order: scheduled start, then Job number; an attempt with no time sorts last. The lane is capped with
+  the whole count reported beside it.
+
 **Entry into `PENDING_REVIEW` (`BR-061`)**
+
 
 Both conditions must hold:
 
@@ -823,10 +1003,11 @@ Both conditions must hold:
 - A pending or clarification-needed follow-up request blocks review entry. If an authorized office
   user rejects the request because no additional Visit is required, that decision resolves the
   follow-up requirement for review-entry purposes (`BR-FV-004`, `BR-FV-007`, `BR-FV-013`).
-- `BR-061` does not say whether a remaining `DRAFT` Visit blocks entry into `PENDING_REVIEW`. This
-  model therefore does not classify `DRAFT` for that transition; the unresolved decision is recorded
-  in §21 and must be resolved before implementing automatic `PENDING_REVIEW` entry when draft Visits
-  exist.
+- `BR-061` does not say whether a remaining `DRAFT` Visit blocks entry into `PENDING_REVIEW`. That
+  remains an **OPEN QUESTION** for review entry, so no classification of `DRAFT` is applied to this
+  transition; the unresolved decision is recorded in §21 and must be resolved before implementing
+  automatic `PENDING_REVIEW` entry when draft Visits exist. Completion is decided and *does* block on
+  a `DRAFT` Visit, which is remaining work that has not happened (§8.5, `BR-062`).
 - The Job-status effect of `NEEDS_QUOTE_APPROVAL` is an **OPEN QUESTION** (`BR-061`). No transition
   is implemented for it: the Job remains `IN_PROGRESS`, because no confirmed rule says the Job may
   be resolved. The question is recorded in §21 rather than guessed (`BR-042`).
@@ -837,14 +1018,29 @@ Both conditions must hold:
 
 **Completion (`BR-062`)**
 
-- The only closing transition is `PENDING_REVIEW → COMPLETED` (`BR-058`), and it is an **explicit
-  business action** performed by an authorized office user holding the close permission. It is
-  never automatic and never a technician action (`BR-066`).
+- Closing is a transition **into** `COMPLETED` (`BR-058`): `PENDING_REVIEW → COMPLETED` is the normal
+  path, and an open Job may also be closed directly from `SCHEDULED`, `IN_PROGRESS` or `NEW`, in one
+  operation. It is an **explicit business action** performed by an authorized office user holding the
+  close permission. It is never automatic and never a technician action (`BR-066`), and a client
+  confirms it with the user before sending it.
+- **A Job must not be completed while it has an open Visit.** A Visit is open while its status is not
+  historical — anything other than `COMPLETED`, `CANCELED` or `NO_SHOW` (§9.1, `BR-074`). This is the
+  invariant behind "no remaining work requires another Visit":
+  - a `SCHEDULED` or `IN_PROGRESS` Visit blocks completion;
+  - a **`DRAFT` Visit blocks completion too** — it is a field attempt that has not happened, which is
+    why this set is deliberately not the narrower `needsSchedulingActiveVisit` set of §8.4;
+  - Visits that are all `COMPLETED`, `CANCELED` or `NO_SHOW` do not block completion;
+  - a Job with **no** Visit may be closed (administrative closure).
+  The check is evaluated inside the same transaction that applies the status change, and it is
+  reported as `JOB_COMPLETION_BLOCKED` — its own outcome, because the destination is structurally
+  permitted (`BR-058`). A client cannot override it.
 - `final_outcome_code` is optional, is set at close, and is **never copied automatically** from
   the latest Visit outcome (`BR-062`). Its value catalogue is an **OPEN QUESTION**, so the column
   carries no CHECK.
-- Historical `CANCELED` or `NO_SHOW` Visits do **not** prevent completion. The governing condition
-  is that no remaining work requires another Visit (`BR-062`).
+- Historical `COMPLETED`, `CANCELED` or `NO_SHOW` Visits do **not** prevent completion. The governing
+  condition is that no remaining work requires another Visit (`BR-062`).
+- Closing a Job writes one `job_status_history` row and moves the Job only: no Visit status and no
+  Visit status history is written by a Job status change (`BR-059`, `BR-067`).
 - Once completed:
   - the Job's terminal business history is preserved;
   - Visit outcomes become **immutable** (`BR-079`);
@@ -855,6 +1051,8 @@ Both conditions must hold:
 
 - Reopening is `COMPLETED → NEW` or `CANCELED → NEW` (`BR-058`). It never produces `IN_PROGRESS`,
   because it does not imply that work is currently underway.
+- Reopening is the **only** way a Job reaches `NEW`: an open Job is never moved back to `NEW`, because
+  that is the reopened, not-yet-scheduled state (`BR-058`).
 - Reopening does **not** modify or reopen historical completed/canceled Visits, and it does **not**
   create a Visit automatically. A new field attempt is a new Visit created explicitly (`BR-051`,
   `BR-071`).
@@ -867,6 +1065,10 @@ Both conditions must hold:
 
 - A Job may be canceled from `NEW`, `SCHEDULED`, `IN_PROGRESS` or `PENDING_REVIEW` — **including
   after field work has started**.
+- Cancellation is **not** folded into the ordinary status selector: it is a separate explicit action
+  with its own requirements. `CANCELED` is a structurally permitted destination (`BR-058`), but the
+  API does not apply it while the structured reason catalogue is undefined, and the list the Job read
+  reports leaves it out rather than drawing an action the API would refuse (`BR-042`).
 - Cancellation requires **both** a structured `reason_code` and a mandatory `note` explanation.
   The structured reason catalogue is an **OPEN QUESTION** (`BR-064`), so this pairing is enforced
   in the service layer for the cancellation action rather than frozen as a database enumeration.
@@ -880,6 +1082,34 @@ Both conditions must hold:
   (§10).
 - Canceling a Visit never changes the Job status by itself (`BR-076`); canceling a _Job_ does set
   the Job status to `CANCELED` (`BR-064`).
+
+### 8.7 Visit → Job consequences (`ADR-019` D4)
+
+`BR-058` states that a Job "advances as a consequence of Visit lifecycle events" without naming which
+ones; `BR-061` and `BR-062` own the conditions a destination must satisfy. `ADR-019` D4 defines the
+mapping, and this is its single place in the model (`BR-041`):
+
+| Visit event | Job consequence | Rule |
+| --- | --- | --- |
+| `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS` | `NEW`/`SCHEDULED`/`PENDING_REVIEW` → `IN_PROGRESS`; a Job already `IN_PROGRESS` is not changed | `BR-058` (the meaning of `IN_PROGRESS`) |
+| any **working** destination (`DRAFT`, `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`) while the Job is `PENDING_REVIEW` | → `IN_PROGRESS` | `BR-061`, `BR-074` |
+| `COMPLETED` with `RESOLVED` | → `PENDING_REVIEW` **only while `BR-061`'s conditions hold** (no active or scheduled Visit, no pending follow-up request); otherwise the Job stays `IN_PROGRESS` | `BR-061` |
+| `COMPLETED` with `NEEDS_PARTS`, `NEEDS_FOLLOWUP`, `NEEDS_QUOTE_APPROVAL`, `UNABLE_TO_COMPLETE` | → `IN_PROGRESS` | `BR-061` |
+| `DRAFT` or `SCHEDULED` while the Job is **not** awaiting review | no Job change | `BR-058` has no backwards Job destination |
+
+The second row is `BR-061`'s invariant read in the other direction. A Job awaits review *because* no Visit
+remained active, so a Visit moved into a working status — a **reopen** out of `COMPLETED` included — takes
+the Job back out of review. Without it a reopened, actively worked Visit could coexist with a Job awaiting
+review, which is exactly the state `BR-061` exists to prevent (`BR-074`).
+
+- A consequence **never** completes a Job (`BR-062`), never cancels one (`BR-064`), and is never applied
+  to a terminal Job (`COMPLETED`/`CANCELED` have no destination other than their reopen, `BR-063`).
+- It moves the **Job alone**: no Visit status and no Visit history is written by the consequence, exactly
+  as no Job status is written by a Visit event (`BR-059`).
+- It is applied by the API inside the same transaction as the Visit transition and recorded as one
+  `job_status_history` row (§7.1, `BR-033`, `BR-067`). A client never derives or sends it.
+- A terminal Job holding an active Visit, and whether a consequence row should carry an explicit link to
+  the Visit event that caused it, are **OPEN QUESTION**s recorded by `ADR-019` rather than modelled here.
 
 ## 9. The Visit
 
@@ -903,13 +1133,31 @@ status and the two must never be merged (`BR-059`).
 | `CANCELED`    | Canceled (`BR-076`)                                 |
 | `NO_SHOW`     | The field attempt could not be performed            |
 
-Normal lifecycle:
+Working statuses — the field attempt is not over:
+
+```text
+DRAFT, SCHEDULED, EN_ROUTE, ON_SITE, IN_PROGRESS, COMPLETED
+```
+
+Historical statuses — the field attempt is over:
+
+```text
+CANCELED, NO_SHOW
+```
+
+The **normal progression** is the order a successful field attempt usually follows:
 
 ```text
 DRAFT → SCHEDULED → EN_ROUTE → ON_SITE → IN_PROGRESS → COMPLETED
 ```
 
-Terminal alternatives:
+That order is the usual path, not a required one. `BR-074` permits **free movement** between the working
+statuses, so a Visit may move **directly** between any two of them, in either direction, in one
+operation — a skipped step and a step backward are each one transition, and a `COMPLETED` Visit may be
+**reopened** into any other working status. Field reality requires correcting a status mistake, catching
+up after a missed tap and moving backward when the work genuinely goes back a step.
+
+The **dispatch alternatives** remain exactly as they were:
 
 ```text
 SCHEDULED   → CANCELED
@@ -919,18 +1167,35 @@ IN_PROGRESS → CANCELED
 SCHEDULED   → NO_SHOW
 ```
 
-- Once a Visit is `COMPLETED`, `CANCELED` or `NO_SHOW` it is **historical** and can never return to
-  an active state (`BR-074`).
+- `CANCELED` and `NO_SHOW` are **truly terminal**: no working status is reachable from them, and they are
+  not field destinations — canceling a Visit and marking `NO_SHOW` are office/dispatch actions that need
+  a structured reason (`BR-066`, `BR-076`, §8.3).
+- `COMPLETED` is historical but **not** a dead end: it is the one historical status that offers
+  destinations, which is how a reopen is expressed (`BR-074`).
+- Reopening a `COMPLETED` Visit preserves the previous completion and its outcome in append-only history
+  while clearing the Visit's **current** outcome; the next completion records a new one (`BR-074`,
+  `BR-077`, `BR-079`, §9.5).
+- A Visit may not "change" to the status it already holds; that is not a transition (`BR-067`).
 - Every transition is validated by the backend against this table; clients must not invent their
   own Visit status vocabulary (`BR-022`, `BR-041`, `BR-074`).
 - Status history is append-only (§9.5).
-- The single defined correction is `EN_ROUTE → SCHEDULED` (§9.5, `BR-075`). Any other backward
-  movement is a business decision that has not been made (`BR-075` Notes).
-- Who may drive each transition is defined by `BR-066` and the permission model: technicians
-  operate the field lifecycle of their assigned Visits; canceling a Visit and marking `NO_SHOW`
-  are office/dispatch actions (`BR-066`, §8.3).
+- The correction **flag** stays as narrow as the correction `BR-075` named — `EN_ROUTE → SCHEDULED`
+  (§9.5). `BR-074`'s free movement needs no flag of its own: every status event already records its
+  previous status, its new status, its actor and its timestamp.
+- Who may drive each transition is defined by `BR-066`, `BR-093` and the permission model: a technician
+  operates the field lifecycle of a Visit their own current crew includes; an office member holding the
+  office capability operates any of the organization's Visits **without** crew membership — completion
+  included, and with the outcome capability a completion requires of every caller; canceling a Visit and
+  marking `NO_SHOW` are office/dispatch actions no capability authorizes yet (`BR-066`, `BR-076`, §8.3).
+- **What the API applies today** is recorded in `docs/api/job-actions.md` §7: the whole working
+  vocabulary in either direction with reopens included, `CANCELED` and `NO_SHOW` refused because
+  no capability authorizes a dispatch action yet (`BR-042`, `BR-093`), `BR-072`'s conditions gating
+  a move to `SCHEDULED`, and `BR-077`'s outcome required on a completion. The scope is the caller's own
+  current assignment for a field caller, and the organization's Visits for a caller admitted by the office
+  capability (`BR-093`); a Visit a field caller's assignments do not reach is reported as not found
+  (`ADR-019` D2, D3).
 - The two state machines interact only in one direction: Visit lifecycle events cause Job status
-  consequences (§8.2, §8.4). A Visit may be `COMPLETED` while its Job remains `IN_PROGRESS`
+  consequences (§8.2, §8.4, §8.7). A Visit may be `COMPLETED` while its Job remains `IN_PROGRESS`
   (`BR-059`, `BR-077`).
 
 ### 9.2 Proposed table — `visits`
@@ -1059,8 +1324,10 @@ Checks:
 - `to_status IN (...)`, `from_status IS NULL OR from_status IN (...)`,
   `from_status IS DISTINCT FROM to_status`.
 - `NOT is_correction OR (from_status = 'EN_ROUTE' AND to_status = 'SCHEDULED')` — the single
-  correction confirmed by `BR-075`. Any other correction is an undecided business rule, so it is not
-  modelled; adding one is a deliberate migration after a product decision.
+  correction named by `BR-075`. `BR-074`'s free movement is deliberately **not** flagged: it is fully
+  auditable from `from_status`, `to_status`, the actor and the timestamp, which is the audit `BR-067`
+  requires. Generalizing the flag would need a migration and adds nothing to that record, so it stays
+  as narrow as the rule that named it.
 - `to_status <> 'CANCELED' OR cancellation_source IS NOT NULL` and
   `to_status = 'CANCELED' OR cancellation_source IS NULL`.
 - `cancellation_source IS NULL OR cancellation_source IN ('MANUAL','JOB_CANCELLATION')`.
@@ -1086,8 +1353,17 @@ Cancellation and correction rules recorded here:
 - `ON_SITE` and `IN_PROGRESS` Visits are never cascade-canceled silently (`BR-065`): the row is
   written only after the authorized user explicitly confirmed that Visit. The row and its actor are
   the evidence; no separate boolean is modelled.
-- `EN_ROUTE → SCHEDULED` is an explicit correction by an authorized user (`BR-075`). The original
-  row is untouched, the Visit identity does not change, and history stays append-only.
+- `BR-074`'s free movement is recorded the same way as any other transition: one append-only row per
+  applied change, carrying the previous status, the new status, the actor and the timestamp. The original
+  row is untouched, the Visit identity does not change, and history stays append-only (`BR-067`, `BR-075`).
+  `EN_ROUTE → SCHEDULED` is the one case recorded with `is_correction = true`, because `BR-075` named it.
+- **Reopening a `COMPLETED` Visit** (`COMPLETED` → any other working status) writes its status row like
+  any other transition and additionally **clears the Visit's current outcome columns**
+  (`visits.outcome_code`, `outcome_summary`, `outcome_recorded_at`,
+  `outcome_recorded_by_membership_id`) in the same transaction. The completion it reverses keeps its own
+  `visit_status_history` row and its own `visit_outcome_history` row, so nothing is rewritten or removed;
+  the next completion writes a **new** outcome (`BR-074`, `BR-077`, `BR-079`, §11.2). No outcome row is
+  written by the reopen itself, because no outcome resulted from it.
 
 ### 9.6 Visit location and `visit_location_history`
 
@@ -1279,8 +1555,9 @@ AND existing.scheduled_end > new.scheduled_start
   technician, unless a technician has explicit scheduling permission and creates the follow-up Visit
   directly (`BR-FV-001`, `BR-FV-011`).
 - Outcome and status are different things (`BR-078`, §9.1): a Visit may be `COMPLETED` while its Job
-  remains `IN_PROGRESS` (`BR-059`, `BR-077`). A new field attempt is a **new Visit**, never a
-  reopened or edited completed Visit (`BR-071`, `BR-078`).
+  remains `IN_PROGRESS` (`BR-059`, `BR-077`). A new **field attempt** is a new Visit, never an edit of a
+  completed one. Reopening a completed Visit (`BR-074`) is not a new attempt: it corrects the status of
+  the attempt that already exists, and that attempt must record a new outcome at its next completion.
 - Job effect (`BR-061`): a Job may enter `PENDING_REVIEW` only when no Visit remains active or
   scheduled and either the latest completed Visit outcome indicates the Job may be resolved
   (`RESOLVED`) or an authorized rejection of the follow-up request because no additional Visit is
@@ -1296,7 +1573,9 @@ AND existing.scheduled_end > new.scheduled_start
 - **Immutability** (`BR-062`, `BR-079`): once the Job is `COMPLETED`, Visit outcomes are immutable.
   This is enforced in the service layer from the Job's status inside the same transaction that would
   change the outcome. Reopening a Job (`BR-063`) does not reopen historical Visits, so it does not
-  un-freeze their outcomes; the boundary case is recorded in §21.
+  un-freeze their outcomes; the boundary case is recorded in §21. A Visit's own reopen (`BR-074`) is a
+  **field** action and is refused while the Job is `COMPLETED` or `CANCELED`
+  (`JOB_CLOSED_FOR_FIELD_WORK`), so it can never be used to make a closed Job's outcomes mutable.
 
 ### 11.2 Current outcome and `visit_outcome_history`
 
@@ -1320,6 +1599,11 @@ Current outcome columns and constraints on `visits`:
   to `COMPLETED` are written by one statement, or by one transaction, so this holds at every commit.
 - Note: a _draft_ outcome is not modelled. `BR-077` requires the outcome at completion; storing a
   partial, unsubmitted outcome is not defined by the business rules and is therefore not invented.
+- Note: **reopening** a completed Visit (`BR-074`) clears all four current-outcome columns in the same
+  transaction that changes the status, so a working Visit carries no current outcome. That is why none of
+  the checks above is violated: `status <> 'COMPLETED'` makes the outcome columns free to be `NULL`, and
+  the pair checks are satisfied because they are cleared together. The `visit_outcome_history` row of the
+  completion that was reversed stays exactly as it was written (`BR-067`, `BR-079`).
 
 Proposed table — `visit_outcome_history` (append-only):
 
@@ -1502,12 +1786,16 @@ Proposed constraints and table:
   counter for a new organization and increments it:
 
 ```sql
-INSERT INTO organization_job_number_counters (organization_id)
-VALUES ($1)
+INSERT INTO organization_job_number_counters (organization_id, last_job_number)
+VALUES ($1, 1)
 ON CONFLICT (organization_id)
 DO UPDATE SET last_job_number = organization_job_number_counters.last_job_number + 1
 RETURNING last_job_number;
 ```
+
+- The inserted value states the **first** number explicitly: `DO UPDATE` runs only on conflict, so a
+  fresh counter row must already carry the number the creation takes (otherwise a new organization's
+  first Job would read the column's `0` default and fail `CHECK (job_number > 0)`).
 
 - The counter row is the serialization point for concurrent Job creation within one organization
   (§15); the counter is monotonic and never moves backwards.
@@ -1782,7 +2070,7 @@ catalogue or column was invented for it (`BR-042`, `qa.md` §15).
 | 14  | What are the scheduling time-zone semantics?                                                                                  | `BR-026`           | Only absolute instants (`timestamptz`) are stored; no organization or Visit time-zone field exists (§2.3, §9.3, §14).                                                                                 | Display and input of schedules.         |
 | 15  | What are the audit retention and audit visibility rules?                                                                      | `BR-033`           | The history tables exist and are append-only; retention and read access are not defined (§2.4).                                                                                                       | Retention jobs and audit screens.       |
 | 16  | Must a Property's own address-change history be retained, beyond the Job/Visit snapshots that must not be rewritten?          | `BR-057`, `BR-084` | **Deferred** by product ownership: no Property address-history table is modelled. Editing never rewrites Job/Visit snapshots, which remain the authoritative record of the address used at the time. | Property address-history UI and audit.  |
-| 17  | Does a remaining `DRAFT` Visit block entry into `PENDING_REVIEW`?                                                             | `BR-061`           | `BR-060` excludes `DRAFT` from the "Needs Scheduling" active-work signal, but `BR-061` does not classify it for review entry. No automatic transition is implemented for the draft-Visit case (§8.4). | `PENDING_REVIEW` entry rule.            |
+| 17  | Does a remaining `DRAFT` Visit block entry into `PENDING_REVIEW`?                                                             | `BR-061`           | `BR-060` excludes `DRAFT` from the "Needs Scheduling" active-work signal, but `BR-061` does not classify it for review entry. No automatic transition is implemented for the draft-Visit case (§8.4). Completion is separate and **does** block on a `DRAFT` Visit (§8.5, `BR-062`). | `PENDING_REVIEW` entry rule.            |
 | 18  | Does the customer-detail Job row's past-Visit fallback include a `CANCELED` past Visit?                                        | `BR-081`           | Implemented literally: only the upcoming candidate excludes `CANCELED`; the past fallback considers any past Visit by scheduled start (§8.4).                                                          | Customer-detail Job row only.           |
 | 19  | Which capability authorizes **creating** a Property?                                                                          | `BR-085`           | **Decided:** `properties.create` (`ADR-012` D1). Enforced by `POST /customers/:id/properties`; the interim `customers.edit` authorization is removed.                                                | —                                       |
 | 20  | Does an archived Property still appear in the customer-detail Property projection?                                            | `BR-081`, `BR-083` | **Decided:** the projection and `propertyCount` cover the customer's `ACTIVE` relationships only (`ADR-012` D3). Archived Properties remain retrievable through explicit archived views.                | —                                       |
@@ -1792,6 +2080,7 @@ catalogue or column was invented for it (`BR-042`, `qa.md` §15).
 | 24  | What formally defines a technician as "running late"?                                                                         | `BR-070`, `BR-038` | Not defined. The manager home presents only the **overdue Visit** condition above, which compares the Visit's own scheduled window against the server clock and needs no travel time, location or estimate. No "running late" alert is produced, and no ETA is derived from GPS or travel data (`docs/tracker/016-android-manager-home.md`). | A "running late" alert; any ETA or travel-time estimate. |
 | 25  | Which attention conditions should a cancelled Visit raised **today** produce on the manager home?                             | `BR-076`           | Not defined. A `CANCELED` Visit is excluded from today's schedule and counts, and no "cancelled today" condition is produced: the Visit row carries no cancellation instant of its own (only the status history does), and "today" for it is undefined. Recorded rather than inferred. | A "cancelled today" attention condition. |
 | 26  | Does the manager home's "Needs attention" list need a capability of its own?                                                 | `BR-006`, `BR-008` | The read is guarded by the existing `customers.view`, the same capability the Job/Visit projections already use. The permission model has no `jobs.*` capability yet, and inventing one is forbidden (`BR-042`) — see `docs/tracker/016-android-manager-home.md`. | The Jobs feature's permission set; the manager home's own capability. |
+| 27  | May a **field** member read another technician's schedule (a **team** scope), and which capability authorizes it?             | `BR-006`, `BR-009`, `BR-024` | **Open, and enforced closed.** `GET /schedule` resolves a **scope** from the capability the caller holds: `customers.view` reads the operation's day (`ORGANIZATION`), `VISIT_VIEW_ASSIGNED` reads only the caller's own assigned Visits (`SELF`) (`ADR-020` decision update). A `membershipId` outside the resolved scope is refused `403`, uniformly whether or not it names anybody. No capability for a team scope exists in the catalogue — `VISIT_VIEW_ASSIGNED` is by definition the caller's *own* assignments, and `TECHNICIAN_VIEW` authorizes the technician **records** an assignee is chosen from — so none was invented (`BR-042`). | The technician Schedule screen's technician selector; any `TEAM` scope; `docs/api/schedule.md` §5.4. |
 
 Not an open question, recorded here to prevent a false assumption: **Job-number gaps**. `BR-052`
 requires uniqueness and immutability, not a gapless sequence, so no gap-free guarantee is claimed

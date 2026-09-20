@@ -9,12 +9,17 @@ import {
 import {
   ASSIGNMENT_ROLE_CODES,
   JOB_STATUSES,
+  VISIT_OUTCOME_CODES,
+  VISIT_STATUSES,
   type AssignmentRoleCode,
   type JobStatus,
+  type VisitOutcomeCode,
+  type VisitStatus,
 } from './job.types.js';
 
 /*
- * The Job and Visit **action** requests (`BR-058`, `BR-063`, `BR-068`, `BR-069`, `BR-073`).
+ * The Job and Visit **action** requests (`BR-058`, `BR-063`, `BR-068`, `BR-069`, `BR-073`, `BR-074`,
+ * `BR-077`, `BR-078`).
  *
  * Every parser validates untrusted input at the API boundary (`dev.md` §7) with the shared,
  * dependency-free validation helpers, so the rules are unit-testable without a Nest application. A
@@ -171,9 +176,105 @@ export interface AssignVisitTechniciansDto {
   readonly expectedVersion: number | null;
 }
 
+/** The fields a caller supplies to advance one Visit through its field lifecycle (`BR-074`). */
+export interface ChangeVisitStatusDto {
+  /** The destination `BR-074` permits for the Visit's current status (`VISIT_STATUS_TRANSITIONS`). */
+  readonly status: VisitStatus;
+  /**
+   * The outcome the completion records (`BR-077`, `BR-078`). It is required exactly when the
+   * destination is `COMPLETED`, because a Visit cannot be completed without recording what resulted
+   * from the field attempt, and it is refused on any other destination because nothing else stores one.
+   */
+  readonly outcomeCode: VisitOutcomeCode | null;
+  readonly outcomeSummary: string | null;
+  /**
+   * The idempotency key the device generated once, before its first attempt (`BR-031`, `ADR-019` D5).
+   *
+   * When it is supplied, a replay of the same operation is answered with the state the first attempt
+   * produced instead of being evaluated a second time, so a queued transition replayed after a timeout
+   * is applied exactly once. Without one the operation simply has no replay protection: a repeat is
+   * evaluated against the Visit's current state and refused if that state no longer permits it, which
+   * is the refuse-and-reconcile answer a client presents and offers to discard (`BR-014`).
+   */
+  readonly clientOperationId: string | null;
+  /** The device instant the field action happened; provenance only, beside the server's own instant. */
+  readonly capturedAt: Date | null;
+  /** The Visit version the client last saw; when it moved on, the change is refused (`BR-086`). */
+  readonly expectedVersion: number | null;
+  /**
+   * Whether the caller accepted the availability conflicts the API reported (`BR-070`).
+   *
+   * `BR-072` requires a conflict check before a Visit may become `SCHEDULED`, and a detected conflict
+   * must be explicitly confirmed: the first request is refused with the conflicts so the user can be
+   * shown them, and the same request resent with this flag applies the change.
+   */
+  readonly confirmConflicts: boolean;
+}
+
+/** The longest outcome summary the API accepts, in characters. */
+export const MAX_VISIT_OUTCOME_SUMMARY_LENGTH = 2000;
+
+/**
+ * Validates untrusted input into a `ChangeVisitStatusDto`.
+ *
+ * The outcome is a **pair or nothing**, and it is required for `COMPLETED` only: `BR-077` requires an
+ * outcome before a Visit may be completed, and no other destination stores one (`docs/domain/job-visit-
+ * domain-model.md` §11.2 — a DRAFT outcome is not modelled). Supplying one for any other destination is
+ * refused rather than silently dropped, because the client would otherwise be told an outcome was
+ * recorded when nothing was.
+ */
+export function parseChangeVisitStatusDto(
+  input: unknown,
+): ChangeVisitStatusDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const status = requireEnum(source.status, VISIT_STATUSES, 'status');
+  const outcomeCode =
+    source.outcomeCode === undefined || source.outcomeCode === null
+      ? null
+      : requireEnum(source.outcomeCode, VISIT_OUTCOME_CODES, 'outcomeCode');
+  const outcomeSummary = optionalText(
+    source.outcomeSummary,
+    'outcomeSummary',
+    MAX_VISIT_OUTCOME_SUMMARY_LENGTH,
+  );
+
+  if (status === 'COMPLETED' && (outcomeCode === null || outcomeSummary === null)) {
+    fail('outcome', 'is required when the visit is completed');
+  }
+  if (status !== 'COMPLETED' && (outcomeCode !== null || outcomeSummary !== null)) {
+    fail('outcome', 'is only accepted when the visit is completed');
+  }
+
+  return {
+    status,
+    outcomeCode,
+    outcomeSummary,
+    clientOperationId: optionalUuid(
+      source.clientOperationId,
+      'clientOperationId',
+    ),
+    capturedAt: toInstant(source.capturedAt, 'capturedAt'),
+    expectedVersion: optionalPositiveInteger(
+      source.expectedVersion,
+      'expectedVersion',
+    ),
+    confirmConflicts: source.confirmConflicts === true,
+  };
+}
+
+/** An optional instant as a `Date`, sharing `BR-031`'s provenance meaning with the evidence routes. */
+function toInstant(value: unknown, field: string): Date | null {
+  const instant = optionalInstant(value, field);
+  return instant === null ? null : new Date(instant);
+}
+
 /** The text update a caller adds to one Visit's activity (`BR-027`, `BR-077`). */
 export interface AddVisitNoteDto {
   readonly body: string;
+  /** The idempotency key, with the meaning `ChangeVisitStatusDto.clientOperationId` documents. */
+  readonly clientOperationId: string | null;
+  /** The device instant the note was written; provenance beside the server's own instant. */
+  readonly capturedAt: Date | null;
 }
 
 /** Validates untrusted input into an `AddVisitNoteDto`. */
@@ -183,7 +284,14 @@ export function parseAddVisitNoteDto(input: unknown): AddVisitNoteDto {
   if (body === null) {
     fail('body', 'is required');
   }
-  return { body };
+  return {
+    body,
+    clientOperationId: optionalUuid(
+      source.clientOperationId,
+      'clientOperationId',
+    ),
+    capturedAt: toInstant(source.capturedAt, 'capturedAt'),
+  };
 }
 
 /** Validates untrusted input into an `AssignVisitTechniciansDto`. */

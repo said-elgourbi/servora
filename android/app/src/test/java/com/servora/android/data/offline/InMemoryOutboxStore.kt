@@ -47,6 +47,14 @@ class InMemoryOutboxStore : OutboxStore {
         update(operationId) { it.failedWith(OutboxOperationState.REJECTED, reason, at) }
     }
 
+    override suspend fun discardRefused(operationId: String) {
+        // Mirrors the stored store's predicate: only a refused row is removed, so a replayable
+        // operation can never be dropped through this route (`BR-014`).
+        rows.removeAll {
+            it.operationId == operationId && it.state == OutboxOperationState.REJECTED
+        }
+    }
+
     override suspend fun recoverInFlight() {
         rows.replaceAll { row ->
             if (row.state == OutboxOperationState.IN_FLIGHT) {

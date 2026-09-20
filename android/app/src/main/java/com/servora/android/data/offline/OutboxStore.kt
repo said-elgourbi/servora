@@ -43,6 +43,18 @@ interface OutboxStore {
     )
 
     /**
+     * Removes an operation the user has explicitly discarded, and only one the backend **refused**
+     * (§11 item 5, `D6c`).
+     *
+     * A refusal is terminal — [head] never returns it — so removing it decides nothing that could
+     * still be applied. The state guard is what keeps this from becoming a way to drop waiting work:
+     * an operation that is still pending or retrying is not removed, because `BR-014` forbids losing
+     * it. What the user's discard means for the rest of a feature's local state — the evidence slice
+     * removes the photo's file and record with it — belongs to the feature, not to this contract.
+     */
+    suspend fun discardRefused(operationId: String)
+
+    /**
      * Returns every replay an interruption left in flight to waiting (§6): process death at app
      * start, and a cancellation the engine survived.
      */
@@ -110,6 +122,10 @@ internal class RoomOutboxStore @Inject constructor(
             at = at,
             reason = reason.name,
         )
+    }
+
+    override suspend fun discardRefused(operationId: String) {
+        dao.deleteRefused(operationId, OutboxOperationState.REJECTED.name)
     }
 
     override suspend fun recoverInFlight() {

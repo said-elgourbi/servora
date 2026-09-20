@@ -41,8 +41,8 @@ Notes:
 
 The foundation database starts empty and the API has no user-creation endpoint yet, so a
 fresh environment cannot sign in. `make seed` creates two active accounts, one per default
-foundation role (`BR-003`), inside one organization. It also adds a deterministic operational
-demo dataset for local scrolling/filtering checks.
+foundation role (`BR-003`), inside one organization. It also writes a realistic demo dataset —
+customers, Properties, Jobs and Visits — so local checks have something real to show.
 
 ```bash
 make seed
@@ -60,18 +60,24 @@ row (`Dev Manager` / `Dev Technician`), and the `organization_members` row (`rol
 `ACTIVE`). The seed also upserts the default permission catalogue, default organization roles and
 role-permission assignments.
 
-Operational demo data:
+Demo data — a realistic book of business, not a tagged fixture:
 
-- 20 customers in the same organization, mixing companies and individuals, active and inactive
-  status, English and French language preferences, and several preferred contact methods.
-- Customer contacts, billing addresses, 1-4 service Properties per customer, and active
-  Property-Customer relationship rows.
-- 44 Jobs numbered from `1001`, spread across `NEW`, `SCHEDULED`, `IN_PROGRESS`,
-  `PENDING_REVIEW`, `COMPLETED` and `CANCELED`.
-- Visits, visit assignments and visit notes for scheduled/field-work scenarios, including
-  scheduled, active, completed and canceled Visit states.
-- Rows created by the operational demo are tagged with `[dev-seed-operational]`. Re-running
-  `make seed` refreshes those tagged rows instead of appending another copy.
+- 14 Customers across Canada: companies and individuals, active and inactive, English and French,
+  each with a billing address, contact persons (`BR-095`), 1–3 service Properties and the active
+  Property ↔ Customer relationship rows.
+- 35 Jobs numbered from `1001`, spread across every Job status.
+- 37 Visits across every Visit status, carrying 1–3 technicians with exactly one `LEAD` (`BR-068`),
+  plus the assignment history `BR-069` describes, Visit status history, outcomes, notes and
+  cancellation reasons.
+- The dataset is **anchored to the moment the seed runs**: a Visit that has already happened is
+  finished and one that has not happened yet is merely scheduled, so the demo never presents a future
+  field attempt as completed work. `assertSeedScenariosAreCoherent`
+  (`api/src/database/development-seed-scenarios.ts`) refuses to write the dataset when an edit breaks
+  that, breaks the Job/Visit agreement the API enforces, or books one technician on two overlapping
+  Visits.
+- `make seed` **replaces** the previous demo rather than appending to it: every Customer, Property,
+  Job and Visit of the seeded organization is removed first, and the organization's Job numbering
+  restarts at `1001`. Anything created by hand through the app in that organization goes with it.
 
 Credential policy:
 
@@ -101,28 +107,69 @@ Expected: `200` with `sessionId`, `accessToken` and `refreshToken`. A wrong pass
 `401 INVALID_CREDENTIALS` with the same body shape, and a request without `device` returns `400`.
 
 Implementation: `api/src/database/development-seed.ts` resolves the credential dataset from the
-environment (pure, unit-tested in `development-seed.spec.ts`) and
-`api/src/database/run-development-seed.ts` performs the account, permission and operational demo
-writes (`npm run db:seed`).
+environment (pure, unit-tested in `development-seed.spec.ts`),
+`api/src/database/development-seed-scenarios.ts` is the demo dataset itself plus the coherence rules
+it is asserted against (pure, unit-tested in `development-seed-scenarios.spec.ts`), and
+`api/src/database/run-development-seed.ts` performs the account, permission and demo writes
+(`npm run db:seed`).
 
 ### What `make seed` writes
 
-Beyond the two accounts, the seed writes operational demo data so the management screens have something
-real to present:
+The seed also adds a deterministic **demo dataset** so the management and field screens have something
+real to present. It is one hand-written book of business rather than generated rows, so it reads the way
+a service company's work actually reads:
 
-- 20 customers, their contacts, addresses and Properties, and Jobs spread across every Job status;
-- **four further Technician members** (`Sarah Moreau`, `John Tremblay`, `Priya Raman`, `Luc Gagnon`) so
-  a Visit can carry a real crew (`BR-068`). They are members only: the two documented credentials above
-  remain the only seeded logins and no password is generated for them;
-- **two or three technicians per Visit** with exactly one `LEAD`, rotating the Lead between Visits, with
-  the assignment **history** `BR-069` describes — a Lead who was first assigned as an ordinary technician
-  and promoted later, and a technician who was removed again — recorded as history rows rather than a
-  rewritten assignment;
-- **three notes per Visit** from the manager and the crew (`BR-027`);
-- the **Visit and Job status history** along the only paths `BR-074` and `BR-058` permit.
+- **14 Customers** across Canada — companies and individuals, active and inactive, English and French,
+  with contact persons (`BR-095`), a billing address and 1–3 service Properties each;
+- **35 Jobs** numbered from `1001`, spread across **every** Job status so each filter and each list has
+  data;
+- **37 Visits** spread across **every** Visit status, carrying a crew of one to three technicians with
+  exactly one `LEAD` (`BR-068`), the assignment **history** `BR-069` describes — a Lead who was first
+  assigned as an ordinary technician and promoted later, and a technician who was removed again — Visit
+  status history, recorded outcomes (`BR-077`), notes from the office and the crew (`BR-027`) and a
+  structured cancellation reason (`BR-076`);
+- **four further Technician members** (`Sarah Moreau`, `John Tremblay`, `Priya Raman`, `Luc Gagnon`) so a
+  Visit can carry a real crew. They are members only: the two documented credentials above remain the only
+  seeded logins and no password is generated for them.
 
-Re-running `make seed` refreshes this demo data rather than duplicating it: the previous run's customers,
-Properties, Jobs, Visits and their history are removed first.
+Two properties of the dataset matter when it is edited (`api/src/database/development-seed-scenarios.ts`):
+
+1. **Every Visit window is relative to the moment the seed runs** (`daysAgo`, `inDays`, `hoursFromNow`),
+   so a Visit that has already happened is `COMPLETED` and one that has not happened yet is only
+   `SCHEDULED`. There is no fixed date to go stale, and a future field attempt can never be seeded as
+   finished work.
+2. **The dataset is asserted before it is written.** `assertSeedScenariosAreCoherent` refuses it unless
+   the Job and Visit statuses agree the way `BR-058`, `BR-061`, `BR-062` and `BR-074` require, every
+   `COMPLETED` Visit has an outcome and an end in the past, no note is written in the future or by
+   somebody off the crew, and no technician is booked on two overlapping Visits (`BR-070`).
+
+Re-running `make seed` **replaces** the demo instead of duplicating it: every Customer, Property, Job and
+Visit of the seeded organization is deleted first (their histories and assignments cascade with them) and
+the organization's Job numbering restarts at `1001`. Evidence objects already uploaded to the local MinIO
+bucket are not removed — their rows cascade away with the Job, so a re-seed can leave orphaned dev objects
+in the bucket.
+
+### Temporary dev sign-in buttons (Android debug builds)
+
+A **debug** build of the Android application shows two extra buttons on the sign-in screen — *Sign in as
+Manager* and *Sign in as Technician* — so a device session can switch audience in one tap instead of
+typing a seeded credential. It is development tooling, not product behaviour (`BR-042`).
+
+| Question                          | Answer                                                                                                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Where does it live?               | `android/app/src/debug/java/com/servora/android/ui/signin/DevSignInAccounts.kt`                                                                                 |
+| Why can a release build not show it? | The `release` source set declares the same type with an empty list, so the section is absent **by construction** — not by a flag someone must remember to reset |
+| Which accounts?                   | The two `make seed` accounts above, with the passwords from your git-ignored `.env`                                                                             |
+| The seed generated a password     | `make seed` printed the generated value once when `SEED_*_PASSWORD` was empty — paste that into `DevSignInAccounts.kt`                                            |
+| Does it bypass authentication?    | No. A button prefills the form and submits the real credentials to the real `POST /auth/sign-in` (`BR-018`, `BR-007`)                                           |
+| How is it removed?                | `docs/tracker/049-android-dev-sign-in-buttons.md` lists the exact files to delete                                                                               |
+
+Those passwords are local-only and belong to reserved `.test` accounts, but they **are** in git: this is
+the one deliberate exception to `dev.md` §5 recorded in the tracker entry above. Never put a real
+credential there.
+
+Implementation: `SignInViewModel.onDevSignIn` prefills the form and reuses the ordinary submit path, and
+`SignInScreen` renders the section only when the account list it is given is non-empty.
 
 ## 4. Android against a local API (physical device or emulator)
 
@@ -202,7 +249,24 @@ Notes:
 | `make api-test` / `api-test-e2e`                       | API unit tests / API e2e tests (needs `make up`) |
 | `make api-lint` / `api-format`                         | Lint / format the API sources                    |
 | `make android-build` / `android-test` / `android-lint` | Assemble debug APK / JVM tests / lint            |
+| `make android-stop` / `tidy`                           | Stop the Gradle/Kotlin build daemons / stop them and report leftovers (§8) |
 | `make test` / `lint` / `build`                         | Aliases for the API targets                      |
+
+### How much verification to run
+
+Verification is scoped to the change (`.clinerules/qa.md` §3.1): an ordinary task runs the affected
+application's compile/build, its type check and the tests that cover the code it touched, while the full
+lint, the full suites and the full builds run when the feature completes — not after every correction.
+
+```bash
+cd api && npm run typecheck && npm run build
+cd api && npm test -- src/jobs/mp4-audio.spec.ts                   # the spec(s) covering the change
+cd api && npm run test:e2e -- test/job-audio-notes.e2e-spec.ts     # the e2e spec(s) covering the change
+cd android && ./gradlew compileDebugKotlin
+cd android && ./gradlew testDebugUnitTest --tests 'com.servora.android.ui.jobs.*'
+```
+
+Stop the build daemons after the last Gradle command either way (§8).
 
 ## 6. Transactional email (`ADR-008`)
 
@@ -283,7 +347,45 @@ to be.** If reads ever move to presigned URLs, the signature is bound to the exa
 that change would need `S3_PUBLIC_ENDPOINT` plus a second tunnel (`adb reverse tcp:9000 tcp:9000`)
 locally, and an HTTPS endpoint in a release build. The reasoning is recorded in `ADR-013` D7.
 
-## 8. Troubleshooting
+## 8. Resource hygiene (build daemons)
+
+The Android targets are the one part of this setup that leaves heavyweight processes behind.
+`./gradlew` starts a **Gradle daemon** and a **Kotlin daemon** that are deliberately long-lived, and
+nothing about a successful build tells you they are still there. Measured on this working copy after
+a single Android build:
+
+| Process                               | Resident memory | Idle timeout (default) |
+| ------------------------------------- | --------------- | ---------------------- |
+| Gradle daemon (`GradleDaemon`)        | ≈ 4.9 GB        | 3 h                    |
+| Kotlin daemon (`KotlinCompileDaemon`) | ≈ 2.4 GB        | 2 h                    |
+
+Those numbers are why the machine becomes unusable after a few Android tasks: on this machine
+`available` memory went from 3.1 GB to 10.5 GB the moment both daemons were stopped.
+
+```bash
+make android-stop        # stop the Gradle + Kotlin build daemons
+make tidy                # the same, then report anything else still running
+```
+
+Notes:
+
+- `./gradlew --stop` stops the Gradle daemon, and the Kotlin daemon belonging to it exits with it
+  (verified here with Gradle 9.7.1 and Kotlin 2.3.21). `make tidy` additionally reports leftover
+  Node/API processes and the foundation container states, without changing them.
+- `android/gradle.properties` sets `org.gradle.daemon.idletimeout` to 10 minutes, so a daemon nobody
+  stopped releases its heap on its own instead of holding it for three hours. One daemon is still
+  reused across the builds of a single working session (`test` → `lint` → `assemble`).
+- Stopping a daemon is safe: it holds no build result, only caches in `~/.gradle`, and the next build
+  starts a fresh one.
+- **Do not run these while a Gradle build is running** — `make tidy` stops the daemon that build is
+  using. The agent runs it only after its own last Android command (`.clinerules/dev.md` §18,
+  `.clinerules/qa.md` §7.4); the product owner decides when their own builds are finished.
+- `make tidy` never stops the foundation stack, never deletes a volume and never touches a device
+  session. `make down` / `make down-v` remain the explicit ways to stop compose.
+
+---
+
+## 9. Troubleshooting
 
 | Symptom                                                                         | Cause                                                                | Fix                                                                                                             |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -298,3 +400,5 @@ locally, and an HTTPS endpoint in a release build. The reasoning is recorded in 
 | The `minio` container restarts repeatedly, or its healthcheck never goes healthy | The pinned image cannot run on this CPU                              | Use the `-cpuv1` variant of `quay.io/minio/minio` at the same release in `docker-compose.yml`                     |
 | `http://localhost:9001` does not answer                                         | The Console binds a random port when `--console-address` is missing  | Keep `--console-address ":9001"` in the `minio` command                                                          |
 | A presigned URL returns `SignatureDoesNotMatch` (once presigning exists)        | SigV4 covers the `Host` header, so the URL was signed for another host | Sign for exactly the host the client calls; see `ADR-013` D7 and `S3_PUBLIC_ENDPOINT`                             |
+| The machine becomes sluggish and `free -m` shows several GB held by `java`      | Gradle/Kotlin daemons from earlier Android builds are still idling   | `make tidy` (§8)                                                                                                 |
+| A change to `android/gradle.properties` seems to have no effect                 | The running daemon still uses the JVM arguments it started with       | `make android-stop`, then run the build again (§8)                                                               |

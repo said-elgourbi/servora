@@ -65,16 +65,54 @@ interface CustomersRepository {
     suspend fun createCustomer(request: CreateCustomerRequest): CustomerCreateResult
 
     /**
-     * Records a contact on [customerId] (`BR-023`).
+     * Records a contact on [customerId] (`BR-095`).
      *
-     * The backend authorizes the write (`customers.edit`) and resolves the customer inside the
-     * caller's organization, so a customer the organization does not own is reported as not found
+     * The backend authorizes the write (`customers.contacts.create`) and resolves the customer inside
+     * the caller's organization, so a customer the organization does not own is reported as not found
      * (`BR-001`).
+     *
+     * The write is **online-only** (`offline-first-architecture.md` §13): the route accepts no
+     * client-generated idempotency key and no conflict policy has been decided for a create, so it is
+     * never queued.
      */
     suspend fun createContact(
         customerId: String,
         request: CreateCustomerContactRequest,
     ): ContactCreateResult
+
+    /**
+     * Applies a partial edit to one of [customerId]'s contacts (`BR-095`).
+     *
+     * The backend authorizes the write (`customers.contacts.edit`) and owns the version guard: it
+     * applies the edit only against the state the caller read, so a contact that moved past
+     * [UpdateCustomerContactRequest.expectedVersion] is refused with
+     * [CustomersFailureReason.VERSION_CONFLICT] rather than written over (`BR-032`, `BR-086`).
+     *
+     * The write is **online-only** for the same reason a create is: the route accepts no idempotency
+     * key (`offline-first-architecture.md` §13).
+     */
+    suspend fun updateContact(
+        customerId: String,
+        contactId: String,
+        request: UpdateCustomerContactRequest,
+    ): ContactUpdateResult
+
+    /**
+     * Removes one of [customerId]'s contacts from ordinary use (`BR-095`).
+     *
+     * The backend authorizes the write (`customers.contacts.remove`) and removes the contact softly,
+     * so nothing is deleted and the caller re-reads what the customer now holds (`BR-033`). The version
+     * guard is the edit's, so a contact that has moved on is refused rather than removed
+     * (`BR-032`, `BR-086`).
+     *
+     * The write is **online-only** for the same reason a create is: the route accepts no idempotency
+     * key (`offline-first-architecture.md` §13).
+     */
+    suspend fun removeContact(
+        customerId: String,
+        contactId: String,
+        request: RemoveCustomerContactRequest,
+    ): ContactRemoveResult
 
     /**
      * Applies an edit to [customerId] (`BR-023`), converting it between individual and company when
@@ -222,6 +260,44 @@ class DefaultCustomersRepository @Inject constructor(
         )
     }
 
+    override suspend fun updateContact(
+        customerId: String,
+        contactId: String,
+        request: UpdateCustomerContactRequest,
+    ): ContactUpdateResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return ContactUpdateResult.Failure(
+                CustomersFailureReason.UNAUTHENTICATED,
+            )
+
+        return updateContact(
+            accessToken,
+            allowRenewal = true,
+            customerId = customerId,
+            contactId = contactId,
+            request = request,
+        )
+    }
+
+    override suspend fun removeContact(
+        customerId: String,
+        contactId: String,
+        request: RemoveCustomerContactRequest,
+    ): ContactRemoveResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return ContactRemoveResult.Failure(
+                CustomersFailureReason.UNAUTHENTICATED,
+            )
+
+        return removeContact(
+            accessToken,
+            allowRenewal = true,
+            customerId = customerId,
+            contactId = contactId,
+            request = request,
+        )
+    }
+
     override suspend fun updateCustomer(
         customerId: String,
         request: UpdateCustomerRequest,
@@ -357,9 +433,23 @@ class DefaultCustomersRepository @Inject constructor(
                 CustomerCreateResult.Failure(CustomersFailureReason.NETWORK)
         }
 
+    /*
+     * The three contact writes classify their answers with [httpFailureReason] rather than with the
+     * mapping the reads use, because the contact routes are the ones that document `404` and `409` as
+     * their own outcomes: a contact id that is not this customer's — or one already removed — is
+     * `404 CONTACT_NOT_FOUND`, and a mutation naming a version the contact has left is
+     * `409 CONTACT_VERSION_CONFLICT`. `BR-032` and `BR-086` require that conflict to be reported as a
+     * conflict, so the caller re-reads instead of the failure being flattened into an unexpected one
+     * (`dev.md` §7).
+     */
+
     /**
      * Writes the contact once, renewing the session and retrying when the backend refuses the access
      * token.
+     *
+     * The retry carries the same body. A contact write carries no client mutation identifier, so a
+     * renewal happens before a second payload is sent rather than after one may have been applied
+     * (`BR-001`, `offline-first-architecture.md` §13).
      */
     private suspend fun createContact(
         accessToken: String,
@@ -378,7 +468,7 @@ class DefaultCustomersRepository @Inject constructor(
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
                 renewAndRetryCreateContact(accessToken, customerId, request)
             } else {
-                ContactCreateResult.Failure(failure.toFailureReason())
+                ContactCreateResult.Failure(httpFailureReason(failure.code()))
             }
         } catch (failure: IOException) {
             ContactCreateResult.Failure(CustomersFailureReason.NETWORK)
@@ -408,6 +498,121 @@ class DefaultCustomersRepository @Inject constructor(
 
             SessionRenewal.Unavailable ->
                 ContactCreateResult.Failure(CustomersFailureReason.NETWORK)
+        }
+
+    /** Applies the contact edit once, renewing the session and retrying when the token is refused. */
+    private suspend fun updateContact(
+        accessToken: String,
+        allowRenewal: Boolean,
+        customerId: String,
+        contactId: String,
+        request: UpdateCustomerContactRequest,
+    ): ContactUpdateResult =
+        try {
+            api.updateContact(
+                authorization = "Bearer $accessToken",
+                id = customerId,
+                contactId = contactId,
+                request = request,
+            )
+            ContactUpdateResult.Success
+        } catch (failure: HttpException) {
+            if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+                renewAndRetryUpdateContact(accessToken, customerId, contactId, request)
+            } else {
+                ContactUpdateResult.Failure(httpFailureReason(failure.code()))
+            }
+        } catch (failure: IOException) {
+            ContactUpdateResult.Failure(CustomersFailureReason.NETWORK)
+        } catch (failure: SerializationException) {
+            ContactUpdateResult.Failure(CustomersFailureReason.UNEXPECTED)
+        }
+
+    /** Retries the contact edit once with a renewed session, or reports why it could not renew. */
+    private suspend fun renewAndRetryUpdateContact(
+        rejectedToken: String,
+        customerId: String,
+        contactId: String,
+        request: UpdateCustomerContactRequest,
+    ): ContactUpdateResult =
+        when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
+            is SessionRenewal.Renewed ->
+                updateContact(
+                    renewal.accessToken,
+                    allowRenewal = false,
+                    customerId = customerId,
+                    contactId = contactId,
+                    request = request,
+                )
+
+            SessionRenewal.Rejected ->
+                ContactUpdateResult.Failure(
+                    CustomersFailureReason.UNAUTHENTICATED,
+                )
+
+            SessionRenewal.Unavailable ->
+                ContactUpdateResult.Failure(CustomersFailureReason.NETWORK)
+        }
+
+    /**
+     * Removes the contact once, renewing the session and retrying when the backend refuses the access
+     * token.
+     *
+     * The answer is inspected through [Response] because the route succeeds with `204` and no body, so
+     * the version conflict it documents arrives as its own status rather than as a thrown answer.
+     */
+    private suspend fun removeContact(
+        accessToken: String,
+        allowRenewal: Boolean,
+        customerId: String,
+        contactId: String,
+        request: RemoveCustomerContactRequest,
+    ): ContactRemoveResult =
+        try {
+            val response = api.removeContact(
+                authorization = "Bearer $accessToken",
+                id = customerId,
+                contactId = contactId,
+                request = request,
+            )
+            when {
+                response.isSuccessful -> ContactRemoveResult.Success
+
+                response.code() == HTTP_UNAUTHORIZED && allowRenewal ->
+                    renewAndRetryRemoveContact(accessToken, customerId, contactId, request)
+
+                else -> ContactRemoveResult.Failure(httpFailureReason(response.code()))
+            }
+        } catch (failure: IOException) {
+            ContactRemoveResult.Failure(CustomersFailureReason.NETWORK)
+        } catch (failure: SerializationException) {
+            ContactRemoveResult.Failure(CustomersFailureReason.UNEXPECTED)
+        }
+
+    /** Retries the contact removal once with a renewed session, or reports why it could not renew. */
+    private suspend fun renewAndRetryRemoveContact(
+        rejectedToken: String,
+        customerId: String,
+        contactId: String,
+        request: RemoveCustomerContactRequest,
+    ): ContactRemoveResult =
+        when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
+            is SessionRenewal.Renewed ->
+                removeContact(
+                    renewal.accessToken,
+                    allowRenewal = false,
+                    customerId = customerId,
+                    contactId = contactId,
+                    request = request,
+                )
+
+            SessionRenewal.Rejected ->
+                ContactRemoveResult.Failure(
+                    CustomersFailureReason.UNAUTHENTICATED,
+                )
+
+            SessionRenewal.Unavailable ->
+                ContactRemoveResult.Failure(CustomersFailureReason.NETWORK)
         }
 
     /**
@@ -744,6 +949,9 @@ private fun CustomerContactDto.toContact(): CustomerContact =
         isPrimary = isPrimary,
         isBillingContact = isBillingContact,
         isJobContact = isJobContact,
+        // The write token travels with the contact so an edit or a removal can state the version it
+        // was read from (`BR-095`, `BR-032`, `ADR-022` D9).
+        version = version,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

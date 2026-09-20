@@ -2,7 +2,8 @@
 
 **Status: IMPLEMENTED** for `GET /customers`, `GET /customers/:id`, `GET /customers/:id/properties`,
 `GET /customers/:id/properties/:propertyId`, `GET /customers/:id/jobs`, `POST /customers`,
-`POST /customers/:id/contacts`, `POST /customers/:id/properties`,
+`POST /customers/:id/contacts`, `PATCH /customers/:id/contacts/:contactId`,
+`DELETE /customers/:id/contacts/:contactId`, `POST /customers/:id/properties`,
 `PATCH|PUT /customers/:id/properties/:propertyId`,
 `POST /customers/:id/properties/:propertyId/archive`,
 `POST /customers/:id/properties/:propertyId/restore`,
@@ -14,10 +15,12 @@ This document records the wire contract; the derivation itself is specified in
 `Business Rules.md` (`BR-081`) and `docs/domain/job-visit-domain-model.md` §8.4.
 
 References: `BR-001`, `BR-007`, `BR-023`, `BR-048`, `BR-050`, `BR-056`, `BR-058`, `BR-068`,
-`BR-081`, `BR-082`, `BR-083`, `BR-084`, `BR-085`, `BR-086`, **`BR-087`**, `dev.md` §7, `dev.md` §8,
-`docs/decisions/012-property-lifecycle-and-permissions.md`,
+`BR-081`, `BR-082`, `BR-083`, `BR-084`, `BR-085`, `BR-086`, **`BR-087`**, **`BR-095`**, `dev.md` §7,
+`dev.md` §8, `docs/decisions/012-property-lifecycle-and-permissions.md`,
+**`docs/decisions/022-customer-contact-persons.md`**,
 `docs/tracker/010-customer-detail.md`, `docs/tracker/012-property-permissions-and-lifecycle-schema.md`,
-`docs/tracker/013-property-lifecycle.md`, `docs/tracker/015-android-edit-customer.md`.
+`docs/tracker/013-property-lifecycle.md`, `docs/tracker/015-android-edit-customer.md`,
+`docs/tracker/047-customer-contact-persons.md`.
 
 ## 1. Conventions
 
@@ -38,13 +41,23 @@ Property capabilities are independent of the customer capabilities and are never
 | --------------------- | ------------------------------------------------------------------------------------------ |
 | `customers.view`      | `GET /customers`, `GET /customers/:id`, `…/jobs`                                           |
 | `customers.create`    | `POST /customers`                                                                          |
-| `customers.edit`      | `PATCH /customers/:id`, `PUT /customers/:id`, `POST /customers/:id/contacts`               |
+| `customers.edit`      | `PATCH /customers/:id`, `PUT /customers/:id`                                               |
 | `customers.archive`   | `POST /customers/:id/archive`                                                              |
+| `customers.contacts.create` | `POST /customers/:id/contacts`                                                       |
+| `customers.contacts.edit`   | `PATCH /customers/:id/contacts/:contactId`                                           |
+| `customers.contacts.remove` | `DELETE /customers/:id/contacts/:contactId`                                          |
 | `properties.view`     | `GET /customers/:id/properties`, `GET /customers/:id/properties/:propertyId`               |
 | `properties.create`   | `POST /customers/:id/properties`                                                           |
 | `properties.edit`     | `PATCH /customers/:id/properties/:propertyId`, `PUT …`                                     |
 | `properties.archive`  | `POST /customers/:id/properties/:propertyId/archive`, `POST …/restore`                     |
 | `properties.delete`   | `DELETE /customers/:id/properties/:propertyId`                                             |
+
+> **A contact write needs a contact capability.** Contact persons have their own capability set
+> (`BR-095`; `ADR-022` D4), following `BR-085`'s Property position: `customers.contacts.create`,
+> `customers.contacts.edit` and `customers.contacts.remove`, all granted to the default Manager role
+> and none to the default Technician role. `customers.edit` maintains the customer's own records and
+> **no longer authorizes any contact write**. Reading contacts adds no capability: they are part of the
+> customer projections `customers.view` and `customers.view_assigned` already return.
 
 > **A Property read or write needs a Property capability.** `GET /customers/:id/properties`
 > requires `properties.view` and `POST /customers/:id/properties` requires `properties.create`
@@ -65,8 +78,18 @@ Optional `status` and `jobs` filters; see `docs/tracker/008-android-customers-fi
 ### 3.2 `GET /customers/:id`
 
 The customer detail header. `customer` carries the derived counts, the required subtype record is
-returned in `individual` **or** `company`, and `contacts` carries the customer's contacts
-(`BR-023`).
+returned in `individual` **or** `company`, and `contacts` carries the customer's contact persons
+(`BR-023`, `BR-095`). Each contact carries its own first name, last name, `email`, `phone`, `role`,
+`isPrimary`, its `version` and its timestamps; §5.2 documents the routes that write them.
+
+The array is **the primary contact first, then the rest oldest-first** (`BR-095`; `ADR-022`, "Derived
+behaviours that follow from D1–D9"), and a contact that has been **removed** is never in it: removal is
+soft, so the record survives so that "who removed this person, and when" stays answerable while it is out
+of every ordinary view (`BR-033`, `ADR-022` D8). Removing the primary contact leaves the customer with
+**zero** primary contacts; no other contact is promoted automatically.
+
+Reading the array needs no contact capability — it is part of the projection `customers.view` already
+authorizes (`ADR-022` D4).
 
 ```json
 {
@@ -90,7 +113,23 @@ returned in `individual` **or** `company`, and `contacts` carries the customer's
     "businessName": null,
     "taxNumber": null
   },
-  "contacts": []
+  "contacts": [
+    {
+      "id": "…",
+      "customerId": "…",
+      "firstName": "John",
+      "lastName": "Smith",
+      "email": "john@example.com",
+      "phone": "+15559876543",
+      "role": "Site manager",
+      "isPrimary": true,
+      "isBillingContact": false,
+      "isJobContact": false,
+      "version": 1,
+      "createdAt": "2025-01-12T10:31:00.000Z",
+      "updatedAt": "2025-01-12T10:31:00.000Z"
+    }
+  ]
 }
 ```
 
@@ -402,9 +441,16 @@ The body is discriminated by `type`, and exactly one matching subtype payload is
 - A rejected payload is `400 VALIDATION_FAILED`; a caller without `customers.create` is
   `403 FORBIDDEN` (`dev.md` §7).
 
-### 5.2 `POST /customers/:id/contacts` — add a contact (`BR-023`)
+### 5.2 Contact persons — add, edit and remove (`BR-023`, `BR-095`)
 
-Records a contact against a customer the caller's organization owns. It requires `customers.edit`.
+A customer's contact persons are the people the organization speaks to. A contact carries **its own**
+first name, last name, phone number and email address; the customer header's own `phone` and `email`
+remain the customer's general line (`BR-095`; `ADR-022` D2).
+
+#### 5.2.1 `POST /customers/:id/contacts` — add a contact person
+
+Records a contact against a customer the caller's organization owns. It requires
+`customers.contacts.create`.
 
 ```json
 {
@@ -421,17 +467,89 @@ Records a contact against a customer the caller's organization owns. It requires
 
 - `firstName` and `lastName` are required; every other member is optional and defaults to
   `null`/`false`.
-- Success is `201` with the created contact in the shape the detail's `contacts` array uses (`id`,
-  `customerId`, the two names, `email`, `phone`, `role`, `isPrimary`, `isBillingContact`,
-  `isJobContact`, `createdAt`, `updatedAt`).
-- An id the caller's organization does not own is `404 CUSTOMER_NOT_FOUND`, never `403` (`BR-001`).
-- **Authorization note.** Contacts have no capability of their own. Maintaining a customer's records
-  is what `customers.edit` governs, which is the interim authorization the Property create used
-  before the Property catalogue existed (`ADR-012` D1). Whether contacts warrant their own
-  capability set, as Properties received in `BR-085`, is an **OPEN QUESTION** for product ownership;
-  until it is decided, this route never grants more than `customers.edit` already does.
-- A contact has no update or delete route yet. What a customer's primary contact means when it
-  changes, and how a contact is edited, are not defined by any rule and are **OPEN QUESTION**s.
+- `isPrimary: true` makes the contact the customer's primary and **clears the customer's previous
+  primary in the same transaction**, so a customer never holds two primary contacts (`BR-095`; the
+  database's `customer_contacts_primary_unique` partial index enforces the same invariant).
+- Success is `201` with the created contact in the shape §3.2's `contacts` array uses:
+
+```json
+{
+  "id": "…",
+  "customerId": "…",
+  "firstName": "John",
+  "lastName": "Smith",
+  "email": "john@example.com",
+  "phone": "+15551234567",
+  "role": "Site manager",
+  "isPrimary": true,
+  "isBillingContact": false,
+  "isJobContact": false,
+  "version": 1,
+  "createdAt": "2026-09-18T10:30:00.000Z",
+  "updatedAt": "2026-09-18T10:30:00.000Z"
+}
+```
+
+- `version` is the optimistic-concurrency token the edit and removal routes take back as
+  `expectedVersion` (`ADR-022` D9).
+- An id the caller's organization does not own is `404 CUSTOMER_NOT_FOUND`, never `403` (`BR-001`),
+  and a rejected payload is `400 VALIDATION_FAILED`.
+- The contact `role` is free text held by the model and the API. No client captures or edits it in
+  v1 (`ADR-022` D5).
+
+#### 5.2.2 `PATCH /customers/:id/contacts/:contactId` — edit a contact person
+
+Edits one of the customer's contact persons. It requires `customers.contacts.edit`.
+
+The edit is **partial**: a member that is absent is left as it is, and an explicit `null` clears an
+optional member. That is what keeps a value no client edits — the free-text `role` — from being
+cleared by an edit that never knew about it (`BR-095`; `ADR-022` D9).
+
+```json
+{
+  "phone": "+15559999999",
+  "email": "john@example.com",
+  "isPrimary": true,
+  "expectedVersion": 1
+}
+```
+
+- `firstName` and `lastName` may be supplied; when they are, they must be non-blank.
+- `isPrimary: true` clears the customer's previous primary and sets this contact in **one
+  transaction**, so no stored state exists in which two contacts are primary or the customer has
+  briefly none.
+- **`expectedVersion` is required.** It is the `version` the caller read. A mutation naming a version
+  the contact has left is `409 CONTACT_VERSION_CONFLICT` and is not applied — the API is the final
+  authority and never writes over newer state blindly (`BR-032`, `BR-086`).
+- Success is `200` with the updated contact, its `version` incremented by one.
+- Errors: `400 VALIDATION_FAILED` (including a missing `expectedVersion`),
+  `404 CUSTOMER_NOT_FOUND`, `404 CONTACT_NOT_FOUND` (a contact id that is not this customer's, or one
+  that has been removed), `409 CONTACT_VERSION_CONFLICT`.
+
+#### 5.2.3 `DELETE /customers/:id/contacts/:contactId` — remove a contact person
+
+Removes a contact person from ordinary use. It requires `customers.contacts.remove`.
+
+The removal is **soft** (`BR-095`; `ADR-022` D8): `removed_at` and the acting membership are written
+and the record survives, so "who removed this person, and when" stays answerable (`BR-033`). The
+removed contact leaves every ordinary view and can no longer be edited or removed again — both answer
+`404 CONTACT_NOT_FOUND`. **No reason is required** and none is invented (`BR-042`). Removing the
+primary contact leaves the customer with **zero** primary contacts, which is a legal state, and never
+promotes another contact automatically.
+
+The caller states the version it read, exactly as an edit does, so the body is:
+
+```json
+{ "expectedVersion": 2 }
+```
+
+- Success is `204` with no body.
+- Errors: `400 VALIDATION_FAILED` (including a missing `expectedVersion`),
+  `404 CUSTOMER_NOT_FOUND`, `404 CONTACT_NOT_FOUND`, `409 CONTACT_VERSION_CONFLICT`.
+
+> **Why DELETE carries a body.** Every mutation in this API states its input in the body
+> (`dev.md` §7), and the removal's only input is the version the caller read — the acting member comes
+> from the request's own authorization, not the payload.
 
 ### 5.3 `PATCH` / `PUT /customers/:id` — edit a customer (`BR-023`, `BR-087`)
 
