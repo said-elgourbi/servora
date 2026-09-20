@@ -131,6 +131,55 @@ class CustomerPermissionsUiStateTest {
     }
 
     @Test
+    fun `maps the contact capabilities to their own UI capabilities`() {
+        // A Customer's contact persons are maintained with their own capability set (`BR-095`), read from
+        // its own codes: a session told it may add a contact is not thereby told it may edit or remove
+        // one.
+        val state = customerPermissionsUiState(
+            setOf("customers.contacts.create").asPermissionChecker(),
+        )
+
+        assertTrue(state.canCreateContact)
+        assertFalse(state.canEditContact)
+        assertFalse(state.canRemoveContact)
+    }
+
+    @Test
+    fun `does not infer contact capabilities from the customer ones`() {
+        // `customers.edit` authorizes no contact write (`BR-095`): a session holding every customer
+        // capability is offered no contact action.
+        val state = customerPermissionsUiState(
+            setOf(
+                "customers.view",
+                "customers.create",
+                "customers.edit",
+                "customers.archive",
+            ).asPermissionChecker(),
+        )
+
+        assertFalse(state.canCreateContact)
+        assertFalse(state.canEditContact)
+        assertFalse(state.canRemoveContact)
+    }
+
+    @Test
+    fun `does not infer customer capabilities from the contact ones`() {
+        val state = customerPermissionsUiState(
+            setOf(
+                "customers.contacts.create",
+                "customers.contacts.edit",
+                "customers.contacts.remove",
+            ).asPermissionChecker(),
+        )
+
+        assertFalse(state.canOpenCustomers)
+        assertFalse(state.canCreateCustomer)
+        assertFalse(state.canEditCustomer)
+        assertFalse(state.canArchiveCustomer)
+        assertFalse(state.canViewProperties)
+    }
+
+    @Test
     fun `does not infer capabilities from missing permissions`() {
         val state = customerPermissionsUiState(emptySet<String>().asPermissionChecker())
 

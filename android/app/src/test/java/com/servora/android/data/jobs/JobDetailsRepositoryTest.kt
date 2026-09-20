@@ -1,15 +1,21 @@
 package com.servora.android.data.jobs
 
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.data.offline.InMemoryOutboxStore
 import com.servora.android.data.offline.InMemoryWorkingSetStore
+import com.servora.android.data.offline.OutboxReplayEngine
 import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.AssignmentRole
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.JobActivityKind
+import com.servora.android.domain.model.JobContactPerson
+import com.servora.android.domain.model.JobCustomerContact
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.VisitOutcome
 import com.servora.android.domain.model.VisitStatus
 import java.io.IOException
 import java.time.Instant
@@ -55,6 +61,10 @@ class JobDetailsRepositoryTest {
         assertEquals("Furnace repair", details.title)
         assertEquals(JobStatus.SCHEDULED, details.status)
         assertEquals("Martha Reynolds", details.customerName)
+        // This payload carries no customer contact block, which is exactly what the API answers a
+        // session it does not admit to the Customer (`BR-092`). The client maps what it was given and
+        // decides no authorization question of its own (`BR-001`, `BR-007`).
+        assertNull(details.customerContactDetails)
         assertEquals("987 Cedar Lane", details.address?.addressLine1)
         assertEquals(VisitStatus.SCHEDULED, details.selectedVisit?.status)
         assertEquals("2026-09-14T13:00:00.000Z", details.selectedVisit?.scheduledStart)
@@ -67,6 +77,318 @@ class JobDetailsRepositoryTest {
             details.technicians.map { it.role },
         )
         assertTrue(details.technicians[0].isLead)
+        // A payload that carries no `visits` — an answer predating the field, which is what a
+        // working-set row written by an earlier build holds — is still readable, with the Job's Visits
+        // reported as none rather than failing the whole read (`BR-042`,
+        // `offline-first-architecture.md` §10).
+        assertTrue(details.visits.isEmpty())
+    }
+
+    @Test
+    fun `maps the Job's visits with the status, schedule and crew each one carries`() = runTest {
+        // A Job with two Visits: the one it is represented by, and the earlier one it holds (`BR-047`,
+        // `BR-071`). They carry different schedules and different crews, so a mapping that mixed them up
+        // could not pass.
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    visits = listOf(
+                        listedVisitDto(
+                            id = "visit-0",
+                            sequence = 1,
+                            status = "COMPLETED",
+                            // The Visit's own **current** outcome travels on the Visit, so a group can
+                            // state what the field attempt resulted in (`BR-077`, `BR-078`).
+                            outcomeCode = "RESOLVED",
+                            scheduledStart = "2026-09-07T13:00:00.000Z",
+                            scheduledEnd = "2026-09-07T15:00:00.000Z",
+                            version = 7,
+                            technicians = listOf(
+                                technicianDto(
+                                    membershipId = "member-9",
+                                    name = "Dave Past",
+                                    roleCode = "LEAD",
+                                ),
+                            ),
+                        ),
+                        listedVisitDto(
+                            id = "visit-1",
+                            sequence = 2,
+                            status = "SCHEDULED",
+                            scheduledStart = "2026-09-14T13:00:00.000Z",
+                            scheduledEnd = "2026-09-14T15:00:00.000Z",
+                            version = 2,
+                            technicians = listOf(technicianDto()),
+                        ),
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        assertEquals(listOf("visit-0", "visit-1"), details.visits.map { it.id })
+        assertEquals(listOf(1, 2), details.visits.map { it.sequence })
+        assertEquals(
+            listOf(VisitStatus.COMPLETED, VisitStatus.SCHEDULED),
+            details.visits.map { it.status },
+        )
+        // The outcome is the Visit's own: the completed earlier Visit reports the outcome it holds, and
+        // the scheduled one reports none rather than borrowing it (`BR-079`, `BR-042`).
+        assertEquals(VisitOutcome.RESOLVED, details.visits[0].outcome)
+        assertNull(details.visits[1].outcome)
+        assertEquals("2026-09-07T13:00:00.000Z", details.visits[0].scheduledStart)
+        assertEquals(7, details.visits[0].version)
+        // The crew belongs to its own Visit: the earlier Visit's technician is never reported as the
+        // represented Visit's, and the represented Visit is simply one of the Job's Visits (`BR-068`,
+        // `BR-081`).
+        assertEquals("Dave Past", details.visits[0].technicians.single().name)
+        assertEquals(listOf("Mike Lead"), details.visits[1].technicians.map { it.name })
+        assertEquals("visit-1", details.selectedVisit?.id)
+    }
+
+    @Test
+    fun `reports a Visit outcome this build cannot name as no outcome`() = runTest {
+        // An outcome code Servora's vocabulary does not have cannot be presented, so it is reported as
+        // **no** outcome rather than as a different one, and the Job — its Visit, its schedule and its
+        // crew with it — stays readable (`BR-042`). The entry that recorded the outcome is still in that
+        // Visit's own activity (`BR-080`).
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    visits = listOf(listedVisitDto(status = "COMPLETED", outcomeCode = "INVENTED")),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        val listed = details.visits.single()
+        assertNull(listed.outcome)
+        assertEquals(VisitStatus.COMPLETED, listed.status)
+        assertEquals("Mike Lead", listed.technicians.single().name)
+    }
+
+    @Test
+    fun `maps a listed Visit with no schedule as one with no schedule`() = runTest {
+        // A `DRAFT` Visit exists before it is scheduled (`BR-072`): the read lists it, and the client
+        // reports no schedule for it rather than inventing one (`BR-042`).
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    selectedVisit = null,
+                    technicians = emptyList(),
+                    visits = listOf(
+                        listedVisitDto(
+                            id = "visit-1",
+                            sequence = 1,
+                            status = "DRAFT",
+                            scheduledStart = null,
+                            scheduledEnd = null,
+                            technicians = emptyList(),
+                        ),
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        val listed = details.visits.single()
+        assertNull(listed.scheduledStart)
+        assertNull(listed.scheduledEnd)
+        assertEquals(VisitStatus.DRAFT, listed.status)
+        assertTrue(listed.technicians.isEmpty())
+    }
+
+    @Test
+    fun `maps the customer contact details the API included`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    customerContactDetails = JobDetailsCustomerContactDto(
+                        email = "martha@example.com",
+                        phone = "+15145550142",
+                        notes = "Prefers mornings.",
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        assertEquals(
+            JobCustomerContact(
+                phone = "+15145550142",
+                email = "martha@example.com",
+                notes = "Prefers mornings.",
+            ),
+            details.customerContactDetails,
+        )
+    }
+
+    @Test
+    fun `keeps a contact detail the office never recorded absent rather than blank`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    customerContactDetails = JobDetailsCustomerContactDto(
+                        phone = "+15145550142",
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        // A field the office never filled in stays null, which is a different thing from the whole block
+        // being absent (`BR-092`): the screen leaves that row out rather than drawing an empty one.
+        assertEquals(
+            JobCustomerContact(phone = "+15145550142", email = null, notes = null),
+            details.customerContactDetails,
+        )
+    }
+
+    @Test
+    fun `maps the customer contact persons the API included`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    customerContactDetails = JobDetailsCustomerContactDto(
+                        phone = "+15145550142",
+                        contacts = listOf(
+                            JobDetailsContactPersonDto(
+                                firstName = "John",
+                                lastName = "Smith",
+                                phone = "+15551234567",
+                                email = "john@example.com",
+                                isPrimary = true,
+                            ),
+                            // A contact whose email the office never recorded, which the screen leaves
+                            // out rather than drawing blank (`BR-012`), and which is not the primary:
+                            // `isPrimary` is the contact's own flag (`BR-095`).
+                            JobDetailsContactPersonDto(
+                                firstName = "Marie",
+                                lastName = "Tremblay",
+                                phone = null,
+                            ),
+                        ),
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        // The read carries the people the technician may need to speak to, in the order the API
+        // reported them — primary first (`BR-092`, `BR-095`) — and the client re-orders nothing.
+        assertEquals(
+            listOf(
+                JobContactPerson(
+                    firstName = "John",
+                    lastName = "Smith",
+                    phone = "+15551234567",
+                    email = "john@example.com",
+                    isPrimary = true,
+                ),
+                JobContactPerson(
+                    firstName = "Marie",
+                    lastName = "Tremblay",
+                    phone = null,
+                    email = null,
+                ),
+            ),
+            details.customerContactDetails?.contacts,
+        )
+    }
+
+    @Test
+    fun `reads a contact person reported without the primary flag as not primary`() = runTest {
+        // A working-set row written by a build that predates the field, or an API answer from before it,
+        // holds no `isPrimary` (`BR-042`, `offline-first-architecture.md` §10). It is read as "no contact
+        // person is flagged", which is the legal zero-primary state in which the Customer is its own
+        // primary — the same thing the missing field describes (`BR-095`).
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    customerContactDetails = JobDetailsCustomerContactDto(
+                        phone = "+15145550142",
+                        contacts = listOf(
+                            JobDetailsContactPersonDto(
+                                firstName = "John",
+                                lastName = "Smith",
+                            ),
+                        ),
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        assertEquals(
+            listOf(
+                JobContactPerson(
+                    firstName = "John",
+                    lastName = "Smith",
+                    phone = null,
+                    email = null,
+                    isPrimary = false,
+                ),
+            ),
+            details.customerContactDetails?.contacts,
+        )
+    }
+
+    @Test
+    fun `maps a customer with no contact persons to an empty list rather than failing`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    customerContactDetails = JobDetailsCustomerContactDto(
+                        phone = "+15145550142",
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        // A Customer with no contact person at all — an individual Customer is their own primary and
+        // holds no contact row (`BR-095`) — is reported as none, not as a failed read (`BR-042`).
+        assertEquals(emptyList<JobContactPerson>(), details.customerContactDetails?.contacts)
     }
 
     @Test
@@ -213,6 +535,19 @@ class JobDetailsRepositoryTest {
             ),
             FakeSessionAuthenticator(accessToken = "access-token"),
         )
+        // A Visit the read lists but this build cannot name fails the whole read, exactly as the Visit
+        // it represents does: a history that silently left a field attempt out would report the Job
+        // wrongly (`BR-042`, `BR-047`).
+        val unknownListedVisitStatus = repository(
+            FakeJobDetailsApi(
+                answer = {
+                    jobDetailsDto().copy(
+                        visits = listOf(listedVisitDto(status = "RESCHEDULED")),
+                    )
+                },
+            ),
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
 
         assertEquals(
             CustomersFailureReason.UNEXPECTED,
@@ -225,6 +560,10 @@ class JobDetailsRepositoryTest {
         assertEquals(
             CustomersFailureReason.UNEXPECTED,
             assertFailure(unknownRole.loadJobDetails(JOB_ID)),
+        )
+        assertEquals(
+            CustomersFailureReason.UNEXPECTED,
+            assertFailure(unknownListedVisitStatus.loadJobDetails(JOB_ID)),
         )
     }
 
@@ -305,21 +644,222 @@ class JobDetailsRepositoryTest {
         val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
 
         val events = when (
-            val result = repository.addVisitNote(
-                jobId = JOB_ID,
-                visitId = "visit-1",
-                body = "  Replaced the filter.  ",
+            val result = repository.addVisitNoteRequest(
+                VisitNote(
+                    jobId = JOB_ID,
+                    visitId = "visit-1",
+                    body = "  Replaced the filter.  ",
+                    operationId = "11111111-1111-4111-8111-111111111111",
+                    capturedAt = TEST_CLOCK.instant(),
+                ),
             )
         ) {
             is ActivityWriteResult.Success -> result.events
             is ActivityWriteResult.Failure ->
                 throw AssertionError("expected activity, got ${result.reason}")
+
+            ActivityWriteResult.Queued -> throw AssertionError("expected activity, got a queued write")
         }
 
         assertEquals("Bearer access-token", api.lastAuthorization)
-        assertEquals(AddVisitNoteRequestDto(body = "Replaced the filter."), api.lastNoteRequest)
+        // The note carries the idempotency key and the device instant the action was made with, so a
+        // replay after a timeout is recorded at most once (`BR-031`, `ADR-019` D5).
+        assertEquals("Replaced the filter.", api.lastNoteRequest?.body)
+        assertEquals(
+            "11111111-1111-4111-8111-111111111111",
+            api.lastNoteRequest?.clientOperationId,
+        )
+        assertEquals(TEST_CLOCK.instant().toString(), api.lastNoteRequest?.capturedAt)
         assertEquals(listOf("note-1"), events.map { it.id })
     }
+
+    @Test
+    fun `maps the Visit destinations the API reports`() = runTest {
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val details = when (val result = repository.loadJobDetails(JOB_ID)) {
+            is JobDetailsResult.Success -> result.details
+            is JobDetailsResult.Failure ->
+                throw AssertionError("expected the Job, got ${result.reason}")
+        }
+
+        // The field lifecycle is the backend's answer, so the screen never holds a second copy of it
+        // (`BR-022`, `BR-041`).
+        assertEquals(
+            listOf(VisitStatus.EN_ROUTE),
+            details.selectedVisit?.allowedStatusTransitions,
+        )
+    }
+
+    @Test
+    fun `maps the caller's own reach on the Visit as the API answered it`() = runTest {
+        // A Visit the caller may read but whose crew does not include them: the API's answer is what
+        // stops the screen offering an action the field route would refuse (`ADR-019` D3, `BR-041`).
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    selectedVisit = visitDto().copy(
+                        allowedStatusTransitions = listOf("EN_ROUTE"),
+                        fieldActionable = false,
+                    ),
+                )
+            },
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        assertEquals(false, details.selectedVisit?.fieldActionable)
+        // The destinations are carried through as reported, whatever the API sent: the projection is the
+        // API's answer and this layer never second-guesses it (`BR-041`). Since `BR-093` a real read
+        // reports no destination for a caller it cannot place, so this payload checks the pass-through
+        // rather than the shape a live answer has.
+        assertEquals(
+            listOf(VisitStatus.EN_ROUTE),
+            details.selectedVisit?.allowedStatusTransitions,
+        )
+    }
+
+    @Test
+    fun `applies a Visit transition with the destination, provenance and version the screen saw`() =
+        runTest {
+            // The field route is the technician's own lifecycle: it carries the destination, the
+            // idempotency key, the device instant and the Visit version the screen last saw
+            // (`BR-074`, `BR-086`, `ADR-019` D5).
+            val api = FakeJobDetailsApi(answer = { jobDetailsDto().copy(status = "IN_PROGRESS") })
+            val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+            val result = repository.changeVisitStatus(
+                VisitStatusChange(
+                    jobId = JOB_ID,
+                    visitId = "visit-1",
+                    status = VisitStatus.ON_SITE,
+                    operationId = "22222222-2222-4222-8222-222222222222",
+                    capturedAt = TEST_CLOCK.instant(),
+                    expectedVersion = 2,
+                ),
+            )
+
+            assertTrue(result is JobActionResult.Success)
+            assertEquals("Bearer access-token", api.lastAuthorization)
+            assertEquals("visit-1", api.lastVisitId)
+            assertEquals(
+                ChangeVisitStatusRequestDto(
+                    status = "ON_SITE",
+                    clientOperationId = "22222222-2222-4222-8222-222222222222",
+                    capturedAt = TEST_CLOCK.instant().toString(),
+                    expectedVersion = 2,
+                ),
+                api.lastVisitStatusRequest,
+            )
+        }
+
+    @Test
+    fun `sends the outcome a completion requires in the same request`() = runTest {
+        // `BR-077` requires the outcome with the completion, so the two are one operation: there is no
+        // request that finishes a Visit without saying what resulted from it.
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto().copy(status = "COMPLETED") })
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        repository.changeVisitStatus(
+            VisitStatusChange(
+                jobId = JOB_ID,
+                visitId = "visit-1",
+                status = VisitStatus.COMPLETED,
+                outcome = VisitOutcome.RESOLVED,
+                outcomeSummary = "  Replaced the igniter.  ",
+                operationId = "33333333-3333-4333-8333-333333333333",
+                capturedAt = TEST_CLOCK.instant(),
+                expectedVersion = 5,
+            ),
+        )
+
+        assertEquals("COMPLETED", api.lastVisitStatusRequest?.status)
+        assertEquals("RESOLVED", api.lastVisitStatusRequest?.outcomeCode)
+        assertEquals("Replaced the igniter.", api.lastVisitStatusRequest?.outcomeSummary)
+    }
+
+    @Test
+    fun `queues a Visit transition the API could not be reached for, keeping its key`() = runTest {
+        // The transition is offline-capable (`BR-013`), so a request that never reached the backend is
+        // durable rather than lost — and it is queued under the **same** idempotency key the attempt
+        // used, so a replay applies it once (`BR-014`, `BR-031`, §5). Nothing is presented as applied.
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            failFirstWith = IOException("no connection"),
+        )
+        val outbox = InMemoryOutboxStore()
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+            outbox = outbox,
+        )
+
+        val result = repository.changeVisitStatus(
+            VisitStatusChange(
+                jobId = JOB_ID,
+                visitId = "visit-1",
+                status = VisitStatus.ON_SITE,
+                operationId = "44444444-4444-4444-8444-444444444444",
+                capturedAt = TEST_CLOCK.instant(),
+                expectedVersion = 2,
+            ),
+        )
+
+        assertTrue(result is JobActionResult.Queued)
+        assertEquals(1, outbox.stored.size)
+        val row = outbox.stored.single()
+        assertEquals("44444444-4444-4444-8444-444444444444", row.operationId)
+        assertEquals(VisitFieldOperationTypes.CHANGE_STATUS, row.operationType)
+        // The Job is the target and the Visit lives in the payload, so the row is partitioned by the
+        // record the screen is open on.
+        assertEquals(JOB_ID, row.targetId)
+        // The version the technician saw travels with the row: `ADR-019` D5 refuses a stale one rather
+        // than re-reading it and applying the command against newer state.
+        assertEquals(2, row.expectedVersion)
+    }
+
+    @Test
+    fun `reports a refused Visit transition as the Visit's own answer and queues nothing`() =
+        runTest {
+            // A refusal is the backend's own answer, so it is reported rather than queued: the Visit's
+            // state machine refused the destination, and that is what the technician has to act on
+            // (`BR-032`).
+            val api = FakeJobDetailsApi(
+                answer = { jobDetailsDto() },
+                failFirstWith = HttpException(
+                    Response.error<Any>(
+                        409,
+                        """{"code":"VISIT_STATUS_TRANSITION_NOT_ALLOWED"}"""
+                            .toResponseBody("application/json".toMediaType()),
+                    ),
+                ),
+            )
+            val outbox = InMemoryOutboxStore()
+            val repository = repository(
+                api,
+                FakeSessionAuthenticator(accessToken = "access-token"),
+                outbox = outbox,
+            )
+
+            val result = repository.changeVisitStatus(
+                VisitStatusChange(
+                    jobId = JOB_ID,
+                    visitId = "visit-1",
+                    status = VisitStatus.ON_SITE,
+                    operationId = "55555555-5555-4555-8555-555555555555",
+                    capturedAt = TEST_CLOCK.instant(),
+                    expectedVersion = 2,
+                ),
+            )
+
+            assertEquals(
+                JobActionFailure.VISIT_TRANSITION_NOT_ALLOWED,
+                (result as JobActionResult.Failure).reason,
+            )
+            assertTrue(outbox.stored.isEmpty())
+        }
 
     @Test
     fun `removes a photo with the trimmed reason and maps the refreshed activity`() = runTest {
@@ -348,6 +888,8 @@ class JobDetailsRepositoryTest {
             is ActivityWriteResult.Success -> result.events
             is ActivityWriteResult.Failure ->
                 throw AssertionError("expected activity, got ${result.reason}")
+
+            ActivityWriteResult.Queued -> throw AssertionError("expected activity, got a queued write")
         }
 
         assertEquals("Bearer access-token", api.lastAuthorization)
@@ -421,6 +963,8 @@ class JobDetailsRepositoryTest {
             is ActivityWriteResult.Success -> result.events
             is ActivityWriteResult.Failure ->
                 throw AssertionError("expected activity, got ${result.reason}")
+
+            ActivityWriteResult.Queued -> throw AssertionError("expected activity, got a queued write")
         }
 
         // The audio kind's own route and request (`BR-089`, `ADR-018` A7): the reason is stated, trimmed,
@@ -1083,6 +1627,12 @@ internal fun visitDto() = JobDetailsVisitDto(
     scheduledEnd = "2026-09-14T15:00:00.000Z",
     version = 2,
     reschedulable = true,
+    // The destinations the API reports for a `SCHEDULED` Visit (`BR-074`), so the screen draws its
+    // field action from the server's own answer rather than a second copy of the lifecycle.
+    allowedStatusTransitions = listOf("EN_ROUTE"),
+    // The API's other answer: the caller's membership is on this Visit's crew, so the action may be
+    // offered (`ADR-019` D3).
+    fieldActionable = true,
 )
 
 internal fun technicianDto(
@@ -1093,6 +1643,32 @@ internal fun technicianDto(
     membershipId = membershipId,
     name = name,
     roleCode = roleCode,
+)
+
+/**
+ * One Visit of the Job as `GET /jobs/:id` lists them (`BR-047`, `BR-071`).
+ *
+ * A Visit with no schedule is expressed by passing both ends as `null`, which is the shape the API
+ * reports for a Visit that has not been scheduled yet (`BR-072`).
+ */
+internal fun listedVisitDto(
+    id: String = "visit-1",
+    sequence: Int = 1,
+    status: String = "SCHEDULED",
+    outcomeCode: String? = null,
+    scheduledStart: String? = "2026-09-14T13:00:00.000Z",
+    scheduledEnd: String? = "2026-09-14T15:00:00.000Z",
+    version: Int = 2,
+    technicians: List<JobDetailsTechnicianDto> = listOf(technicianDto()),
+) = JobDetailsVisitSummaryDto(
+    id = id,
+    sequence = sequence,
+    status = status,
+    outcomeCode = outcomeCode,
+    scheduledStart = scheduledStart,
+    scheduledEnd = scheduledEnd,
+    version = version,
+    technicians = technicians,
 )
 
 internal fun jobActivityEventDto(
@@ -1148,6 +1724,15 @@ private class FakeJobDetailsApi(
     private val activityAnswer: () -> JobActivityDto = { JobActivityDto(jobId = "") },
 ) : JobDetailsApi {
 
+    /**
+     * The tests this fake serves are about the Job read and the Job and Visit actions, so creating a
+     * Job is not exercised here — the Create Job form has its own fake (`qa.md` §6.1).
+     */
+    override suspend fun createJob(
+        authorization: String,
+        request: CreateJobRequest,
+    ): JobDetailsDto = throw AssertionError("these tests do not create a Job")
+
     var calls = 0
         private set
 
@@ -1167,6 +1752,14 @@ private class FakeJobDetailsApi(
         private set
 
     var lastNoteRequest: AddVisitNoteRequestDto? = null
+        private set
+
+    /** The Visit a field lifecycle action named. */
+    var lastVisitId: String? = null
+        private set
+
+    /** The last Visit status transition this API was asked to apply (`BR-074`, `BR-075`). */
+    var lastVisitStatusRequest: ChangeVisitStatusRequestDto? = null
         private set
 
     var lastRemovalRequest: RemoveJobPhotoRequestDto? = null
@@ -1271,6 +1864,23 @@ private class FakeJobDetailsApi(
             throw failFirstWith
         }
         return activityAnswer()
+    }
+
+    override suspend fun changeVisitStatus(
+        authorization: String,
+        jobId: String,
+        visitId: String,
+        request: ChangeVisitStatusRequestDto,
+    ): JobDetailsDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastVisitId = visitId
+        lastVisitStatusRequest = request
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return answer()
     }
 
     override suspend fun assignableTechnicians(
@@ -1406,6 +2016,8 @@ private fun repository(
     sessionAuthenticator: SessionAuthenticator,
     workingSet: InMemoryWorkingSetStore = InMemoryWorkingSetStore(),
     subjectId: String? = SUBJECT_ID,
+    outbox: InMemoryOutboxStore = InMemoryOutboxStore(),
+    subject: AuthenticatedSubject = FakeAuthenticatedSubject(subjectId),
 ) = DefaultJobDetailsRepository(
     api = api,
     sessionAuthenticator = sessionAuthenticator,
@@ -1414,8 +2026,20 @@ private fun repository(
         json = Json { ignoreUnknownKeys = true },
         clock = TEST_CLOCK,
     ),
-    subject = FakeAuthenticatedSubject(subjectId),
+    subject = subject,
     json = Json { ignoreUnknownKeys = true },
+    visitFieldActions = VisitFieldActions(
+        outbox = outbox,
+        offlineSync = FakeOfflineSync(),
+        json = Json { ignoreUnknownKeys = true },
+        clock = TEST_CLOCK,
+    ),
+    engine = OutboxReplayEngine(
+        outbox = outbox,
+        handlers = emptySet(),
+        subject = subject,
+        clock = TEST_CLOCK,
+    ),
 )
 
 /** The subject the working set's rows are filed under; a second one stands for another session. */

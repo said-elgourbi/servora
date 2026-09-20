@@ -49,14 +49,19 @@ import androidx.compose.ui.unit.dp
 import com.servora.android.R
 import com.servora.android.data.jobs.JobAudioPlaybackProgress
 import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.jobs.QueuedVisitFieldAction
+import com.servora.android.data.jobs.QueuedVisitNote
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CustomerJobAddress
+import com.servora.android.domain.model.JobCustomerContact
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
 import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.components.InfoCard
 import com.servora.android.ui.components.JobStatusPill
 import com.servora.android.ui.components.OfflineNotice
@@ -106,6 +111,15 @@ const val JobDetailsAddressMapTag = "job-details-address-map"
 /** Identifies the Job's Customer row. */
 const val JobDetailsCustomerTag = "job-details-customer"
 
+/** Identifies the Customer's phone on the Job card (`BR-092`). */
+const val JobDetailsCustomerPhoneTag = "job-details-customer-phone"
+
+/** Identifies the Customer's email on the Job card (`BR-092`). */
+const val JobDetailsCustomerEmailTag = "job-details-customer-email"
+
+/** Identifies the Customer's notes on the Job card (`BR-092`). */
+const val JobDetailsCustomerNotesTag = "job-details-customer-notes"
+
 /** Identifies the Technicians section, which is what this screen is primarily read for. */
 const val JobDetailsTechniciansTag = "job-details-technicians"
 
@@ -131,6 +145,9 @@ private val JobDetailsBottomClearance = 72.dp
 
 /** The clearance the capture tray needs, so the last timeline entry is never covered by it. */
 private val JobDetailsTrayClearance = 260.dp
+
+/** The gap between the report of an action and whatever the screen has pinned below it. */
+private val JobDetailsReportSpacing = 8.dp
 private val JobDetailsAvatarSize = 36.dp
 private val JobDetailsMapAffordanceSize = 18.dp
 
@@ -165,14 +182,32 @@ private val JobDetailsMapAffordanceSize = 18.dp
 fun JobDetailsScreen(
     state: JobDetailsUiState,
     canUpdateJob: Boolean,
+    // Driving the represented Visit through its field lifecycle is the technician's own capability
+    // (`BR-009`, `BR-066`), so it is a separate gate from the office's Job update: a Manager without
+    // it is offered no field action and a technician holding it is offered no Job status control
+    // (`BR-007`, `BR-011`).
+    canUpdateAssignedVisit: Boolean,
+    // Recording the outcome a completion requires is its own capability, so a session holding only
+    // the status one is not offered a destination the API would refuse it (`BR-009`, `BR-077`).
+    canRecordVisitOutcome: Boolean,
+    // Adding a note to a Visit is the capability `BR-009` gives the technician; the office reaches the
+    // same route with `JOB_UPDATE` (`docs/api/job-actions.md` §2).
+    canAddVisitNote: Boolean,
     canAddEvidencePhoto: Boolean,
     canViewTechnicians: Boolean,
+    // Opening the office Customer destination needs `customers.view`. A session holding only the field
+    // capabilities would have the API refuse it, so it is not offered one (`BR-011`, `BR-092`): the
+    // Customer's contact details are read in place instead.
+    canOpenCustomer: Boolean,
     onRetry: () -> Unit,
     onRetryActivity: () -> Unit,
     onOpenCustomer: (customerId: String) -> Unit,
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
     onLoadAssignableTechnicians: () -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
+    onChangeVisitStatus: (status: VisitStatus, outcome: VisitOutcome?, summary: String?) -> Unit,
+    onDiscardQueuedVisitAction: (operationId: String) -> Unit,
+    onDiscardQueuedVisitNote: (operationId: String) -> Unit,
     onAddActivityText: (body: String) -> Unit,
     onRescheduleVisit: (start: Instant, end: Instant) -> Unit,
     onAssignTechnicians: (assignments: List<TechnicianAssignment>) -> Unit,
@@ -217,6 +252,8 @@ fun JobDetailsScreen(
     var showReschedule by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAssign by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAddActivity by rememberSaveable(state.jobId) { mutableStateOf(false) }
+    // The Visit the technician is completing, if the completion sheet is open (`BR-077`).
+    var showVisitCompletion by rememberSaveable(state.jobId) { mutableStateOf(false) }
 
     /*
      * The recording whose removal is being confirmed, or `null` while no confirmation is open.
@@ -270,7 +307,15 @@ fun JobDetailsScreen(
     val audioMessage = state.audioMessage
     val actionMessage = when {
         actionFailure != null -> stringResource(jobActionFailureMessage(actionFailure))
-        completedAction != null -> stringResource(jobActionCompletionMessage(completedAction))
+        completedAction != null -> stringResource(
+            // A queued action is not applied, so it is reported as saved on the device rather than as
+            // done (`BR-001`, `BR-014`, §7).
+            if (state.actionQueued) {
+                jobActionQueuedMessage(completedAction)
+            } else {
+                jobActionCompletionMessage(completedAction)
+            },
+        )
         photoFailure != null -> {
             // A photo that could not be taken is named by its place in the pick, because a pick hands
             // over several at once and "a photo did not work" would not say which one to choose again
@@ -331,6 +376,15 @@ fun JobDetailsScreen(
                     // Stating a crew means choosing from the organization's technicians, so the
                     // action needs that capability as well (`BR-007`, `BR-068`).
                     canManageTechnicians = canViewTechnicians && state.canAssign,
+                    // Driving the Visit reaches the route through either authorization `BR-093` defines:
+                    // the technician's field capability for their own assigned work, or the office
+                    // capability that admits an office member without crew membership (`BR-008`,
+                    // `ADR-019` D7). The completion's own capability is not asked here — the API omits
+                    // that destination for a session that does not hold it (`BR-009`, `BR-077`).
+                    canChangeVisitStatus = (canUpdateAssignedVisit || canUpdateJob) &&
+                        state.canChangeVisitStatus,
+                    canRecordVisitOutcome = canRecordVisitOutcome,
+                    canOpenCustomer = canOpenCustomer,
                     onOpenCustomer = onOpenCustomer,
                     onOpenInMaps = onOpenInMaps,
                     onOpenAssign = {
@@ -339,6 +393,10 @@ fun JobDetailsScreen(
                     },
                     onOpenReschedule = { showReschedule = true },
                     onChangeJobStatus = onChangeJobStatus,
+                    onChangeVisitStatus = { status -> onChangeVisitStatus(status, null, null) },
+                    onOpenVisitCompletion = { showVisitCompletion = true },
+                    onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
+                    onDiscardQueuedVisitNote = onDiscardQueuedVisitNote,
                     onRetryActivity = onRetryActivity,
                     onOpenPhoto = { photoId -> viewedPhotoId = photoId },
                     photoImages = photoImages,
@@ -361,84 +419,97 @@ fun JobDetailsScreen(
             else -> JobDetailsLoading()
         }
 
-        // The report of what an action did is drawn by whichever window is on screen: normally here,
-        // and by the photo viewer's own host while its full-screen dialog is open — otherwise a save
-        // made from the viewer would report itself behind the viewer, where nobody can see it
-        // (`BR-042`, `docs/tracker/031-android-photo-viewer-ui.md`).
-        if (!isViewerOpen) {
-            JobActionSnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 8.dp),
-            )
-        }
-
-        // One action adds anything to the Job's Activity: it opens the sheet that states what kind
-        // of update it is (`BR-012`, `BR-027`). It needs no represented Visit, because a photo is
-        // Job-level evidence even when the Job has no Visit yet (`BR-015`, `BR-051`), and each kind it
-        // offers is drawn on the capability the API enforces for that kind: the Job update capability
-        // for a note, and the evidence capability for a photo (`BR-006`, `BR-007`). A technician who
-        // may record evidence therefore reaches the camera and the picker without being given the
-        // Manager's Job capability (`BR-009`, `docs/decisions/015-evidence-capabilities.md`).
-        if (
-            details != null &&
-            (canUpdateJob || canAddEvidencePhoto || canAddAudio) &&
-            !state.holdsUnacceptedEvidence
+        /*
+         * Everything the screen pins to the bottom is one stack, and the report of what an action did
+         * is the top of it. The report used to be drawn at the screen's own bottom edge, where the
+         * floating action and the unaccepted evidence are: whichever of them was there covered it,
+         * and a refusal the manager cannot read is a refusal the screen did not make (`BR-042`).
+         *
+         * The report is drawn by whichever window is on screen: this stack normally, and the photo
+         * viewer's own host while its full-screen dialog is open — otherwise a save made from the
+         * viewer would report itself behind the viewer, where nobody can see it
+         * (`docs/tracker/031-android-photo-viewer-ui.md`).
+         */
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
         ) {
-            ExtendedFloatingActionButton(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-                    .testTag(JobDetailsAddActivityTag),
-                onClick = { showAddActivity = true },
-                shape = MaterialTheme.shapes.large,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_add),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+            if (!isViewerOpen) {
+                JobActionSnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier.padding(bottom = JobDetailsReportSpacing),
                 )
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.job_activity_add_update))
             }
-        }
 
-        // The evidence the backend has not accepted yet is the technician's working state, so while the
-        // device holds any of it the bottom of the screen belongs to it: the next thing they want is to
-        // finish or drop what they have, and the floating action would otherwise sit on top of it
-        // (`BR-012`). Both kinds are stacked rather than one hiding the other, because a Job can hold a
-        // photo waiting to save and a recording waiting to attach at the same time (`§9`).
-        if (state.holdsUnacceptedEvidence) {
-            Column(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(JobEvidenceStackSpacing),
+            // One action adds anything to the Job's Activity: it opens the sheet that states what kind
+            // of update it is (`BR-012`, `BR-027`). It needs no represented Visit, because a photo is
+            // Job-level evidence even when the Job has no Visit yet (`BR-015`, `BR-051`), and each kind
+            // it offers is drawn on the capability the API enforces for that kind: the Job update
+            // capability for a note, and the evidence capability for a photo (`BR-006`, `BR-007`). A
+            // technician who may record evidence therefore reaches the camera and the picker without
+            // being given the Manager's Job capability (`BR-009`,
+            // `docs/decisions/015-evidence-capabilities.md`).
+            if (
+                details != null &&
+                (canUpdateJob || canAddEvidencePhoto || canAddAudio) &&
+                !state.holdsUnacceptedEvidence
             ) {
-                if (state.pendingAudioNotes.isNotEmpty()) {
-                    JobAudioNotice(
-                        notes = state.pendingAudioNotes,
-                        uploads = state.audioUploads,
-                        isAttaching = state.isSubmittingAudio,
-                        // The notice is not the sheet, so it attaches the take with the note already
-                        // recorded on it: what the technician typed in the review is what it sends
-                        // (`BR-091`).
-                        onAttach = { onAttachAudioNote(state.audioDraft?.note) },
-                        onRemove = onRemovePendingAudioNote,
+                ExtendedFloatingActionButton(
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(16.dp)
+                        .testTag(JobDetailsAddActivityTag),
+                    onClick = { showAddActivity = true },
+                    shape = MaterialTheme.shapes.large,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_add),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
                     )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.job_activity_add_update))
                 }
-                if (state.pendingPhotos.isNotEmpty()) {
-                    JobPhotoTray(
-                        photos = state.pendingPhotos,
-                        uploads = state.photoUploads,
-                        isSubmitting = state.isSubmittingPhotos,
-                        onCapture = onCapturePhoto,
-                        onSubmit = onSubmitPendingPhotos,
-                        onRemove = onRemovePendingPhoto,
-                        onOpen = { photoId -> viewedPhotoId = photoId },
-                        photoImages = photoImages,
-                    )
+            }
+
+            // The evidence the backend has not accepted yet is the technician's working state, so while
+            // the device holds any of it the bottom of the screen belongs to it: the next thing they
+            // want is to finish or drop what they have, and the floating action would otherwise sit on
+            // top of it (`BR-012`). Both kinds are stacked rather than one hiding the other, because a
+            // Job can hold a photo waiting to save and a recording waiting to attach at the same time
+            // (`§9`).
+            if (state.holdsUnacceptedEvidence) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(JobEvidenceStackSpacing),
+                ) {
+                    if (state.pendingAudioNotes.isNotEmpty()) {
+                        JobAudioNotice(
+                            notes = state.pendingAudioNotes,
+                            uploads = state.audioUploads,
+                            isAttaching = state.isSubmittingAudio,
+                            // The notice is not the sheet, so it attaches the take with the note
+                            // already recorded on it: what the technician typed in the review is what
+                            // it sends (`BR-091`).
+                            onAttach = { onAttachAudioNote(state.audioDraft?.note) },
+                            onRemove = onRemovePendingAudioNote,
+                        )
+                    }
+                    if (state.pendingPhotos.isNotEmpty()) {
+                        JobPhotoTray(
+                            photos = state.pendingPhotos,
+                            uploads = state.photoUploads,
+                            isSubmitting = state.isSubmittingPhotos,
+                            onCapture = onCapturePhoto,
+                            onSubmit = onSubmitPendingPhotos,
+                            onRemove = onRemovePendingPhoto,
+                            onOpen = { photoId -> viewedPhotoId = photoId },
+                            photoImages = photoImages,
+                        )
+                    }
                 }
             }
         }
@@ -446,10 +517,16 @@ fun JobDetailsScreen(
 
     if (details != null && showAddActivity) {
         JobUpdateSheet(
-            // A note is the represented Visit's, so a Job with no Visit has none to write here, and
-            // writing one takes the Job update capability the API enforces for it (`BR-015`,
-            // `BR-051`, `BR-066`).
-            canWriteNote = canUpdateJob && details.selectedVisit != null,
+            // A note is the represented Visit's, so a Job with no Visit has none to write here. A note
+            // is written by the office with `JOB_UPDATE` or by the technician with `VISIT_ADD_NOTE`,
+            // which is the capability `BR-009` gives them and the one the API enforces on the route
+            // (`BR-015`, `BR-051`, `BR-066`, `docs/api/job-actions.md` §2). The API keeps the office's
+            // organization-wide reach and scopes a technician to the Visit's own crew, so the kind
+            // follows that same split instead of offering a write the route answers with a refusal
+            // (`ADR-019` D2, D3).
+            canWriteNote = details.selectedVisit?.let { visit ->
+                canUpdateJob || (canAddVisitNote && visit.fieldActionable)
+            } == true,
             // A photo is authorized by the evidence capability, which the technician who records the
             // field evidence holds (`BR-006`, `BR-009`).
             canAddPhoto = canAddEvidencePhoto,
@@ -508,6 +585,19 @@ fun JobDetailsScreen(
                 }
                 showAddActivity = false
             },
+        )
+    }
+
+    // The Visit's completion: the outcome `BR-077` requires is stated here, and the destination and
+    // the outcome travel to the API in one request, so no partial outcome is ever stored.
+    if (details != null && showVisitCompletion && details.selectedVisit != null) {
+        VisitCompletionSheet(
+            isSubmitting = state.isSubmitting,
+            onConfirm = { outcome, summary ->
+                showVisitCompletion = false
+                onChangeVisitStatus(VisitStatus.COMPLETED, outcome, summary)
+            },
+            onDismiss = { showVisitCompletion = false },
         )
     }
 
@@ -671,11 +761,18 @@ private fun JobDetailsContent(
     state: JobDetailsUiState,
     canUpdateJob: Boolean,
     canManageTechnicians: Boolean,
+    canChangeVisitStatus: Boolean,
+    canRecordVisitOutcome: Boolean,
+    canOpenCustomer: Boolean,
     onOpenCustomer: (customerId: String) -> Unit,
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
     onOpenAssign: () -> Unit,
     onOpenReschedule: () -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
+    onChangeVisitStatus: (status: VisitStatus) -> Unit,
+    onOpenVisitCompletion: () -> Unit,
+    onDiscardQueuedVisitAction: (operationId: String) -> Unit,
+    onDiscardQueuedVisitNote: (operationId: String) -> Unit,
     onRetryActivity: () -> Unit,
     onOpenPhoto: (String) -> Unit,
     photoImages: JobPhotoImages,
@@ -716,6 +813,18 @@ private fun JobDetailsContent(
             } else {
                 null
             },
+            // The Visit's field action: the destinations the API reported, minus the one this session
+            // cannot complete because it does not hold the outcome capability (`BR-009`, `BR-077`).
+            canChangeVisitStatus = canChangeVisitStatus,
+            canRecordVisitOutcome = canRecordVisitOutcome,
+            actionEnabled = state.canAct,
+            onChangeVisitStatus = onChangeVisitStatus,
+            onOpenVisitCompletion = onOpenVisitCompletion,
+            queuedAction = state.queuedVisitAction,
+            queuedNotes = state.queuedVisitNotes,
+            onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
+            onDiscardQueuedVisitNote = onDiscardQueuedVisitNote,
+            canOpenCustomer = canOpenCustomer,
             onOpenCustomer = onOpenCustomer,
             onOpenInMaps = onOpenInMaps,
         )
@@ -837,6 +946,16 @@ private fun JobVisitCard(
     details: JobDetails,
     canReschedule: Boolean,
     onReschedule: (() -> Unit)?,
+    canChangeVisitStatus: Boolean,
+    canRecordVisitOutcome: Boolean,
+    actionEnabled: Boolean,
+    onChangeVisitStatus: (VisitStatus) -> Unit,
+    onOpenVisitCompletion: () -> Unit,
+    queuedAction: QueuedVisitFieldAction?,
+    queuedNotes: List<QueuedVisitNote>,
+    onDiscardQueuedVisitAction: (operationId: String) -> Unit,
+    onDiscardQueuedVisitNote: (operationId: String) -> Unit,
+    canOpenCustomer: Boolean,
     onOpenCustomer: (customerId: String) -> Unit,
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
 ) {
@@ -844,7 +963,17 @@ private fun JobVisitCard(
     val addressText = address
         ?.let { snapshot -> addressLine(snapshot) }
         ?.takeIf { it.isNotBlank() }
-    Column {
+    // The destinations the Visit's own lifecycle offers, minus the completion when this session does
+    // not hold the capability the API asks for on it (`BR-009`, `BR-077`). Filtering by a
+    // **capability** is the client's own gate; filtering by an inferred Visit state is deliberately not
+    // done, so every destination the API reports is offered and its refusal is presented
+    // (`BR-007`, `BR-041`).
+    val destinations = details.selectedVisit
+        ?.allowedStatusTransitions
+        ?.filter { destination -> destination != VisitStatus.COMPLETED || canRecordVisitOutcome }
+        .orEmpty()
+    val canDriveVisit = canChangeVisitStatus && destinations.isNotEmpty()
+    Column(verticalArrangement = Arrangement.spacedBy(JobDetailsSectionSpacing)) {
         SectionLabel(
             label = stringResource(R.string.job_details_visit_label),
             count = null,
@@ -855,7 +984,23 @@ private fun JobVisitCard(
                 value = scheduledValue(details.selectedVisit),
                 modifier = Modifier.testTag(JobDetailsScheduleTag),
                 trailing = details.selectedVisit?.let { visit ->
-                    { VisitStatusPill(status = visit.status) }
+                    {
+                        if (canDriveVisit) {
+                            // The Visit's status chip **is** the control that moves it, so the state
+                            // the technician wants to change is the thing they tap (`BR-074`).
+                            VisitStatusAction(
+                                status = visit.status,
+                                allowedTransitions = destinations,
+                                enabled = actionEnabled,
+                                onSelect = onChangeVisitStatus,
+                                onComplete = onOpenVisitCompletion,
+                            )
+                        } else {
+                            // Presented, not controlled: an action nobody may perform is not one to
+                            // offer (`BR-006`, `BR-007`).
+                            VisitStatusPill(status = visit.status)
+                        }
+                    }
                 },
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -876,10 +1021,24 @@ private fun JobVisitCard(
                 label = stringResource(R.string.job_details_customer_label),
                 value = details.customerName,
                 modifier = Modifier.testTag(JobDetailsCustomerTag),
-                // The customer the Job belongs to is a customer of this organization, so the row
-                // opens that customer rather than showing its name as dead text (`BR-048`).
-                onClick = { onOpenCustomer(details.customerId) },
+                // The customer the Job belongs to is a customer of this organization, so the row opens
+                // that customer — for a session whose read the API accepts. A technician holds no
+                // `customers.view`, so the office destination would answer `403`; they read the contact
+                // details in place instead (`BR-011`, `BR-092`).
+                onClick =
+                    if (canOpenCustomer) {
+                        { onOpenCustomer(details.customerId) }
+                    } else {
+                        null
+                    },
             )
+            // The Customer's own contact details, when the API included them (`BR-092`). The screen
+            // draws exactly what it was given: a session with no customer capability receives no block
+            // and is therefore shown nothing, because whether it may read the Customer is the API's
+            // answer and never the client's (`BR-001`, `BR-007`).
+            details.customerContactDetails?.let { contact ->
+                CustomerContactRows(contact)
+            }
             if (onReschedule != null) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(
@@ -899,6 +1058,52 @@ private fun JobVisitCard(
                 }
             }
         }
+        // What the queue is still holding sits directly under the Visit it will move, so the
+        // technician sees their own unfinished work beside the record it changes rather than only in
+        // the Activity the backend reported (`BR-012`, `BR-080`, §7).
+        VisitFieldPendingNotice(
+            action = queuedAction,
+            notes = queuedNotes,
+            onDiscardAction = onDiscardQueuedVisitAction,
+            onDiscardNote = onDiscardQueuedVisitNote,
+        )
+    }
+}
+
+/**
+ * The Customer's own contact details on the Job card (`BR-092`).
+ *
+ * A row is drawn per detail the Customer actually has. A field the office never recorded is not drawn as
+ * a line announcing its absence: the card is what a technician reads before knocking on the door, and
+ * three rows of missing data would push the work they came for down the screen (`BR-012`). Only the
+ * fields `BR-092` names can appear here — the phone, the email and the notes — because the API sends
+ * nothing else (`ADR-021` D3).
+ */
+@Composable
+private fun CustomerContactRows(contact: JobCustomerContact) {
+    contact.phone?.let { phone ->
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        InformationRow(
+            label = stringResource(R.string.job_details_customer_phone_label),
+            value = phone,
+            modifier = Modifier.testTag(JobDetailsCustomerPhoneTag),
+        )
+    }
+    contact.email?.let { email ->
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        InformationRow(
+            label = stringResource(R.string.job_details_customer_email_label),
+            value = email,
+            modifier = Modifier.testTag(JobDetailsCustomerEmailTag),
+        )
+    }
+    contact.notes?.let { notes ->
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        InformationRow(
+            label = stringResource(R.string.job_details_customer_notes_label),
+            value = notes,
+            modifier = Modifier.testTag(JobDetailsCustomerNotesTag),
+        )
     }
 }
 

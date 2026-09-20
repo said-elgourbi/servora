@@ -1,6 +1,8 @@
 import { DomainValidationError } from '../validation/domain-validation.js';
 import {
   parseCreateCustomerContactDto,
+  parseRemoveCustomerContactDto,
+  parseUpdateCustomerContactDto,
   toCustomerContactDto,
 } from './customer-contact.dto.js';
 import type { CustomerContact } from './customer.types.js';
@@ -94,6 +96,9 @@ describe('toCustomerContactDto', () => {
       isPrimary: true,
       isBillingContact: false,
       isJobContact: false,
+      removedAt: null,
+      removedByMembershipId: null,
+      version: 1,
       createdAt,
       updatedAt,
     };
@@ -109,8 +114,77 @@ describe('toCustomerContactDto', () => {
       isPrimary: true,
       isBillingContact: false,
       isJobContact: false,
+      version: 1,
       createdAt: '2026-09-13T14:00:00.000Z',
       updatedAt: '2026-09-13T15:30:00.000Z',
     });
+  });
+});
+
+describe('parseUpdateCustomerContactDto', () => {
+  it('requires the version the caller read', () => {
+    expect(() => parseUpdateCustomerContactDto({ firstName: 'John' })).toThrow(
+      DomainValidationError,
+    );
+    expect(() => parseUpdateCustomerContactDto({ expectedVersion: 0 })).toThrow(
+      DomainValidationError,
+    );
+  });
+
+  it('leaves an absent field out, so a partial edit changes only what it states', () => {
+    expect(
+      parseUpdateCustomerContactDto({
+        phone: ' +15551234567 ',
+        expectedVersion: 3,
+      }),
+    ).toEqual({ phone: '+15551234567', expectedVersion: 3 });
+  });
+
+  it('keeps an explicit null as a cleared optional value', () => {
+    const parsed = parseUpdateCustomerContactDto({
+      email: null,
+      role: '   ',
+      expectedVersion: 1,
+    });
+
+    expect(parsed.email).toBeNull();
+    expect(parsed.role).toBeNull();
+  });
+
+  it('rejects a blank name, because a supplied name must be a name', () => {
+    expect(() =>
+      parseUpdateCustomerContactDto({ firstName: '  ', expectedVersion: 1 }),
+    ).toThrow(DomainValidationError);
+  });
+
+  it('rejects a flag that is not a boolean', () => {
+    expect(() =>
+      parseUpdateCustomerContactDto({ isPrimary: 'yes', expectedVersion: 1 }),
+    ).toThrow(DomainValidationError);
+  });
+
+  it('does not accept the billing or job-contact flags', () => {
+    // No rule defines what makes a billing or a job contact, so no client edits one (`BR-042`).
+    expect(
+      parseUpdateCustomerContactDto({
+        isBillingContact: true,
+        isJobContact: true,
+        expectedVersion: 1,
+      }),
+    ).toEqual({ expectedVersion: 1 });
+  });
+});
+
+describe('parseRemoveCustomerContactDto', () => {
+  it('reads the version the caller states', () => {
+    expect(parseRemoveCustomerContactDto({ expectedVersion: 4 })).toEqual({
+      expectedVersion: 4,
+    });
+  });
+
+  it('requires the version, because a removal that names none would overwrite blindly', () => {
+    expect(() => parseRemoveCustomerContactDto({})).toThrow(
+      DomainValidationError,
+    );
   });
 });

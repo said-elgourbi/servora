@@ -73,4 +73,19 @@ object WorkingSetEntityTypes {
      * technician's day is never served to whoever signs in next (`§10`).
      */
     const val TECHNICIAN_HOME = "home.technician"
+
+    /**
+     * One local day of the signed-in technician's own schedule (`GET /schedule`, `BR-013`).
+     *
+     * `BR-013` names "viewing assigned work" as field work that has to survive a loss of
+     * connectivity, and the technician's schedule is exactly that seen over days rather than over
+     * one day. One row is held **per local date**, because the answer depends on the date the
+     * backend was asked about: browsing back to a day already read answers from here when the API
+     * cannot be reached, and a row read for another date is never served for this one (§13.4).
+     *
+     * Only a **field-scoped** answer is kept: the office board is a dispatcher's read and stays
+     * online-only (`ADR-020` D6), so a schedule read that answered for the whole organization is
+     * never written here.
+     */
+    const val TECHNICIAN_SCHEDULE = "schedule.technician"
 }

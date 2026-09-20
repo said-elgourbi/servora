@@ -34,6 +34,16 @@ export const VISIT_STATUSES = [
 ] as const;
 export type VisitStatus = (typeof VISIT_STATUSES)[number];
 
+/** The follow-up request lifecycle (`BR-041`): proposed work, not a scheduled Visit. */
+export const FOLLOW_UP_VISIT_REQUEST_STATUSES = [
+  'PENDING',
+  'NEEDS_CLARIFICATION',
+  'APPROVED',
+  'REJECTED',
+] as const;
+export type FollowUpVisitRequestStatus =
+  (typeof FOLLOW_UP_VISIT_REQUEST_STATUSES)[number];
+
 /**
  * The Visit statuses that count as active work (`BR-060`).
  *
@@ -169,33 +179,37 @@ export type VisitOutcomeCode = (typeof VISIT_OUTCOME_CODES)[number];
 /**
  * The Visit lifecycle's **structurally** permitted transitions (`BR-074`, `BR-075`).
  *
- * This is the authoritative structural validation contract for a Visit: the normal lifecycle's forward
- * moves, plus the one correction `BR-075` defines. A destination the table does not list is not a
- * business transition, and the field route refuses it with `VISIT_STATUS_TRANSITION_NOT_ALLOWED`
- * (`docs/api/job-actions.md`, `ADR-019` D3/D5).
+ * This is the authoritative structural validation contract for a Visit. `BR-074` deliberately does
+ * **not** enforce a strict next-status chain on field actions: field reality requires correcting a status
+ * mistake, catching up after a missed tap, and moving backward when the work genuinely goes back a step.
+ * A Visit may therefore be moved **directly** between any two working statuses, in either direction, in
+ * one operation, and a `COMPLETED` Visit may be reopened into any other working status.
  *
- * `CANCELED` and `NO_SHOW` are deliberately absent. `BR-074` lists them as terminal alternatives, but
- * `BR-066` makes them **dispatch** actions: no capability authorizes an office or field caller to take
- * them today and `BR-076`'s cancellation-reason catalogue is an `OPEN QUESTION`, so accepting one
- * would mean inventing both the authority and the vocabulary (`BR-042`, `ADR-019` D7).
+ * `CANCELED` and `NO_SHOW` are deliberately absent, exactly as before. `BR-066` makes them **dispatch**
+ * actions, no capability authorizes a field caller to take them, and `BR-076` requires a structured
+ * cancellation reason for both — so accepting one would mean inventing both the authority and the
+ * vocabulary (`BR-042`, `ADR-019` D7). They stay truly terminal, and no working status is reachable from
+ * them.
  *
  * The table answers *which destinations exist* for a Visit; it does not answer *whether a destination
- * may be entered right now*. That is a runtime eligibility question owned by its own rule — `BR-072`
- * for a Visit becoming `SCHEDULED` — and the API answers it with that rule's own error rather than by
- * removing a structurally valid destination (`BR-058`, `BR-061` follow the same split for Jobs).
+ * may be entered right now*. That is a runtime eligibility question owned by its own rule — `BR-072` for
+ * a Visit becoming `SCHEDULED`, `BR-077` for the outcome a completion requires — and the API answers it
+ * with that rule's own error rather than by removing a structurally valid destination (`BR-058`,
+ * `BR-061` follow the same split for Jobs).
  */
 export const VISIT_STATUS_TRANSITIONS: Readonly<
   Record<VisitStatus, readonly VisitStatus[]>
 > = {
-  DRAFT: ['SCHEDULED'],
-  SCHEDULED: ['EN_ROUTE'],
-  // `SCHEDULED` here is `BR-075`'s correction, not a lifecycle step: a technician may leave without
-  // arriving, and the correction returns the Visit to the status it was scheduled in.
-  EN_ROUTE: ['ON_SITE', 'SCHEDULED'],
-  ON_SITE: ['IN_PROGRESS'],
-  IN_PROGRESS: ['COMPLETED'],
-  // Terminal (`BR-074`): a completed, canceled or no-show Visit never returns to an active status.
-  COMPLETED: [],
+  DRAFT: ['SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED'],
+  SCHEDULED: ['DRAFT', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED'],
+  EN_ROUTE: ['DRAFT', 'SCHEDULED', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED'],
+  ON_SITE: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'IN_PROGRESS', 'COMPLETED'],
+  IN_PROGRESS: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'COMPLETED'],
+  // A `COMPLETED` Visit is reopenable (`BR-074`), which is why it is the one historical status with
+  // destinations at all.
+  COMPLETED: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'],
+  // Truly terminal (`BR-074`): a canceled or no-show Visit never returns to a working status, and no
+  // field caller may take either (`BR-066`).
   CANCELED: [],
   NO_SHOW: [],
 };
@@ -209,11 +223,15 @@ export function isPermittedVisitStatusTransition(
 }
 
 /**
- * Whether the transition is `BR-075`'s correction rather than the normal lifecycle.
+ * Whether the transition is the correction `BR-075` originally named rather than the normal progression.
  *
- * `EN_ROUTE → SCHEDULED` is the one correction product ownership confirms: a technician may leave for
- * a Property without arriving. It is recorded as a status event that says so (`is_correction`), never
- * as a rewrite of the status it corrects (`BR-067`, `BR-075`).
+ * `BR-074` now permits free movement between the working statuses, so a reversal needs no special
+ * permission and is a status change like any other. The **flag** stays as narrow as the business rule
+ * that named it — `EN_ROUTE → SCHEDULED`, a technician who left for a Property without arriving —
+ * because `visit_status_history_correction_check` declares exactly that pair, and because generalizing it
+ * is not needed: every status event already carries its previous status, its new status, its actor and
+ * its timestamp, which is the audit `BR-067` requires (`BR-075` Notes). It is recorded as a status event
+ * that says so (`is_correction`), never as a rewrite of the status it corrects (`BR-067`, `BR-075`).
  */
 export function isVisitStatusCorrection(
   from: VisitStatus,
@@ -222,7 +240,14 @@ export function isVisitStatusCorrection(
   return from === 'EN_ROUTE' && to === 'SCHEDULED';
 }
 
-/** The destinations a client may select for a Visit in [status]. */
+/**
+ * The destinations a client may select for a Visit in [status] (`BR-074`).
+ *
+ * A working Visit is offered every other working status, and a `COMPLETED` Visit is offered the five
+ * working ones — which is how the reopen reaches the technician's menu. The list is the backend's own
+ * answer, so no client holds a copy of the lifecycle (`BR-041`), and `CANCELED`/`NO_SHOW` are never in
+ * it (`BR-066`).
+ */
 export function applicableVisitStatusTransitions(
   status: VisitStatus,
 ): readonly VisitStatus[] {

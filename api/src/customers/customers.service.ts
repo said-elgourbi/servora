@@ -7,6 +7,8 @@ import {
   exists,
   getTableColumns,
   inArray,
+  isNull,
+  ne,
   notExists,
   sql,
 } from 'drizzle-orm';
@@ -36,7 +38,12 @@ import {
   type CustomerListFilters,
 } from './customer-list-filter.dto.js';
 import type { CreateCustomerAddressDto } from './customer-address.dto.js';
-import type { CreateCustomerContactDto } from './customer-contact.dto.js';
+import type {
+  CreateCustomerContactDto,
+  RemoveCustomerContactDto,
+  UpdateCustomerContactDto,
+} from './customer-contact.dto.js';
+import type { Executor } from './properties.service.js';
 import {
   DEFAULT_PROPERTY_LIST_FILTERS,
   PROPERTY_COUNTRY,
@@ -61,6 +68,7 @@ import type {
   CustomerContact,
   CustomerType,
   IndividualCustomer,
+  NewCustomerContact,
 } from './customer.types.js';
 
 /**
@@ -74,6 +82,40 @@ export class CustomerNotFoundError extends Error {
       `Customer ${customerId} was not found in the requested organization.`,
     );
     this.name = 'CustomerNotFoundError';
+  }
+}
+
+/**
+ * Raised when a contact the request names is not that customer's, or is no longer in ordinary use.
+ *
+ * Callers treat this as "not found" (never "forbidden"), so the API does not leak another
+ * organization's — or another customer's — contact (`BR-001`, `BR-095`). A removed contact is
+ * deliberately not addressable by a write: it survives for the audit question, not for editing
+ * (`ADR-022` D8).
+ */
+export class ContactNotFoundError extends Error {
+  constructor(contactId: string) {
+    super(`Contact ${contactId} was not found for the requested customer.`);
+    this.name = 'ContactNotFoundError';
+  }
+}
+
+/**
+ * Raised when a mutation carries a version the contact has already moved past.
+ *
+ * The API is the final authority: a mutation naming a version the contact has left is refused rather
+ * than applied, so two office users editing the same contact cannot silently overwrite each other
+ * (`BR-095`; `BR-032`, `BR-086`).
+ */
+export class ContactVersionConflictError extends Error {
+  readonly currentVersion: number;
+
+  constructor(contactId: string, currentVersion: number) {
+    super(
+      `Contact ${contactId} has moved past the version the request carried (current ${currentVersion}).`,
+    );
+    this.name = 'ContactVersionConflictError';
+    this.currentVersion = currentVersion;
   }
 }
 
@@ -584,32 +626,232 @@ export class CustomersService {
     return archived;
   }
 
-  /** Adds a contact to a customer the caller's organization owns. */
+  /**
+   * Adds a contact person to a customer the caller's organization owns (`BR-023`, `BR-095`).
+   *
+   * A customer never has two primary contacts, so a create that states `isPrimary` clears the
+   * customer's previous primary in the **same transaction**, under the lock every contact write takes
+   * first. The database enforces the same invariant with its partial unique index (`ADR-022` D1);
+   * clearing under the lock is what makes this operation satisfy that index instead of colliding with
+   * it when two promotions run at once.
+   */
   async addContact(
     scope: OrganizationScope,
     customerId: string,
     input: CreateCustomerContactDto,
   ): Promise<CustomerContact> {
-    await this.requireCustomerInScope(scope, customerId);
+    return this.db.transaction(async (tx) => {
+      await this.lockCustomerInScope(tx, scope, customerId);
 
-    const [contact] = await this.db
-      .insert(customerContacts)
-      .values({
-        customerId,
-        firstName: input.firstName,
-        lastName: input.lastName,
-        email: input.email ?? null,
-        phone: input.phone ?? null,
-        role: input.role ?? null,
-        isPrimary: input.isPrimary,
-        isBillingContact: input.isBillingContact,
-        isJobContact: input.isJobContact,
-      })
-      .returning();
+      if (input.isPrimary) {
+        await this.clearPrimaryContact(tx, customerId);
+      }
+
+      const [contact] = await tx
+        .insert(customerContacts)
+        .values({
+          customerId,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          email: input.email ?? null,
+          phone: input.phone ?? null,
+          role: input.role ?? null,
+          isPrimary: input.isPrimary,
+          isBillingContact: input.isBillingContact,
+          isJobContact: input.isJobContact,
+        })
+        .returning();
+      return contact;
+    });
+  }
+
+  /**
+   * Edits a contact person of a customer the caller's organization owns (`BR-095`).
+   *
+   * The edit is partial in two senses, and both matter. A field the caller leaves out is **not
+   * written at all**, so an edit can never write back a value it read a moment earlier and overwrite a
+   * change another writer made in between. And a field the caller does state is the only one that
+   * moves, which is what keeps a value no client captures (the free-text `role`) from being cleared.
+   *
+   * Making the contact primary clears the customer's previous primary under the same lock, so two
+   * contacts are never primary and the customer is never briefly without one. A removed contact is not
+   * part of an ordinary view, so it cannot be edited: its record survives so that "who removed this
+   * person, and when" stays answerable, not so that it can be written again (`ADR-022` D8).
+   */
+  async updateContact(
+    scope: OrganizationScope,
+    customerId: string,
+    contactId: string,
+    input: UpdateCustomerContactDto,
+  ): Promise<CustomerContact> {
+    return this.db.transaction(async (tx) => {
+      await this.lockCustomerInScope(tx, scope, customerId);
+      const contact = await this.requireContact(tx, customerId, contactId);
+      this.assertContactVersion(contact, input.expectedVersion);
+
+      if (input.isPrimary === true) {
+        await this.clearPrimaryContact(tx, customerId, contactId);
+      }
+
+      const [updated] = await tx
+        .update(customerContacts)
+        .set({
+          ...statedContactChanges(input),
+          version: sql`${customerContacts.version} + 1`,
+        })
+        .where(
+          and(
+            eq(customerContacts.id, contactId),
+            eq(customerContacts.customerId, customerId),
+          ),
+        )
+        .returning();
+      return updated;
+    });
+  }
+
+  /**
+   * Removes a contact person from ordinary use (`BR-095`).
+   *
+   * The removal is **soft**: `removed_at` and the acting membership are recorded and the record
+   * survives, so "who removed this person, and when" stays answerable (`BR-033`, `BR-067`;
+   * `ADR-022` D8). Removing the primary contact leaves the customer with **zero** primary contacts,
+   * which is a legal state, and never promotes another contact automatically.
+   */
+  async removeContact(
+    scope: OrganizationScope & { membershipId: string },
+    customerId: string,
+    contactId: string,
+    input: RemoveCustomerContactDto,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.lockCustomerInScope(tx, scope, customerId);
+      const contact = await this.requireContact(tx, customerId, contactId);
+      this.assertContactVersion(contact, input.expectedVersion);
+
+      await tx
+        .update(customerContacts)
+        .set({
+          removedAt: new Date(),
+          removedByMembershipId: scope.membershipId,
+          version: sql`${customerContacts.version} + 1`,
+        })
+        .where(
+          and(
+            eq(customerContacts.id, contactId),
+            eq(customerContacts.customerId, customerId),
+          ),
+        );
+    });
+  }
+
+  /**
+   * Confirms the customer exists in the caller's organization and holds its row for the transaction.
+   *
+   * Every contact write takes this lock first, which serialises a customer's contact writes. It is what
+   * makes the two rules around the primary flag hold under concurrency rather than only on paper
+   * (`BR-095`; `ADR-022` D1, D9):
+   *
+   * - the previous primary is cleared under the same lock that decides the new one, so two
+   *   simultaneous promotions cannot both clear the same row and then both claim the flag — which the
+   *   database's partial unique index would refuse, turning a race into a server failure;
+   * - the read that establishes a contact's `version` happens under the same lock as the write that
+   *   consumes it, so a version-guarded mutation cannot interleave with another write to that contact.
+   *
+   * A customer the caller's organization does not own is reported as not found (`BR-001`).
+   */
+  private async lockCustomerInScope(
+    executor: Executor,
+    scope: OrganizationScope,
+    customerId: string,
+  ): Promise<void> {
+    const [customer] = await executor
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.organizationId, scope.organizationId),
+          eq(customers.id, customerId),
+        ),
+      )
+      .for('update');
+    if (customer === undefined) {
+      throw new CustomerNotFoundError(customerId);
+    }
+  }
+
+  /**
+   * Resolves one of the customer's contacts that is still in ordinary use, or fails closed.
+   *
+   * The lookup is scoped by `(customer_id, id)`: a contact of another customer — or another
+   * organization — is never addressable, and the caller is told "not found" rather than "forbidden"
+   * so the API does not leak it (`BR-001`, `BR-095`).
+   */
+  private async requireContact(
+    executor: Executor,
+    customerId: string,
+    contactId: string,
+  ): Promise<CustomerContact> {
+    const [contact] = await executor
+      .select(getTableColumns(customerContacts))
+      .from(customerContacts)
+      .where(
+        and(
+          eq(customerContacts.id, contactId),
+          eq(customerContacts.customerId, customerId),
+          isNull(customerContacts.removedAt),
+        ),
+      )
+      .limit(1);
+    if (contact === undefined) {
+      throw new ContactNotFoundError(contactId);
+    }
     return contact;
   }
 
-  /** Lists a customer's contacts, scoped to the caller's organization. */
+  /** Rejects a mutation that names a version the contact has already moved past (`BR-095`). */
+  private assertContactVersion(
+    contact: CustomerContact,
+    expectedVersion: number,
+  ): void {
+    if (expectedVersion !== contact.version) {
+      throw new ContactVersionConflictError(contact.id, contact.version);
+    }
+  }
+
+  /**
+   * Clears the customer's current primary contact so another one can take the flag (`BR-095`).
+   *
+   * The row that loses the flag is a changed row like any other, so it is versioned: a caller that
+   * read it while it was primary re-reads rather than writing state it has not seen. The contact
+   * about to become primary is excluded, so the statement never touches the row the same operation is
+   * about to write.
+   */
+  private async clearPrimaryContact(
+    executor: Executor,
+    customerId: string,
+    exceptContactId?: string,
+  ): Promise<void> {
+    await executor
+      .update(customerContacts)
+      .set({ isPrimary: false, version: sql`${customerContacts.version} + 1` })
+      .where(
+        and(
+          eq(customerContacts.customerId, customerId),
+          eq(customerContacts.isPrimary, true),
+          exceptContactId === undefined
+            ? undefined
+            : ne(customerContacts.id, exceptContactId),
+        ),
+      );
+  }
+
+  /**
+   * Lists a customer's contacts, scoped to the caller's organization.
+   *
+   * This is the read both surfaces report contacts from: the office detail includes the array in its
+   * customer projection, and the Job Details read carries it inside the customer block (`BR-095`).
+   */
   async listContacts(
     scope: OrganizationScope,
     customerId: string,
@@ -623,6 +865,15 @@ export class CustomersService {
    *
    * Kept separate so composing the customer detail does not repeat the customer lookup:
    * `findCustomerDetailInOrganization` has already verified the customer exists in scope.
+   *
+   * Two things are decided here for every read, so no surface can disagree with another (`BR-041`):
+   *
+   * - **A removed contact is not part of an ordinary view** (`BR-095`; `ADR-022` D8). The record
+   *   survives so that "who removed this person, and when" stays answerable (`BR-033`), not so that it
+   *   is listed beside the people the organization still calls.
+   * - **The primary contact comes first, then the rest oldest-first**, which is the order `BR-095`
+   *   records. Only the primary flag orders the list; the rest follow the order they were recorded in,
+   *   so an ordinary edit does not reshuffle the section a reader is looking at.
    */
   private async selectContacts(
     scope: OrganizationScope,
@@ -636,9 +887,13 @@ export class CustomersService {
         and(
           eq(customerContacts.customerId, customerId),
           eq(customers.organizationId, scope.organizationId),
+          isNull(customerContacts.removedAt),
         ),
       )
-      .orderBy(desc(customerContacts.createdAt));
+      .orderBy(
+        desc(customerContacts.isPrimary),
+        asc(customerContacts.createdAt),
+      );
   }
 
   /** Adds an address to a customer the caller's organization owns. */
@@ -984,6 +1239,36 @@ export class CustomersService {
       language: input.language ?? 'en-CA',
     };
   }
+}
+
+/**
+ * The columns a partial contact edit actually states, and nothing else (`BR-095`).
+ *
+ * Writing only what the caller sent is what makes a partial edit safe: the statement cannot write
+ * back a value the caller never mentioned, so it cannot overwrite a change another writer made
+ * between the edit's read and its write.
+ */
+function statedContactChanges(input: UpdateCustomerContactDto) {
+  const changes: Partial<NewCustomerContact> = {};
+  if (input.firstName !== undefined) {
+    changes.firstName = input.firstName;
+  }
+  if (input.lastName !== undefined) {
+    changes.lastName = input.lastName;
+  }
+  if (input.email !== undefined) {
+    changes.email = input.email;
+  }
+  if (input.phone !== undefined) {
+    changes.phone = input.phone;
+  }
+  if (input.role !== undefined) {
+    changes.role = input.role;
+  }
+  if (input.isPrimary !== undefined) {
+    changes.isPrimary = input.isPrimary;
+  }
+  return changes;
 }
 
 /**

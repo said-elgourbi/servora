@@ -143,9 +143,24 @@ private fun jobStatusColors(status: JobStatus): StatusChipColors {
     }
 }
 
-/** The Visit lifecycle's status chip (`BR-074`). */
+/**
+ * The Visit lifecycle's status chip (`BR-074`).
+ *
+ * It follows [JobStatusPill] exactly, because the two chips are the same control for two state
+ * machines: the status's own colours, an optional leading dot, an optional trailing affordance, and —
+ * when [onClick] is given — the chip **is** the control, with [onClickLabel] naming what tapping it
+ * does because the chip's own label states the status (`BR-028`, `BR-059`).
+ */
 @Composable
-internal fun VisitStatusPill(status: VisitStatus, modifier: Modifier = Modifier) {
+internal fun VisitStatusPill(
+    status: VisitStatus,
+    modifier: Modifier = Modifier,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+    enabled: Boolean = true,
+    onClickLabel: String? = null,
+) {
     val scheme = MaterialTheme.colorScheme
     val colors = when (status) {
         VisitStatus.COMPLETED ->
@@ -168,6 +183,11 @@ internal fun VisitStatusPill(status: VisitStatus, modifier: Modifier = Modifier)
         label = stringResource(visitStatusLabel(status)),
         colors = colors,
         modifier = modifier,
+        leading = leading,
+        trailing = trailing,
+        onClick = onClick,
+        enabled = enabled,
+        onClickLabel = onClickLabel,
     )
 }
 

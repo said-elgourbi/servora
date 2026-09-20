@@ -1,4 +1,9 @@
-import type { JobStatus, VisitOutcomeCode, VisitStatus } from './job.types.js';
+import {
+  isTerminalVisitStatus,
+  type JobStatus,
+  type VisitOutcomeCode,
+  type VisitStatus,
+} from './job.types.js';
 
 /**
  * The Visit → Job consequence (`BR-058`, `BR-061`; `ADR-019` D4).
@@ -18,6 +23,7 @@ import type { JobStatus, VisitOutcomeCode, VisitStatus } from './job.types.js';
  *   no Visit remains active or scheduled, and the latest completed Visit's outcome resolves the Job.
  *   It is evaluated by the caller against the state inside the same transaction, because it is a
  *   runtime condition rather than part of this structural mapping.
+ * @param jobStatus the Job's status inside the same transaction.
  *
  * @returns the Job status the consequence moves the Job to, or `null` when the event has no Job
  *   consequence at all. A destination equal to the Job's current status is not a transition and writes
@@ -27,7 +33,18 @@ export function jobStatusConsequenceForVisitTransition(
   to: VisitStatus,
   outcomeCode: VisitOutcomeCode | null,
   jobMayAwaitReview: boolean,
+  jobStatus: JobStatus,
 ): JobStatus | null {
+  // `BR-061`'s invariant read in the other direction: a Job awaits review *because* no Visit remained
+  // active, so a Visit moved into a working status takes the Job back out of review. `BR-074`'s free
+  // movement makes that reachable in several ways — a reopen out of `COMPLETED`, a step backward, or a
+  // skipped step — and none of them may leave an actively worked Visit beside a Job awaiting completion
+  // review. `IN_PROGRESS` is the Job's meaning for "work has started and/or work remains", and `BR-058`
+  // gives an open Job no other destination to fall back to (`NEW` is reached only by an explicit reopen).
+  if (jobStatus === 'PENDING_REVIEW' && !isTerminalVisitStatus(to)) {
+    return 'IN_PROGRESS';
+  }
+
   switch (to) {
     // Work has started, or started and continues: `BR-058`'s meaning of `IN_PROGRESS` is "work has
     // started and/or work remains", which is exactly what these three field events report.
@@ -41,9 +58,10 @@ export function jobStatusConsequenceForVisitTransition(
       return outcomeCode === 'RESOLVED' && jobMayAwaitReview
         ? 'PENDING_REVIEW'
         : 'IN_PROGRESS';
-    // `EN_ROUTE → SCHEDULED` is `BR-075`'s correction, and it has no Job consequence: `BR-058` has no
-    // backwards Job destination and `NEW` is not one for an open Job, so mirroring the correction
-    // would need rules the product has not defined (`BR-042`, `ADR-019` D4).
+    // `DRAFT` and `SCHEDULED` have no Job consequence: `BR-058` has no Job destination for a field
+    // attempt merely being scheduled or returned to draft, and `NEW` is not a destination for an open
+    // Job, so mirroring them would need rules the product has not defined (`BR-042`, `ADR-019` D4).
+    // `CANCELED` and `NO_SHOW` are dispatch actions no field caller may take (`BR-066`).
     default:
       return null;
   }

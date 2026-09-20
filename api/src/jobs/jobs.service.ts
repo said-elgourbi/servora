@@ -16,11 +16,16 @@ import {
   sql,
 } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
+import { addressSnapshotOf } from '../address/address-snapshot.js';
+import { CustomersService } from '../customers/customers.service.js';
+import { PropertiesService } from '../customers/properties.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import {
   customers,
+  followUpVisitRequests,
   jobStatusHistory,
   jobs,
+  organizationJobNumberCounters,
   organizationMembers,
   userProfiles,
   visitNotes,
@@ -34,6 +39,16 @@ import {
 import { isUniqueViolation } from '../database/unique-violation.js';
 import { memberName } from '../members/member-name.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
+import type { CreateJobDto } from './job-create.dto.js';
+import type {
+  DirectCreateVisitDto,
+  FollowUpVisitApprovalDto,
+  FollowUpVisitRequestDto,
+  FollowUpVisitReviewDto,
+  RequestedVisitTechnician,
+  SubmitFollowUpVisitRequestDto,
+} from './follow-up-visit-request.dto.js';
+import { toFollowUpVisitRequestDto } from './follow-up-visit-request.dto.js';
 import type { JobDetails } from './job-details.dto.js';
 import { planAssignmentChanges } from './job-assignment-plan.js';
 import type {
@@ -51,6 +66,7 @@ import {
   isPermittedJobStatusTransition,
   isPermittedVisitStatusTransition,
   isReschedulableVisitStatus,
+  isTerminalVisitStatus,
   isVisitStatusCorrection,
   type AssignmentRoleCode,
   type JobStatus,
@@ -59,6 +75,7 @@ import {
 } from './job.types.js';
 import {
   readAssignedTechnicians,
+  readJobVisits,
   selectVisitsForJobs,
 } from './visit-assignment.js';
 import { jobStatusConsequenceForVisitTransition } from './visit-job-consequence.js';
@@ -76,11 +93,62 @@ export class JobNotFoundError extends Error {
   }
 }
 
+/**
+ * The Customer a Job is created for does not exist in the caller's organization, or has been deleted
+ * (`BR-001`, `BR-023`).
+ *
+ * A Customer another organization owns and a Customer that does not exist are reported identically, so
+ * an id cannot be probed for existence (`BR-023`).
+ */
+export class JobCustomerNotFoundError extends Error {
+  constructor() {
+    super('Customer was not found.');
+    this.name = 'JobCustomerNotFoundError';
+  }
+}
+
+/**
+ * The Customer a Job is created for exists but does not accept new work (`BR-023`).
+ *
+ * A customer may be set `INACTIVE` without being deleted, so this is a state the API reports rather
+ * than treating as absent: the Customer is there, and the operation conflicts with its lifecycle.
+ */
+export class JobCustomerInactiveError extends Error {
+  constructor() {
+    super('Customer is not active.');
+    this.name = 'JobCustomerInactiveError';
+  }
+}
+
 /** The Visit does not belong to that Job in the caller's organization (`BR-001`). */
 export class VisitNotFoundError extends Error {
   constructor() {
     super('Visit was not found on this job.');
     this.name = 'VisitNotFoundError';
+  }
+}
+
+export class FollowUpVisitRequestNotFoundError extends Error {
+  constructor() {
+    super('Follow-up visit request was not found.');
+    this.name = 'FollowUpVisitRequestNotFoundError';
+  }
+}
+
+export class FollowUpVisitRequestConflictError extends Error {
+  constructor(
+    readonly currentStatus: string,
+    readonly currentVersion: number,
+  ) {
+    super('The follow-up visit request changed since it was read.');
+    this.name = 'FollowUpVisitRequestConflictError';
+  }
+}
+
+export class FollowUpVisitRequestNotReviewableError extends Error {
+  constructor(readonly status: string) {
+    super(`A follow-up visit request in ${status} cannot be reviewed.`);
+    this.name = 'FollowUpVisitRequestNotReviewableError';
   }
 }
 
@@ -215,9 +283,7 @@ export class VisitStatusTransitionNotAllowedError extends Error {
  * scheduled. The reason names the condition that failed.
  */
 export class VisitSchedulingConditionNotMetError extends Error {
-  constructor(
-    readonly reason: 'PROPERTY' | 'SCHEDULE' | 'CREW_LEAD',
-  ) {
+  constructor(readonly reason: 'PROPERTY' | 'SCHEDULE' | 'CREW_LEAD') {
     super('The visit cannot be scheduled yet.');
     this.name = 'VisitSchedulingConditionNotMetError';
   }
@@ -274,16 +340,17 @@ export interface AssignedJobViewer {
 /**
  * A caller whose write reaches a Visit through their own current assignment (`BR-009`; `ADR-019` D3).
  *
- * The field routes are open to any technician on the Visit's **current crew**, not only the `LEAD`
+ * The Visit write routes are open to any technician on the Visit's **current crew**, not only the `LEAD`
  * (`BR-068` treats `LEAD` as an assignment role rather than an authority, and `BR-069` lets a manager
  * change it at any time). "Currently assigned" is evaluated at the moment of the action against the
  * same rows `AssignedJobViewer` reads.
  *
- * A caller who reaches the route through the **office** capability writes the whole organization's
- * Visits, exactly as they did before this slice: `ADR-019` D2 applies the assignment scope only to a
- * caller who does not hold the office capability, and the note route follows the same shape. Which
- * Visit an office caller addresses is therefore decided by the capability that admitted them, never
- * by a role name (`BR-006`, `BR-007`).
+ * A caller who reaches a route through the **office** capability writes the whole organization's Visits
+ * without crew membership: `BR-093` makes that capability the second authorization of the Visit status
+ * route, and the note route has followed the same shape all along. `ADR-019` D2 applies the assignment
+ * scope only to a caller who does **not** hold the office capability. Which Visit an office caller
+ * addresses is therefore decided by the capability that admitted them, never by a role name (`BR-006`,
+ * `BR-007`).
  */
 export interface AssignedVisitWriter {
   readonly membershipId: string;
@@ -299,7 +366,11 @@ export interface AssignedVisitWriter {
  */
 @Injectable()
 export class JobsService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly properties: PropertiesService,
+    private readonly customers: CustomersService,
+  ) {}
 
   private get db() {
     return this.database.db;
@@ -323,6 +394,12 @@ export class JobsService {
         job: getTableColumns(jobs),
         customerId: customers.id,
         customerName: customers.displayName,
+        // The Customer's own contact details (`BR-092`). They are columns of the row this read already
+        // joins, so resolving them costs no extra query; whether the route **exposes** them is its
+        // second authorization question, answered at the projection (`JobDetailsReadOptions`).
+        customerEmail: customers.email,
+        customerPhone: customers.phone,
+        customerNotes: customers.notes,
       })
       .from(jobs)
       .innerJoin(
@@ -352,21 +429,43 @@ export class JobsService {
       (await selectVisitsForJobs(this.db, scope, [row.job.id])).get(
         row.job.id,
       ) ?? null;
+    // The Job's Visits in their own sequence (`BR-047`, `BR-071`), each with the crew it carries. One
+    // read of the crews serves every Visit, so a Job with several Visits does not cost one query each
+    // (`BR-068`, `dev.md` §6).
+    const jobVisits = await readJobVisits(this.db, scope, row.job.id);
     const technicians = await readAssignedTechnicians(
       this.db,
       scope,
-      selectedVisit === null ? [] : [selectedVisit.visitId],
+      jobVisits.map((visit) => visit.visitId),
+    );
+    // The Customer's contact persons (`BR-092`, `BR-095`). They are read through the service that owns
+    // their scope, their removal rule and their order, so the field block and the office detail can
+    // never disagree about which contacts exist or which one comes first (`BR-041`). Whether the read
+    // **exposes** them is still the second authorization question, answered at the projection.
+    const contactPersons = await this.customers.listContacts(
+      scope,
+      row.customerId,
     );
 
     return {
       job: row.job,
       customerId: row.customerId,
       customerName: row.customerName,
+      customerContactDetails: {
+        email: row.customerEmail,
+        phone: row.customerPhone,
+        notes: row.customerNotes,
+        contacts: contactPersons,
+      },
       selectedVisit,
       technicians:
         selectedVisit === null
           ? []
           : (technicians.get(selectedVisit.visitId) ?? []),
+      visits: jobVisits.map((visit) => ({
+        ...visit,
+        technicians: technicians.get(visit.visitId) ?? [],
+      })),
     };
   }
 
@@ -414,6 +513,127 @@ export class JobsService {
   }
 
   /**
+   * Creates a Job for a Customer at a Property (`BR-021`, `BR-047` – `BR-053`, `BR-056`).
+   *
+   * The supported create operation requires both an **active Customer** and an **active Property that
+   * currently belongs to that Customer** (`BR-094`): a Job is work for a party receiving service
+   * (`BR-048`) performed at a location (`BR-049`), and the Product decision is that this operation
+   * states both. The database still permits a property-less Job — `BR-051` keeps a Job creatable
+   * without a Visit and `BR-056` lets a Property be added later — so a Job created by another path or
+   * an earlier one remains valid; it is this operation that requires the Property.
+   *
+   * Everything the Job is created with that a client must not decide belongs to the backend: the
+   * identifier, the organization-scoped Job number (`BR-052`), the `NEW` status (`BR-058`), the
+   * Property address snapshot (`BR-056`) and the version. The client names the Customer, the Property
+   * and the title, and nothing else.
+   *
+   * **One transaction.** The Customer, the Property (under its row lock), the Job-number allocation and
+   * the insert are one unit, so a failure leaves neither a consumed number nor a half-created Job. The
+   * counter row is the serialization point for concurrent creation within an organization
+   * (`docs/domain/job-visit-domain-model.md` §13, §15), and `unique (organization_id, job_number)`
+   * backs it at the database.
+   *
+   * **No Visit is created.** A Visit is one field attempt (`BR-047`, `BR-051`): creating the work
+   * request never creates or schedules field execution, and a Job with no Visit is the normal state a
+   * new Job is in. The Job's `NEW` status is the Job lifecycle's own, not a Visit's (`BR-059`).
+   *
+   * The initial state is recorded as append-only status history (`BR-033`, `BR-067`). The Job enters
+   * `NEW` from **no** status, which is what `job_status_history` permits a `null` previous status for:
+   * nothing is fabricated as the status the Job was in before it existed.
+   */
+  async createJob(
+    scope: OrganizationScope,
+    actorMembershipId: string,
+    input: CreateJobDto,
+  ): Promise<JobDetails> {
+    const jobId = await this.db.transaction(async (tx) => {
+      const [customer] = await tx
+        .select({ id: customers.id, status: customers.status })
+        .from(customers)
+        .where(
+          and(
+            eq(customers.organizationId, scope.organizationId),
+            eq(customers.id, input.customerId),
+            isNull(customers.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (customer === undefined) {
+        throw new JobCustomerNotFoundError();
+      }
+      if (customer.status !== 'ACTIVE') {
+        throw new JobCustomerInactiveError();
+      }
+
+      // The Property's own rules are the Property domain's, evaluated here inside this transaction:
+      // it must belong to this Customer and be `ACTIVE` (`BR-050`, `BR-083`).
+      const property =
+        await this.properties.assertPropertyAvailableForCustomerNewWork(
+          tx,
+          scope,
+          input.customerId,
+          input.propertyId,
+        );
+
+      // One statement bootstraps the counter for a new organization and increments it, so two
+      // concurrent creations cannot read the same number (`BR-052`). The inserted value states the
+      // first number explicitly: the increment applies only on conflict, so a fresh row must already
+      // carry the number this creation takes.
+      const [counter] = await tx
+        .insert(organizationJobNumberCounters)
+        .values({ organizationId: scope.organizationId, lastJobNumber: 1 })
+        .onConflictDoUpdate({
+          target: organizationJobNumberCounters.organizationId,
+          set: {
+            lastJobNumber: sql`${organizationJobNumberCounters.lastJobNumber} + 1`,
+            updatedAt: sql`now()`,
+          },
+        })
+        .returning({ jobNumber: organizationJobNumberCounters.lastJobNumber });
+      if (counter === undefined) {
+        throw new Error('The job number counter returned no row.');
+      }
+
+      const [job] = await tx
+        .insert(jobs)
+        .values({
+          organizationId: scope.organizationId,
+          jobNumber: counter.jobNumber,
+          customerId: input.customerId,
+          propertyId: property.id,
+          // The location is frozen as it is now; a later edit of the Property never rewrites it
+          // (`BR-056`, `BR-057`).
+          propertyAddressSnapshot: addressSnapshotOf(property),
+          title: input.title,
+          description: input.description,
+          // A Job is created `NEW`: the status is the lifecycle's first state and never a client's
+          // (`BR-058`).
+          status: 'NEW',
+          version: 1,
+        })
+        .returning({ id: jobs.id });
+      if (job === undefined) {
+        throw new Error('The job insert returned no row.');
+      }
+
+      await tx.insert(jobStatusHistory).values({
+        organizationId: scope.organizationId,
+        jobId: job.id,
+        fromStatus: null,
+        toStatus: 'NEW',
+        actorMembershipId,
+      });
+
+      return job.id;
+    });
+
+    // The answer is the read's own projection, so a client is handed the Job exactly as the Job
+    // Details screen reads it — including the number, the status and the address the backend chose
+    // (`BR-001`, `BR-041`).
+    return this.requireJobDetails(scope, jobId);
+  }
+
+  /**
    * A field caller's scope, as the semi-join both reads apply (`BR-009`; `ADR-019` D2).
    *
    * A Job is readable when the caller's membership is on the **current crew of at least one of its
@@ -449,10 +669,7 @@ export class JobsService {
           .where(
             and(
               eq(visitTechnicians.organizationId, scope.organizationId),
-              eq(
-                visitTechnicians.technicianMembershipId,
-                viewer.membershipId,
-              ),
+              eq(visitTechnicians.technicianMembershipId, viewer.membershipId),
               eq(visits.jobId, jobs.id),
             ),
           ),
@@ -538,14 +755,26 @@ export class JobsService {
   }
 
   /**
-   * Advances one Visit through its field lifecycle (`BR-074`, `BR-075`, `BR-077`; `ADR-019` D3, D4,
-   * D5).
+   * Moves one Visit's field status (`BR-074`, `BR-075`, `BR-077`, `BR-093`; `ADR-019` D3, D4, D5, D7).
    *
-   * The Visit's own state machine is validated against the shared structural table first, so a status a
-   * client invents, the status the Visit already holds and a destination `BR-074` does not list are all
-   * refused, with the destinations the Visit really has. `CANCELED` and `NO_SHOW` are among the refused
-   * destinations: `BR-066` makes them dispatch actions and no capability authorizes one today
-   * (`BR-042`, `ADR-019` D7).
+   * `BR-074` permits free movement between the working statuses, so this applies **one** transition to
+   * any destination the shared structural table lists for the Visit's current status, in either
+   * direction — a skipped step, a step backward and a reopen out of `COMPLETED` included. The table is
+   * consulted first, so a status a client invents, the status the Visit already holds and a destination
+   * `BR-074` does not list are all refused, with the destinations the Visit really has. `CANCELED` and
+   * `NO_SHOW` are among the refused destinations: `BR-066` makes them dispatch actions and no capability
+   * authorizes one today (`BR-042`).
+   *
+   * `writer` is the scope the route resolved from the capability that admitted the caller (`BR-093`): a
+   * field caller is bounded by their own current crew, while the office capability addresses the
+   * organization's Visits without crew membership — which is how a manager completes a Visit from Job
+   * Details (`ADR-019` D3, D7). The authorization to take the **completion** destination is not decided
+   * here: the route requires `VISIT_RECORD_OUTCOME` of every caller, the office included (`BR-009`,
+   * `BR-077`, `BR-093`).
+   *
+   * `actorMembershipId` is the authenticated member who performed the action, whichever authorization
+   * admitted them, and it is what the append-only history records — an office completion names the office
+   * member who performed it rather than a technician who did not (`BR-033`, `BR-067`, `BR-093`).
    *
    * A structurally permitted destination may still be one the Visit does not currently qualify for, and
    * that is its own rule's answer rather than a gap in the table: `BR-072` decides whether a Visit may
@@ -566,15 +795,17 @@ export class JobsService {
     jobId: string,
     visitId: string,
     actorMembershipId: string,
+    writer: AssignedVisitWriter | null,
     input: ChangeVisitStatusDto,
   ): Promise<JobDetails> {
     await this.requireJobDetails(scope, jobId);
-    // The field route is reached by holding a field capability, so its scope is always the caller's own
-    // current assignment (`ADR-019` D3). No office caller reaches it today: the office half of the Visit
-    // lifecycle is `ADR-019` D7's open question, and nothing is invented for it (`BR-042`).
-    const visit = await this.requireVisitForWriter(scope, jobId, visitId, {
-      membershipId: actorMembershipId,
-    });
+    // The scope the route resolved from the capability that admitted the caller (`BR-093`).
+    const visit = await this.requireVisitForWriter(
+      scope,
+      jobId,
+      visitId,
+      writer,
+    );
     const status = visit.status as VisitStatus;
 
     // Idempotency is answered before any conflict, because a replay is not a second writer: an operation
@@ -597,16 +828,18 @@ export class JobsService {
       throw new VisitVersionConflictError(visit.version);
     }
     if (!isPermittedVisitStatusTransition(status, input.status)) {
-      throw new VisitStatusTransitionNotAllowedError(
-        status,
-        input.status,
-        [...VISIT_STATUS_TRANSITIONS[status]],
-      );
+      throw new VisitStatusTransitionNotAllowedError(status, input.status, [
+        ...VISIT_STATUS_TRANSITIONS[status],
+      ]);
     }
 
     const conflicts =
       input.status === 'SCHEDULED'
-        ? await this.assertVisitMayBeScheduled(scope, visit, input.confirmConflicts)
+        ? await this.assertVisitMayBeScheduled(
+            scope,
+            visit,
+            input.confirmConflicts,
+          )
         : [];
 
     try {
@@ -641,11 +874,9 @@ export class JobsService {
 
         const live = locked.status as VisitStatus;
         if (!isPermittedVisitStatusTransition(live, input.status)) {
-          throw new VisitStatusTransitionNotAllowedError(
-            live,
-            input.status,
-            [...VISIT_STATUS_TRANSITIONS[live]],
-          );
+          throw new VisitStatusTransitionNotAllowedError(live, input.status, [
+            ...VISIT_STATUS_TRANSITIONS[live],
+          ]);
         }
 
         const jobStatus = await this.requireLockedJobStatus(tx, scope, jobId);
@@ -654,6 +885,13 @@ export class JobsService {
         }
 
         const recordedAt = new Date();
+        // `BR-074`'s reopen: moving a `COMPLETED` Visit back into a working status keeps the previous
+        // completion and its outcome in append-only history (`visit_status_history`,
+        // `visit_outcome_history`) while clearing the Visit's **current** outcome, because that outcome
+        // is no longer what resulted from this field attempt. The next completion records a new one
+        // (`BR-077`, `BR-079`). The four columns are cleared together, as their pair checks require.
+        const reopening =
+          live === 'COMPLETED' && !isTerminalVisitStatus(input.status);
         await tx
           .update(visits)
           .set({
@@ -667,7 +905,14 @@ export class JobsService {
                   outcomeRecordedAt: recordedAt,
                   outcomeRecordedByMembershipId: actorMembershipId,
                 }
-              : {}),
+              : reopening
+                ? {
+                    outcomeCode: null,
+                    outcomeSummary: null,
+                    outcomeRecordedAt: null,
+                    outcomeRecordedByMembershipId: null,
+                  }
+                : {}),
           })
           .where(
             and(
@@ -806,6 +1051,211 @@ export class JobsService {
       });
     });
 
+    return this.requireJobDetails(scope, jobId);
+  }
+
+  async submitFollowUpVisitRequest(
+    scope: OrganizationScope,
+    jobId: string,
+    actorMembershipId: string,
+    input: SubmitFollowUpVisitRequestDto,
+  ): Promise<FollowUpVisitRequestDto> {
+    await this.requireJobDetails(scope, jobId);
+    if (input.sourceVisitId !== null) {
+      await this.requireVisit(scope, jobId, input.sourceVisitId);
+    }
+    const [request] = await this.db
+      .insert(followUpVisitRequests)
+      .values({
+        organizationId: scope.organizationId,
+        jobId,
+        sourceVisitId: input.sourceVisitId,
+        requestingTechnicianMembershipId: actorMembershipId,
+        proposedStart: input.proposedStart,
+        proposedEnd: input.proposedEnd,
+        reason: input.reason,
+        sameTechnicianPreferred: input.sameTechnicianPreferred,
+      })
+      .returning();
+    return toFollowUpVisitRequestDto(request);
+  }
+
+  async listFollowUpVisitRequests(
+    scope: OrganizationScope,
+    actorMembershipId: string,
+    reviewer: boolean,
+  ): Promise<readonly FollowUpVisitRequestDto[]> {
+    const rows = await this.db
+      .select()
+      .from(followUpVisitRequests)
+      .where(
+        reviewer
+          ? eq(followUpVisitRequests.organizationId, scope.organizationId)
+          : and(
+              eq(followUpVisitRequests.organizationId, scope.organizationId),
+              eq(
+                followUpVisitRequests.requestingTechnicianMembershipId,
+                actorMembershipId,
+              ),
+            ),
+      )
+      .orderBy(desc(followUpVisitRequests.createdAt));
+    return rows.map(toFollowUpVisitRequestDto);
+  }
+
+  async askFollowUpVisitRequestClarification(
+    scope: OrganizationScope,
+    jobId: string,
+    requestId: string,
+    actorMembershipId: string,
+    input: FollowUpVisitReviewDto,
+  ): Promise<FollowUpVisitRequestDto> {
+    return this.reviewFollowUpVisitRequest(
+      scope,
+      jobId,
+      requestId,
+      actorMembershipId,
+      input,
+      'NEEDS_CLARIFICATION',
+    );
+  }
+
+  async rejectFollowUpVisitRequest(
+    scope: OrganizationScope,
+    jobId: string,
+    requestId: string,
+    actorMembershipId: string,
+    input: FollowUpVisitReviewDto,
+  ): Promise<FollowUpVisitRequestDto> {
+    return this.reviewFollowUpVisitRequest(
+      scope,
+      jobId,
+      requestId,
+      actorMembershipId,
+      input,
+      'REJECTED',
+    );
+  }
+
+  async approveFollowUpVisitRequest(
+    scope: OrganizationScope,
+    requestedJobId: string,
+    requestId: string,
+    actorMembershipId: string,
+    input: FollowUpVisitApprovalDto,
+  ): Promise<JobDetails> {
+    await this.assertTechniciansAssignable(
+      scope,
+      input.technicians.map((technician) => technician.membershipId),
+    );
+    let jobId = '';
+    await this.db.transaction(async (tx) => {
+      const [request] = await tx
+        .select()
+        .from(followUpVisitRequests)
+        .where(
+          and(
+            eq(followUpVisitRequests.organizationId, scope.organizationId),
+            eq(followUpVisitRequests.id, requestId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (request === undefined) {
+        throw new FollowUpVisitRequestNotFoundError();
+      }
+      if (request.jobId !== requestedJobId) {
+        throw new FollowUpVisitRequestNotFoundError();
+      }
+      jobId = request.jobId;
+      // Approval is idempotent once this request owns a Visit. A retry commonly carries the
+      // pre-approval version it originally read, so resolve the completed operation before applying
+      // optimistic-concurrency checks intended for a new review attempt.
+      if (request.createdVisitId !== null) {
+        return;
+      }
+      this.assertFollowUpRequestExpected(request, input);
+      if (
+        request.status !== 'PENDING' &&
+        request.status !== 'NEEDS_CLARIFICATION'
+      ) {
+        throw new FollowUpVisitRequestNotReviewableError(request.status);
+      }
+
+      const job = await this.requireJobRow(tx, scope, request.jobId);
+      const scheduledStart = input.scheduledStart ?? request.proposedStart;
+      const scheduledEnd = input.scheduledEnd ?? request.proposedEnd;
+      const conflicts = await this.findScheduleConflicts(
+        scope,
+        '00000000-0000-0000-0000-000000000000',
+        input.technicians.map((technician) => technician.membershipId),
+        scheduledStart,
+        scheduledEnd,
+      );
+      if (conflicts.length > 0 && !input.confirmConflicts) {
+        throw new ScheduleConflictError(conflicts);
+      }
+      const visitId = await this.insertScheduledVisit(
+        tx,
+        scope,
+        job,
+        actorMembershipId,
+        scheduledStart,
+        scheduledEnd,
+        input.technicians,
+        conflicts,
+      );
+      await tx
+        .update(followUpVisitRequests)
+        .set({
+          status: 'APPROVED',
+          reviewerMembershipId: actorMembershipId,
+          reviewedAt: new Date(),
+          reviewNote: input.note,
+          createdVisitId: visitId,
+          version: sql`${followUpVisitRequests.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(followUpVisitRequests.id, requestId));
+    });
+
+    return this.requireJobDetails(scope, jobId);
+  }
+
+  async createScheduledVisit(
+    scope: OrganizationScope,
+    jobId: string,
+    actorMembershipId: string,
+    input: DirectCreateVisitDto,
+  ): Promise<JobDetails> {
+    await this.assertTechniciansAssignable(
+      scope,
+      input.technicians.map((technician) => technician.membershipId),
+    );
+    const conflicts = await this.findScheduleConflicts(
+      scope,
+      '00000000-0000-0000-0000-000000000000',
+      input.technicians.map((technician) => technician.membershipId),
+      input.scheduledStart,
+      input.scheduledEnd,
+    );
+    if (conflicts.length > 0 && !input.confirmConflicts) {
+      throw new ScheduleConflictError(conflicts);
+    }
+
+    await this.db.transaction(async (tx) => {
+      const job = await this.requireJobRow(tx, scope, jobId);
+      await this.insertScheduledVisit(
+        tx,
+        scope,
+        job,
+        actorMembershipId,
+        input.scheduledStart,
+        input.scheduledEnd,
+        input.technicians,
+        conflicts,
+      );
+    });
     return this.requireJobDetails(scope, jobId);
   }
 
@@ -978,6 +1428,172 @@ export class JobsService {
     return readJobActivity(this.db, scope, jobId);
   }
 
+  private async reviewFollowUpVisitRequest(
+    scope: OrganizationScope,
+    jobId: string,
+    requestId: string,
+    actorMembershipId: string,
+    input: FollowUpVisitReviewDto,
+    status: 'NEEDS_CLARIFICATION' | 'REJECTED',
+  ): Promise<FollowUpVisitRequestDto> {
+    const [request] = await this.db
+      .select()
+      .from(followUpVisitRequests)
+      .where(
+        and(
+          eq(followUpVisitRequests.organizationId, scope.organizationId),
+          eq(followUpVisitRequests.id, requestId),
+        ),
+      )
+      .limit(1);
+    if (request === undefined) {
+      throw new FollowUpVisitRequestNotFoundError();
+    }
+    if (request.jobId !== jobId) {
+      throw new FollowUpVisitRequestNotFoundError();
+    }
+    this.assertFollowUpRequestExpected(request, input);
+    if (
+      request.status !== 'PENDING' &&
+      request.status !== 'NEEDS_CLARIFICATION'
+    ) {
+      throw new FollowUpVisitRequestNotReviewableError(request.status);
+    }
+    const [updated] = await this.db
+      .update(followUpVisitRequests)
+      .set({
+        status,
+        reviewerMembershipId: actorMembershipId,
+        reviewedAt: new Date(),
+        reviewNote: input.note,
+        version: sql`${followUpVisitRequests.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(followUpVisitRequests.id, requestId))
+      .returning();
+    return toFollowUpVisitRequestDto(updated);
+  }
+
+  private assertFollowUpRequestExpected(
+    request: typeof followUpVisitRequests.$inferSelect,
+    input: FollowUpVisitReviewDto,
+  ): void {
+    if (
+      input.expectedStatus !== null &&
+      input.expectedStatus !== request.status
+    ) {
+      throw new FollowUpVisitRequestConflictError(
+        request.status,
+        request.version,
+      );
+    }
+    if (
+      input.expectedVersion !== null &&
+      input.expectedVersion !== request.version
+    ) {
+      throw new FollowUpVisitRequestConflictError(
+        request.status,
+        request.version,
+      );
+    }
+  }
+
+  private async requireJobRow(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    jobId: string,
+  ): Promise<typeof jobs.$inferSelect> {
+    const [job] = await client
+      .select()
+      .from(jobs)
+      .where(
+        and(eq(jobs.organizationId, scope.organizationId), eq(jobs.id, jobId)),
+      )
+      .for('update')
+      .limit(1);
+    if (job === undefined) {
+      throw new JobNotFoundError();
+    }
+    if (job.propertyId === null || job.propertyAddressSnapshot === null) {
+      throw new VisitSchedulingConditionNotMetError('PROPERTY');
+    }
+    return job;
+  }
+
+  private async insertScheduledVisit(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    job: typeof jobs.$inferSelect,
+    actorMembershipId: string,
+    scheduledStart: Date,
+    scheduledEnd: Date,
+    technicians: readonly RequestedVisitTechnician[],
+    confirmedConflicts: readonly ScheduleConflict[],
+  ): Promise<string> {
+    const [visit] = await client
+      .insert(visits)
+      .values({
+        organizationId: scope.organizationId,
+        jobId: job.id,
+        propertyId: job.propertyId,
+        locationAddressSnapshot: job.propertyAddressSnapshot,
+        status: 'SCHEDULED',
+        scheduledStart,
+        scheduledEnd,
+      })
+      .returning({ id: visits.id });
+    await client.insert(visitScheduleHistory).values({
+      organizationId: scope.organizationId,
+      visitId: visit.id,
+      previousScheduledStart: null,
+      previousScheduledEnd: null,
+      newScheduledStart: scheduledStart,
+      newScheduledEnd: scheduledEnd,
+      actorMembershipId,
+      confirmedConflicts:
+        confirmedConflicts.length === 0 ? null : confirmedConflicts,
+    });
+    for (const technician of technicians) {
+      await client.insert(visitTechnicians).values({
+        organizationId: scope.organizationId,
+        visitId: visit.id,
+        technicianMembershipId: technician.membershipId,
+        roleCode: technician.roleCode,
+      });
+      await client.insert(visitTechnicianHistory).values({
+        organizationId: scope.organizationId,
+        visitId: visit.id,
+        technicianMembershipId: technician.membershipId,
+        event: 'ASSIGNED',
+        roleCode: technician.roleCode,
+        actorMembershipId,
+      });
+    }
+    if (job.status === 'NEW') {
+      await client
+        .update(jobs)
+        .set({
+          status: 'SCHEDULED',
+          version: sql`${jobs.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(jobs.organizationId, scope.organizationId),
+            eq(jobs.id, job.id),
+          ),
+        );
+      await client.insert(jobStatusHistory).values({
+        organizationId: scope.organizationId,
+        jobId: job.id,
+        fromStatus: 'NEW',
+        toStatus: 'SCHEDULED',
+        actorMembershipId,
+      });
+    }
+    return visit.id;
+  }
+
   /**
    * One Visit this caller may **write**, or a failure the route maps (`ADR-019` D3).
    *
@@ -1005,10 +1621,7 @@ export class JobsService {
         and(
           eq(visitTechnicians.organizationId, scope.organizationId),
           eq(visitTechnicians.visitId, visitId),
-          eq(
-            visitTechnicians.technicianMembershipId,
-            writer.membershipId,
-          ),
+          eq(visitTechnicians.technicianMembershipId, writer.membershipId),
         ),
       )
       .limit(1);
@@ -1174,10 +1787,7 @@ export class JobsService {
       .select({ status: jobs.status })
       .from(jobs)
       .where(
-        and(
-          eq(jobs.organizationId, scope.organizationId),
-          eq(jobs.id, jobId),
-        ),
+        and(eq(jobs.organizationId, scope.organizationId), eq(jobs.id, jobId)),
       )
       .for('update')
       .limit(1);
@@ -1189,11 +1799,13 @@ export class JobsService {
 
   /**
    * Applies the Job consequence `ADR-019` D4 decides for one recorded Visit event, in the same
-   * transaction as the Visit transition (`BR-058`, `BR-059`, `BR-067`).
+   * transaction as the Visit transition (`BR-058`, `BR-059`, `BR-061`, `BR-067`).
    *
    * The mapping itself lives in `visit-job-consequence.ts`, so the same rule is not implemented twice
    * (`BR-041`), and nothing here completes or cancels a Job: `BR-062` makes closing a Job an explicit
-   * office action and `BR-064` requires a cancellation reason.
+   * office action and `BR-064` requires a cancellation reason. `BR-061`'s invariant is applied in both
+   * directions there, so a Visit moved back into a working status takes its Job out of `PENDING_REVIEW`
+   * (`BR-074`).
    */
   private async applyVisitConsequence(
     client: JobMutationClient,
@@ -1212,6 +1824,7 @@ export class JobsService {
       to === 'COMPLETED'
         ? (await this.jobReviewConditionFailure(client, scope, jobId)) === null
         : false,
+      currentJobStatus,
     );
     if (destination === null || destination === currentJobStatus) {
       return;
@@ -1225,10 +1838,7 @@ export class JobsService {
         updatedAt: new Date(),
       })
       .where(
-        and(
-          eq(jobs.organizationId, scope.organizationId),
-          eq(jobs.id, jobId),
-        ),
+        and(eq(jobs.organizationId, scope.organizationId), eq(jobs.id, jobId)),
       );
     // One recorded Job transition (`BR-033`, `BR-067`): the new status, the actor and the server's
     // instant. No note is invented for it, and whether the row should carry an explicit link to the

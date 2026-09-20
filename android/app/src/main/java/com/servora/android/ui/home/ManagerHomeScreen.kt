@@ -628,7 +628,10 @@ private fun VisitCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = technicianSummary(visit),
+                text = techniciansSummary(
+                    names = visit.technicians.map { it.name },
+                    crewSize = visit.technicians.size,
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -653,28 +656,5 @@ private fun VisitCard(
             }
         }
     }
-}
-
-/**
- * Who is going to be there.
- *
- * Assigned technicians are named, Lead first, as the backend ordered them (`BR-068`). A Visit with
- * nobody assigned says so, and a Visit whose assigned members have no profile yet reports how many
- * are assigned rather than claiming the work is unassigned (`BR-020`).
- */
-@Composable
-private fun technicianSummary(visit: ManagerHomeVisit): String {
-    val names = visit.technicians.mapNotNull { it.name }
-    if (names.isNotEmpty()) {
-        return names.joinToString(separator = ", ")
-    }
-    if (visit.technicians.isEmpty()) {
-        return stringResource(R.string.customers_job_unassigned)
-    }
-    return pluralStringResource(
-        R.plurals.home_schedule_technicians,
-        visit.technicians.size,
-        visit.technicians.size,
-    )
 }
 

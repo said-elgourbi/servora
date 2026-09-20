@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -24,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,7 +46,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.domain.model.Customer
+import com.servora.android.domain.model.CustomerContact
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerJob
 import com.servora.android.domain.model.CustomerJobTechnician
@@ -52,6 +56,7 @@ import com.servora.android.domain.model.CustomerProperty
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PropertyStatus
+import com.servora.android.ui.components.ContactPrimaryBadge
 import com.servora.android.ui.components.InfoCard
 import com.servora.android.ui.components.JobStatusPill
 import com.servora.android.ui.components.OfflineNotice
@@ -70,6 +75,26 @@ const val CustomerDetailPropertiesTag = "customer-detail-properties"
 const val CustomerDetailJobsTag = "customer-detail-jobs"
 const val CustomerDetailSeeAllJobsTag = "customer-detail-see-all-jobs"
 const val CustomerDetailAddPropertyTag = "customer-detail-add-property"
+
+/** The customer's contact persons card (`BR-095`; `ADR-022` D6). */
+const val CustomerDetailContactsTag = "customer-detail-contacts"
+const val CustomerDetailAddContactTag = "customer-detail-add-contact"
+const val CustomerDetailContactRemovalMessageTag = "customer-detail-contact-removal-message"
+const val CustomerDetailContactRemoveDialogTag = "customer-detail-contact-remove-dialog"
+const val CustomerDetailContactRemoveConfirmTag = "customer-detail-contact-remove-confirm"
+
+/**
+ * The Primary badge on the customer's **own** phone line, drawn when no contact person is the primary
+ * (`BR-095`): the Customer is then its own primary, and its own number is the primary one.
+ */
+const val CustomerDetailCustomerPhoneBadgeTag = "customer-detail-customer-phone-badge"
+
+fun customerDetailContactTag(contactId: String): String = "customer-detail-contact-$contactId"
+
+fun customerDetailContactEditTag(contactId: String): String = "customer-detail-contact-$contactId-edit"
+
+fun customerDetailContactRemoveTag(contactId: String): String =
+    "customer-detail-contact-$contactId-remove"
 
 /** The disclosure that keeps the customer's archived Properties reachable (`BR-082`). */
 const val CustomerDetailArchivedPropertiesTag = "customer-detail-archived-properties"
@@ -98,13 +123,37 @@ fun CustomerDetailScreen(
     state: CustomerDetailUiState,
     canViewProperties: Boolean,
     canAddProperty: Boolean,
+    canCreateJob: Boolean,
+    canCreateContact: Boolean,
+    canEditContact: Boolean,
+    canRemoveContact: Boolean,
+    contactRemoval: RemoveContactUiState,
     onAddProperty: () -> Unit,
+    onCreateJob: () -> Unit,
     onSeeAllJobs: () -> Unit,
+    onAddContact: () -> Unit,
+    onEditContact: (contactId: String) -> Unit,
+    onRemoveContact: (contact: CustomerContact) -> Unit,
+    onDismissContactRemovalFailure: () -> Unit,
+    onContactRemoved: () -> Unit,
     onRetry: () -> Unit,
     onOpenProperty: (propertyId: String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val detail = state.detail
+
+    // Which contact the confirmation is open for, resolved from the detail below. The id is what is
+    // remembered, so the confirmation survives a configuration change and always names the row the
+    // backend last reported.
+    var confirmRemoveContactId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // The removal is on the backend now, so the customer is re-read rather than patched locally
+    // (`BR-001`, `BR-033`); the destination acknowledges the signal once it has read again.
+    LaunchedEffect(contactRemoval.isRemoved) {
+        if (contactRemoval.isRemoved) {
+            onContactRemoved()
+        }
+    }
 
     // The screen draws its content only: this destination's title, its back control and the
     // permission-gated Edit action belong to the app shell's one contextual top bar
@@ -117,9 +166,18 @@ fun CustomerDetailScreen(
                     showingLastReported = state.showingLastReported,
                     canViewProperties = canViewProperties,
                     canAddProperty = canAddProperty,
+                    canCreateContact = canCreateContact,
+                    canEditContact = canEditContact,
+                    canRemoveContact = canRemoveContact,
+                    isRemovingContact = contactRemoval.isRemoving,
+                    contactRemovalFailure = contactRemoval.failureReason,
                     onAddProperty = onAddProperty,
                     onSeeAllJobs = onSeeAllJobs,
                     onOpenProperty = onOpenProperty,
+                    onAddContact = onAddContact,
+                    onEditContact = onEditContact,
+                    onRequestRemoveContact = { contactId -> confirmRemoveContactId = contactId },
+                    onDismissContactRemovalFailure = onDismissContactRemovalFailure,
                 )
 
             state.failureReason != null -> CustomersError(onRetry = onRetry)
@@ -127,27 +185,48 @@ fun CustomerDetailScreen(
             else -> CustomersLoading()
         }
 
-        // Create Job is pinned as a floating action, as the product owner directed; the design
-        // draws it in the actions row. The action is not wired yet: the Jobs feature has no
-        // create path, so this stays an affordance rather than a fabricated job.
-        ExtendedFloatingActionButton(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-                .testTag(CustomerDetailCreateJobTag),
-            onClick = {},
-            shape = MaterialTheme.shapes.large,
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_add),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.customers_create_job))
+        // Create Job is pinned as a floating action, as the product owner directed; the design draws it
+        // in the actions row. It opens the Job form with this customer as its context, and it is drawn
+        // only for a session that holds the create capability the API enforces on `POST /jobs`
+        // (`BR-008`, `BR-011`, `BR-094`).
+        if (canCreateJob) {
+            ExtendedFloatingActionButton(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .testTag(CustomerDetailCreateJobTag),
+                onClick = onCreateJob,
+                shape = MaterialTheme.shapes.large,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_add),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.customers_create_job))
+            }
         }
+    }
+
+    // Removing a contact person is a consequential action (`BR-067`, `ADR-022` D8), so it is
+    // confirmed first. The dialog states what happens and the removal states the version the user
+    // read, so a contact another member changed in the meantime is refused rather than removed from
+    // under them (`BR-032`, `BR-095`).
+    val pendingRemoval = confirmRemoveContactId?.let { contactId ->
+        detail?.contacts?.firstOrNull { it.id == contactId }
+    }
+    if (pendingRemoval != null) {
+        RemoveContactDialog(
+            contact = pendingRemoval,
+            onConfirm = {
+                confirmRemoveContactId = null
+                onRemoveContact(pendingRemoval)
+            },
+            onDismiss = { confirmRemoveContactId = null },
+        )
     }
 }
 
@@ -157,9 +236,18 @@ private fun CustomerDetailContent(
     showingLastReported: Boolean,
     canViewProperties: Boolean,
     canAddProperty: Boolean,
+    canCreateContact: Boolean,
+    canEditContact: Boolean,
+    canRemoveContact: Boolean,
+    isRemovingContact: Boolean,
+    contactRemovalFailure: CustomersFailureReason?,
     onAddProperty: () -> Unit,
     onSeeAllJobs: () -> Unit,
     onOpenProperty: (propertyId: String) -> Unit,
+    onAddContact: () -> Unit,
+    onEditContact: (contactId: String) -> Unit,
+    onRequestRemoveContact: (contactId: String) -> Unit,
+    onDismissContactRemovalFailure: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag(CustomerDetailContentTag),
@@ -177,7 +265,38 @@ private fun CustomerDetailContent(
                 )
             }
         }
-        item { CustomerDetailContactCard(detail.customer) }
+        item { CustomerDetailContactCard(detail.customer, showsPrimaryOnPhone = isCustomerItsOwnPrimary(detail)) }
+        // The customer's contact persons (`BR-095`). Reading them adds no capability — they are part
+        // of the projection `customers.view` already authorizes (`ADR-022` D4) — so the card is drawn
+        // for every session that may read the customer, and only its actions are capability-gated
+        // (`BR-007`, `BR-011`).
+        item {
+            CustomerContactsSection(
+                contacts = detail.contacts,
+                canCreateContact = canCreateContact,
+                canEditContact = canEditContact,
+                canRemoveContact = canRemoveContact,
+                isRemovingContact = isRemovingContact,
+                onAddContact = onAddContact,
+                onEditContact = onEditContact,
+                onRequestRemoveContact = onRequestRemoveContact,
+            )
+        }
+        // A refused removal is reported where it was taken, and it stays until the user clears it:
+        // nothing has changed, so the customer is still shown exactly as the API last described it
+        // (`BR-001`, `BR-042`).
+        contactRemovalFailure?.let { reason ->
+            item {
+                ActionAttention(
+                    message = stringResource(
+                        R.string.customers_contacts_remove_failure,
+                        stringResource(reason.contactMessageRes()),
+                    ),
+                    onDismiss = onDismissContactRemovalFailure,
+                    testTag = CustomerDetailContactRemovalMessageTag,
+                )
+            }
+        }
         // Properties are their own capability set (`BR-085`), so the section is absent rather than
         // empty for a caller without `properties.view`; the backend independently refuses the read
         // (`BR-007`).
@@ -254,9 +373,16 @@ private fun CustomerDetailIdentity(detail: CustomerDetail) {
     }
 }
 
-/** The customer's phone and email, each a link, as designed. */
+/**
+ * The customer's phone and email, each a link, as designed.
+ *
+ * [showsPrimaryOnPhone] draws the **Primary** badge on the phone line: `BR-095` makes the Customer its own
+ * effective primary when no contact person holds the flag, and this is the line that then carries the
+ * marker. The badge follows the effective primary and nothing else — when a contact person is flagged,
+ * that person's row in the contacts card carries it instead.
+ */
 @Composable
-private fun CustomerDetailContactCard(customer: Customer) {
+private fun CustomerDetailContactCard(customer: Customer, showsPrimaryOnPhone: Boolean) {
     val context = LocalContext.current
     val lines = listOfNotNull(customer.phone, customer.email)
 
@@ -269,11 +395,22 @@ private fun CustomerDetailContactCard(customer: Customer) {
             )
         }
         customer.phone?.let { phone ->
-            CustomerContactLine(
-                text = phone,
-                glyph = R.drawable.ic_phone,
-                onClick = { context.startContactIntent(dialIntent(phone)) },
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CustomerContactLine(
+                    // `fill = false` so the line keeps its intrinsic width and the badge sits beside it
+                    // rather than being pushed off the card by a value that fills the row.
+                    modifier = Modifier.weight(1f, fill = false),
+                    text = phone,
+                    glyph = R.drawable.ic_phone,
+                    onClick = { context.startContactIntent(dialIntent(phone)) },
+                )
+                if (showsPrimaryOnPhone) {
+                    ContactPrimaryBadge(Modifier.testTag(CustomerDetailCustomerPhoneBadgeTag))
+                }
+            }
         }
         if (customer.phone != null && customer.email != null) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -286,6 +423,225 @@ private fun CustomerDetailContactCard(customer: Customer) {
             )
         }
     }
+}
+
+/**
+ * The customer's contact persons (`BR-095`, `ADR-022` D6).
+ *
+ * The rows are the backend's own ordering — the primary contact first, then the rest oldest-first — so
+ * the screen presents what the API derived rather than choosing an order of its own (`BR-041`).
+ *
+ * Edit and Remove are drawn only for the capability that would perform the write, and the create
+ * action only for `customers.contacts.create`: a session may legitimately read a customer without
+ * maintaining the people the organization calls (`BR-007`, `BR-011`, `BR-095`).
+ */
+@Composable
+private fun CustomerContactsSection(
+    contacts: List<CustomerContact>,
+    canCreateContact: Boolean,
+    canEditContact: Boolean,
+    canRemoveContact: Boolean,
+    isRemovingContact: Boolean,
+    onAddContact: () -> Unit,
+    onEditContact: (contactId: String) -> Unit,
+    onRequestRemoveContact: (contactId: String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(CustomerDetailContactsTag),
+    ) {
+        SectionLabel(
+            label = stringResource(R.string.customers_detail_contacts),
+            count = contacts.size,
+        )
+        InfoCard {
+            if (contacts.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.customers_contacts_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                contacts.forEachIndexed { index, contact ->
+                    if (index > 0) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                    CustomerContactRow(
+                        contact = contact,
+                        canEditContact = canEditContact,
+                        canRemoveContact = canRemoveContact,
+                        isRemovingContact = isRemovingContact,
+                        onEditContact = onEditContact,
+                        onRequestRemoveContact = onRequestRemoveContact,
+                    )
+                }
+            }
+            // Adding a contact belongs with the contacts it adds to, as adding a Property does with
+            // the Properties (`BR-011`).
+            if (canCreateContact) {
+                if (contacts.isNotEmpty()) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+                TextButton(
+                    modifier = Modifier.testTag(CustomerDetailAddContactTag),
+                    onClick = onAddContact,
+                ) {
+                    Text(stringResource(R.string.customers_contacts_add))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One contact person: the name the organization knows, and the person's own phone and email.
+ *
+ * The phone and email are links — reaching the person is the whole reason a contact is recorded — and
+ * they reuse the affordances the customers list already has (`dialIntent` / `mailIntent`), so the app
+ * dials and composes the same way everywhere (`ADR-022` D6). A value the office never recorded is left
+ * out rather than drawn as a row announcing its absence (`BR-012`).
+ */
+@Composable
+private fun CustomerContactRow(
+    contact: CustomerContact,
+    canEditContact: Boolean,
+    canRemoveContact: Boolean,
+    isRemovingContact: Boolean,
+    onEditContact: (contactId: String) -> Unit,
+    onRequestRemoveContact: (contactId: String) -> Unit,
+) {
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(customerDetailContactTag(contact.id)),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                modifier = Modifier.weight(1f),
+                text = contactName(contact),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (contact.isPrimary) {
+                ContactPrimaryBadge()
+            }
+        }
+        contact.phone?.takeIf { it.isNotBlank() }?.let { phone ->
+            CustomerContactLine(
+                text = phone,
+                glyph = R.drawable.ic_phone,
+                onClick = { context.startContactIntent(dialIntent(phone)) },
+            )
+        }
+        contact.email?.takeIf { it.isNotBlank() }?.let { email ->
+            CustomerContactLine(
+                text = email,
+                glyph = R.drawable.ic_mail,
+                onClick = { context.startContactIntent(mailIntent(email)) },
+            )
+        }
+        if (canEditContact || canRemoveContact) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (canEditContact) {
+                    TextButton(
+                        modifier = Modifier.testTag(customerDetailContactEditTag(contact.id)),
+                        onClick = { onEditContact(contact.id) },
+                    ) {
+                        Text(stringResource(R.string.customers_edit_short))
+                    }
+                }
+                if (canRemoveContact) {
+                    TextButton(
+                        modifier = Modifier.testTag(customerDetailContactRemoveTag(contact.id)),
+                        // A removal already in flight is not offered again, so one tap cannot become
+                        // two operations (`BR-067`).
+                        enabled = !isRemovingContact,
+                        onClick = { onRequestRemoveContact(contact.id) },
+                    ) {
+                        Text(
+                            text = stringResource(R.string.customers_contacts_remove),
+                            color = if (isRemovingContact) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The person's whole name, built from the two parts the office recorded. */
+private fun contactName(contact: CustomerContact): String =
+    listOf(contact.firstName, contact.lastName)
+        .filter { it.isNotBlank() }
+        .joinToString(" ")
+
+/**
+ * Whether the Customer is its own effective primary contact (`BR-095`).
+ *
+ * True when no contact person holds the primary flag — the legal "zero primary" state — in which case the
+ * Customer's own phone number is the one that stands as the primary, for an individual and a company
+ * alike. The office customer detail lists every contact person rather than choosing one, so this decides
+ * the **marker** only: the Customer's own phone line wears it when nothing is flagged.
+ */
+private fun isCustomerItsOwnPrimary(detail: CustomerDetail): Boolean =
+    detail.contacts.none { it.isPrimary }
+
+/**
+ * The removal confirmation (`BR-095`, `ADR-022` D8).
+ *
+ * It names the person being removed and states what the removal does: the person leaves the customer's
+ * contacts while the record is kept, because a removal is soft and "who removed this person, and when"
+ * has to stay answerable (`BR-033`, `BR-067`).
+ */
+@Composable
+private fun RemoveContactDialog(
+    contact: CustomerContact,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        modifier = Modifier.testTag(CustomerDetailContactRemoveDialogTag),
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.customers_contacts_remove_confirm_title)) },
+        text = {
+            Text(
+                stringResource(
+                    R.string.customers_contacts_remove_confirm_message,
+                    contactName(contact),
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                modifier = Modifier.testTag(CustomerDetailContactRemoveConfirmTag),
+                onClick = onConfirm,
+            ) {
+                Text(
+                    text = stringResource(R.string.customers_contacts_remove_confirm_action),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.property_cancel))
+            }
+        },
+    )
 }
 
 @Composable

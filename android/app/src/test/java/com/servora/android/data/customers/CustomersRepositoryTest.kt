@@ -807,6 +807,173 @@ class CustomersRepositoryTest {
     }
 
     @Test
+    fun `maps each contact's version so a write can state the version it read`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            detailAnswer = {
+                detailDto().copy(contacts = listOf(contactDto(version = 4)))
+            },
+        )
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+
+        val detail = assertDetailSuccess(repository.loadCustomerDetail("c1"))
+
+        // The version is the contact's write token (`BR-095`, `ADR-022` D9): an edit or a removal
+        // states it back as `expectedVersion`, so the detail read has to carry it.
+        assertEquals(4, detail.contacts.single().version)
+    }
+
+    @Test
+    fun `edits a contact with the session token and the version it read`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            updateContactAnswer = { contactDto(version = 2) },
+        )
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.updateContact(
+            customerId = "c1",
+            contactId = "ct1",
+            request = UpdateCustomerContactRequest(
+                phone = "+15559999999",
+                isPrimary = true,
+                expectedVersion = 1,
+            ),
+        )
+
+        assertEquals(ContactUpdateResult.Success, result)
+        assertEquals("ct1", api.lastContactUpdateId)
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        val request = requireNotNull(api.lastContactUpdateRequest)
+        assertEquals(1, request.expectedVersion)
+        assertEquals("+15559999999", request.phone)
+        assertEquals(true, request.isPrimary)
+        // The free-text role no client edits is not stated, so the API leaves it as the contact holds
+        // it (`ADR-022` D9).
+        assertNull(request.role)
+    }
+
+    @Test
+    fun `classifies a contact edit against a version the contact has left as a conflict`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() })
+        api.failures += httpFailure(409)
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.updateContact(
+            customerId = "c1",
+            contactId = "ct1",
+            request = UpdateCustomerContactRequest(phone = "+15559999999", expectedVersion = 1),
+        )
+
+        // The API is the final authority and refused the mutation rather than writing over newer
+        // state, which the screen reports so the user re-reads (`BR-032`, `BR-086`).
+        assertEquals(ContactUpdateResult.Failure(CustomersFailureReason.VERSION_CONFLICT), result)
+    }
+
+    @Test
+    fun `classifies an edit of a contact the customer does not hold as not found`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() })
+        api.failures += httpFailure(404)
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.updateContact(
+            customerId = "c1",
+            contactId = "gone",
+            request = UpdateCustomerContactRequest(expectedVersion = 2),
+        )
+
+        // A contact id that is not this customer's, or one already removed, is `404 CONTACT_NOT_FOUND`
+        // (`docs/api/customers.md` §5.2.2) and is reported as the not-found it is.
+        assertEquals(ContactUpdateResult.Failure(CustomersFailureReason.NOT_FOUND), result)
+    }
+
+    @Test
+    fun `renews the session and retries the contact edit once when the token is refused`() = runTest {
+        val api = FakeCustomersApi(
+            answer = { emptyList() },
+            updateContactAnswer = { contactDto(version = 2) },
+        )
+        api.failures += httpFailure(401)
+        val authenticator = authenticator(
+            accessToken = "expired-token",
+            renewal = SessionRenewal.Renewed(accessToken = "fresh-token"),
+        )
+
+        val result = repository(api, authenticator).updateContact(
+            customerId = "c1",
+            contactId = "ct1",
+            request = UpdateCustomerContactRequest(isPrimary = false, expectedVersion = 1),
+        )
+
+        assertEquals(ContactUpdateResult.Success, result)
+        assertEquals(1, authenticator.renewals)
+        assertEquals("Bearer fresh-token", api.lastAuthorization)
+        // The retried edit carries the same body, so the version the caller read is stated once for the
+        // operation (`BR-001`, `BR-032`).
+        assertEquals(1, requireNotNull(api.lastContactUpdateRequest).expectedVersion)
+    }
+
+    @Test
+    fun `removes a contact with the version it read and reports success`() = runTest {
+        val api = FakeCustomersApi(answer = { emptyList() })
+        val repository = repository(api, authenticator(accessToken = "access-token"))
+
+        val result = repository.removeContact(
+            customerId = "c1",
+            contactId = "ct1",
+            request = RemoveCustomerContactRequest(expectedVersion = 3),
+        )
+
+        // The route answers `204` with no body; the removal is soft, so nothing is carried back and the
+        // screen re-reads the customer (`BR-095`, `ADR-022` D8).
+        assertEquals(ContactRemoveResult.Success, result)
+        assertEquals("ct1", api.lastContactRemovalId)
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals(3, requireNotNull(api.lastContactRemovalRequest).expectedVersion)
+    }
+
+    @Test
+    fun `classifies a contact removal against a version the contact has left as a conflict`() =
+        runTest {
+            val api = FakeCustomersApi(
+                answer = { emptyList() },
+                removeContactAnswer = { contactHttpFailure(409) },
+            )
+            val repository = repository(api, authenticator(accessToken = "access-token"))
+
+            val result = repository.removeContact(
+                customerId = "c1",
+                contactId = "ct1",
+                request = RemoveCustomerContactRequest(expectedVersion = 1),
+            )
+
+            // The version guard the removal documents is reported as the conflict it is, not as an
+            // unanswered call (`BR-032`, `BR-086`).
+            assertEquals(
+                ContactRemoveResult.Failure(CustomersFailureReason.VERSION_CONFLICT),
+                result,
+            )
+        }
+
+    @Test
+    fun `classifies a contact removal that never reached the backend as a network failure`() =
+        runTest {
+            val api = FakeCustomersApi(answer = { emptyList() })
+            api.failures += IOException("offline")
+            val repository = repository(api, authenticator(accessToken = "access-token"))
+
+            val result = repository.removeContact(
+                customerId = "c1",
+                contactId = "ct1",
+                request = RemoveCustomerContactRequest(expectedVersion = 1),
+            )
+
+            // Contact writes are online-only (`offline-first-architecture.md` §13): the operation is
+            // reported as the network failure it is rather than queued.
+            assertEquals(ContactRemoveResult.Failure(CustomersFailureReason.NETWORK), result)
+        }
+
+    @Test
     fun `sends the edit with the session token and reports success`() = runTest {
         val api = FakeCustomersApi(
             answer = { emptyList() },
@@ -991,6 +1158,19 @@ class CustomersRepositoryTest {
         ),
     )
 
+    /**
+     * The answer a contact route's failure arrives as.
+     *
+     * The removal route answers through [Response] rather than by throwing, so a failure of it is a
+     * scripted status the way the route really reports one.
+     */
+    private fun contactHttpFailure(status: Int): Response<Unit> =
+        Response.error(
+            status,
+            """{"statusCode":$status,"code":"CONTACT_VERSION_CONFLICT","message":"ignored"}"""
+                .toResponseBody("application/json".toMediaType()),
+        )
+
     private fun customerDto(
         id: String = "c1",
         type: String = "INDIVIDUAL",
@@ -1015,12 +1195,13 @@ class CustomersRepositoryTest {
         customer = customerDto(id = id),
     )
 
-    private fun contactDto() = CustomerContactDto(
+    private fun contactDto(version: Int = 1) = CustomerContactDto(
         id = "ct1",
         customerId = "c1",
         firstName = "John",
         lastName = "Smith",
         isPrimary = true,
+        version = version,
         createdAt = "2026-01-01T00:00:00Z",
         updatedAt = "2026-01-01T00:00:00Z",
     )
@@ -1044,6 +1225,10 @@ private class FakeCustomersApi(
     private val createContactAnswer: suspend () -> CustomerContactDto = {
         error("the contact create was not scripted for this test")
     },
+    private val updateContactAnswer: suspend () -> CustomerContactDto = {
+        error("the contact edit was not scripted for this test")
+    },
+    private val removeContactAnswer: suspend () -> Response<Unit> = { Response.success(Unit) },
     private val updateCustomerAnswer: suspend () -> CreatedCustomerDto = {
         error("the customer edit was not scripted for this test")
     },
@@ -1057,6 +1242,10 @@ private class FakeCustomersApi(
     var lastCustomerRequest: CreateCustomerRequest? = null
     var lastContactRequest: CreateCustomerContactRequest? = null
     var lastContactId: String? = null
+    var lastContactUpdateId: String? = null
+    var lastContactUpdateRequest: UpdateCustomerContactRequest? = null
+    var lastContactRemovalId: String? = null
+    var lastContactRemovalRequest: RemoveCustomerContactRequest? = null
     var lastUpdateId: String? = null
     var lastUpdateRequest: UpdateCustomerRequest? = null
     var calls: Int = 0
@@ -1174,6 +1363,34 @@ private class FakeCustomersApi(
         lastContactRequest = request
         failures.removeFirstOrNull()?.let { throw it }
         return createContactAnswer()
+    }
+
+    override suspend fun updateContact(
+        authorization: String,
+        id: String,
+        contactId: String,
+        request: UpdateCustomerContactRequest,
+    ): CustomerContactDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastContactUpdateId = contactId
+        lastContactUpdateRequest = request
+        failures.removeFirstOrNull()?.let { throw it }
+        return updateContactAnswer()
+    }
+
+    override suspend fun removeContact(
+        authorization: String,
+        id: String,
+        contactId: String,
+        request: RemoveCustomerContactRequest,
+    ): Response<Unit> {
+        calls += 1
+        lastAuthorization = authorization
+        lastContactRemovalId = contactId
+        lastContactRemovalRequest = request
+        failures.removeFirstOrNull()?.let { throw it }
+        return removeContactAnswer()
     }
 
     override suspend fun updateCustomer(

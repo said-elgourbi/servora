@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, getTableColumns, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, isNull, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
@@ -112,8 +112,13 @@ const ARCHIVE_WARNING_TERMINAL_VISIT_STATUSES = [
   'NO_SHOW',
 ] as const;
 
-/** The database handle a read may use: the pool itself or the transaction it runs inside. */
-type Executor = Pick<
+/**
+ * The database handle a read may use: the pool itself or the transaction it runs inside.
+ *
+ * It is exported because a caller outside this service — the Job-creation path — runs the Property
+ * check inside its own transaction, so the Property cannot change between the check and the write.
+ */
+export type Executor = Pick<
   DatabaseService['db'],
   'select' | 'insert' | 'update' | 'delete'
 >;
@@ -328,6 +333,70 @@ export class PropertiesService {
     if (property === undefined) {
       throw new PropertyNotFoundError(propertyId);
     }
+    if (property.status !== 'ACTIVE') {
+      throw new PropertyNotAvailableForNewWorkError(propertyId);
+    }
+    return property;
+  }
+
+  /**
+   * Confirms, inside the caller's transaction, that a Property is a location this Customer's new work
+   * may be created at (`BR-050`, `BR-083`, `BR-085`).
+   *
+   * Two rules are checked and both are the Property domain's own: the Property must **currently
+   * belong** to the addressed Customer — the active `property_customer_relationships` row, not merely
+   * an organization-owned Property, and not a relationship that has already ended (`BR-050`) — and it
+   * must be `ACTIVE`, because archiving blocks new Jobs while leaving existing work alone (`BR-083`).
+   *
+   * It takes [executor] rather than using the pool so the Job-creation path can run it inside the
+   * transaction that inserts the Job. The Property row is locked, so an archive that commits while a
+   * Job is being created is serialized against it: no Job is created at a Property that is no longer
+   * active (`BR-086`).
+   *
+   * A Property this Customer does not hold is reported as **not found**, never as forbidden: the
+   * Property routes answer the same way, so an id cannot be probed for which Customer holds it
+   * (`BR-001`, `BR-007`).
+   */
+  async assertPropertyAvailableForCustomerNewWork(
+    executor: Executor,
+    scope: OrganizationScope,
+    customerId: string,
+    propertyId: string,
+  ): Promise<Property> {
+    const [property] = await executor
+      .select()
+      .from(properties)
+      .where(
+        and(
+          eq(properties.organizationId, scope.organizationId),
+          eq(properties.id, propertyId),
+        ),
+      )
+      .for('update')
+      .limit(1);
+    if (property === undefined) {
+      throw new PropertyNotFoundError(propertyId);
+    }
+
+    const [relationship] = await executor
+      .select({ id: propertyCustomerRelationships.id })
+      .from(propertyCustomerRelationships)
+      .where(
+        and(
+          eq(
+            propertyCustomerRelationships.organizationId,
+            scope.organizationId,
+          ),
+          eq(propertyCustomerRelationships.propertyId, propertyId),
+          eq(propertyCustomerRelationships.customerId, customerId),
+          isNull(propertyCustomerRelationships.endedAt),
+        ),
+      )
+      .limit(1);
+    if (relationship === undefined) {
+      throw new PropertyNotFoundError(propertyId);
+    }
+
     if (property.status !== 'ACTIVE') {
       throw new PropertyNotAvailableForNewWorkError(propertyId);
     }

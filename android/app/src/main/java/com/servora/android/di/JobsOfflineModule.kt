@@ -24,6 +24,7 @@ import com.servora.android.data.jobs.JobAudioUploadHandler
 import com.servora.android.data.jobs.MediaPlayerJobAudioPlayer
 import com.servora.android.data.jobs.PrivateJobAudioFiles
 import com.servora.android.data.jobs.MediaRecorderJobAudioRecorder
+import com.servora.android.data.jobs.VisitFieldActionHandler
 import com.servora.android.data.offline.OfflineOperationHandler
 import dagger.Binds
 import dagger.Module
@@ -59,6 +60,16 @@ internal object JobsOfflineModule {
     @IntoSet
     fun provideJobAudioUploadHandler(
         handler: JobAudioUploadHandler,
+    ): OfflineOperationHandler = handler
+
+    /**
+     * A queued Visit field action is the technician's offline-capable lifecycle work
+     * (`BR-013`, `BR-074`, `BR-077`; `ADR-019` D5).
+     */
+    @Provides
+    @IntoSet
+    fun provideVisitFieldActionHandler(
+        handler: VisitFieldActionHandler,
     ): OfflineOperationHandler = handler
 }
 

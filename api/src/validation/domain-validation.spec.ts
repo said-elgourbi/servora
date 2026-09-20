@@ -8,6 +8,7 @@ import {
   requireEmail,
   requireEnum,
   requirePassword,
+  requirePositiveInteger,
   requireText,
 } from './domain-validation.js';
 
@@ -145,6 +146,21 @@ describe('domain validation', () => {
         optionalInstant('2026-09-13T10:15:00.1234567890Z', 'capturedAt'),
       ).toThrow(/must be an ISO-8601 instant/);
     });
+  });
+
+  describe('requirePositiveInteger', () => {
+    it('returns a positive integer', () => {
+      expect(requirePositiveInteger(1, 'expectedVersion')).toBe(1);
+    });
+
+    it.each([undefined, null, 0, -1, 1.5, '2'])(
+      'rejects a value that is not a positive integer (%s)',
+      (value) => {
+        expect(() => requirePositiveInteger(value, 'expectedVersion')).toThrow(
+          /must be a positive integer/,
+        );
+      },
+    );
   });
 
   describe('optionalPositiveInteger', () => {

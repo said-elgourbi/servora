@@ -37,6 +37,7 @@ import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.domain.model.evidencePhaseOrNull
+import com.servora.android.domain.model.visitOutcomeOrNull
 import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
 import com.servora.android.ui.components.initials
@@ -163,14 +164,14 @@ internal fun JobActivitySection(
 }
 
 @Composable
-private fun ActivityLoading() {
+internal fun ActivityLoading() {
     Box(modifier = Modifier.fillMaxWidth().height(72.dp), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(modifier = Modifier.size(24.dp))
     }
 }
 
 @Composable
-private fun ActivityFailure(onRetry: () -> Unit) {
+internal fun ActivityFailure(onRetry: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().testTag(JobActivityFailureTag)) {
         Text(
             text = stringResource(R.string.job_activity_error_message),
@@ -204,16 +205,24 @@ private fun ActivityEmpty() {
         )
     }
 }
-/** The timeline itself: one marker and connecting line per entry, newest first. */
+/**
+ * The timeline itself: one marker and connecting line per entry, newest first.
+ *
+ * It is reusable because more than one section of the Job Details screen draws one: the Job's own
+ * timeline, and — once the Job and its Visits are presented apart — each Visit's own events beside that
+ * Visit (`BR-080`). The entries are handed in already narrowed and in the backend's order, and the
+ * component holds no rule of its own about which entries belong together.
+ */
 @Composable
-private fun ActivityTimeline(
+internal fun ActivityTimeline(
     events: List<JobActivityEvent>,
     jobId: String,
     photoImages: JobPhotoImages,
     onOpenPhoto: (String) -> Unit,
     audio: JobActivityAudio,
+    modifier: Modifier = Modifier,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth()) {
         events.forEachIndexed { index, event ->
             ActivityEventRow(
                 event = event,
@@ -540,19 +549,15 @@ private fun localizedRole(code: String?): String =
         else -> code.orEmpty()
     }
 
+/**
+ * The localized label an outcome code is presented with (`BR-028`, `BR-041`).
+ *
+ * The code-to-label table is the shared [visitOutcomeLabel] one the completion sheet and the Visit group's
+ * card both use, so one outcome is named the same way wherever the screen states it (`BR-041`). A code this
+ * build does not know has no label, which the entry that carries it reports generically rather than wrongly.
+ */
 @Composable
 private fun localizedOutcome(code: String?): String? =
-    when (code) {
-        "RESOLVED" -> stringResource(R.string.job_activity_outcome_resolved)
-        "NEEDS_PARTS" -> stringResource(R.string.job_activity_outcome_needs_parts)
-        "NEEDS_FOLLOWUP" -> stringResource(R.string.job_activity_outcome_needs_followup)
-        "NEEDS_QUOTE_APPROVAL" ->
-            stringResource(R.string.job_activity_outcome_needs_quote_approval)
-
-        "UNABLE_TO_COMPLETE" ->
-            stringResource(R.string.job_activity_outcome_unable_to_complete)
-
-        else -> null
-    }
+    visitOutcomeOrNull(code)?.let { outcome -> stringResource(visitOutcomeLabel(outcome)) }
 
 

@@ -3,6 +3,7 @@ import {
   JOB_STATUS_TRANSITIONS,
   TERMINAL_VISIT_STATUSES,
   VISIT_OUTCOME_CODES,
+  VISIT_STATUSES,
   VISIT_STATUS_TRANSITIONS,
   applicableJobStatusTransitions,
   applicableVisitStatusTransitions,
@@ -178,67 +179,74 @@ describe('job lifecycle vocabulary', () => {
 });
 
 describe('visit lifecycle vocabulary', () => {
-  it('permits exactly the normal lifecycle plus the one correction BR-075 defines', () => {
+  it('permits free movement between the working statuses and reopens a completed Visit', () => {
+    // `BR-074`: a Visit is not advanced one step at a time. Every working status is reachable from every
+    // other, in either direction, and `COMPLETED` is reopenable — while `CANCELED` and `NO_SHOW` stay
+    // terminal and remain unreachable from a field action (`BR-066`).
     expect(VISIT_STATUS_TRANSITIONS).toEqual({
-      DRAFT: ['SCHEDULED'],
-      SCHEDULED: ['EN_ROUTE'],
-      EN_ROUTE: ['ON_SITE', 'SCHEDULED'],
-      ON_SITE: ['IN_PROGRESS'],
-      IN_PROGRESS: ['COMPLETED'],
-      COMPLETED: [],
+      DRAFT: ['SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED'],
+      SCHEDULED: ['DRAFT', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED'],
+      EN_ROUTE: ['DRAFT', 'SCHEDULED', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED'],
+      ON_SITE: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'IN_PROGRESS', 'COMPLETED'],
+      IN_PROGRESS: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'COMPLETED'],
+      COMPLETED: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'],
       CANCELED: [],
       NO_SHOW: [],
     });
   });
 
-  it('walks the normal lifecycle one step at a time', () => {
-    expect(isPermittedVisitStatusTransition('DRAFT', 'SCHEDULED')).toBe(true);
-    expect(isPermittedVisitStatusTransition('SCHEDULED', 'EN_ROUTE')).toBe(true);
-    expect(isPermittedVisitStatusTransition('EN_ROUTE', 'ON_SITE')).toBe(true);
-    expect(isPermittedVisitStatusTransition('ON_SITE', 'IN_PROGRESS')).toBe(true);
-    expect(isPermittedVisitStatusTransition('IN_PROGRESS', 'COMPLETED')).toBe(
-      true,
-    );
-  });
-
-  it('records EN_ROUTE to SCHEDULED as a correction and nothing else as one', () => {
-    // `BR-075`: at minimum a technician who left without arriving may be corrected back to `SCHEDULED`.
-    expect(isVisitStatusCorrection('EN_ROUTE', 'SCHEDULED')).toBe(true);
-    for (const [from, to] of [
-      ['DRAFT', 'SCHEDULED'],
-      ['SCHEDULED', 'EN_ROUTE'],
-      ['EN_ROUTE', 'ON_SITE'],
-      ['ON_SITE', 'IN_PROGRESS'],
-      ['IN_PROGRESS', 'COMPLETED'],
-    ] as const) {
-      expect(isVisitStatusCorrection(from, to)).toBe(false);
-    }
-  });
-
-  it('refuses skipping a step, standing still and every backwards move but the correction', () => {
-    // `BR-074` has no `DRAFT` → `IN_PROGRESS`, no `SCHEDULED` → `ON_SITE`, and a Visit never returns to
-    // an active status once it is historical.
-    expect(isPermittedVisitStatusTransition('DRAFT', 'IN_PROGRESS')).toBe(false);
-    expect(isPermittedVisitStatusTransition('SCHEDULED', 'ON_SITE')).toBe(false);
-    expect(isPermittedVisitStatusTransition('ON_SITE', 'SCHEDULED')).toBe(false);
-    expect(isPermittedVisitStatusTransition('IN_PROGRESS', 'EN_ROUTE')).toBe(
-      false,
-    );
-    for (const status of [
+  it('moves a Visit directly between working statuses, skipping a step or going backward', () => {
+    // `BR-074` is a menu, not a chain: a skipped step and a step backward are each **one** permitted
+    // transition, so a technician never has to walk a Visit through statuses it never passed through.
+    expect(isPermittedVisitStatusTransition('SCHEDULED', 'IN_PROGRESS')).toBe(true);
+    expect(isPermittedVisitStatusTransition('IN_PROGRESS', 'SCHEDULED')).toBe(true);
+    expect(isPermittedVisitStatusTransition('ON_SITE', 'EN_ROUTE')).toBe(true);
+    expect(isPermittedVisitStatusTransition('DRAFT', 'COMPLETED')).toBe(true);
+    // And a completion is reachable from every working status, not only from `IN_PROGRESS`.
+    for (const from of [
       'DRAFT',
       'SCHEDULED',
       'EN_ROUTE',
       'ON_SITE',
       'IN_PROGRESS',
-      'COMPLETED',
-      'CANCELED',
-      'NO_SHOW',
     ] as const) {
-      expect(isPermittedVisitStatusTransition(status, status)).toBe(false);
+      expect(isPermittedVisitStatusTransition(from, 'COMPLETED')).toBe(true);
     }
-    for (const status of ['COMPLETED', 'CANCELED', 'NO_SHOW'] as const) {
+  });
+
+  it('records EN_ROUTE to SCHEDULED as the correction BR-075 names and nothing else as one', () => {
+    // `BR-075`: the flag stays exactly as narrow as the correction the rule named — a technician who left
+    // for a Property without arriving. `BR-074`'s free movement needs no flag of its own, because every
+    // status event already carries its previous status, its new status, its actor and its timestamp.
+    expect(isVisitStatusCorrection('EN_ROUTE', 'SCHEDULED')).toBe(true);
+    for (const [from, to] of [
+      ['COMPLETED', 'IN_PROGRESS'],
+      ['IN_PROGRESS', 'SCHEDULED'],
+      ['ON_SITE', 'EN_ROUTE'],
+      ['SCHEDULED', 'ON_SITE'],
+      ['DRAFT', 'SCHEDULED'],
+      ['COMPLETED', 'SCHEDULED'],
+    ] as const) {
+      expect(isVisitStatusCorrection(from, to)).toBe(false);
+    }
+  });
+
+  it('refuses standing still and reaches nothing from the truly terminal statuses', () => {
+    // A Visit may not "change" to the status it already holds; that is not a transition (`BR-074`).
+    for (const status of VISIT_STATUSES) {
+      expect(isPermittedVisitStatusTransition(status, status)).toBe(false);
+      expect(applicableVisitStatusTransitions(status)).not.toContain(status);
+    }
+    // `CANCELED` and `NO_SHOW` remain truly terminal: no working status is reachable from them, and a
+    // `COMPLETED` Visit is the only historical status that offers a destination (`BR-074`).
+    for (const status of ['CANCELED', 'NO_SHOW'] as const) {
       expect(VISIT_STATUS_TRANSITIONS[status]).toEqual([]);
     }
+    for (const status of ['CANCELED', 'NO_SHOW'] as const) {
+      expect(isTerminalVisitStatus(status)).toBe(true);
+      expect(applicableVisitStatusTransitions(status)).toEqual([]);
+    }
+    expect(applicableVisitStatusTransitions('COMPLETED')).not.toEqual([]);
   });
 
   it('offers no route to CANCELED or NO_SHOW, which are dispatch actions', () => {

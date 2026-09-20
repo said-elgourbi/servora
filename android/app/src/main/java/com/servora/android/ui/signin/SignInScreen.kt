@@ -73,6 +73,7 @@ fun SignInScreen(
         onSubmit = viewModel::onSubmit,
         onForgotPassword = onForgotPassword,
         onSmsSignIn = onSmsSignIn,
+        onDevSignIn = viewModel::onDevSignIn,
         modifier = modifier,
     )
 }
@@ -93,6 +94,8 @@ internal fun SignInScreen(
     onSubmit: () -> Unit,
     onForgotPassword: () -> Unit = {},
     onSmsSignIn: () -> Unit = {},
+    devAccounts: List<DevSignInAccount> = DevSignInAccounts.available,
+    onDevSignIn: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     imeVisible: Boolean = WindowInsets.isImeVisible,
 ) {
@@ -254,6 +257,15 @@ internal fun SignInScreen(
                         Text(stringResource(R.string.sign_in_sms_action))
                     }
 
+                    if (devAccounts.isNotEmpty()) {
+                        Spacer(Modifier.height(24.dp))
+                        DevSignInSection(
+                            accounts = devAccounts,
+                            enabled = !uiState.isSubmitting,
+                            onSignIn = onDevSignIn,
+                        )
+                    }
+
                     Spacer(Modifier.height(24.dp))
                     Text(
                         text = stringResource(R.string.sign_in_copyright),
@@ -265,6 +277,64 @@ internal fun SignInScreen(
             }
         }
     }
+}
+
+/**
+ * The temporary local-development sign-in shortcut.
+ *
+ * It renders only when the build carries accounts ([DevSignInAccounts]), so a release build — whose
+ * list is empty — shows no section at all rather than a disabled one. Each button submits that
+ * account's real credentials through the normal sign-in path (`BR-018`), which makes this a
+ * shortcut for a developer and never an authentication bypass (`BR-007`). The password is
+ * deliberately not rendered: the address tells the accounts apart, and the password is not
+ * something to print on a screen.
+ *
+ * Development tooling, not product behaviour (`BR-042`), recorded in
+ * `docs/tracker/049-android-dev-sign-in-buttons.md`.
+ */
+@Composable
+private fun DevSignInSection(
+    accounts: List<DevSignInAccount>,
+    enabled: Boolean,
+    onSignIn: (String, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.dev_sign_in_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        accounts.forEach { account ->
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { onSignIn(account.email, account.password) },
+                enabled = enabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Text(account.role.label())
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = account.email,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** The localized button label for a development account's role (`BR-028`). */
+@Composable
+private fun DevSignInRole.label(): String = when (this) {
+    DevSignInRole.MANAGER -> stringResource(R.string.dev_sign_in_manager)
+    DevSignInRole.TECHNICIAN -> stringResource(R.string.dev_sign_in_technician)
 }
 
 /** Renders the reason the last attempt failed, if it did. */

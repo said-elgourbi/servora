@@ -4,6 +4,8 @@ import androidx.compose.runtime.Immutable
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.jobs.JobAudioPlayback
+import com.servora.android.data.jobs.QueuedVisitFieldAction
+import com.servora.android.data.jobs.QueuedVisitNote
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.CapturedJobAudioNote
@@ -16,6 +18,8 @@ import com.servora.android.domain.model.PendingJobAudioNote
 import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitStatus
 import java.time.Instant
 
 /**
@@ -229,6 +233,9 @@ enum class JobActionKind {
 
     /** A text update was added to the represented Visit's activity (`BR-027`, `BR-077`). */
     ACTIVITY_TEXT,
+
+    /** The represented Visit moved through its field lifecycle (`BR-074`, `BR-075`, `BR-077`). */
+    VISIT_STATUS_CHANGE,
 }
 
 /**
@@ -252,6 +259,22 @@ sealed interface PendingJobAction {
     /** An assignment waiting for confirmation (`BR-068`). */
     data class Assign(
         val assignments: List<TechnicianAssignment>,
+        override val conflicts: List<ScheduleConflict>,
+    ) : PendingJobAction
+
+    /**
+     * A Visit status transition waiting for confirmation (`BR-070`, `BR-074`).
+     *
+     * A destination that schedules a Visit runs `BR-072`'s availability check, so a technician who
+     * chose it — `BR-075`'s correction back to `SCHEDULED`, for instance — is shown the overlapping
+     * Visits and confirms them before anything is sent.
+     */
+    data class VisitTransition(
+        val status: VisitStatus,
+        val outcome: VisitOutcome?,
+        val outcomeSummary: String?,
+        val operationId: String,
+        val capturedAt: Instant,
         override val conflicts: List<ScheduleConflict>,
     ) : PendingJobAction
 }
@@ -302,6 +325,19 @@ data class JobDetailsUiState(
     val actionFailure: JobActionFailure? = null,
     /** An action waiting for the user to accept the conflicts it would create (`BR-070`). */
     val pendingConfirmation: PendingJobAction? = null,
+    /**
+     * Whether the action the last answer reported is waiting for the backend rather than applied
+     * (`BR-014`, §7).
+     *
+     * A queued action is never presented as done: it is reported as saved on this device and shown
+     * beside the Visit it will move, so the screen never claims a change the backend has not accepted
+     * (`BR-001`, `BR-086`).
+     */
+    val actionQueued: Boolean = false,
+    /** The Visit status transition waiting for the backend, or `null` when none is (§7). */
+    val queuedVisitAction: QueuedVisitFieldAction? = null,
+    /** The notes waiting for the backend, oldest first (§7). */
+    val queuedVisitNotes: List<QueuedVisitNote> = emptyList(),
     /** The technicians the assign sheet can offer, or `null` while they have not been read. */
     val assignableTechnicians: List<AssignableTechnician>? = null,
     /** Why the technicians could not be read, or `null`. */
@@ -430,6 +466,24 @@ data class JobDetailsUiState(
     /** Whether a crew may be stated for the represented Visit (`BR-068`). */
     val canAssign: Boolean
         get() = details?.selectedVisit != null && canAct
+
+    /**
+     * Whether the represented Visit's field lifecycle may be driven right now (`BR-074`).
+     *
+     * The destinations come from the API, which owns the lifecycle, so a Visit the backend reports no
+     * destination for offers no action (`BR-022`, `BR-041`). Whether the **session** may drive it is
+     * the screen's own capability gate, and the API decides again at the route (`BR-007`, `BR-011`).
+     *
+     * The API's own answer on the caller's place in the Visit's crew is part of the condition rather
+     * than a third gate of the screen's own (`ADR-019` D3): a Visit this session may read but whose crew
+     * does not include it offers no action, because the field route's only answer to it is a refusal —
+     * which a screen presenting it as a Visit that no longer exists would report wrongly (`BR-041`).
+     */
+    val canChangeVisitStatus: Boolean
+        get() =
+            details?.selectedVisit?.let { visit ->
+                visit.fieldActionable && visit.allowedStatusTransitions.isNotEmpty()
+            } == true && canAct
 
     /** Whether the activity has been asked for and not answered yet. */
     val showsActivityLoading: Boolean

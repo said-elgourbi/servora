@@ -18,7 +18,8 @@ technician lands in)
 References: `BR-001`, `BR-004`, `BR-006`, `BR-007`, `BR-009`, `BR-010`, `BR-011`, `BR-012`, `BR-013`,
 `BR-014`, `BR-028`, `BR-031`, `BR-032`, `BR-033`, `BR-040`, `BR-041`, `BR-042`, `BR-058`, `BR-059`,
 `BR-060`, `BR-061`, `BR-062`, `BR-066`, `BR-067`, `BR-068`, `BR-069`, `BR-070`, `BR-072`, `BR-074`,
-`BR-075`, `BR-077`, `BR-078`, `BR-079`, `BR-080`, `BR-086`, `BR-088`; `Project.md` §13–§15, §19, §31;
+`BR-075`, `BR-077`, `BR-078`, `BR-079`, `BR-080`, `BR-086`, `BR-088`, `BR-093`; `Project.md` §13–§15, §19,
+§31;
 `dev.md` §7, §9, §10; `qa.md` §3.1, §4.3, §8, §13;
 `docs/architecture/offline-first-architecture.md` §2, §5, §8, §11, §12, §13;
 `docs/domain/job-visit-domain-model.md` §8.3, §9.1, §9.5, §11.1, §14, §15.
@@ -294,8 +295,11 @@ Recorded rather than guessed (`BR-042`), each with what it blocks.
 
 1. **The technician home's content and order** (D6) — blocks Phase 2's `GET /home/technician` and all of
    Phase 4.
-2. **Whether an office user may perform a field action, and with which capability** (D7) — blocks the
-   office half of the Visit lifecycle.
+2. **Whether an office user may perform a field action, and with which capability** (D7) — **answered on
+   2026-09-18**, recorded as `BR-093` (decision update at the end of this record): the office capability
+   that reaches Visit writes is the route's second authorization, without crew membership, and a
+   completion still requires `VISIT_RECORD_OUTCOME` of every caller. What it blocked — the office half of
+   the Visit lifecycle — is implemented.
 3. **A paused/on-hold Visit state** (D8; `BR-013` lists "pausing work", `BR-074` has no such state) —
    blocks any pause affordance.
 4. **The technician self-edit window for an outcome** (`BR-079`) — blocks outcome correction. `BR-079`'s
@@ -325,7 +329,9 @@ this ADR is not read as saying more than the code does:
    current crew is answered **`404`**, never `403` — D2's own answer to a scope question. D7's sentence
    "a Manager who is granted the field capabilities can already use the field routes" therefore holds only
    for a Manager who is *also* on the Visit's crew. D7's open question is untouched by this: no office
-   capability was invented, and the office half stays unbuilt.
+   capability was invented, and the office half stays unbuilt. **(Answered on 2026-09-18 — see the decision
+   update at the end of this record: `BR-093` implements the office half. This paragraph describes what
+   Phase 3 landed, not the current state.)**
 2. **The note route accepts either capability**, by a **product-owner decision of the same date** rather
    than by this ADR: `VISIT_ADD_NOTE` **or** the office `JOB_UPDATE`, with the scope applied only to the
    caller who does not hold the office capability — D1's any-of primitive and D2's "the scope follows the
@@ -384,3 +390,102 @@ are implemented to that answer.
 
 D1–D5 and D7/D8 are unchanged, and no business rule was amended: `BR-009` already names the capability
 this read enforces, and `BR-010`/`BR-012` already say the technician's screen answers what to do next.
+
+## Decision update — 2026-09-17 (product ownership amends D3 and D4: `BR-074`'s free movement)
+
+**Status:** Accepted (product-owner decision, 2026-09-17). Recorded under `BR-040`; `BR-074`, `BR-075`,
+`BR-061`, `BR-066`, `BR-078` and `BR-079` were amended with it.
+
+D3's transition list and D4's consequence mapping were built on `BR-074` as it then read: a Visit could
+only be advanced to the next status, plus the single `EN_ROUTE → SCHEDULED` correction. Product ownership
+confirmed that this did not account for the reality of field work, and the rule now permits **free
+movement** instead.
+
+1. **A Visit moves directly between any two working statuses, in either direction, in one operation.**
+   `DRAFT`, `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS` and `COMPLETED` are the working statuses;
+   a skipped step (`SCHEDULED → IN_PROGRESS`) and a step backward (`ON_SITE → EN_ROUTE`,
+   `IN_PROGRESS → SCHEDULED`) are each **one** transition. This is the shape `BR-058` already gives the
+   Job, so `VISIT_STATUS_TRANSITIONS` now reads the way `JOB_STATUS_TRANSITIONS` does.
+2. **A `COMPLETED` Visit is reopenable** into any other working status, so it is the one historical
+   status with destinations. Reopening preserves the completion and its outcome in append-only history
+   while **clearing the Visit's current outcome**; the next completion must record a **new** one
+   (`BR-077`, `BR-079`).
+3. **`CANCELED` and `NO_SHOW` are unchanged.** They remain office-only dispatch actions that require a
+   structured reason (`BR-066`, `BR-076`), remain truly terminal, and are destinations of no field route.
+   D7's open question is untouched.
+4. **D4 gains the `PENDING_REVIEW` exit: a Job must not await review while its field work is unfinished.**
+   `BR-061`'s invariant is now applied in both directions, so a Visit moved into a working status — a
+   reopen out of `COMPLETED` included — takes the Job back to `IN_PROGRESS`. Applying it in both
+   directions is what makes point 2 safe rather than a hole in `BR-061`.
+5. **Ordinary field status changes and reversals require no reason dialog.** A reason stays required only
+   where its own rule states one (`CANCELED`, `NO_SHOW`).
+6. **No migration.** `visits_status_check`, `visit_status_history`'s own checks and
+   `visits_completed_outcome_check` all already permit every transition and the cleared outcome, so the
+   change is schema-free — `BR-074`'s transitions were never a schema constraint. The one flag that stays
+   narrow is `is_correction`: `visit_status_history_correction_check` declares exactly
+   `EN_ROUTE → SCHEDULED`, and generalizing it was deliberately not done, because every status event
+   already carries the previous status, the new status, the actor and the timestamp that `BR-067`
+   requires. That is a recorded deferral, not an omission.
+
+**What this does not change.** The assignment scope (D2), the any-of primitive (D1), the offline posture
+and idempotency (D5), the completion's outcome requirement (`BR-077`), `BR-072`'s runtime eligibility for
+`SCHEDULED`, `BR-070`'s conflict confirmation, and `JOB_CLOSED_FOR_FIELD_WORK` (`BR-062`, `BR-079`) all
+stand exactly as they were. **Android needed no production change at all:** `VisitStatusAction` already
+renders the destinations the API reports, so widening the table widened the technician's menu — which is
+the `BR-041` design paying off rather than an accident.
+
+## Decision update — 2026-09-18 (product ownership answers D7: office Visit completion)
+
+**Status:** Accepted (product-owner decision, 2026-09-18). Recorded under `BR-040`; the rule it produces is
+`BR-093`, and the permission question `BR-075` left open — the one that pointed at D7 — is closed with it.
+
+D7 recorded *whether* an office user may perform a field action and deliberately decided nothing
+(`BR-042`). Product ownership has now decided it, in the operational terms the office actually has: **an
+authorized office member may complete a Visit from Job Details without being on its crew.** Requiring a
+crew membership for completion was rejected as too restrictive — a technician who telephones dispatch
+instead of using the application, one who loses connectivity or device access, a Visit left open by
+accident, and post-hoc clean-up after the work was confirmed finished are all real cases, and none of them
+should force a member onto a crew to close the record.
+
+1. **The Visit status route has two authorizations, and they stay distinct.** `VISIT_UPDATE_ASSIGNED_STATUS`
+   is the field capability (`BR-009`) and its scope is the caller's own **current crew** (D3). The office's
+   `JOB_UPDATE` — the capability every office action on a Job or Visit already requires (`BR-008`,
+   `docs/api/job-actions.md` §2) — is the second, and it addresses the organization's Visits **without**
+   crew membership. The route is therefore guarded by `@RequireAnyPermission(JOB_UPDATE,
+   VISIT_UPDATE_ASSIGNED_STATUS)`, and the scope follows the capability that admitted the caller, which is
+   D2's own shape and the note route's precedent. The office capability is an alternative to crew
+   membership; it is not a substitute for the capabilities the route already asks for.
+2. **The completion keeps its own capability.** `VISIT_RECORD_OUTCOME` is required of **every** caller, the
+   office included (`BR-009`, `BR-077`): the office capability admits a member to the route, it does not
+   authorize the outcome. The second question therefore stays exactly where the controller already asked
+   it. Nothing else about a completion changes — same outcome requirement, same transition rules, same
+   validation and eligibility, same Job consequence (D4).
+3. **The projection reports only what the caller may execute.** `selectedVisit.fieldActionable` now means
+   *this caller is authorized to drive this Visit* — crew membership **or** the office capability — and
+   `selectedVisit.allowedStatusTransitions` is narrowed to the destinations that follow from it: nothing
+   for a caller who may drive neither, and no `COMPLETED` unless the caller holds
+   `VISIT_RECORD_OUTCOME`. Phase 5b's disclosure — reporting the Visit's structural destinations to a
+   caller the route would refuse — is superseded for the authorization half; eligibility (`BR-072`,
+   `BR-070`) is still never filtered, because `BR-074` forbids expressing it that way. `BR-041` is why the
+   two fields are derived from one answer in one place.
+4. **The record names the member who actually acted.** `visit_status_history.actor_membership_id` and
+   `visit_outcome_history.actor_membership_id` already carry the authenticated member, so an office
+   completion is attributed to the office member and never to the crew's Lead (`BR-033`, `BR-067`,
+   `BR-080`). No schema change was needed for it, and none was made.
+5. **Crew scoping is not weakened generally.** A technician is bounded by their own current crew exactly as
+   before; a caller without the office capability gains nothing from this decision, however many field
+   capabilities they hold. `CANCELED` and `NO_SHOW` are untouched: they remain office-only dispatch
+   actions with a structured reason, no capability authorizes one, and they stay destinations of no route
+   (`BR-066`, `BR-076`).
+6. **No migration, no new capability.** The four field capabilities, `JOB_UPDATE` and the append-only
+   history tables all already exist, so the change is authorization and projection only (`BR-042`).
+
+**What this does not change.** D1's any-of primitive, D2's assignment scope for a caller without the office
+capability, D3's "any technician on the crew", D4's Job consequence, D5's offline posture and idempotency,
+D6's technician home, D8's pause question, and `BR-074`'s free movement all stand.
+
+**Android needed one production change.** The Visit action's capability gate had to learn the second
+authorization: `JobDetailsScreen` required `canUpdateAssignedVisit`, so a session holding the office
+capability alone would have been hidden by the client although the API accepts it (`BR-007`, `BR-011`). It
+now accepts either, and the completion's own destination remains the API's answer rather than a second
+copy of the rule in the client (`BR-041`).

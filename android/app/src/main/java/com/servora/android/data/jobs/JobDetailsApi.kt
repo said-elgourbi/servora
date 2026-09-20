@@ -25,6 +25,20 @@ import retrofit2.http.Streaming
  * rather than a locally patched copy (`BR-001`).
  */
 interface JobDetailsApi {
+    /**
+     * `POST /jobs` — creates a Job for a Customer at a Property (`BR-047` – `BR-056`, `BR-094`).
+     *
+     * The caller names the Customer, the Property and the title; the backend owns the identifier, the
+     * organization-scoped Job number, the `NEW` status, the address snapshot and the version, and
+     * refuses a Customer or a Property that is not usable (`BR-001`, `BR-007`). The answer is the same
+     * projection `GET /jobs/{jobId}` returns, so no second representation of a Job exists (`BR-041`).
+     */
+    @POST("jobs")
+    suspend fun createJob(
+        @Header("Authorization") authorization: String,
+        @Body request: CreateJobRequest,
+    ): JobDetailsDto
+
     /** `GET /jobs/{jobId}` — one Job of the caller's organization, as its details screen shows it. */
     @GET("jobs/{jobId}")
     suspend fun jobDetails(
@@ -63,6 +77,26 @@ interface JobDetailsApi {
         @Path("jobId") jobId: String,
         @Path("visitId") visitId: String,
         @Body request: AssignVisitTechniciansRequestDto,
+    ): JobDetailsDto
+
+    /**
+     * `PATCH /jobs/{jobId}/visits/{visitId}/status` — the Visit's field lifecycle (`BR-074`, `BR-093`).
+     *
+     * Two authorizations reach it (`BR-093`): `VISIT_UPDATE_ASSIGNED_STATUS`, which scopes the caller to
+     * their own current crew, and the office's `JOB_UPDATE`, which admits an office member to any Visit
+     * of the organization **without** crew membership — that is how a manager completes a Visit from Job
+     * Details. The completion's own capability is required of every caller, so the API asks for
+     * `VISIT_RECORD_OUTCOME` again when the destination is `COMPLETED` (`BR-009`, `BR-066`, `BR-077`,
+     * `ADR-019` D1–D3, D7). A completion carries the outcome `BR-077` requires in the same body, and the
+     * answer is the Job as it now stands, so the screen presents the backend's state including the
+     * Visit's new status.
+     */
+    @PATCH("jobs/{jobId}/visits/{visitId}/status")
+    suspend fun changeVisitStatus(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("visitId") visitId: String,
+        @Body request: ChangeVisitStatusRequestDto,
     ): JobDetailsDto
 
     /** `POST /jobs/{jobId}/visits/{visitId}/notes` — adds a text Activity update. */

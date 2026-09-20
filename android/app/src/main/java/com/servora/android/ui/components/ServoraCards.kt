@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -24,7 +25,9 @@ import com.servora.android.R
  *
  * They live here rather than in one feature package because more than one feature renders them: the
  * customer screens and the manager home both present a titled section over bordered cards, and a
- * second copy of the same metrics would let them drift apart (`dev.md` §1).
+ * second copy of the same metrics would let them drift apart (`dev.md` §1). The **Primary** badge a
+ * Customer's effective primary contact wears (`BR-095`) is here for the same reason: the office customer
+ * detail and the Job Details card both mark that contact with it.
  */
 
 /**
@@ -60,6 +63,34 @@ internal fun InfoCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             content = content,
+        )
+    }
+}
+
+/**
+ * The **Primary** badge a Customer's effective primary contact wears (`BR-095`).
+ *
+ * The effective primary is the contact person flagged primary, or the Customer itself when no contact
+ * person is flagged — and then it is the Customer's own phone line that carries this badge. One badge,
+ * one meaning, on both surfaces that mark it (`BR-041`).
+ */
+@Composable
+internal fun ContactPrimaryBadge(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.secondary,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+        ),
+    ) {
+        Text(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            text = stringResource(R.string.customers_contacts_primary),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
         )
     }
 }

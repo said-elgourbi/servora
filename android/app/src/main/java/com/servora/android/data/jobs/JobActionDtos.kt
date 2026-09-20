@@ -42,10 +42,43 @@ data class AssignVisitTechniciansRequestDto(
     val expectedVersion: Int? = null,
 )
 
+/**
+ * Request body that moves a Visit through its field lifecycle (`BR-074`, `BR-075`, `BR-077`).
+ *
+ * A completion carries the outcome in the same request, so the state change and the outcome `BR-077`
+ * requires are one operation rather than two that could disagree. The outcome fields are absent for
+ * every other destination, because nothing else stores one (`BR-078`) and the API refuses them there.
+ *
+ * `clientOperationId` is the idempotency key and `capturedAt` is the device instant the technician
+ * acted; both are created once when the action is performed and reused for every attempt, so a
+ * replay is applied at most once (`BR-031`). `expectedVersion` is the Visit version the screen last
+ * saw, so a Visit that moved on is refused rather than overwritten (`BR-086`, `ADR-019` D5).
+ * `confirmConflicts` is true only when the technician accepted the `BR-070` conflicts the API
+ * reported for a previous attempt at the same operation.
+ */
+@Serializable
+data class ChangeVisitStatusRequestDto(
+    val status: String,
+    val outcomeCode: String? = null,
+    val outcomeSummary: String? = null,
+    val clientOperationId: String? = null,
+    val capturedAt: String? = null,
+    val expectedVersion: Int? = null,
+    val confirmConflicts: Boolean = false,
+)
+
 /** Request body that adds one text update to a Visit's activity (`BR-027`, `BR-077`). */
 @Serializable
 data class AddVisitNoteRequestDto(
     val body: String,
+    /**
+     * The idempotency key, so a queued note replayed after a timeout is recorded at most once
+     * (`BR-031`). A note carries no version, because it is append-only and has no update path
+     * (`ADR-019` D5).
+     */
+    val clientOperationId: String? = null,
+    /** The device instant the note was written; provenance beside the server's own instant. */
+    val capturedAt: String? = null,
 )
 
 /**

@@ -11,6 +11,7 @@ import {
 } from '../src/auth/permissions.js';
 import { JobsService } from '../src/jobs/jobs.service.js';
 import {
+  customerContacts,
   customers,
   jobs,
   organizationMemberPermissions,
@@ -33,6 +34,20 @@ import {
 } from './support/foundation-database.js';
 
 const PASSWORD = 'servora-e2e-password';
+
+/** The Customer contact columns `BR-092` reports, so a fixture can set them without a second helper. */
+interface CustomerContactValues {
+  email?: string;
+  phone?: string;
+  notes?: string;
+}
+
+/** The contact details the assigned-customer read is asserted against (`BR-092`). */
+const CUSTOMER_CONTACT: CustomerContactValues = {
+  email: 'dispatch@fieldcustomer.test',
+  phone: '+15145550142',
+  notes: 'Gate code 4821. Ring twice.',
+};
 
 /**
  * `GET /jobs/:id` — who may read a Job Details screen, and what the read projects.
@@ -172,6 +187,7 @@ describe('job details (e2e)', () => {
   async function newCustomer(
     targetOrganizationId: string,
     displayName: string,
+    contact: CustomerContactValues = {},
   ) {
     const [customer] = await database.db
       .insert(customers)
@@ -179,6 +195,11 @@ describe('job details (e2e)', () => {
         organizationId: targetOrganizationId,
         type: 'COMPANY',
         displayName,
+        // The Customer's own contact details, which is what `BR-092` reports and `BR-023`'s billing,
+        // preferred-contact and language fields are deliberately not.
+        email: contact.email ?? null,
+        phone: contact.phone ?? null,
+        notes: contact.notes ?? null,
       })
       .returning();
     return customer;
@@ -310,13 +331,15 @@ describe('job details (e2e)', () => {
     const job = await newJob(organizationId, customer.id, property.id);
 
     const now = Date.now();
+    const pastStart = new Date(now - 7_200_000);
+    const pastEnd = new Date(now - 3_600_000);
     const pastVisit = await newVisit({
       targetOrganizationId: organizationId,
       jobId: job.id,
       propertyId: property.id,
       status: 'COMPLETED',
-      scheduledStart: new Date(now - 7_200_000),
-      scheduledEnd: new Date(now - 3_600_000),
+      scheduledStart: pastStart,
+      scheduledEnd: pastEnd,
       actorMembershipId: member.id,
     });
     await assign({
@@ -327,13 +350,14 @@ describe('job details (e2e)', () => {
     });
 
     const upcomingStart = new Date(now + 3_600_000);
+    const upcomingEnd = new Date(now + 7_200_000);
     const upcomingVisit = await newVisit({
       targetOrganizationId: organizationId,
       jobId: job.id,
       propertyId: property.id,
       status: 'SCHEDULED',
       scheduledStart: upcomingStart,
-      scheduledEnd: new Date(now + 7_200_000),
+      scheduledEnd: upcomingEnd,
     });
     // Assigned in the order a dispatcher would not necessarily choose, so the read's own Lead-first
     // ordering is what the assertions check (`BR-068`).
@@ -350,7 +374,19 @@ describe('job details (e2e)', () => {
       roleCode: 'LEAD',
     });
 
-    return { job, customer, upcomingVisit, upcomingStart, lead, second };
+    return {
+      job,
+      customer,
+      pastVisit,
+      pastStart,
+      pastEnd,
+      pastCrew,
+      upcomingVisit,
+      upcomingStart,
+      upcomingEnd,
+      lead,
+      second,
+    };
   }
 
   it('refuses an unauthenticated caller with 401', async () => {
@@ -407,6 +443,138 @@ describe('job details (e2e)', () => {
         (technician: { name: string }) => technician.name,
       ),
     ).not.toContain('Dave Past');
+  });
+
+  /*
+   * The Job's Visits, which is what a screen reads when it presents the Job rather than one field
+   * attempt (`BR-047`, `BR-071`). Every Visit is listed in the Job's own sequence with the crew it
+   * actually carries, and the Visit that represents the Job is not privileged: it is simply the entry
+   * whose id `selectedVisit` names (`BR-081`, `BR-041`).
+   */
+  it('lists every Visit of the Job in its own sequence, each with its own crew', async () => {
+    const fixture = await jobWithTwoVisits();
+    const session = await signInFor([CUSTOMER_PERMISSIONS.VIEW]);
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(response.body.visits).toEqual([
+      {
+        id: fixture.pastVisit.id,
+        sequence: 1,
+        status: 'COMPLETED',
+        // The Visit's own **current** outcome travels with it, so a screen can state what resulted
+        // from a field attempt beside that attempt's date and crew (`BR-077`, `BR-078`).
+        outcomeCode: 'RESOLVED',
+        scheduledStart: fixture.pastStart.toISOString(),
+        scheduledEnd: fixture.pastEnd.toISOString(),
+        version: fixture.pastVisit.version,
+        technicians: [
+          {
+            membershipId: fixture.pastCrew.id,
+            name: 'Dave Past',
+            roleCode: 'LEAD',
+          },
+        ],
+      },
+      {
+        id: fixture.upcomingVisit.id,
+        sequence: 2,
+        status: 'SCHEDULED',
+        // A Visit that has not been completed holds no outcome, and none is invented for it
+        // (`BR-042`).
+        outcomeCode: null,
+        scheduledStart: fixture.upcomingStart.toISOString(),
+        scheduledEnd: fixture.upcomingEnd.toISOString(),
+        version: fixture.upcomingVisit.version,
+        technicians: [
+          {
+            membershipId: fixture.lead.id,
+            name: 'Mike Lead',
+            roleCode: 'LEAD',
+          },
+          {
+            membershipId: fixture.second.id,
+            name: 'Sarah Moreau',
+            roleCode: 'TECHNICIAN',
+          },
+        ],
+      },
+    ]);
+  });
+
+  /*
+   * A Visit's outcome is its **current** one and not its history (`BR-079`): reopening a completed
+   * Visit clears the outcome it recorded while that outcome stays in append-only history, so the read
+   * reports no outcome for the Visit again. A client that derived the outcome from the activity
+   * timeline would state one the Visit no longer holds.
+   */
+  it('reports no outcome for a Visit that was reopened after completion', async () => {
+    const fixture = await jobWithTwoVisits();
+    await database.db
+      .update(visits)
+      .set({
+        status: 'IN_PROGRESS',
+        outcomeCode: null,
+        outcomeSummary: null,
+        outcomeRecordedAt: null,
+        outcomeRecordedByMembershipId: null,
+      })
+      .where(eq(visits.id, fixture.pastVisit.id));
+    const session = await signInFor([CUSTOMER_PERMISSIONS.VIEW]);
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    const reopened = response.body.visits.find(
+      (visit: { id: string }) => visit.id === fixture.pastVisit.id,
+    );
+    expect(reopened.status).toBe('IN_PROGRESS');
+    // The Visit holds no outcome again, and none is reported for it rather than the one its history
+    // still records (`BR-079`, `BR-042`).
+    expect(reopened.outcomeCode).toBeNull();
+  });
+
+  it('lists a Visit that has no schedule with both ends reported as null', async () => {
+    // A Visit exists before it is scheduled (`BR-072`), and it is still a field attempt the Job holds,
+    // so it is listed rather than omitted — with no schedule claimed for it (`BR-042`).
+    const member = await newMembership(organizationId);
+    const customer = await newCustomer(organizationId, 'Draft Visit Co');
+    const property = await newProperty(organizationId, '7 Draft Street');
+    await linkProperty(organizationId, property.id, customer.id, member.id);
+    const job = await newJob(organizationId, customer.id, property.id);
+    const draft = await newVisit({
+      targetOrganizationId: organizationId,
+      jobId: job.id,
+      status: 'DRAFT',
+    });
+    const session = await signInFor([CUSTOMER_PERMISSIONS.VIEW]);
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    // A Visit with no schedule is never selected (`BR-081`), so the Job has no represented Visit while
+    // still holding one.
+    expect(response.body.selectedVisit).toBeNull();
+    expect(response.body.visits).toEqual([
+      {
+        id: draft.id,
+        sequence: 1,
+        status: 'DRAFT',
+        // A Visit that has not been completed holds no outcome (`BR-077`, `BR-079`).
+        outcomeCode: null,
+        scheduledStart: null,
+        scheduledEnd: null,
+        version: draft.version,
+        technicians: [],
+      },
+    ]);
   });
 
   it('falls back to the most recent past Visit when the Job has no upcoming one', async () => {
@@ -623,9 +791,17 @@ describe('job details (e2e)', () => {
    */
 
   /** A Job with a Property and one Visit whose crew is [memberId]. */
-  async function jobWithCrew(memberId: string, status = 'SCHEDULED') {
+  async function jobWithCrew(
+    memberId: string,
+    status = 'SCHEDULED',
+    contact: CustomerContactValues = {},
+  ) {
     const actor = await newMembership(organizationId);
-    const customer = await newCustomer(organizationId, 'Field Customer');
+    const customer = await newCustomer(
+      organizationId,
+      'Field Customer',
+      contact,
+    );
     const property = await newProperty(organizationId, '12 Field Road');
     await linkProperty(organizationId, property.id, customer.id, actor.id);
     const job = await newJob(organizationId, customer.id, property.id);
@@ -645,7 +821,48 @@ describe('job details (e2e)', () => {
       technicianMembershipId: memberId,
       roleCode: 'LEAD',
     });
-    return { job, visit };
+    return { job, visit, customer, actor };
+  }
+
+  /**
+   * One contact person of a Customer (`BR-095`, `BR-023`).
+   *
+   * The row is written directly, the way every other fixture here writes its records, so a test can
+   * state what the Customer holds — including a contact that was removed — without going through the
+   * write routes this suite does not test.
+   */
+  async function newContact(
+    customerId: string,
+    values: {
+      firstName: string;
+      lastName: string;
+      phone?: string;
+      email?: string;
+      role?: string;
+      isPrimary?: boolean;
+      isBillingContact?: boolean;
+      removedByMembershipId?: string;
+    },
+  ) {
+    const [contact] = await database.db
+      .insert(customerContacts)
+      .values({
+        customerId,
+        firstName: values.firstName,
+        lastName: values.lastName,
+        phone: values.phone ?? null,
+        email: values.email ?? null,
+        role: values.role ?? null,
+        isPrimary: values.isPrimary ?? false,
+        isBillingContact: values.isBillingContact ?? false,
+        // A removal records the moment and the member together, which is what
+        // `customer_contacts_removal_state_check` requires (`ADR-022` D8).
+        removedAt:
+          values.removedByMembershipId === undefined ? null : new Date(),
+        removedByMembershipId: values.removedByMembershipId ?? null,
+      })
+      .returning();
+    return contact;
   }
 
   it('answers the Job to a field caller assigned to its Visit', async () => {
@@ -758,5 +975,285 @@ describe('job details (e2e)', () => {
       .get(`/jobs/${job.id}`)
       .set('Authorization', `Bearer ${session.accessToken}`)
       .expect(404);
+  });
+
+  /**
+   * The Customer behind the assigned Job (`BR-092`; `ADR-021` D1, D2).
+   *
+   * The read asks a **second** authorization question beside the one that admitted the caller to the
+   * Job: `customers.view` or `customers.view_assigned` puts the Customer's own contact details in the
+   * answer, and a caller holding neither reads the same Job without them rather than being refused the
+   * Job they are assigned to (`BR-009`, `BR-011`). The scope is the assignment, never the Customer.
+   */
+
+  it('reports the customer of an assigned Job to a field caller holding customers.view_assigned', async () => {
+    const session = await signInFor([
+      VISIT_PERMISSIONS.VIEW_ASSIGNED,
+      CUSTOMER_PERMISSIONS.VIEW_ASSIGNED,
+    ]);
+    const { job, customer } = await jobWithCrew(
+      session.membershipId,
+      'SCHEDULED',
+      CUSTOMER_CONTACT,
+    );
+    // A contact person with everything a contact row can hold. What reaches the Technician is the
+    // fields `BR-092` names — the name, the phone number, the email address and which contact person is
+    // the Customer's flagged primary (`BR-095`) — and the billing-contact flag, the free-text `role` and
+    // the rest of the row are not part of the field read.
+    await newContact(customer.id, {
+      firstName: 'John',
+      lastName: 'Smith',
+      phone: '+15551234567',
+      email: 'john@example.com',
+      role: 'Site manager',
+      isPrimary: true,
+      isBillingContact: true,
+    });
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(response.body.customerContactDetails).toEqual({
+      email: CUSTOMER_CONTACT.email,
+      phone: CUSTOMER_CONTACT.phone,
+      notes: CUSTOMER_CONTACT.notes,
+      contacts: [
+        {
+          firstName: 'John',
+          lastName: 'Smith',
+          phone: '+15551234567',
+          email: 'john@example.com',
+          isPrimary: true,
+        },
+      ],
+    });
+    // No billing field is on the wire, and neither is the contact's write token: `BR-092` excludes the
+    // billing-contact flag and the free-text `role`, and a read has no use for a `version` (`BR-041`).
+    const block = response.body.customerContactDetails as {
+      contacts: Record<string, unknown>[];
+    };
+    expect(Object.keys(block).sort()).toEqual([
+      'contacts',
+      'email',
+      'notes',
+      'phone',
+    ]);
+    expect(Object.keys(block.contacts[0] ?? {}).sort()).toEqual([
+      'email',
+      'firstName',
+      'isPrimary',
+      'lastName',
+      'phone',
+    ]);
+  });
+
+  it('orders the contacts of the customer the same way the office reads them', async () => {
+    // `ADR-022` D3: the Technician reads the same contacts the office does, in the same order —
+    // primary first, then the rest oldest-first (`BR-095`) — so the two surfaces cannot disagree about
+    // which contact comes first.
+    const session = await signInFor([
+      VISIT_PERMISSIONS.VIEW_ASSIGNED,
+      CUSTOMER_PERMISSIONS.VIEW_ASSIGNED,
+    ]);
+    const { job, customer } = await jobWithCrew(
+      session.membershipId,
+      'SCHEDULED',
+      CUSTOMER_CONTACT,
+    );
+    await newContact(customer.id, { firstName: 'First', lastName: 'Recorded' });
+    const primary = await newContact(customer.id, {
+      firstName: 'Promoted',
+      lastName: 'Primary',
+      isPrimary: true,
+    });
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    const contacts = (
+      response.body.customerContactDetails as {
+        contacts: { firstName: string; lastName: string }[];
+      }
+    ).contacts;
+    expect(contacts.map((contact) => contact.lastName)).toEqual([
+      primary.lastName,
+      'Recorded',
+    ]);
+  });
+
+  it('does not disclose a removed contact through an assigned Job', async () => {
+    // A removal takes a contact out of the ordinary view (`BR-095`; `ADR-022` D8), and the field view
+    // is an ordinary view: a Technician is not handed a person the organization has removed.
+    const session = await signInFor([
+      VISIT_PERMISSIONS.VIEW_ASSIGNED,
+      CUSTOMER_PERMISSIONS.VIEW_ASSIGNED,
+    ]);
+    const { job, customer, actor } = await jobWithCrew(
+      session.membershipId,
+      'SCHEDULED',
+      CUSTOMER_CONTACT,
+    );
+    await newContact(customer.id, {
+      firstName: 'Kept',
+      lastName: 'Contact',
+      isPrimary: true,
+    });
+    await newContact(customer.id, {
+      firstName: 'Removed',
+      lastName: 'Contact',
+      removedByMembershipId: actor.id,
+    });
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    const contacts = (
+      response.body.customerContactDetails as {
+        contacts: { firstName: string }[];
+      }
+    ).contacts;
+    expect(contacts.map((contact) => contact.firstName)).toEqual(['Kept']);
+  });
+
+  it('reports no customer contact details to a field caller without the customer capability', async () => {
+    // `BR-092` adds the capability and `BR-009` keeps the field read of the Job itself where it was: the
+    // technician still opens the Job they are assigned to, and the projection reports the block as
+    // absent rather than refusing the read (`BR-007`, `BR-011`).
+    const session = await signInFor([VISIT_PERMISSIONS.VIEW_ASSIGNED]);
+    const { job } = await jobWithCrew(
+      session.membershipId,
+      'SCHEDULED',
+      CUSTOMER_CONTACT,
+    );
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(response.body.customerContactDetails).toBeNull();
+    // The block is an addition, never a substitution: the rest of the Job is exactly as it was.
+    expect(response.body.customerName).toBe('Field Customer');
+    expect(response.body.selectedVisit).not.toBeNull();
+  });
+
+  it('reports a partly known customer with the absent fields as null', async () => {
+    const session = await signInFor([
+      VISIT_PERMISSIONS.VIEW_ASSIGNED,
+      CUSTOMER_PERMISSIONS.VIEW_ASSIGNED,
+    ]);
+    const { job } = await jobWithCrew(session.membershipId, 'SCHEDULED', {
+      phone: '+15145550142',
+    });
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(response.body.customerContactDetails).toEqual({
+      email: null,
+      phone: '+15145550142',
+      notes: null,
+      contacts: [],
+    });
+  });
+
+  it('reports a Customer with no contact persons as an empty list', async () => {
+    // Zero contacts is a legal state (`BR-095`), so the block answers the absence with `[]` rather than
+    // omitting the member a client reads it from.
+    const session = await signInFor([
+      VISIT_PERMISSIONS.VIEW_ASSIGNED,
+      CUSTOMER_PERMISSIONS.VIEW_ASSIGNED,
+    ]);
+    const { job } = await jobWithCrew(
+      session.membershipId,
+      'SCHEDULED',
+      CUSTOMER_CONTACT,
+    );
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(response.body.customerContactDetails.contacts).toEqual([]);
+  });
+
+  it('reports the customer through the office capability the organization already reads with', async () => {
+    const session = await signInFor([CUSTOMER_PERMISSIONS.VIEW]);
+    const other = await newMembership(organizationId);
+    const { job, customer } = await jobWithCrew(
+      other.id,
+      'SCHEDULED',
+      CUSTOMER_CONTACT,
+    );
+    // The same contacts the field read reports, read by the same second question: which capability
+    // admitted the caller decides the scope of the Job, not what the customer block carries (`BR-092`).
+    await newContact(customer.id, {
+      firstName: 'Jane',
+      lastName: 'Doe',
+      isPrimary: true,
+    });
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(response.body.customerContactDetails).toEqual({
+      email: CUSTOMER_CONTACT.email,
+      phone: CUSTOMER_CONTACT.phone,
+      notes: CUSTOMER_CONTACT.notes,
+      contacts: [
+        {
+          firstName: 'Jane',
+          lastName: 'Doe',
+          phone: null,
+          email: null,
+          isPrimary: true,
+        },
+      ],
+    });
+  });
+
+  it('does not reach a customer through a Job the field caller is not assigned to', async () => {
+    // `BR-092` scopes the read by the assignment, never by the Customer: the capability reads the
+    // customer of a Job the caller's own crew includes and nothing else, so a Job it does not reach is
+    // not found and no customer is disclosed (`ADR-019` D2).
+    const session = await signInFor([
+      VISIT_PERMISSIONS.VIEW_ASSIGNED,
+      CUSTOMER_PERMISSIONS.VIEW_ASSIGNED,
+    ]);
+    const other = await newMembership(organizationId);
+    const { job } = await jobWithCrew(other.id, 'SCHEDULED', CUSTOMER_CONTACT);
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404)
+      .expect((response) => {
+        expect(response.body.code).toBe('JOB_NOT_FOUND');
+      });
+  });
+
+  it('does not admit a caller to a Job on the customer capability alone', async () => {
+    // The customer capability answers the read's second question; it is never a substitute for the one
+    // that answers the first (`BR-006`, `BR-092`; `ADR-021` D2). A caller holding it and nothing else is
+    // refused the Job entirely, exactly as before this slice.
+    const session = await signInFor([CUSTOMER_PERMISSIONS.VIEW_ASSIGNED]);
+    const other = await newMembership(organizationId);
+    const { job } = await jobWithCrew(other.id, 'SCHEDULED', CUSTOMER_CONTACT);
+
+    await request(app.getHttpServer())
+      .get(`/jobs/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(403);
   });
 });

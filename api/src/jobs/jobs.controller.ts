@@ -29,9 +29,25 @@ import { RequireAnyPermission, RequirePermissions } from '../auth/permissions.de
 import { PermissionsGuard } from '../auth/permissions.guard.js';
 import type { PermissionedRequest } from '../auth/permissions.guard.js';
 import { ObjectStorageError } from '../storage/object-storage.js';
+import {
+  PropertyNotFoundError,
+  PropertyNotAvailableForNewWorkError,
+} from '../customers/properties.service.js';
 import { DomainValidationError } from '../validation/domain-validation.js';
+import { parseCreateJobDto } from './job-create.dto.js';
+import {
+  parseDirectCreateVisitDto,
+  parseFollowUpVisitApprovalDto,
+  parseFollowUpVisitReviewDto,
+  parseSubmitFollowUpVisitRequestDto,
+  type FollowUpVisitRequestDto,
+} from './follow-up-visit-request.dto.js';
 import { toJobDetailsDto } from './job-details.dto.js';
-import type { JobDetailsDto, JobDetails } from './job-details.dto.js';
+import type {
+  JobDetailsDto,
+  JobDetails,
+  JobDetailsReadOptions,
+} from './job-details.dto.js';
 import { toJobActivityDto } from './job-activity.js';
 import type { JobActivityDto } from './job-activity.js';
 import { parseJobActivityOptions } from './job-activity-query.dto.js';
@@ -77,6 +93,11 @@ import {
   JobCancellationUnavailableError,
   JobClosedForFieldWorkError,
   JobCompletionBlockedError,
+  FollowUpVisitRequestConflictError,
+  FollowUpVisitRequestNotFoundError,
+  FollowUpVisitRequestNotReviewableError,
+  JobCustomerInactiveError,
+  JobCustomerNotFoundError,
   JobNotFoundError,
   JobReviewConditionNotMetError,
   JobStatusTransitionNotAllowedError,
@@ -104,11 +125,21 @@ import {
  * (D1, D2). The catalogue still has **no** `jobs.*` capability, so the guard stays interim until the
  * Jobs feature defines its own (`BR-006`, `BR-042`; `docs/api/job-details.md` §2).
  *
+ * The read's **second** question — whether the Customer's own contact details belong in the answer — is
+ * answered from `customers.view` or `customers.view_assigned` instead, through `jobDetailsReadOptionsOf`
+ * (`BR-092`; `ADR-021` D1, D2). It is not part of the guard, because a technician assigned to the Job
+ * must still read the Job when they hold no Customer capability at all.
+ *
  * The **actions** are guarded by the existing `JOB_UPDATE` capability, which `BR-008` already names
  * as a Manager default and which the seeded catalogue already grants to that role. Introducing
  * `jobs.*` codes would invent the capability set the Jobs feature has not defined, so the actions
  * reuse the one that exists; the interim decision and its open question are recorded in
  * `docs/api/job-actions.md` §2 and `docs/tracker/018-android-job-actions.md`.
+ *
+ * The **create** route is the exception among the Job writes: `BR-008` names "create jobs" as a
+ * Manager default and the foundation catalogue already defines and grants `JOB_CREATE`, so creating a
+ * Job uses the capability that exists for exactly that action rather than the interim `JOB_UPDATE`
+ * (`BR-006`, `docs/api/job-details.md` §2).
  *
  * The **evidence routes** are the exception, and deliberately so: a photo is added by the technician
  * who took it (`BR-015`, `BR-027`), so they are guarded by the evidence capabilities the catalogue
@@ -136,11 +167,65 @@ export class JobsController {
   ) {}
 
   /**
+   * Creates a Job (`BR-021`, `BR-047` – `BR-053`, `BR-056`, `BR-094`).
+   *
+   * The caller states the Customer, the Property and the title; the property-less form a Job may also
+   * take (`BR-051`, `BR-056`) is not what this operation supports, because a Job must be created for a
+   * Customer at a location that Customer currently holds (`BR-094`). The Customer, the Property, the
+   * Job number, the `NEW` status, the address snapshot and the version are the backend's.
+   *
+   * It is guarded by the existing `JOB_CREATE` capability `BR-008` names as a Manager default and
+   * migration `0004_woozy_spitfire` already grants to that role — the same capability that already
+   * exists for this action, rather than the interim `JOB_UPDATE` the other actions reuse.
+   *
+   * No Visit is created: a Visit is one field attempt (`BR-047`, `BR-051`), and this route creates the
+   * work request only.
+   */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(JOB_PERMISSIONS.CREATE)
+  async create(
+    @Req() request: PermissionedRequest,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseCreateJobDto(body));
+    return this.action(authorization, () =>
+      this.jobs.createJob(
+        { organizationId: authorization.organizationId },
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
+  @Get('visit-requests')
+  @RequireAnyPermission(
+    VISIT_PERMISSIONS.REVIEW_REQUESTS,
+    VISIT_PERMISSIONS.REQUEST_FOLLOW_UP,
+  )
+  async listVisitRequests(
+    @Req() request: PermissionedRequest,
+  ): Promise<readonly FollowUpVisitRequestDto[]> {
+    const authorization = authorizationOf(request);
+    return this.jobs.listFollowUpVisitRequests(
+      { organizationId: authorization.organizationId },
+      authorization.membershipId,
+      authorization.permissions.includes(VISIT_PERMISSIONS.REVIEW_REQUESTS),
+    );
+  }
+
+  /**
    * One Job, for the office caller or for a field caller whose own crew includes the Job (`ADR-019`
    * D1, D2).
    *
    * Both audiences share one projection and one guard. Which capability admitted the caller is what
    * decides the scope applied to the read — never a role name (`BR-006`, `BR-007`).
+   *
+   * Beside that scope the read asks a **second** question: whether the Customer's own contact details
+   * belong in the answer (`BR-092`; `ADR-021` D2). A caller holding `customers.view` or
+   * `customers.view_assigned` receives them; a caller holding neither receives `null` for the block and
+   * the rest of the Job unchanged, because the Job is still theirs to work (`BR-009`, `BR-011`).
    */
   @Get(':id')
   @RequireAnyPermission(
@@ -160,7 +245,122 @@ export class JobsController {
     if (details === null) {
       throw jobNotFound();
     }
-    return toJobDetailsDto(details);
+    return toJobDetailsDto(details, jobDetailsReadOptionsOf(authorization));
+  }
+
+  @Post(':id/visit-requests')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(VISIT_PERMISSIONS.REQUEST_FOLLOW_UP)
+  async submitVisitRequest(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<FollowUpVisitRequestDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseSubmitFollowUpVisitRequestDto(body));
+    try {
+      return await this.jobs.submitFollowUpVisitRequest(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Post(':id/visits')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(VISIT_PERMISSIONS.CREATE_SCHEDULE)
+  async createVisit(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseDirectCreateVisitDto(body));
+    return this.action(authorization, () =>
+      this.jobs.createScheduledVisit(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
+  @Post(':id/visit-requests/:requestId/clarification')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(VISIT_PERMISSIONS.REVIEW_REQUESTS)
+  async clarifyVisitRequest(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+    @Body() body: unknown,
+  ): Promise<FollowUpVisitRequestDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseFollowUpVisitReviewDto(body));
+    try {
+      return await this.jobs.askFollowUpVisitRequestClarification(
+        { organizationId: authorization.organizationId },
+        id,
+        requestId,
+        authorization.membershipId,
+        input,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Post(':id/visit-requests/:requestId/rejection')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(VISIT_PERMISSIONS.REVIEW_REQUESTS)
+  async rejectVisitRequest(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+    @Body() body: unknown,
+  ): Promise<FollowUpVisitRequestDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseFollowUpVisitReviewDto(body));
+    try {
+      return await this.jobs.rejectFollowUpVisitRequest(
+        { organizationId: authorization.organizationId },
+        id,
+        requestId,
+        authorization.membershipId,
+        input,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Post(':id/visit-requests/:requestId/approval')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(VISIT_PERMISSIONS.REVIEW_REQUESTS)
+  async approveVisitRequest(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    if (!authorization.permissions.includes(VISIT_PERMISSIONS.CREATE_SCHEDULE)) {
+      throw AuthApiError.forbidden();
+    }
+    const input = parseInput(() => parseFollowUpVisitApprovalDto(body));
+    return this.action(authorization, () =>
+      this.jobs.approveFollowUpVisitRequest(
+        { organizationId: authorization.organizationId },
+        id,
+        requestId,
+        authorization.membershipId,
+        input,
+      ),
+    );
   }
 
   /**
@@ -229,7 +429,7 @@ export class JobsController {
   ): Promise<JobDetailsDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseChangeJobStatusDto(body));
-    return this.action(() =>
+    return this.action(authorization, () =>
       this.jobs.changeJobStatus(
         { organizationId: authorization.organizationId },
         id,
@@ -249,7 +449,7 @@ export class JobsController {
    */
   @Patch(':id/visits/:visitId/schedule')
   @HttpCode(HttpStatus.OK)
-  @RequirePermissions(JOB_PERMISSIONS.UPDATE)
+  @RequirePermissions(VISIT_PERMISSIONS.UPDATE_SCHEDULE)
   async reschedule(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -258,7 +458,7 @@ export class JobsController {
   ): Promise<JobDetailsDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseRescheduleVisitDto(body));
-    return this.action(() =>
+    return this.action(authorization, () =>
       this.jobs.rescheduleVisit(
         { organizationId: authorization.organizationId },
         id,
@@ -277,7 +477,7 @@ export class JobsController {
    */
   @Put(':id/visits/:visitId/technicians')
   @HttpCode(HttpStatus.OK)
-  @RequirePermissions(JOB_PERMISSIONS.UPDATE)
+  @RequirePermissions(VISIT_PERMISSIONS.ASSIGN_TECHNICIANS)
   async assign(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -286,7 +486,7 @@ export class JobsController {
   ): Promise<JobDetailsDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseAssignVisitTechniciansDto(body));
-    return this.action(() =>
+    return this.action(authorization, () =>
       this.jobs.assignVisitTechnicians(
         { organizationId: authorization.organizationId },
         id,
@@ -298,20 +498,29 @@ export class JobsController {
   }
 
   /**
-   * Advances one Visit through its field lifecycle (`BR-074`, `BR-075`, `BR-077`; `ADR-019` D3, D4, D5).
+   * Advances one Visit through its field lifecycle (`BR-074`, `BR-075`, `BR-077`, `BR-093`; `ADR-019`
+   * D3, D4, D5, D7).
    *
-   * The route applies only the normal lifecycle's forward transitions and `BR-075`'s one correction;
-   * `CANCELED` and `NO_SHOW` are refused because `BR-066` makes them dispatch actions and no capability
-   * authorizes one today (`BR-042`, `BR-076`, `ADR-019` D7). A destination the lifecycle does not permit
-   * is answered with the destinations the Visit has, as the Job status route already does.
+   * The route applies `BR-074`'s transitions and `BR-075`'s one correction; `CANCELED` and `NO_SHOW` are
+   * refused because `BR-066` makes them dispatch actions and no capability authorizes one today
+   * (`BR-042`, `BR-076`). A destination the lifecycle does not permit is answered with the destinations
+   * the Visit has, as the Job status route already does.
    *
-   * `VISIT_UPDATE_ASSIGNED_STATUS` guards it — the capability `BR-009` gives the technician for their
-   * assigned work — and the caller's scope is their own current assignment: a Visit their crew does not
-   * include is reported as not found, never as forbidden (`ADR-019` D2, D3).
+   * **Two authorizations reach it, and `BR-093` keeps them distinct.** `VISIT_UPDATE_ASSIGNED_STATUS` is
+   * the capability `BR-009` gives the technician for their own assigned work, and the caller's scope is
+   * then their own current assignment: a Visit their crew does not include is reported as not found,
+   * never as forbidden (`ADR-019` D2, D3). The office's `JOB_UPDATE` — the capability every office Visit
+   * action on a Job already requires (`BR-008`, `docs/api/job-actions.md` §2) — admits an office member
+   * to any Visit of the organization **without** crew membership, which is how a manager completes a
+   * Visit from Job Details (`BR-093`). Which capability admitted the caller decides the scope, never a
+   * role name (`BR-004`, `BR-006`, `BR-007`).
    */
   @Patch(':id/visits/:visitId/status')
   @HttpCode(HttpStatus.OK)
-  @RequirePermissions(VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS)
+  @RequireAnyPermission(
+    JOB_PERMISSIONS.UPDATE,
+    VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS,
+  )
   async changeVisitStatus(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -323,19 +532,25 @@ export class JobsController {
     // Completing a Visit records the outcome `BR-077` requires, which the catalogue keeps as its own
     // capability (`BR-009`). A route declares either an all-of requirement or an any-of one and never
     // both (`ADR-019` D1), so the second question is asked here, in its own place — exactly as the
-    // activity read asks the question its `includeRemovedEvidence` flag raises.
+    // activity read asks the question its `includeRemovedEvidence` flag raises. `BR-093` requires it of
+    // **every** caller: the office capability admits a member to the route, but the completion's own
+    // capability is what authorizes the outcome, the office included.
     if (
       input.status === 'COMPLETED' &&
       !authorization.permissions.includes(VISIT_PERMISSIONS.RECORD_OUTCOME)
     ) {
       throw AuthApiError.forbidden();
     }
-    return this.action(() =>
+    return this.action(authorization, () =>
       this.jobs.changeVisitStatus(
         { organizationId: authorization.organizationId },
         id,
         visitId,
         authorization.membershipId,
+        // The scope follows the capability that admitted the caller (`BR-093`): the office's
+        // `JOB_UPDATE` addresses the organization's Visits, a field capability keeps the caller bounded
+        // by their own current crew (`ADR-019` D2, D3).
+        visitWriterOf(authorization),
         input,
       ),
     );
@@ -622,10 +837,17 @@ export class JobsController {
 
   /** Runs one action and answers with the Job as it now stands, or maps its failure. */
   private async action(
+    authorization: ReturnType<typeof authorizationOf>,
     perform: () => Promise<JobDetails>,
   ): Promise<JobDetailsDto> {
     try {
-      return toJobDetailsDto(await perform());
+      // The action routes return the same projection the read does, so they answer the read's second
+      // authorization question the same way — otherwise a technician's customer block would vanish the
+      // moment they moved a Visit's status (`BR-092`, `ADR-021` D2).
+      return toJobDetailsDto(
+        await perform(),
+        jobDetailsReadOptionsOf(authorization),
+      );
     } catch (error) {
       throw mapActionError(error);
     }
@@ -644,6 +866,76 @@ function jobNotFound(): HttpException {
       message: 'Job was not found.',
     },
     HttpStatus.NOT_FOUND,
+  );
+}
+
+/**
+ * The Customer a Job is created for is outside the caller's organization, does not exist, or has been
+ * deleted (`BR-001`, `BR-023`).
+ *
+ * One code for all three, so the answer cannot be used to probe another organization's Customer ids or
+ * to learn whether a deleted Customer exists — exactly as `GET /customers/:id` answers.
+ */
+function customerNotFound(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.NOT_FOUND,
+      code: 'CUSTOMER_NOT_FOUND',
+      message: 'Customer was not found.',
+    },
+    HttpStatus.NOT_FOUND,
+  );
+}
+
+/**
+ * The Customer exists but does not accept new work (`BR-023`).
+ *
+ * The request is well formed and the Customer is the caller's; it is the Customer's own lifecycle that
+ * refuses the operation, so it is a conflict with current state rather than a bad payload.
+ */
+function customerInactive(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'CUSTOMER_INACTIVE',
+      message: 'The customer is not active and cannot take new work.',
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+/**
+ * The Property is outside the caller's organization, does not exist, or is not one this Customer
+ * currently holds (`BR-001`, `BR-050`).
+ *
+ * The same code the Customer-scoped Property routes answer with, so a Property id cannot be probed for
+ * which Customer holds it or whether it exists at all.
+ */
+function propertyNotFound(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.NOT_FOUND,
+      code: 'PROPERTY_NOT_FOUND',
+      message: 'Property was not found.',
+    },
+    HttpStatus.NOT_FOUND,
+  );
+}
+
+/**
+ * The Property exists but is not a location new work may start at because it is archived (`BR-083`).
+ *
+ * Archiving blocks new Jobs while leaving existing work alone, so the operation conflicts with the
+ * Property's lifecycle rather than being a bad payload.
+ */
+function propertyNotAvailableForNewWork(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'PROPERTY_NOT_AVAILABLE_FOR_NEW_WORK',
+      message: 'The property is archived and cannot take new work.',
+    },
+    HttpStatus.CONFLICT,
   );
 }
 
@@ -674,18 +966,60 @@ function assignedViewerOf(
 }
 
 /**
- * The Visit-level write scope for the note route, or `null` for the office caller (`ADR-019` D2, D3).
+ * The Job read's other authorization questions: what the projection may include and what the caller may
+ * do on the Visit it reports (`BR-092`, `BR-093`; `ADR-021` D1, D2; `ADR-019` D3, D7).
  *
- * A caller holding the office's Job-update capability keeps exactly the reach it has always had on this
- * route: recording a note about a Visit is office work `BR-008` names, so the assignment scope is not
- * imposed on it — `ADR-019` D2 applies the scope only to a caller **without** the office capability, and
- * the note route follows the same shape as the Job read. A caller admitted by `VISIT_ADD_NOTE` instead
- * writes only a Visit their own current crew includes, and a Visit their assignments do not reach is
- * reported as not found.
+ * The guard decided who may read the Job at all; this decides what the projection may answer. It is
+ * asked here, at the boundary, because a route declares either an all-of requirement or an any-of one and
+ * never both (`ADR-019` D1). `customers.view` is the office read, which already reaches every Customer of
+ * the organization; `customers.view_assigned` is the field capability `BR-092` grants the default
+ * Technician role. A caller holding neither reads the same Job with `null` for the block rather than
+ * being refused the Job, because the Job is still theirs to work (`BR-009`, `BR-011`).
+ *
+ * Every route that returns a Job answers it through this one function, the action routes included, so the
+ * read and the actions can never disagree (`BR-041`).
+ */
+function jobDetailsReadOptionsOf(
+  authorization: ReturnType<typeof authorizationOf>,
+): JobDetailsReadOptions {
+  return {
+    includeCustomerContact:
+      authorization.permissions.includes(CUSTOMER_PERMISSIONS.VIEW) ||
+      authorization.permissions.includes(CUSTOMER_PERMISSIONS.VIEW_ASSIGNED),
+    // The Visit's own question — may **this caller** drive its field lifecycle — is answered from the
+    // membership the request was authorized for, because the crew the projection reports holds
+    // memberships and the field route's scope is that same membership (`ADR-019` D3).
+    callerMembershipId: authorization.membershipId,
+    // Beside the crew, `BR-093` gives the question a second answer for the office caller: the capability
+    // that reaches Visit writes authorizes any Visit of the organization without crew membership, which
+    // is how a manager completes a Visit from Job Details (`ADR-019` D7).
+    officeVisitWriter: authorization.permissions.includes(JOB_PERMISSIONS.UPDATE),
+    // The completion keeps its own capability for **every** caller, the office included, so the
+    // projection exposes the `COMPLETED` destination only when the caller holds it (`BR-009`, `BR-077`,
+    // `BR-093`).
+    recordsVisitOutcome: authorization.permissions.includes(
+      VISIT_PERMISSIONS.RECORD_OUTCOME,
+    ),
+  };
+}
+
+/**
+ * The Visit-level write scope, or `null` for the office caller (`BR-093`; `ADR-019` D2, D3, D7).
+ *
+ * Both Visit write routes ask it, and both read the same answer: `POST /jobs/:id/visits/:visitId/notes`
+ * (`ADR-019` D3) and `PATCH /jobs/:id/visits/:visitId/status` (`BR-093`).
+ *
+ * A caller holding the office's Job-update capability keeps exactly the reach it has always had on these
+ * routes: recording a note about a Visit, and `BR-093`'s office completion, are office work `BR-008`
+ * names, so the assignment scope is not imposed on it — `ADR-019` D2 applies the scope only to a caller
+ * **without** the office capability, and both routes follow the same shape as the Job read. A caller
+ * admitted by a field capability instead writes only a Visit their own current crew includes, and a Visit
+ * their assignments do not reach is reported as not found.
  *
  * Which capability admitted the caller decides the scope, never a role name (`BR-004`, `BR-006`,
- * `BR-007`). Whether the office may perform a **field** action is `ADR-019` D7's open question and
- * nothing here decides it.
+ * `BR-007`). Note that the office caller is exempt from **crew membership**, not from a destination's own
+ * capability: a completion still requires `VISIT_RECORD_OUTCOME` of every caller, and that question is
+ * asked in its own place (`BR-093`).
  */
 function visitWriterOf(
   authorization: ReturnType<typeof authorizationOf>,
@@ -849,8 +1183,29 @@ function mapActionError(error: unknown): unknown {
   if (error instanceof JobNotFoundError) {
     return jobNotFound();
   }
+  if (error instanceof JobCustomerNotFoundError) {
+    return customerNotFound();
+  }
+  if (error instanceof JobCustomerInactiveError) {
+    return customerInactive();
+  }
+  if (error instanceof PropertyNotFoundError) {
+    return propertyNotFound();
+  }
+  if (error instanceof PropertyNotAvailableForNewWorkError) {
+    return propertyNotAvailableForNewWork();
+  }
   if (error instanceof VisitNotFoundError) {
     return visitNotFound();
+  }
+  if (error instanceof FollowUpVisitRequestNotFoundError) {
+    return followUpVisitRequestNotFound();
+  }
+  if (error instanceof FollowUpVisitRequestConflictError) {
+    return followUpVisitRequestConflict(error);
+  }
+  if (error instanceof FollowUpVisitRequestNotReviewableError) {
+    return followUpVisitRequestNotReviewable(error);
   }
   if (error instanceof JobStatusTransitionNotAllowedError) {
     return transitionNotAllowed(error);
@@ -909,6 +1264,48 @@ function visitNotFound(): HttpException {
       message: 'Visit was not found on this job.',
     },
     HttpStatus.NOT_FOUND,
+  );
+}
+
+function followUpVisitRequestNotFound(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.NOT_FOUND,
+      code: 'FOLLOW_UP_VISIT_REQUEST_NOT_FOUND',
+      message: 'Follow-up visit request was not found.',
+    },
+    HttpStatus.NOT_FOUND,
+  );
+}
+
+function followUpVisitRequestConflict(
+  error: FollowUpVisitRequestConflictError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'FOLLOW_UP_VISIT_REQUEST_CONFLICT',
+      message: 'The follow-up visit request changed since it was read.',
+      details: {
+        currentStatus: error.currentStatus,
+        currentVersion: error.currentVersion,
+      },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+function followUpVisitRequestNotReviewable(
+  error: FollowUpVisitRequestNotReviewableError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'FOLLOW_UP_VISIT_REQUEST_NOT_REVIEWABLE',
+      message: `A follow-up visit request in ${error.status} cannot be reviewed.`,
+      details: { status: error.status },
+    },
+    HttpStatus.CONFLICT,
   );
 }
 

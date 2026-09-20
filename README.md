@@ -109,6 +109,90 @@ Initial supported languages are **English** and **French**. Development rules li
 > through with a seek track — the fill and the playhead, **no amplitude**, no waveform (`ADR-018` A11) — and
 > a second tap pauses a recording where it got to rather than letting its position go. Device QA of the audio
 > evidence is that tracker's Phase 9d.
+>
+> The technician's field experience — the field read (`GET /home/technician`), the Visit field
+> lifecycle (`BR-074`'s free movement, with the outcome a completion requires) and the technician
+> home — is `docs/tracker/037-technician-field-experience.md`, with its decisions in
+> `docs/decisions/019-technician-field-experience.md` (the field capability, the assignment scope,
+> the offline posture) and its contracts in `docs/api/job-actions.md` and
+> `docs/api/technician-home.md`.
+>
+> The **Manager Schedule** — the week strip and the selected day's agenda, the technician filter and
+> the work that still has no crew — is `docs/tracker/038-android-manager-schedule.md`, served by a new
+> `GET /schedule` read contracted in `docs/api/schedule.md` and decided in
+> `docs/decisions/020-manager-schedule-and-unassigned-lane.md`. The month calendar is a
+> jump-to-date mechanism only; the screen schedules nothing (assignment, rescheduling and status
+> actions remain the Job Details screen's).
+>
+> The schedule's **density pass** — one compact control row instead of two stacked rows, a collapsing
+> week strip, a multi-technician filter (which made `GET /schedule`'s `membershipId` repeatable and its
+> ids a union) and a tighter card/timeline — is
+> `docs/tracker/040-android-manager-schedule-density.md`. It also carries the two defects
+> physical-device QA reported and their fixes (2026-09-17): the technician sheet's **Apply** now closes
+> the sheet, and an action's report is drawn **above** whatever a screen pins to the bottom — the floating
+> **Add update** action and the evidence waiting to be saved — so its whole text is readable (`BR-042`).
+>
+> The **technician's own schedule** ("My Schedule") — the same `GET /schedule` read resolved for the
+> caller's own work, presented as a week strip and a day of the Visits assigned to that technician, with
+> the crew line (`You + 2`), an emphasised next Visit, quieter completed Visits, and the day kept in the
+> existing offline working set — is `docs/tracker/041-android-technician-schedule.md`, with the read's
+> scope decided in `docs/decisions/020-manager-schedule-and-unassigned-lane.md` (decision update) and
+> contracted in `docs/api/schedule.md`. **A field member cannot read a colleague's schedule**: no
+> capability authorizes it, the API refuses an off-scope request with `403`, and the question is recorded
+> as an open one rather than invented (`BR-042`).
+>
+> The **technician's read of the Customer behind an assigned Job** — the customer's own phone, email and
+> notes on the Job card, view-only, reached only through a Job the technician's own crew includes — is
+> `docs/tracker/042-technician-customer-read.md`, decided in
+> `docs/decisions/021-technician-customer-read.md` (a dedicated `customers.view_assigned` capability,
+> granted to the default Technician role by migration `0013`) and contracted in `docs/api/job-details.md`.
+> A session without it reads the same Job with the block reported **absent**, never a refused Job, and the
+> office Customer screen is no longer offered where its read would answer `403` (`BR-009`, `BR-011`,
+> `BR-092`).
+>
+> **Create Job** — `POST /jobs` and the Android Create Job form — is
+> `docs/tracker/043-create-job.md`. The supported create operation requires both an active Customer and an
+> active Property that Customer currently holds (`BR-094`, new), which the Job & Visit model itself does
+> not: a property-less Job remains valid (`BR-051`, `BR-056`), and nothing in the schema changed. The route
+> is guarded by the existing `JOB_CREATE` capability and allocates the organization-scoped Job number under
+> a counter that makes concurrent creation safe (`BR-052`); it creates **no Visit** (`BR-047`, `BR-051`).
+> The contract is `docs/api/job-details.md` §6 and the create's place in the domain model is
+> `docs/domain/job-visit-domain-model.md` §6.5.
+>
+> **Job Details presents the Job and its Visits apart** — the Job's own overview, the Visit that
+> represents it with **its own** activity, the Job's other Visits as folded history, and the Job's own
+> events in their own section — is `docs/tracker/044-job-details-job-visit-separation.md`. `GET /jobs/:id`
+> gained one additive field (`visits`) because a history row needs each Visit's date, status and crew and
+> nothing in the contract carried them (`BR-042`, `BR-047`, `BR-071`); which event belongs to which Visit
+> is the API's own `visitSequence` answer and not a client's guess (`BR-080`,
+> `docs/api/job-activity.md` §3.3). The previous screen is retained unmodified as the restore point.
+>
+> **Its activity is grouped by the Visit each update belongs to** — one foldable group per Visit, headed
+> `Visit N · date`, opened on the Visit the page represents, plus a **General job updates** group for the
+> events that belong to no Visit — is `docs/tracker/045-android-job-activity-visit-groups.md`. Grouping
+> uses the read's own `visitSequence` because no Visit id crosses the activity contract, and each group's
+> crew comes from that Visit's own crew list, which is **assignment** and is labelled as such (`BR-068`;
+> Servora records no attendance, `BR-034`).
+>
+> **The represented Visit is stated by when it is for, and its activity is headed by its own card** — the
+> section is labelled `Current visit` only while that field attempt is under way or its window is running,
+> and otherwise `Today's visit`, `Tomorrow's visit`, an `Upcoming visit` or a `Previous visit`; and an
+> expanded group's content is headed by one bordered card stating that Visit's date, scheduled window and
+> assigned crew — is `docs/tracker/046-android-job-details-visit-period-and-card.md`. The period is read
+> from the Visit's own schedule and field status plus the device's clock, and it re-selects nothing: which
+> Visit represents the Job stays the API's answer (`BR-081`).
+>
+> **That card also states what the field attempt resulted in** — one **Outcome** row between the scheduled
+> window and the crew, drawn only when the Visit holds one — is
+> `docs/tracker/048-android-job-activity-visit-outcome.md`. It is the Visit's **current** outcome, so
+> `GET /jobs/:id` gained one additive field (`visits[].outcomeCode`): a Visit that was reopened after
+> completion holds none (`BR-079`), which is exactly why the row is read from the Visit and not derived from
+> the timeline, where the outcome it recorded stays as history (`BR-001`).
+>
+> **Two temporary one-tap sign-in buttons for local device QA** — Manager and Technician, present only in a
+> debug build because the release source set carries no accounts — is
+> `docs/tracker/049-android-dev-sign-in-buttons.md`. Development tooling rather than product behaviour: each
+> button submits the seeded account's real credentials through the ordinary sign-in path.
 
 ## Layout
 
@@ -306,19 +390,29 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
   completion invariant, and the confirmation before closing or reopening:
   `docs/tracker/034-manager-job-status-workflow.md`.
 - The technician's field experience — **`ADR-019` accepted (Phase 1), the field read landed (Phase 2a),
-  `GET /home/technician` with the Android technician home landed (Phases 2b and 4) and the Visit field
-  lifecycle landed (Phase 3)**: `GET /jobs/:id` and `/jobs/:id/activity` accept `customers.view` **or**
-  `VISIT_VIEW_ASSIGNED` through a new any-of authorization primitive, with a field caller reading only
-  the Jobs their own current assignments reach; `PATCH /jobs/:id/visits/:visitId/status` applies
-  `BR-074`'s transitions and `BR-075`'s one correction, records every applied change once in
-  append-only history, writes the outcome `BR-077` requires with the completion, and applies the
-  Visit → Job consequence `ADR-019` D4 decides — all guarded by the field capabilities `BR-009` names,
-  scoped to the caller's own current assignment, and replayed exactly once through a client-generated
-  operation id; and the technician's Home is now their own day — the Visit to do next, today in time
-  order, a capped preview of what comes after and the overdue work on their own Visits, readable
-  offline through the working set. **D6 was answered by product ownership on 2026-09-17** (its own
-  screen answering 'what do I need to do next?', not the manager home filtered to one technician).
-  Next: the field action on the Android Job Details screen and on the Home (Phase 5):
+  `GET /home/technician` with the Android technician home landed (Phases 2b and 4), the Visit field
+  lifecycle landed (Phase 3) and the Android field action landed (Phase 5)**: `GET /jobs/:id` and
+  `/jobs/:id/activity` accept `customers.view` **or** `VISIT_VIEW_ASSIGNED` through a new any-of
+  authorization primitive, with a field caller reading only the Jobs their own current assignments
+  reach; `PATCH /jobs/:id/visits/:visitId/status` applies `BR-074`'s transitions and `BR-075`'s one
+  correction, records every applied change once in append-only history, writes the outcome `BR-077`
+  requires with the completion, and applies the Visit → Job consequence `ADR-019` D4 decides — all
+  guarded by the field capabilities `BR-009` names, or since **Phase 5c (2026-09-18)** by the office
+  capability **`BR-093`** adds (an office member may complete a Visit from Job Details without being on
+  its crew), with the scope following the capability that admitted the caller — their own current crew for
+  a field caller, the organization's Visits for an office caller — a completion still requiring
+  `VISIT_RECORD_OUTCOME` of every caller, and the projection reporting only the destinations that caller
+  may execute — and replayed exactly once through a client-generated operation id; the technician's Home is now their own
+  day — the Visit to do next, today in time order, a capped preview of what comes after and the overdue
+  work on their own Visits, readable offline through the working set; and on the Job Details screen the
+  Visit's **status chip is the control** that moves it, drawn from the destinations the API reports, with
+  a completion sheet that records `BR-078`'s outcome type and the summary `BR-077` requires in the same
+  request, the note written under `VISIT_ADD_NOTE`, and the transition and the note queued through the
+  existing outbox when the API cannot be reached. **D6 was answered by product ownership on 2026-09-17**
+  (its own screen answering 'what do I need to do next?', not the manager home filtered to one
+  technician), **`ADR-019` D7 on 2026-09-18**: a Manager may complete a Visit from Job Details without
+  being on its crew, recorded as the business rule `BR-093`; and (Phase 5b) the field action is offered
+  only to a caller the API will actually accept. Next: Phase 6, the product owner's device QA:
   `docs/tracker/037-technician-field-experience.md`
   (decision: `docs/decisions/019-technician-field-experience.md`; contracts: `docs/api/job-actions.md`
   §7, `docs/api/technician-home.md`).

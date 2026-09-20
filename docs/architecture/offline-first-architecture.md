@@ -1,9 +1,11 @@
 # Servora — Offline-First Architecture Standard (Android)
 
 > **Status: IMPLEMENTED for the operations that adopt it.** The store, the outbox, the replay engine
-> and the triggers exist, and five adopters use them: **Property archive and restore** (`BR-086`), the
+> and the triggers exist, and seven adopters use them: **Property archive and restore** (`BR-086`), the
 > **Customer Detail read**, the **Customers list read**, the **Job photo upload** (`BR-015`,
-> `BR-027`) and the **Job Details and Job Activity reads** (`D5`, tracker 029 Phase 5). Everything else
+> `BR-027`), the **Job Details and Job Activity reads** (`D5`, tracker 029 Phase 5), the **Job audio
+> upload** (`BR-091`, `ADR-018`) and the **Visit field transition and note** (`BR-074`, `BR-077`;
+> `ADR-019` D5, tracker 037 Phase 5). Everything else
 > is still online-only, and §11 keeps the questions the standard deliberately does not answer.
 >
 > Decision records: `docs/decisions/012-property-lifecycle-and-permissions.md` (D7, which defined this
@@ -317,8 +319,9 @@ These remain **OPEN QUESTION** and must not be invented:
    here at all: its bytes are the app-private draft file, never evictable, because they are the only copy
    of evidence the API has not accepted yet (`BR-014`, `ADR-018` A2).
 8. **The Visit field transition and the Visit note** (`BR-074`, `BR-075`, `BR-077`, `BR-031`;
-   `ADR-019` D5, tracker 037 Phase 3) — **offline-capable at the API**, with the Android client's outbox
-   adoption landing in that slice's Phase 5, so nothing on the device queues them yet.
+   `ADR-019` D5, tracker 037 Phases 3 and 5) — **implemented on both sides.** The Android client queues
+   `visit.status.change` and `visit.note.add` through the existing outbox when the API cannot be reached,
+   and sends them directly when it can.
    `PATCH /jobs/:id/visits/:visitId/status` and `POST /jobs/:id/visits/:visitId/notes` accept a
    client-generated `clientOperationId`, and a repeat is answered from that key rather than performed
    twice, which is the condition §13.2 states for queueing a mutation (`BR-031`, §5). They are the first
@@ -328,7 +331,11 @@ These remain **OPEN QUESTION** and must not be invented:
    the status the Visit actually holds, and otherwise refuses it with that status and version — never
    last-write-wins, and never "as close as possible" (§8;
    `docs/domain/job-visit-domain-model.md` §15). A refused action keeps the API's own reason, which a
-   client presents and offers to discard (`BR-014`). Recorded in
+   client presents and offers to discard (`BR-014`). One departure from the queue-first shape the
+   evidence adopters use, recorded in tracker 037 Phase 5: the field action is **sent first and queued
+   only when the request could not reach the backend**, because a `BR-070` schedule conflict has to be
+   shown and accepted explicitly and a refused outbox row is never re-applied — the Property lifecycle's
+   shape for a versioned state-change command, not the uploads'. Recorded in
    `docs/api/job-actions.md` §7 and `docs/tracker/037-technician-field-experience.md`.
 9. **The technician home read** (`GET /home/technician`, `BR-013`; `ADR-019` D6, tracker 037
    Phase 4) — served from the working set when the API cannot be reached, so the answer to
@@ -341,6 +348,16 @@ These remain **OPEN QUESTION** and must not be invented:
    **Manager** home stays online-only, and deliberately: it is the operation's day, read from a
    desk where connectivity is not the constraint, and its attention conditions depend on the server
    clock rather than on the device's.
+10. **The technician's own schedule** (`GET /schedule` answered for the caller's own work, `BR-009`,
+   `BR-013`; `ADR-020` decision update, tracker 041) — served from the working set when the API cannot
+   be reached, so the days of assigned work a technician browsed survive a loss of connectivity. It is
+   the read adopters' shape — the wire response is kept and mapped on the way out, only a failure that
+   could not reach the backend falls back, and the screen marks the answer as the last one the backend
+   reported (§7) — under its own projection key (`schedule.technician`). **One row per subject and per
+   local date**, because this answer depends on the date the backend was asked about (§13.4): a day
+   read for another date is never served for this one. **Only a field-scoped answer is kept**: the
+   office board is the same route resolved for the operation's day, and it stays online-only with the
+   Manager home.
 
 What is still **online-only** on Android: the Manager Home (whose read is the operation's day
 rather than one technician's, so a stale copy would be an operational answer the office cannot
@@ -356,9 +373,9 @@ queued — `BR-089`, tracker 029 Phase 6b), **removing an accepted audio note**
 `ADR-018` A10), technician assignment, scheduling and rescheduling, Customer and Property writes, and
 every form. Their routes accept no idempotency key yet, or their mutation conflict policy is undecided
 (§8, §11.1), so they must not be queued or invented. The **Visit field transition and the Visit note**
-left this list when tracker 037 Phase 3 gave their routes a `clientOperationId` and the
-refuse-and-reconcile policy adopter 8 records; their Android adoption is that slice's Phase 5, so no
-Android write queues them today. The `D5` question about accepted evidence **was answered on 2026-09-16 and
+are no longer on this list: tracker 037 Phase 3 gave their routes a `clientOperationId` and the
+refuse-and-reconcile policy adopter 8 records, and Phase 5 adopted the existing outbox on Android, so the
+transition and the note are queued when the API cannot be reached. The `D5` question about accepted evidence **was answered on 2026-09-16 and
 implemented by tracker 029 Phase 5**: accepted evidence's **metadata** is readable offline through the
 working set (adopter 5) and its **bytes** are cached best-effort by the image stack (§9). The photo
 evidence that **is** offline-capable is also the draft: capture, preparation and upload are queued

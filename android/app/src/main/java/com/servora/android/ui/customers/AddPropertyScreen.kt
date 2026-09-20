@@ -296,7 +296,7 @@ internal fun PropertyFormSection(
  * than as part of the field's name (`BR-028`).
  */
 @Composable
-private fun PropertyFieldLabel(labelRes: Int, optional: Boolean) {
+internal fun PropertyFieldLabel(labelRes: Int, optional: Boolean) {
     val label = stringResource(labelRes)
     val optionalMarker = stringResource(R.string.property_field_optional)
     val text = buildAnnotatedString {

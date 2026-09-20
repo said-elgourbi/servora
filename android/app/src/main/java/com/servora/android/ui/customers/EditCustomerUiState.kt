@@ -2,6 +2,7 @@ package com.servora.android.ui.customers
 
 import androidx.compose.runtime.Immutable
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.domain.model.CustomerContact
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerType
 
@@ -37,6 +38,14 @@ data class EditCustomerUiState(
     val email: String = "",
     val notes: String = "",
     val status: CustomerStatus = CustomerStatus.ACTIVE,
+    /**
+     * The customer's contact persons, as the backend reported them (`BR-095`).
+     *
+     * The form never writes them — contacts are maintained from the customer detail screen
+     * (`ADR-022` D5) — so they are carried only so the user can see who is recorded while editing
+     * the customer's own fields.
+     */
+    val contacts: List<CustomerContact> = emptyList(),
     val isSaving: Boolean = false,
     val saveAttempted: Boolean = false,
     val isSaved: Boolean = false,

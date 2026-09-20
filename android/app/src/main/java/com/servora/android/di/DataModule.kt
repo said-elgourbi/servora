@@ -14,6 +14,10 @@ import com.servora.android.data.home.ManagerHomeRepository
 import com.servora.android.data.home.TechnicianHomeRepository
 import com.servora.android.data.jobs.DefaultJobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsRepository
+import com.servora.android.data.schedule.DefaultScheduleRepository
+import com.servora.android.data.schedule.DefaultVisitRequestsRepository
+import com.servora.android.data.schedule.ScheduleRepository
+import com.servora.android.data.schedule.VisitRequestsRepository
 import com.servora.android.data.session.AccessTokenSubject
 import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.data.session.DefaultSessionAuthenticator
@@ -90,6 +94,18 @@ abstract class DataModule {
     abstract fun bindJobDetailsRepository(
         implementation: DefaultJobDetailsRepository,
     ): JobDetailsRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindScheduleRepository(
+        implementation: DefaultScheduleRepository,
+    ): ScheduleRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindVisitRequestsRepository(
+        implementation: DefaultVisitRequestsRepository,
+    ): VisitRequestsRepository
 
     companion object {
         /** Exposes the installation identity as a plain value for injection. */

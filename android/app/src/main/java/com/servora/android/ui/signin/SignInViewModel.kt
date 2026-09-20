@@ -51,6 +51,25 @@ class SignInViewModel @Inject constructor(
         _uiState.update { it.copy(passwordVisible = !it.passwordVisible) }
     }
 
+    /**
+     * Signs in with a local development account in one step, for the temporary dev shortcut on the
+     * sign-in screen (`docs/tracker/049-android-dev-sign-in-buttons.md`).
+     *
+     * It only prefills the form and reuses [onSubmit], so the attempt goes through exactly the same
+     * validation, repository call and state handling as a typed one. There is no second
+     * authentication route (`BR-018`, `BR-007`), and the in-flight guard in [onSubmit] still
+     * applies: a second tap while an attempt is running changes nothing.
+     */
+    fun onDevSignIn(email: String, password: String) {
+        if (_uiState.value.isSubmitting) {
+            return
+        }
+        _uiState.update {
+            it.copy(email = email, password = password, fieldError = null, failureReason = null)
+        }
+        onSubmit()
+    }
+
     fun onSubmit() {
         val current = _uiState.value
         if (current.isSubmitting) {

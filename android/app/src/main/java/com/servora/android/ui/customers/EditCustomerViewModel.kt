@@ -156,6 +156,9 @@ class EditCustomerViewModel @Inject constructor(
                         email = result.detail.customer.email.orEmpty(),
                         notes = result.detail.customer.notes.orEmpty(),
                         status = result.detail.customer.status,
+                        // The form never writes them; they are shown read-only so the user sees who
+                        // is recorded while editing the customer's own fields (`BR-095`, `ADR-022` D5).
+                        contacts = result.detail.contacts,
                     )
 
                     is CustomerDetailResult.Failure -> state.copy(

@@ -6,6 +6,7 @@ import { HealthModule } from './health/health.module.js';
 import { ManagerHomeModule } from './home/manager-home.module.js';
 import { TechnicianHomeModule } from './home/technician-home.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
+import { ScheduleModule } from './schedule/schedule.module.js';
 import { SmsModule } from './sms/sms.module.js';
 import { TechniciansModule } from './technicians/technicians.module.js';
 
@@ -17,6 +18,7 @@ import { TechniciansModule } from './technicians/technicians.module.js';
     ManagerHomeModule,
     TechnicianHomeModule,
     JobsModule,
+    ScheduleModule,
     TechniciansModule,
     HealthModule,
     SmsModule,

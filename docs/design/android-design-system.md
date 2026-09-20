@@ -248,6 +248,15 @@ to: the header's status is labelled **Job status**, and the Visit card labels it
 date rather than with a word that reads as a status, so the card's own badge is the only status a Visit
 appears to have (`docs/tracker/021-android-job-details-status-polish.md`).
 
+The section that presents the represented Visit is labelled for **when that field attempt is for**, as
+of the device's own clock and zone (`docs/tracker/046-android-job-details-visit-period-and-card.md`): the
+Visit the read selected (`BR-081`) is described as the **current** one only while its field work is under
+way or its scheduled window is running (`BR-072`, `BR-074`), and otherwise as **Today's visit**,
+**Tomorrow's visit**, an **Upcoming visit** or a **Previous visit**. A Visit with no schedule this build
+can read keeps the current label, because the read selected it and there is no time to describe it
+against (`BR-042`, `BR-051`). The label states a period and never a lifecycle: no status, schedule or
+selection is decided by it (`BR-001`, `BR-007`).
+
 | Part | Token |
 | --- | --- |
 | Job identity | the Job number, `labelMedium` on `onSurfaceVariant`; then the title, `headlineSmall` bold on `onSurface`; then the description, `bodyMedium` on `onSurfaceVariant`. The number is stated once and is never repeated inside the title (`BR-052`). The three stay one group: the status is not drawn above them, so nothing separates the Job's number from what the Job is |
@@ -255,9 +264,10 @@ appears to have (`docs/tracker/021-android-job-details-status-polish.md`).
 | Contextual action | `TextButton`, `labelLarge`, `heightIn(min = 48.dp)`; disabled with the platform's own dimming |
 | Status control | a Material 3 clickable `Surface` shaped as the shared status chip (`JobStatusPill`): the current status's own container and content colours, its 1 dp `content@25%` border, an 8 dp dot in the chip's own content colour that marks it as a status, the chip's localized label, and a 16 dp `ic_chevron_down` in the same content colour saying it opens something. Tapping it opens the control's own compact menu — one fixed 216 dp column anchored at the chip — made of an `outlineVariant` divider under a non-acting row stating the status the Job is in now (its own dot, its localized label, `bodyMedium` semibold and a 16 dp `ic_check_circle` in its accent colour, with the "Current status" content description), then one `DropdownMenuItem` per destination the API reported (`BR-058`), each a `bodyMedium` label with a dot in that status's accent colour rather than a second row of chips. Every destination the API reported is listed, in the status vocabulary's order: an open Job offers each other open status and `Completed`, and a closed Job offers only `New`; a destination the Job does not currently qualify for is still listed, because the API answers that question (`BR-061`, `BR-062`). Choosing a destination sends **one** change; the two consequential destinations are confirmed first by a Material 3 `AlertDialog` at the screen's dialog width — **Close this job?** (with a body naming the Job, and confirming that closing ends the field work and makes the visit outcomes final) or **Reopen this job?** — whose actions are a filled **Confirm** and a text **Cancel** (`BR-062`, `BR-063`). Without the capability, or with no permitted destination, the status is drawn as the same dot-led chip and does not act (`BR-006`, `BR-007`); the two states differ only by the affordance the control adds, because the clickable `Surface` keeps the chip's own size, reserves the platform's touch target around it and confines the ripple to the chip |
 | Visit card row | the represented Visit's date is labelled **Visit date** (`labelMedium` on `onSurfaceVariant`, as every information row is) rather than with a word that reads as a status, and the Visit's status badge stays at the end of that row. The date row and the badge therefore state the Visit's date and its status, never the same thing twice (`BR-074`) |
+| Visit section label | the section's `SectionLabel`, stating **when the represented Visit is for**: `Current visit`, `Today's visit`, `Tomorrow's visit`, `Upcoming visit` or `Previous visit`, resolved from the Visit's own schedule, its field status and the device's clock (`BR-072`, `BR-074`, `BR-081`) |
 | Visit card action | at the foot of the visit card behind an `outlineVariant` divider: **Reschedule**, disabled when the API says the visit is not reschedulable (`BR-073`) |
 | Technicians section action | at the foot of the crew card behind the same divider: **Manage technicians**, which states the whole crew — adding a technician, removing one and naming the Lead (`BR-068`, `BR-069`) |
-| Action report | a Material 3 `SnackbarHost` at the bottom of the screen. What an action did is transient: `secondaryContainer` on `onSecondaryContainer`, `SnackbarDuration.Short`. A refusal waits for the user: `errorContainer` on `onErrorContainer`, `SnackbarDuration.Indefinite`, with a **Dismiss** text button |
+| Action report | a Material 3 `SnackbarHost` at the bottom of the screen, drawn **above whatever the screen pins below it** — the floating **Add update** action, and the audio notice / photo tray while the device holds evidence the API has not accepted — so a report is never covered by one of them and its whole text is readable (`BR-042`; reported from physical-device QA and fixed 2026-09-17). What an action did is transient: `secondaryContainer` on `onSecondaryContainer`, `SnackbarDuration.Short`. A refusal waits for the user: `errorContainer` on `onErrorContainer`, `SnackbarDuration.Indefinite`, with a **Dismiss** text button |
 | Tappable information row | unchanged: no fill of its own; the row's whole width is the control, so the row's own tokens do not change. A row that opens the Job's address in the device's map application ends in the design's 18 dp `ic_navigation` glyph on `primary` (`Figma/src/screens/JobDetails.tsx`); the glyph also names that action for a screen reader, because the row's own text states the address and not what opening it does (`BR-028`). A Job with no address has nothing to navigate to, so that row is neither tappable nor marked (`BR-056`) |
 | Assignment sheet | a Material 3 `ModalBottomSheet`: one row per technician with a `Checkbox` and a Lead choice, and one primary button; a crew that is not exactly one Lead cannot be confirmed |
 | Reschedule dialog | an `AlertDialog` whose date and time fields open the platform pickers, plus length choices |
@@ -274,14 +284,27 @@ with already presents the change, so the report says the same thing twice and ho
 needs (`BR-001`). A refusal is the opposite case — nothing on screen reflects a change that did not
 happen — so it stays until the user dismisses it.
 
-**Job Activity is a unified timeline** (`BR-080`, `docs/tracker/022-android-job-activity-timeline.md`).
-Below the technicians, the section reads one chronological, newest-first column over the Job's own
-events and every Visit's events. Each entry is a marker on a connecting vertical line — an initials
-avatar for a note, a quiet dot for a system event — followed by the action as the primary text, and
-`Visit N · member · time` (or `member · time` for a Job-level event) as secondary metadata. A Visit-level
-entry states its Visit as the derived `Visit N` sequence, never a database id. The section keeps an
-empty state, a loading state, and a failure state with retry, and the page reserves bottom clearance for
-the floating Add update action so the last entry is never covered.
+**Job Activity is grouped by the Visit each update belongs to** (`BR-047`, `BR-080`,
+`docs/tracker/045-android-job-activity-visit-groups.md`). The section holds one foldable group per Visit —
+headed `Visit N · date`, with the Visit's status and its crew as the folded summary — and a group of its
+own for the events that belong to the Job and to no Visit (**General job updates**). The Visit the read
+represents opens by default; every other Visit's group starts folded, and the general group starts open
+because it holds the Job's accepted evidence (`BR-015`). What an expanded group reveals is headed by one
+bordered card stating that Visit's own facts — its date, its scheduled start – end, and the technicians
+**assigned** to it — and the Visit's entries then follow it as the one timeline they are; a Visit with
+nothing recorded says so inside its own group (`BR-042`, `BR-068`, `BR-072`). Which group an entry belongs
+to is the API's own `visitSequence` answer, and an entry naming no Visit of the Job is reported as the
+Job's rather than guessed into one.
+
+**Inside a group, the entries are the one timeline** (`BR-080`,
+`docs/tracker/022-android-job-activity-timeline.md`). A group's entries are a slice of the Job's one
+chronological, newest-first read, never a re-sorted copy of it. Each entry is a marker on a connecting
+vertical line — an initials avatar for a note, a quiet dot for a system event — followed by the action as
+the primary text, and `Visit N · member · time` (or `member · time` for a Job-level event) as secondary
+metadata. A Visit-level entry states its Visit as the derived `Visit N` sequence, never a database id. The
+section keeps a loading state and a failure state with retry, emptiness is stated by the group that is
+empty, and the page reserves bottom clearance for the floating Add update action so the last entry is never
+covered.
 
 **The rail is secondary, and narrow** (`BR-012`, `docs/tracker/032-android-job-activity-photo-ux.md`).
 The marker is 28 dp, the rail is 28 dp wide with an 8 dp gap, and the connecting line stays
@@ -478,6 +501,11 @@ archived-Property disclosure uses the same chevron and rotation inside a section
 heading; and the Job Activity photo gallery uses it for a section whose height grows with the Job's
 evidence (`docs/tracker/032-android-job-activity-photo-ux.md`).
 
+The same disclosure also heads **a group inside a section** rather than the section itself, which is how
+Job Activity folds one Visit's updates away from another's: the heading is the group's own row, it states
+the group's subject, and only that group's rows are hidden
+(`docs/tracker/045-android-job-activity-visit-groups.md`).
+
 | Part | Token |
 | --- | --- |
 | Heading label | `colorScheme.onSurfaceVariant`, `labelSmall`, bold, from `section_count_format` (`"Label · n"`) — the same string the always-open sections' labels use |
@@ -485,11 +513,55 @@ evidence (`docs/tracker/032-android-job-activity-photo-ux.md`).
 | Touch target | the whole heading row, `≥ 48 dp` (`Modifier.heightIn(min = 48.dp)`) |
 | Ripple | clipped to `shapes.medium`, so the feedback stays inside the row |
 | Chevron content description | the action, not the state: "Show the items that need attention" / "Hide the items that need attention", localized (`BR-028`) |
+| State, where the heading is a row inside a section | `stateDescription` — `Expanded` / `Collapsed`, localized, so the state is announced as well as the action (`BR-028`) |
 
 Only the section's own rows are hidden. Its heading, its count and the sections around it stay
 exactly where they were, and a section with nothing to show carries no chevron and no click.
 Whether a section starts expanded or collapsed is presentation, and belongs to the screen that owns
 the section (`BR-042`).
+
+## Customer detail — the contacts card
+
+A customer's contact persons are their own card on the customer detail, between the customer's own
+contact details and its Properties (`BR-095`; `ADR-022` D6). Product ownership approved the layout in
+place of a Figma screen, because no design draws a contacts section.
+
+| Part | Presentation |
+| --- | --- |
+| Section label | The shared `SectionLabel` — **Contact persons** with the count the API returned (`section_count_format`) |
+| Card | The shared `InfoCard`: one contact per row, `outlineVariant` dividers between rows, and the add action behind a divider at the foot |
+| Contact row | 2 dp between lines: the person's whole name (`titleSmall`, semibold, single line with ellipsis) with the **Primary** badge at the row's end when the contact holds the flag; then the person's own **phone** and **email** as the shared `CustomerContactLine`, and the row's actions |
+| The customer's own phone | The customer's own contact card marks its **phone line** with the same **Primary** badge when **no** contact person holds the flag — the customer is then its own effective primary (`BR-095`). While a contact person is flagged, the customer's line carries no marker: it is the customer's general line (`ADR-022` D2, D10) |
+| Primary badge | `shapes.small`, `colorScheme.secondary`, `onSurfaceVariant` text inside a 1 dp `onSurfaceVariant@25%` border, `labelSmall` bold — the badge an archived Property wears, so a state reads as a state |
+| Phone / email links | `dialIntent` / `mailIntent` / `startContactIntent`, the affordances the customers list already has. A value the office never recorded is left out rather than drawn as a row announcing its absence (`BR-012`) |
+| Row actions | Two `TextButton`s at the foot of the row — **Edit** in `primary` and **Remove** in `colorScheme.error` — each drawn only for the capability that would perform the write (`customers.contacts.edit`, `customers.contacts.remove`; `BR-007`, `BR-011`). **Remove** is disabled while a removal is in flight, so one tap cannot become two |
+| Add action | A `TextButton` — **Add more contact persons** — drawn only for `customers.contacts.create`, behind an `outlineVariant` divider at the card's foot |
+| Empty state | The card states *No contact persons recorded.* rather than drawing an empty surface; the add action stays for a session that may record one |
+| Removal confirmation | A Material 3 `AlertDialog`: **Remove this contact person?** over a body naming the person and stating that the record is kept, with a text **Cancel** and a **Remove** action in `colorScheme.error`. Removal is soft (`ADR-022` D8), so the consequence is stated before it is taken |
+| Refused removal | The shared dismissible refusal surface (`ActionAttention`) under the card, carrying the API's own reason in the contact vocabulary (`BR-042`) |
+
+Reading the card adds no capability: a customer's contacts travel in the projection `customers.view`
+already authorizes, so the card is drawn for every session that may read the customer and only its actions
+are gated (`ADR-022` D4). Its form is the Add/Edit Contact destination — the Add Property form's sibling:
+one `PropertyFormSection` holding the four fields a contact owns (first name, last name, phone, email) and
+the primary row, whose whole row is the target and whose checkbox reports the choice, as the schedule's
+filter rows do. That row is disabled while the contact already holds the flag, because the API documents
+`isPrimary: true` and defines no un-promotion, so there is no change for the form to state. Edit Customer
+shows the same contacts read-only, with the hint that they are managed from the customer detail screen
+(`ADR-022` D5).
+
+## Job Details — the customer block
+
+The Job card answers *who do I reach, and how* (`BR-092`, `BR-095`; `ADR-022` D10). It presents **one**
+phone and folds every other way of reaching the customer away, so the number a technician came for is not
+buried under the customer's whole contact book (`BR-012`).
+
+| Part | Presentation |
+| --- | --- |
+| Primary phone | The card's **Phone** row (`OverviewRow`), carrying the **effective primary** contact's number with the shared **Primary** badge as its trailing control. The row is drawn only when that contact has a number — so the row and the marker appear together, and a flagged contact person with no number is never replaced by the customer's own (`BR-095`) |
+| The customer's own email and notes | The card's own rows, unchanged, in `bodyLarge` (`BR-092`) |
+| Other numbers | The disclosure under the card's rows: a heading — *N other contacts* from the `job_details_customer_other_contacts` plural — with an `18 dp` `ic_chevron_right` rotated 90° while open, `stateDescription` announced, the whole row the target at `≥ 56 dp`, and the convention above for the chevron's content description (`BR-028`, `BR-011`). It starts **closed**: nothing about the other numbers is composed until it is opened |
+| One other contact | A row per entry: the owner's name (`bodyMedium`, semibold), then its phone and, when recorded, its email (`bodySmall`, `onSurfaceVariant`). The entry that stands for the customer's own general line is named after the customer and carries no email, because the customer's own email is already a visible row above — one card does not state one value twice (`BR-012`) |
 
 ## Home screens — the manager’s and the technician’s
 
@@ -523,3 +595,89 @@ What the technician home does **not** copy from the manager home:
 - No status control and no scheduling affordance: changing a Visit’s status is a field **write**
   (`BR-074`, `BR-066`) and belongs beside the Visit on the Job’s screen, which is where every row
   of this home leads (`BR-012`).
+
+## Manager Schedule — the week strip and the day's agenda
+
+The schedule is a **dispatch** screen, not a calendar (`Figma/src/imports/pasted_text/servora-scheduler-design.md`;
+`docs/tracker/038-android-manager-schedule.md`, `docs/tracker/040-android-manager-schedule-density.md`).
+Its top section is persistent — the agenda below it scrolls on its own — and it is arranged by what a
+dispatcher needs in what order: the day, then the dates around it, then one row holding the two things
+that narrow the day. Every control sits at the smallest size that still reads and still hits, because
+the height it takes is height the day's work does not get.
+
+| Part | Presentation |
+| --- | --- |
+| Date header | The selected day written in full in the language's own order (`MMMMdyyyy` resolved by the platform) with an 18 dp `ic_chevron_down`, on a target of at least 48 dp, opening the platform's month calendar. A **Today** text button appears only when another day is selected. |
+| Week strip | A `HorizontalPager` of weeks, 48 dp tall, one page per week. Each day is a 44 × 48 dp cell: the abbreviated weekday (`EEE`) in `labelSmall` `onSurfaceVariant` over the day number in `titleMedium` bold, with a 5 dp marker dot. The selected day is filled `primary`/`onPrimary`; the marker is `primary` on an unselected today and `onPrimary` inside the selected fill, so "today" and "selected" stay two different facts. Swiping moves the strip a week at a time; tapping a day selects it. It is the part that **collapses** (below). |
+| Control row | One 48 dp row under the strip holding the lane selector and the technician chip, 8 dp apart, because both are secondary to the agenda and 48 dp is the smallest a control can be hit at. Each control draws a 32 dp surface inside its own target — the Material "target 48, surface smaller" arrangement — so the row reads as filtering rather than as a pair of actions. |
+| Lane selector | A compact segmented control: two segments the width of their own labels, 2 dp apart (`selectableGroup`, `Role.Tab`). The lane in effect carries a 32 dp `shapes.large` pill in `primaryContainer`/`onPrimaryContainer` with `labelMedium` semibold text; the other is quiet `onSurfaceVariant` text with no fill. The Unassigned segment carries the API's own total as a rounded badge — `error`/`onError` while unselected, `primary`/`onPrimary` while its pill is selected — drawn only when the count is not zero. |
+| Technician chip | A 32 dp `shapes.large` chip inside a 48 dp target, holding a 16 dp `ic_users`, the filter's own summary and an 18 dp `ic_chevron_down`. `secondary`/`onSecondary` with a 1 dp `outlineVariant` hairline while the whole organization is shown; `primaryContainer`/`onPrimaryContainer`, semibold and borderless, once a filter is in effect — so a narrowed day is visible without opening anything. |
+| Technician sheet | A `ModalBottomSheet` titled **Technician** with a one-line subtitle, a **filled** 44 dp search field (`secondary`, no outline) that reads as part of the list beneath it, then a `LazyColumn` (320 dp at most, so its own actions stay on screen for a long team): `All technicians` first, then the technicians the API returned. Every option is a checkbox row of at least 48 dp — the row owns the tap (`toggleable`, `Role.Checkbox`) and the checkbox reports it — tinted `primary` at 10% while chosen, and **selected options are listed before the rest** so "who did I pick?" is answered at the top. The search narrows what is *offered* and never what is *chosen* (`BR-012`), `All technicians` is offered while searching because clearing a filter is not the same question as finding a technician, and a search that matches nobody says so in the sheet's own words. Its actions are a `Clear` `OutlinedButton` (shown only while something is chosen; it empties the draft and asks for the whole organization at once, staying open) and an `Apply` `Button` reading `Apply (n)`, which commits the draft and **closes** the sheet — the same draft/apply route the customer filter sheet takes (`BR-068`, `BR-067`; the closing behaviour was reported missing from physical-device QA and fixed 2026-09-17). |
+
+**The strip collapses, the controls do not.** Once the agenda is scrolled past 16 dp, the week strip
+animates away and the date header and control row stay: the day is still named, still changeable and
+still filterable while the day's work has the screen. The strip is clipped rather than disposed, so
+expanding it returns to the week the manager was on, and moving to another date returns the agenda to
+the top of that date — which brings the strip back with it. The top section therefore costs 144 dp at
+rest and 96 dp while scrolling, against 206 dp before
+(`docs/tracker/040-android-manager-schedule-density.md`).
+
+The agenda's cards reuse the home's presentation rather than restating it: `HomeVisitStatusPill` for
+the Visit's status with the derived overdue condition, `formatScheduledRange` for `9:00 – 10:00`,
+`formattedAddressLine` for the preserved address and `techniciansSummary` for the crew — which is why
+the crew summary was extracted from the manager home instead of copied. A Visit whose window is not set
+says **Not scheduled** (`job_details_not_scheduled`); a Visit with nobody on it shows
+`customers_job_unassigned` marked with a 6 dp `error` dot beside the technician, because the absence of
+an assignment is not a status (`BR-042`). The card never shows the **Job's** status: Job status and
+Visit status are separate state machines (`BR-059`, `BR-074`).
+
+### What one row of the agenda is
+
+A day is scanned in a second or two, so the card states its facts in the order a dispatcher asks for
+them, and the lane says that its rows are one chronology rather than a stack of unrelated cards.
+
+| Part | Presentation |
+| --- | --- |
+| Timeline rail | A 12 dp leading column: a 2 dp `outlineVariant` rule with a 7 dp dot in the Visit's own status colour — the colour the status pill already wears (`BR-041`). The rail is chronological structure, not a second status display, so the dot stays small and the rule stays the quietest line on the row. The rule is drawn through the 8 dp gap between rows, so the lane reads continuously, and it is cut at the first row's dot and the last row's dot, so the lane never looks as though it continues past what is on screen. A row states a time; it is **never drawn as tall as its duration** (`BR-012`). |
+| Visit card | The whole card is the touch target and it opens the Job (`BR-012`). Its lines are, in order: the **time window** in `titleSmall` bold with the **status pill** at the row's end (`HomeVisitStatusPill`); the **Job title** in `bodyLarge` medium, two lines at most; the **customer**, with the Property's name after it (the localized `%1$s · %2$s` format) when the address snapshot carried one; the **crew**; and the **address** behind a 16 dp `ic_map_pin`. Time and Job title are the strongest elements, customer/Property is secondary, and crew and address are tertiary metadata. Every line ellipsizes rather than growing the card, and a crew longer than one line names two members and counts the rest (`%1$s +%2$d`), so a Visit with five technicians is never presented as one with two. 12 dp of padding and 2–4 dp between lines carry the card's density. |
+| Now cue | A 28 dp row drawn only on the day the manager is living through and only in the Schedule lane: `primary` at 40% for the rule, the label (`Now · 2:35 PM` / `Maintenant · 14 h 35`) in `labelSmall` bold `primary` between two hairlines, and a 10 dp `primary` dot on the rail. It separates the Visits that have started from the ones that have not, and it is the **one dot on the rail that is not a Visit's** — larger and in the brand colour, so "where the day is now" is never read as a Visit's status. It is the **device's** clock, read again every 30 seconds while the screen is open, and it decides nothing: a Visit's status and its overdue condition stay the API's answers (`BR-001`). |
+| Empty states | One bordered `shapes.large` card, 16 dp inset, a `bodyLarge` semibold heading over a `bodySmall` `onSurfaceVariant` line: **Nothing scheduled** / *Nothing is scheduled for this day.* in the Schedule lane, and **All visits have been assigned** / *Nothing is waiting for a technician.* in the Unassigned lane. |
+
+**No chevron is drawn on the card.** It was considered and rejected on measurement rather than taste: on
+a 360 dp phone the time window and the status pill together nearly fill the row, and the 26 dp a trailing
+chevron costs would force the time — the first thing a dispatcher reads — to ellipsize. The card is a
+bordered, clickable `shapes.large` surface with the platform's ripple and it opens the Job, exactly as
+the manager home's Visit row does, so the two screens describe the same row the same way (`BR-041`).
+
+Metrics, from this document's own scale: the 20 dp gutter and 16 dp card-gutter the homes use, 12 dp
+inside a schedule card, an 8 dp gap between rows, a 12 dp rail with a 6 dp gap to its card, and a target
+of at least 48 dp on every control — reached by keeping the target 48 dp and drawing the surface
+smaller rather than by shrinking the target.
+
+## Technician Schedule — my own day, my own week
+
+The technician's schedule is a **field** screen, not a dispatch board
+(`docs/tracker/041-android-technician-schedule.md`; `BR-010`, `BR-012`). It answers "what is assigned to
+me, and what am I doing next?" — so it presents one day of the caller's own Visits and a week strip to
+look ahead, and it deliberately has **no** lane selector, **no** technician filter, **no** month calendar
+and **nothing that assigns, reschedules or cancels**. The week strip and the day cells are the same
+shared component the manager schedule uses (`ScheduleWeekStrip`), because which day a swipe reaches and
+what a tap selects is one question on both screens (`BR-041`); everything around it is the technician's
+own.
+
+| Part | Presentation |
+| --- | --- |
+| Header | One 48 dp row: an `IconButton` with an 18–20 dp `ic_chevron_left`, the **week** the strip is on written in the language's own order (`Sep 14–20` — the month is repeated only when the week crosses one), an `ic_chevron_right` `IconButton`, and a **Today** text button that appears only when another day is selected. The arrows move the strip a week at a time, which is the same movement a swipe makes, so a pointer target exists for every gesture. |
+| Week strip | The shared `ScheduleWeekStrip`: 48 dp tall, one page per week, 44 × 48 dp day cells, the selected day filled `primary`/`onPrimary`, today carrying a 5 dp marker dot. |
+| Day heading | A `labelSmall` bold `onSurfaceVariant` line over the agenda: `Today · Wednesday, Sep 16`, `Tomorrow · …`, or the date alone when the technician browsed further. It is the strip's selection spelled out, so a swiped-away day is never guessed at (`BR-041`). |
+| Last-reported notice | The shared `OfflineNotice` (`secondaryContainer`) at the top of the agenda when the day on screen is the one the backend last reported rather than a current answer (`BR-013`). |
+| Visit row | A start-time column (56 dp, `titleSmall` bold, top-aligned with the card's padding) beside the card, so a day is read down the times. The whole card is the target and opens the Job. |
+| Visit card | `shapes.large`, 12 dp padding, 4 dp between lines: the **Job title** (`titleSmall` semibold), the **customer** with the Property's name after it when the snapshot carried one, the **address**, then a row holding the shared `HomeVisitStatusPill` and the **time window**, and finally the **crew** line behind a 14 dp `ic_users`. Every line ellipsizes; the address may take two lines. |
+| Crew line | `You` when the caller is the only one on the Visit, `You + 2` when others are assigned with them (`%1$s +%2$d`), and the crew's own names when the caller is not on it — the caller is recognised by the membership the API resolved the read for, never by a name the device guessed (`BR-068`, `BR-041`). |
+| Emphasis | The **first Visit that has not completed** carries a 2 dp `primary` border; every Visit already `COMPLETED` is drawn on `surfaceVariant` with muted lines. The emphasis is presentation only — no status is derived from it — and it answers "what is left" at a glance without hiding what is done (`BR-012`). |
+| Empty day | One bordered `shapes.large` card, 24 dp vertical inset: **No visits assigned** over *Nothing is assigned to you on this day.* |
+| Loading / failure | A centred spinner with *Loading your schedule…*, and a centred failure state (*Couldn't load your schedule* over the shell's generic error line) with a **Try again** action — the day is never presented as an empty one when nothing could be read (`BR-042`). |
+
+Nothing on this screen opens the manager's surface, and nothing on it changes a Visit: a technician acts
+on their work through the Job Details and Visit flows the rest of the app already provides (`BR-066`).
+

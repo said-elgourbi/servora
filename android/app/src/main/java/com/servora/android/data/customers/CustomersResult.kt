@@ -63,13 +63,42 @@ sealed interface CustomerCreateResult {
     data class Failure(val reason: CustomersFailureReason) : CustomerCreateResult
 }
 
-/** Outcome of recording a customer contact. */
+/** Outcome of recording a customer contact (`BR-095`). */
 sealed interface ContactCreateResult {
     /** The backend created the contact. */
     data object Success : ContactCreateResult
 
     /** The create failed; [reason] decides what the form reports. */
     data class Failure(val reason: CustomersFailureReason) : ContactCreateResult
+}
+
+/**
+ * Outcome of editing a customer contact (`BR-095`).
+ *
+ * The updated contact is not carried: the screens that follow re-read the customer from the backend
+ * rather than trusting a locally assembled copy, so the row they present is the one the API reports —
+ * its incremented `version` included (`BR-001`, `BR-032`).
+ */
+sealed interface ContactUpdateResult {
+    /** The backend applied the edit. */
+    data object Success : ContactUpdateResult
+
+    /** The edit failed; [reason] decides what the form reports. */
+    data class Failure(val reason: CustomersFailureReason) : ContactUpdateResult
+}
+
+/**
+ * Outcome of removing a customer contact (`BR-095`).
+ *
+ * A removal is soft, so the record survives and the reads stop reporting it: the caller re-reads the
+ * customer and presents what the backend now reports (`BR-033`, `ADR-022` D8).
+ */
+sealed interface ContactRemoveResult {
+    /** The backend removed the contact from ordinary use. */
+    data object Success : ContactRemoveResult
+
+    /** The removal failed; [reason] decides what the screen reports. */
+    data class Failure(val reason: CustomersFailureReason) : ContactRemoveResult
 }
 
 /**

@@ -82,13 +82,21 @@ import com.servora.android.ui.home.ManagerHomeScreen
 import com.servora.android.ui.home.ManagerHomeViewModel
 import com.servora.android.ui.home.TechnicianHomeScreen
 import com.servora.android.ui.home.TechnicianHomeViewModel
+import com.servora.android.ui.home.deviceLocale
 import com.servora.android.ui.home.homeHeader
+import com.servora.android.ui.jobs.CreateJobViewModel
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.navigation.ServoraNavHost
 import com.servora.android.ui.navigation.ServoraRoutes
 import com.servora.android.ui.navigation.servoraTopBarState
+import com.servora.android.ui.schedule.ScheduleScreen
+import com.servora.android.ui.schedule.ScheduleViewModel
+import com.servora.android.ui.schedule.TechnicianScheduleScreen
+import com.servora.android.ui.schedule.TechnicianScheduleViewModel
+import com.servora.android.ui.schedule.firstDayOfWeek
 import com.servora.android.ui.theme.stateColors
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -167,15 +175,27 @@ fun ServoraHomeScreen(
     addPropertyViewModel: AddPropertyViewModel,
     propertyDetailViewModel: PropertyDetailViewModel,
     editPropertyViewModel: EditPropertyViewModel,
+    addContactViewModel: AddContactViewModel,
+    editContactViewModel: EditContactViewModel,
+    removeContactViewModel: RemoveContactViewModel,
     managerHomeViewModel: ManagerHomeViewModel,
     technicianHomeViewModel: TechnicianHomeViewModel,
     jobDetailsViewModel: JobDetailsViewModel,
+    createJobViewModel: CreateJobViewModel,
+    scheduleViewModel: ScheduleViewModel,
+    technicianScheduleViewModel: TechnicianScheduleViewModel,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val customers by customersViewModel.uiState.collectAsState()
     val managerHome by managerHomeViewModel.uiState.collectAsState()
     val technicianHome by technicianHomeViewModel.uiState.collectAsState()
+    val schedule by scheduleViewModel.uiState.collectAsState()
+    val technicianSchedule by technicianScheduleViewModel.uiState.collectAsState()
+    // The schedule is read with whichever capability the session holds: the office capability opens the
+    // operation's day, the field capability the caller's own (`BR-006`, `BR-009`, `BR-011`). A session
+    // that can read neither is not offered the destination at all, and the API would refuse it anyway.
+    val canOpenSchedule = permissions.canOpenCustomers || permissions.canViewAssignedWork
     // The list is read once the user is allowed to see customers (`BR-007`); the backend still
     // decides whether the read succeeds.
     LaunchedEffect(permissions.canOpenCustomers) {
@@ -186,12 +206,25 @@ fun ServoraHomeScreen(
     var selected by rememberSaveable {
         mutableStateOf(if (permissions.canOpenCustomers) DashboardTab.CUSTOMERS.name else DashboardTab.HOME.name)
     }
-    val selectedTab = DashboardTab.valueOf(selected)
+    // A tab a session cannot use is never shown, and a restored selection must not land on one
+    // either: a member who signed out as a manager and back in as a technician returns to their
+    // home rather than to a destination their capabilities do not open (`BR-010`, `BR-011`,
+    // `BR-042`).
+    val selectedTab = DashboardTab.valueOf(selected).let { tab ->
+        if (tab == DashboardTab.SCHEDULE && !canOpenSchedule) {
+            DashboardTab.HOME
+        } else {
+            tab
+        }
+    }
     val navController = rememberNavController()
 
     // The home asks the backend for the caller's own day in the device's own zone, so the day the
-    // backend resolves is the day the caller is working in (`BR-001`).
+    // backend resolves is the day the caller is working in (`BR-001`). The schedule asks the same
+    // way and also names the date it is showing, so the day it reads is the day on screen.
     val timeZoneId = remember { ZoneId.systemDefault().id }
+    val firstWeekDay = firstDayOfWeek(deviceLocale())
+    val today = remember(timeZoneId) { LocalDate.now(ZoneId.of(timeZoneId)) }
     LaunchedEffect(selectedTab) {
         if (selectedTab == DashboardTab.HOME) {
             // Which home a member has is decided by their capabilities, never by a role name
@@ -202,6 +235,23 @@ fun ServoraHomeScreen(
                 managerHomeViewModel.load(timeZoneId)
             } else if (permissions.canViewAssignedWork) {
                 technicianHomeViewModel.load(timeZoneId)
+            }
+        } else if (selectedTab == DashboardTab.SCHEDULE && canOpenSchedule) {
+            // The schedule is read by the capability that opened it, never by a role name
+            // (`BR-006`, `BR-011`): the office capability reads the operation's day, the field
+            // capability the caller's own assigned work.
+            if (permissions.canOpenCustomers) {
+                scheduleViewModel.start(
+                    today = today,
+                    timeZoneId = timeZoneId,
+                    firstDayOfWeek = firstWeekDay,
+                )
+            } else {
+                technicianScheduleViewModel.start(
+                    today = today,
+                    timeZoneId = timeZoneId,
+                    firstDayOfWeek = firstWeekDay,
+                )
             }
         }
     }
@@ -221,9 +271,25 @@ fun ServoraHomeScreen(
         technicianHome.home?.displayName
     }
     val homeHeader = homeHeader(greetingName)
+
+    // The customer a destination belongs to, for the destinations that show it as context — the top
+    // bar's subtitle and the Create Job form's fixed customer. The detail is read by the destination
+    // itself, so this lookup answers as soon as it has (`BR-012`).
+    val customerName: (customerId: String) -> String? = { customerId ->
+        customers.customerDetail
+            ?.takeIf { it.customerId == customerId }
+            ?.detail
+            ?.customer
+            ?.displayName
+    }
     val rootTitle = when (selectedTab) {
         DashboardTab.HOME -> homeHeader.title
-        DashboardTab.SCHEDULE -> stringResource(R.string.nav_schedule)
+        // The schedule names itself for the audience that is reading it: the office reads the
+        // operation's schedule, a technician reads their own (`BR-010`, `BR-012`).
+        DashboardTab.SCHEDULE -> stringResource(
+            if (permissions.canOpenCustomers) R.string.nav_schedule else R.string.nav_my_schedule,
+        )
+
         DashboardTab.CUSTOMERS -> stringResource(R.string.nav_customers)
         DashboardTab.SETTINGS -> stringResource(R.string.nav_settings)
     }
@@ -235,15 +301,8 @@ fun ServoraHomeScreen(
             subtitle = if (selectedTab == DashboardTab.HOME) homeHeader.subtitle else null,
         ),
         permissions = permissions,
-        // The customer a destination belongs to, for the destinations that show it as context. The
-        // detail is read by the destination itself, so this lookup answers as soon as it has.
-        customerName = { customerId ->
-            customers.customerDetail
-                ?.takeIf { it.customerId == customerId }
-                ?.detail
-                ?.customer
-                ?.displayName
-        },
+        // The customer a destination belongs to, for the destinations that show it as context.
+        customerName = customerName,
     )
 
     Scaffold(
@@ -261,6 +320,10 @@ fun ServoraHomeScreen(
         bottomBar = {
             DashboardNavigation(
                 selected = selectedTab,
+                canOpenSchedule = canOpenSchedule,
+                // The customers destination is the office capability's own (`BR-006`, `BR-011`): a
+                // session that cannot read customers is not offered it, whether or not it can read
+                // a schedule.
                 canOpenCustomers = permissions.canOpenCustomers,
                 onSelect = { tab ->
                     selected = tab.name
@@ -280,8 +343,13 @@ fun ServoraHomeScreen(
             addPropertyViewModel = addPropertyViewModel,
             propertyDetailViewModel = propertyDetailViewModel,
             editPropertyViewModel = editPropertyViewModel,
+            addContactViewModel = addContactViewModel,
+            editContactViewModel = editContactViewModel,
+            removeContactViewModel = removeContactViewModel,
             jobDetailsViewModel = jobDetailsViewModel,
+            createJobViewModel = createJobViewModel,
             permissions = permissions,
+            customerName = customerName,
             // The bottom-navigation area is the graph's root destination; the drill-down screens are
             // pushed on top of it.
             rootContent = {
@@ -332,10 +400,44 @@ fun ServoraHomeScreen(
                         }
 
                     DashboardTab.SCHEDULE ->
-                        PlaceholderTab(
-                            title = stringResource(R.string.nav_schedule),
-                            modifier = Modifier,
-                        )
+                        if (permissions.canOpenCustomers) {
+                            ScheduleScreen(
+                                state = schedule,
+                                onSelectDate = { date ->
+                                    scheduleViewModel.selectDate(date, firstWeekDay)
+                                },
+                                onShowWeek = scheduleViewModel::showWeek,
+                                onSelectLane = scheduleViewModel::selectLane,
+                                onApplyTechnicians = scheduleViewModel::selectTechnicians,
+                                // A card opens the Job the Visit belongs to, which is where the
+                                // manager acts on it (`BR-012`).
+                                onOpenJob = { jobId ->
+                                    navController.navigate(ServoraRoutes.jobDetail(jobId))
+                                },
+                                onClarifyRequest = scheduleViewModel::askForClarification,
+                                onRejectRequest = scheduleViewModel::rejectRequest,
+                                onRetry = scheduleViewModel::retry,
+                            )
+                        } else {
+                            // The field schedule: the caller's own assigned work, day by day. It is
+                            // the same read resolved for the caller's own membership, so the scope
+                            // is the API's answer rather than a client choice (`BR-009`,
+                            // `ADR-019` D2).
+                            TechnicianScheduleScreen(
+                                state = technicianSchedule,
+                                onSelectDate = { date ->
+                                    technicianScheduleViewModel.selectDate(date, firstWeekDay)
+                                },
+                                onShowWeek = technicianScheduleViewModel::showWeek,
+                                onShowToday = {
+                                    technicianScheduleViewModel.showToday(today, firstWeekDay)
+                                },
+                                onOpenJob = { jobId ->
+                                    navController.navigate(ServoraRoutes.jobDetail(jobId))
+                                },
+                                onRetry = technicianScheduleViewModel::retry,
+                            )
+                        }
 
                     DashboardTab.SETTINGS ->
                         SettingsTab(onSignOut = onSignOut, modifier = Modifier)
@@ -349,6 +451,7 @@ fun ServoraHomeScreen(
 @Composable
 private fun DashboardNavigation(
     selected: DashboardTab,
+    canOpenSchedule: Boolean,
     canOpenCustomers: Boolean,
     onSelect: (DashboardTab) -> Unit,
 ) {
@@ -370,12 +473,18 @@ private fun DashboardNavigation(
                 selected = selected == DashboardTab.HOME,
                 onClick = { onSelect(DashboardTab.HOME) },
             )
-            DashboardNavItem(
-                label = stringResource(R.string.nav_schedule),
-                iconRes = R.drawable.ic_calendar,
-                selected = selected == DashboardTab.SCHEDULE,
-                onClick = { onSelect(DashboardTab.SCHEDULE) },
-            )
+            // The schedule is offered to whichever capability may read one: the office capability
+            // opens the operation's dispatch view, the field capability opens the caller's own
+            // assigned work (`BR-009`, `BR-010`, `BR-011`). A session holding neither is offered
+            // neither, and the API would refuse the read anyway.
+            if (canOpenSchedule) {
+                DashboardNavItem(
+                    label = stringResource(R.string.nav_schedule),
+                    iconRes = R.drawable.ic_calendar,
+                    selected = selected == DashboardTab.SCHEDULE,
+                    onClick = { onSelect(DashboardTab.SCHEDULE) },
+                )
+            }
             if (canOpenCustomers) {
                 DashboardNavItem(
                     label = stringResource(R.string.nav_customers),
@@ -658,15 +767,23 @@ private fun CustomerListScreen(
  * [BasicTextField] is used rather than an `OutlinedTextField` because the design's field is a
  * filled, label-less surface with its own icon inset, which the outlined field's box and floating
  * label cannot express.
+ *
+ * It is `internal` so a second surface that searches customers — the Create Job form's Customer picker —
+ * draws the same control rather than a copy of it (`BR-041`); its placeholder and tags are parameters
+ * because those are the second caller's own copy and test surface.
  */
 @Composable
-private fun CustomerSearchField(
+internal fun CustomerSearchField(
     value: String,
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
+    placeholderRes: Int = R.string.customers_search_placeholder,
+    testTag: String? = null,
 ) {
     Surface(
-        modifier = modifier.height(CustomerFieldHeight),
+        modifier = modifier.then(
+            if (testTag == null) Modifier else Modifier.testTag(testTag),
+        ).height(CustomerFieldHeight),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.secondary,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -698,7 +815,7 @@ private fun CustomerSearchField(
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (value.isEmpty()) {
                             Text(
-                                text = stringResource(R.string.customers_search_placeholder),
+                                text = stringResource(placeholderRes),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -1446,17 +1563,6 @@ internal fun StatusPill(status: CustomerStatus, modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
             color = if (active) colors.success else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun PlaceholderTab(title: String, modifier: Modifier) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

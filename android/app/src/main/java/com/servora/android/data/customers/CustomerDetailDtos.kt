@@ -40,6 +40,12 @@ data class CustomerCompanyDto(
     val taxNumber: String? = null,
 )
 
+/**
+ * One of a customer's contact persons, as `GET /customers/{id}` returns it (`BR-095`).
+ *
+ * In the office detail a contact carries its own email and phone — those belong to the person, not to
+ * the customer header — its `version`, and the flags the model holds.
+ */
 @Serializable
 data class CustomerContactDto(
     val id: String,
@@ -52,6 +58,15 @@ data class CustomerContactDto(
     val isPrimary: Boolean = false,
     val isBillingContact: Boolean = false,
     val isJobContact: Boolean = false,
+    /**
+     * The optimistic-concurrency token the edit and removal routes take back as `expectedVersion`
+     * (`BR-095`, `ADR-022` D9).
+     *
+     * It defaults to `0` so a working-set payload written before the field existed is still readable
+     * (`BR-042`, `offline-first-architecture.md` §10). A contact that reported no version cannot be
+     * edited or removed without re-reading it, which is the honest outcome rather than guessing one.
+     */
+    val version: Int = 0,
     val createdAt: String,
     val updatedAt: String,
 )

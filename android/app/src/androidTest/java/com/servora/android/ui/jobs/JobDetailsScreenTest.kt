@@ -9,10 +9,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -35,7 +37,10 @@ import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.jobs.JobAudioPlayback
 import com.servora.android.data.jobs.JobAudioPlaybackProgress
+import com.servora.android.data.jobs.QueuedVisitFieldAction
 import com.servora.android.data.jobs.JobPhotoImages
+import com.servora.android.data.offline.OutboxFailureReason
+import com.servora.android.data.offline.OutboxOperationState
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.ScheduleConflict
@@ -44,6 +49,7 @@ import com.servora.android.domain.model.AssignmentRole
 import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
+import com.servora.android.domain.model.JobCustomerContact
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
@@ -51,6 +57,7 @@ import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PendingJobPhoto
+import com.servora.android.domain.model.VisitOutcome
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.theme.ServoraTheme
 import java.io.File
@@ -1134,12 +1141,19 @@ class JobDetailsScreenTest {
         canUpdateJob: Boolean = false,
         canAddEvidencePhoto: Boolean = false,
         canViewTechnicians: Boolean = false,
+        canOpenCustomer: Boolean = false,
+        canUpdateAssignedVisit: Boolean = false,
+        canRecordVisitOutcome: Boolean = false,
+        canAddVisitNote: Boolean = false,
         onRetry: () -> Unit = {},
         onRetryActivity: () -> Unit = {},
         onOpenCustomer: (String) -> Unit = {},
         onOpenInMaps: (CustomerJobAddress) -> Unit = {},
         onLoadAssignableTechnicians: () -> Unit = {},
         onChangeJobStatus: (JobStatus) -> Unit = {},
+        onChangeVisitStatus: (VisitStatus, VisitOutcome?, String?) -> Unit = { _, _, _ -> },
+        onDiscardQueuedVisitAction: (String) -> Unit = {},
+        onDiscardQueuedVisitNote: (String) -> Unit = {},
         onAddActivityText: (String) -> Unit = {},
         onRescheduleVisit: (Instant, Instant) -> Unit = { _, _ -> },
         onAssignTechnicians: (List<TechnicianAssignment>) -> Unit = {},
@@ -1184,12 +1198,19 @@ class JobDetailsScreenTest {
                     canUpdateJob = canUpdateJob,
                     canAddEvidencePhoto = canAddEvidencePhoto,
                     canViewTechnicians = canViewTechnicians,
+                    canOpenCustomer = canOpenCustomer,
+                    canUpdateAssignedVisit = canUpdateAssignedVisit,
+                    canRecordVisitOutcome = canRecordVisitOutcome,
+                    canAddVisitNote = canAddVisitNote,
                     onRetry = onRetry,
                     onRetryActivity = onRetryActivity,
                     onOpenCustomer = onOpenCustomer,
                     onOpenInMaps = onOpenInMaps,
                     onLoadAssignableTechnicians = onLoadAssignableTechnicians,
                     onChangeJobStatus = onChangeJobStatus,
+                    onChangeVisitStatus = onChangeVisitStatus,
+                    onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
+                    onDiscardQueuedVisitNote = onDiscardQueuedVisitNote,
                     onAddActivityText = onAddActivityText,
                     onRescheduleVisit = onRescheduleVisit,
                     onAssignTechnicians = onAssignTechnicians,
@@ -1270,6 +1291,166 @@ class JobDetailsScreenTest {
         // is offered neither (`BR-051`, `BR-068`).
         composeTestRule.onNodeWithTag(JobDetailsRescheduleActionTag).assertDoesNotExist()
         composeTestRule.onNodeWithTag(JobDetailsManageTechniciansActionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun offersNoFieldActionToASessionWithoutTheVisitCapability() {
+        render(details = job(), canUpdateAssignedVisit = false, canRecordVisitOutcome = true)
+
+        // The Visit's field lifecycle is the technician's own capability (`BR-009`, `BR-066`), so a
+        // session without it is shown the Visit's status and nothing that moves it (`BR-006`,
+        // `BR-007`). The status is still presented: the read is not an action.
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertDoesNotExist()
+        composeTestRule
+            .onNodeWithText(string(R.string.visit_status_en_route))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun offersExactlyTheVisitsDestinationsToASessionThatMayDriveIt() {
+        render(
+            details = job(),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+        )
+
+        // The Visit's own status chip **is** the control (`BR-074`), and its menu is the destinations
+        // the backend reported — no lifecycle rule is re-implemented here (`BR-022`, `BR-041`).
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).performClick()
+
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusCurrentTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.ON_SITE.name))
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.SCHEDULED.name))
+            .assertIsDisplayed()
+        // A destination the API does not report is not offered (`BR-041`).
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.COMPLETED.name))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun offersTheVisitActionToAnOfficeSessionHoldingTheOfficeCapability() {
+        render(
+            details = job(),
+            canUpdateJob = true,
+            canUpdateAssignedVisit = false,
+            canRecordVisitOutcome = true,
+        )
+
+        // `BR-093` gives the route a second authorization: an office member holding the office
+        // capability drives the Visit without being on its crew (`ADR-019` D7), so the action is offered
+        // even though this session holds none of the field capabilities — and the API's own answer
+        // (`selectedVisit.fieldActionable`) is what carries the office caller. A session holding neither
+        // authorization is offered nothing, as the test above asserts.
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertIsDisplayed()
+    }
+
+    @Test
+    fun reportsTheDestinationTheTechnicianChose() {
+        val chosen = mutableListOf<VisitStatus?>()
+        render(
+            details = job().copy(selectedVisit = visit().copy(status = VisitStatus.ON_SITE)),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+            onChangeVisitStatus = { status, _, _ -> chosen += status },
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).performClick()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.IN_PROGRESS.name))
+            .performClick()
+
+        // The transition is one explicit action, reported as the destination the API offered.
+        assertEquals(listOf(VisitStatus.IN_PROGRESS), chosen)
+    }
+
+    @Test
+    fun asksForTheOutcomeBeforeCompletingTheVisit() {
+        val completions = mutableListOf<Pair<VisitOutcome?, String?>>()
+        render(
+            details = job().copy(
+                selectedVisit = visit().copy(
+                    status = VisitStatus.IN_PROGRESS,
+                    allowedStatusTransitions = listOf(VisitStatus.COMPLETED),
+                ),
+            ),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+            onChangeVisitStatus = { _, outcome, summary -> completions += outcome to summary },
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).performClick()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.COMPLETED.name))
+            .performClick()
+
+        // `BR-077` requires the outcome type **and** a summary, so the sheet asks for both and will not
+        // send a completion that omits either.
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompletionSheetTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteConfirmTag).assertIsNotEnabled()
+
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitOutcomeOptionTag(VisitOutcome.RESOLVED.name))
+            .performClick()
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteConfirmTag).assertIsNotEnabled()
+
+        composeTestRule
+            .onNodeWithTag(JobDetailsVisitOutcomeSummaryTag)
+            .performTextInput("Replaced the igniter.")
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteConfirmTag).performClick()
+
+        assertEquals(listOf(VisitOutcome.RESOLVED to "Replaced the igniter."), completions)
+    }
+
+    @Test
+    fun withholdsCompletionFromASessionThatMayNotRecordAnOutcome() {
+        render(
+            details = job().copy(
+                selectedVisit = visit().copy(
+                    status = VisitStatus.IN_PROGRESS,
+                    allowedStatusTransitions = listOf(VisitStatus.COMPLETED),
+                ),
+            ),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = false,
+        )
+
+        // The API asks for the outcome capability again on the completing destination (`BR-009`,
+        // `BR-077`), so a session without it is offered no completion rather than one the API would
+        // refuse.
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun showsWhatTheQueueIsStillHolding() {
+        render(
+            details = job(),
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                queuedVisitAction = QueuedVisitFieldAction(
+                    operationId = "op-1",
+                    visitId = "visit-1",
+                    status = VisitStatus.ON_SITE,
+                    outcome = null,
+                    outcomeSummary = null,
+                    state = OutboxOperationState.FAILED,
+                    failure = OutboxFailureReason.NETWORK,
+                ),
+            ),
+        )
+
+        // Nothing is presented as applied: the technician's own unfinished work is stated as waiting,
+        // with the state the queue reports (`BR-014`, `BR-001`, §7).
+        composeTestRule.onNodeWithTag(JobDetailsVisitPendingTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.job_visit_pending_retrying))
+            .assertIsDisplayed()
     }
 
     @Test
@@ -1463,11 +1644,64 @@ class JobDetailsScreenTest {
     @Test
     fun opensTheCustomerTheJobBelongsTo() {
         var opened: String? = null
-        render(details = job(), onOpenCustomer = { customerId -> opened = customerId })
+        render(
+            details = job(),
+            // The office destination is drawn on `customers.view`, which a manager holds
+            // (`BR-011`, `BR-092`).
+            canOpenCustomer = true,
+            onOpenCustomer = { customerId -> opened = customerId },
+        )
 
         composeTestRule.onNodeWithTag(JobDetailsCustomerTag).performClick()
 
         assertEquals("customer-1", opened)
+    }
+
+    @Test
+    fun readsTheCustomersContactDetailsOnTheCardForAFieldSession() {
+        // `BR-092`: a technician in the field has to reach the customer they are working for, and the
+        // default Technician role holds no `customers.view` — so the office Customer destination would
+        // answer `403`. The tap is not offered, and the details the technician actually needs are read in
+        // place (`BR-011`, `BR-012`).
+        render(details = jobWithCustomerContact(), canOpenCustomer = false)
+
+        composeTestRule.onNodeWithTag(JobDetailsCustomerTag).assertHasNoClickAction()
+        composeTestRule.onNodeWithTag(JobDetailsCustomerPhoneTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText("+15145550142").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsCustomerEmailTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText("martha@example.com").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsCustomerNotesTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Gate code 4821.").assertIsDisplayed()
+    }
+
+    @Test
+    fun drawsOnlyTheContactDetailsTheCustomerHas() {
+        // A field the office never recorded is left out rather than drawn as a row announcing its
+        // absence: the card is what the technician reads before knocking on the door (`BR-012`).
+        render(
+            details = jobWithCustomerContact(
+                JobCustomerContact(phone = "+15145550142", email = null, notes = null),
+            ),
+            canOpenCustomer = false,
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsCustomerPhoneTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsCustomerEmailTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsCustomerNotesTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun drawsNoCustomerDetailsWhenTheApiIncludedNone() {
+        // Whether a session may read the Customer is the API's answer, never the screen's (`BR-001`,
+        // `BR-007`): a read that carries no block draws nothing, rather than an empty section or a reason
+        // the client invented.
+        render(details = job(), canOpenCustomer = false)
+
+        composeTestRule.onNodeWithTag(JobDetailsCustomerPhoneTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsCustomerEmailTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsCustomerNotesTag).assertDoesNotExist()
+        // The Job still names the customer it belongs to (`BR-048`).
+        composeTestRule.onNodeWithText("Martha Reynolds").assertIsDisplayed()
     }
 
     @Test
@@ -1634,6 +1868,62 @@ class JobDetailsScreenTest {
         composeTestRule
             .onNodeWithText(string(R.string.job_action_error_completion_blocked))
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun drawsTheReportAboveTheFloatingActionItWouldOtherwiseBeUnder() {
+        // The floating action is pinned to the bottom corner of the screen, so a report drawn at the
+        // screen's own bottom edge was covered by it and its text could not be read — a refusal, which
+        // is the action's only report, included (`BR-042`).
+        composeTestRule.mainClock.autoAdvance = false
+        render(
+            details = job(),
+            canUpdateJob = true,
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                actionFailure = JobActionFailure.NETWORK,
+            ),
+        )
+        composeTestRule.mainClock.advanceTimeBy(1_000)
+
+        val report = composeTestRule.onNodeWithTag(JobDetailsActionMessageTag).getBoundsInRoot()
+        val action = composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).getBoundsInRoot()
+
+        assertTrue(
+            "The report must be drawn above the floating action, not under it " +
+                "(report bottom ${report.bottom}, action top ${action.top})",
+            report.bottom <= action.top,
+        )
+    }
+
+    @Test
+    fun drawsTheReportAboveTheEvidenceWaitingToBeSaved() {
+        // The tray takes the bottom of the screen while the device holds a photo the API has not
+        // accepted, and the report of what was done with it is read above the tray for the same reason
+        // (`BR-014`, `BR-042`).
+        composeTestRule.mainClock.autoAdvance = false
+        render(
+            details = job(),
+            canUpdateJob = true,
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                pendingPhotos = listOf(pendingPhoto(submitted = true)),
+                photoUploads = mapOf("photo-1" to JobPhotoSyncState.QUEUED),
+                photoMessage = JobPhotoMessage.QUEUED,
+            ),
+        )
+        composeTestRule.mainClock.advanceTimeBy(1_000)
+
+        val report = composeTestRule.onNodeWithTag(JobDetailsActionMessageTag).getBoundsInRoot()
+        val tray = composeTestRule.onNodeWithTag(JobPhotoTrayTag).getBoundsInRoot()
+
+        assertTrue(
+            "The report must be drawn above the tray, not under it " +
+                "(report bottom ${report.bottom}, tray top ${tray.top})",
+            report.bottom <= tray.top,
+        )
     }
 
     @Test
@@ -2050,6 +2340,21 @@ private fun job() = JobDetails(
 )
 
 /**
+ * The same Job, with the Customer's own contact details as the API reports them for a session it admits
+ * to the Customer (`BR-092`).
+ *
+ * The default block is a fully recorded customer; a test that needs a partly recorded one passes its own,
+ * because a field the office never filled in is `null` rather than an empty string.
+ */
+private fun jobWithCustomerContact(
+    contact: JobCustomerContact = JobCustomerContact(
+        phone = "+15145550142",
+        email = "martha@example.com",
+        notes = "Gate code 4821.",
+    ),
+) = job().copy(customerContactDetails = contact)
+
+/**
  * A Job awaiting review, with the destinations the API reports for that status (`BR-058`): every other
  * open status, and a direct close. `PENDING_REVIEW` is not one of them, because standing still is not a
  * transition, and `NEW` is not either, because `NEW` is reached by reopening a terminal Job.
@@ -2063,7 +2368,13 @@ private fun pendingReviewJob() = job().copy(
     ),
 )
 
-/** The represented Visit of the fixture: `EN_ROUTE`, which `BR-073` does not allow rescheduling. */
+/**
+ * The represented Visit of the fixture: `EN_ROUTE`, which `BR-073` does not allow rescheduling.
+ *
+ * Its destinations are what the API reports for that status (`BR-074`): the next step, and `BR-075`'s
+ * one correction back to `SCHEDULED`. `COMPLETED` is not among them, because the field lifecycle
+ * reaches it only from `IN_PROGRESS`.
+ */
 private fun visit() = JobDetailsVisit(
     id = "visit-1",
     status = VisitStatus.EN_ROUTE,
@@ -2071,6 +2382,11 @@ private fun visit() = JobDetailsVisit(
     scheduledEnd = "2026-09-14T15:00:00.000Z",
     version = 2,
     reschedulable = false,
+    allowedStatusTransitions = listOf(VisitStatus.ON_SITE, VisitStatus.SCHEDULED),
+    // The API's own answer to the half of the question no client can decide (`BR-093`): this caller is
+    // authorized to drive the Visit — their membership is on its crew, or they hold the office
+    // capability that admits them without one (`ADR-019` D3, D7).
+    fieldActionable = true,
 )
 
 /** One `JOB_PHOTO_ADDED` entry: the Job's photo as the Activity reports it (`BR-080`, `BR-015`). */

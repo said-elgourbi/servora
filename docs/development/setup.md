@@ -41,8 +41,8 @@ Notes:
 
 The foundation database starts empty and the API has no user-creation endpoint yet, so a
 fresh environment cannot sign in. `make seed` creates two active accounts, one per default
-foundation role (`BR-003`), inside one organization. It also adds a deterministic operational
-demo dataset for local scrolling/filtering checks.
+foundation role (`BR-003`), inside one organization. It also writes a realistic demo dataset —
+customers, Properties, Jobs and Visits — so local checks have something real to show.
 
 ```bash
 make seed
@@ -60,18 +60,24 @@ row (`Dev Manager` / `Dev Technician`), and the `organization_members` row (`rol
 `ACTIVE`). The seed also upserts the default permission catalogue, default organization roles and
 role-permission assignments.
 
-Operational demo data:
+Demo data — a realistic book of business, not a tagged fixture:
 
-- 20 customers in the same organization, mixing companies and individuals, active and inactive
-  status, English and French language preferences, and several preferred contact methods.
-- Customer contacts, billing addresses, 1-4 service Properties per customer, and active
-  Property-Customer relationship rows.
-- 44 Jobs numbered from `1001`, spread across `NEW`, `SCHEDULED`, `IN_PROGRESS`,
-  `PENDING_REVIEW`, `COMPLETED` and `CANCELED`.
-- Visits, visit assignments and visit notes for scheduled/field-work scenarios, including
-  scheduled, active, completed and canceled Visit states.
-- Rows created by the operational demo are tagged with `[dev-seed-operational]`. Re-running
-  `make seed` refreshes those tagged rows instead of appending another copy.
+- 14 Customers across Canada: companies and individuals, active and inactive, English and French,
+  each with a billing address, contact persons (`BR-095`), 1–3 service Properties and the active
+  Property ↔ Customer relationship rows.
+- 35 Jobs numbered from `1001`, spread across every Job status.
+- 37 Visits across every Visit status, carrying 1–3 technicians with exactly one `LEAD` (`BR-068`),
+  plus the assignment history `BR-069` describes, Visit status history, outcomes, notes and
+  cancellation reasons.
+- The dataset is **anchored to the moment the seed runs**: a Visit that has already happened is
+  finished and one that has not happened yet is merely scheduled, so the demo never presents a future
+  field attempt as completed work. `assertSeedScenariosAreCoherent`
+  (`api/src/database/development-seed-scenarios.ts`) refuses to write the dataset when an edit breaks
+  that, breaks the Job/Visit agreement the API enforces, or books one technician on two overlapping
+  Visits.
+- `make seed` **replaces** the previous demo rather than appending to it: every Customer, Property,
+  Job and Visit of the seeded organization is removed first, and the organization's Job numbering
+  restarts at `1001`. Anything created by hand through the app in that organization goes with it.
 
 Credential policy:
 
@@ -101,28 +107,69 @@ Expected: `200` with `sessionId`, `accessToken` and `refreshToken`. A wrong pass
 `401 INVALID_CREDENTIALS` with the same body shape, and a request without `device` returns `400`.
 
 Implementation: `api/src/database/development-seed.ts` resolves the credential dataset from the
-environment (pure, unit-tested in `development-seed.spec.ts`) and
-`api/src/database/run-development-seed.ts` performs the account, permission and operational demo
-writes (`npm run db:seed`).
+environment (pure, unit-tested in `development-seed.spec.ts`),
+`api/src/database/development-seed-scenarios.ts` is the demo dataset itself plus the coherence rules
+it is asserted against (pure, unit-tested in `development-seed-scenarios.spec.ts`), and
+`api/src/database/run-development-seed.ts` performs the account, permission and demo writes
+(`npm run db:seed`).
 
 ### What `make seed` writes
 
-Beyond the two accounts, the seed writes operational demo data so the management screens have something
-real to present:
+The seed also adds a deterministic **demo dataset** so the management and field screens have something
+real to present. It is one hand-written book of business rather than generated rows, so it reads the way
+a service company's work actually reads:
 
-- 20 customers, their contacts, addresses and Properties, and Jobs spread across every Job status;
-- **four further Technician members** (`Sarah Moreau`, `John Tremblay`, `Priya Raman`, `Luc Gagnon`) so
-  a Visit can carry a real crew (`BR-068`). They are members only: the two documented credentials above
-  remain the only seeded logins and no password is generated for them;
-- **two or three technicians per Visit** with exactly one `LEAD`, rotating the Lead between Visits, with
-  the assignment **history** `BR-069` describes — a Lead who was first assigned as an ordinary technician
-  and promoted later, and a technician who was removed again — recorded as history rows rather than a
-  rewritten assignment;
-- **three notes per Visit** from the manager and the crew (`BR-027`);
-- the **Visit and Job status history** along the only paths `BR-074` and `BR-058` permit.
+- **14 Customers** across Canada — companies and individuals, active and inactive, English and French,
+  with contact persons (`BR-095`), a billing address and 1–3 service Properties each;
+- **35 Jobs** numbered from `1001`, spread across **every** Job status so each filter and each list has
+  data;
+- **37 Visits** spread across **every** Visit status, carrying a crew of one to three technicians with
+  exactly one `LEAD` (`BR-068`), the assignment **history** `BR-069` describes — a Lead who was first
+  assigned as an ordinary technician and promoted later, and a technician who was removed again — Visit
+  status history, recorded outcomes (`BR-077`), notes from the office and the crew (`BR-027`) and a
+  structured cancellation reason (`BR-076`);
+- **four further Technician members** (`Sarah Moreau`, `John Tremblay`, `Priya Raman`, `Luc Gagnon`) so a
+  Visit can carry a real crew. They are members only: the two documented credentials above remain the only
+  seeded logins and no password is generated for them.
 
-Re-running `make seed` refreshes this demo data rather than duplicating it: the previous run's customers,
-Properties, Jobs, Visits and their history are removed first.
+Two properties of the dataset matter when it is edited (`api/src/database/development-seed-scenarios.ts`):
+
+1. **Every Visit window is relative to the moment the seed runs** (`daysAgo`, `inDays`, `hoursFromNow`),
+   so a Visit that has already happened is `COMPLETED` and one that has not happened yet is only
+   `SCHEDULED`. There is no fixed date to go stale, and a future field attempt can never be seeded as
+   finished work.
+2. **The dataset is asserted before it is written.** `assertSeedScenariosAreCoherent` refuses it unless
+   the Job and Visit statuses agree the way `BR-058`, `BR-061`, `BR-062` and `BR-074` require, every
+   `COMPLETED` Visit has an outcome and an end in the past, no note is written in the future or by
+   somebody off the crew, and no technician is booked on two overlapping Visits (`BR-070`).
+
+Re-running `make seed` **replaces** the demo instead of duplicating it: every Customer, Property, Job and
+Visit of the seeded organization is deleted first (their histories and assignments cascade with them) and
+the organization's Job numbering restarts at `1001`. Evidence objects already uploaded to the local MinIO
+bucket are not removed — their rows cascade away with the Job, so a re-seed can leave orphaned dev objects
+in the bucket.
+
+### Temporary dev sign-in buttons (Android debug builds)
+
+A **debug** build of the Android application shows two extra buttons on the sign-in screen — *Sign in as
+Manager* and *Sign in as Technician* — so a device session can switch audience in one tap instead of
+typing a seeded credential. It is development tooling, not product behaviour (`BR-042`).
+
+| Question                          | Answer                                                                                                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Where does it live?               | `android/app/src/debug/java/com/servora/android/ui/signin/DevSignInAccounts.kt`                                                                                 |
+| Why can a release build not show it? | The `release` source set declares the same type with an empty list, so the section is absent **by construction** — not by a flag someone must remember to reset |
+| Which accounts?                   | The two `make seed` accounts above, with the passwords from your git-ignored `.env`                                                                             |
+| The seed generated a password     | `make seed` printed the generated value once when `SEED_*_PASSWORD` was empty — paste that into `DevSignInAccounts.kt`                                            |
+| Does it bypass authentication?    | No. A button prefills the form and submits the real credentials to the real `POST /auth/sign-in` (`BR-018`, `BR-007`)                                           |
+| How is it removed?                | `docs/tracker/049-android-dev-sign-in-buttons.md` lists the exact files to delete                                                                               |
+
+Those passwords are local-only and belong to reserved `.test` accounts, but they **are** in git: this is
+the one deliberate exception to `dev.md` §5 recorded in the tracker entry above. Never put a real
+credential there.
+
+Implementation: `SignInViewModel.onDevSignIn` prefills the form and reuses the ordinary submit path, and
+`SignInScreen` renders the section only when the account list it is given is non-empty.
 
 ## 4. Android against a local API (physical device or emulator)
 

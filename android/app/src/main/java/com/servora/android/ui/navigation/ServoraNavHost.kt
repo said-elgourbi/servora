@@ -21,6 +21,8 @@ import androidx.navigation.navArgument
 import com.servora.android.R
 import com.servora.android.ui.components.ServoraTopBarState
 import com.servora.android.ui.components.openAddressInMaps
+import com.servora.android.ui.customers.AddContactScreen
+import com.servora.android.ui.customers.AddContactViewModel
 import com.servora.android.ui.customers.AddCustomerScreen
 import com.servora.android.ui.customers.AddCustomerViewModel
 import com.servora.android.ui.customers.AddPropertyScreen
@@ -31,6 +33,7 @@ import com.servora.android.ui.customers.CustomerJobHistoryScreen
 import com.servora.android.ui.customers.CustomerPermissionsUiState
 import com.servora.android.ui.customers.CustomersScreen
 import com.servora.android.ui.customers.CustomersViewModel
+import com.servora.android.ui.customers.EditContactViewModel
 import com.servora.android.ui.customers.EditCustomerActionTag
 import com.servora.android.ui.customers.EditCustomerScreen
 import com.servora.android.ui.customers.EditCustomerViewModel
@@ -38,7 +41,13 @@ import com.servora.android.ui.customers.EditPropertyActionTag
 import com.servora.android.ui.customers.EditPropertyViewModel
 import com.servora.android.ui.customers.PropertyDetailScreen
 import com.servora.android.ui.customers.PropertyDetailViewModel
-import com.servora.android.ui.jobs.JobDetailsScreen
+import com.servora.android.ui.customers.RemoveContactViewModel
+import com.servora.android.ui.jobs.CreateJobScreen
+import com.servora.android.ui.jobs.CreateJobViewModel
+// The destination draws the redesigned Job Details screen, which presents the Job and its Visits
+// apart. `JobDetailsScreen` remains in the package as the screen it replaces: restoring the previous
+// presentation is this import and the call below (`docs/tracker/044-job-details-job-visit-separation.md`).
+import com.servora.android.ui.jobs.JobDetailsOverviewScreen
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.jobs.rememberJobPhotoCapture
 import com.servora.android.ui.jobs.rememberJobPhotoPicker
@@ -57,6 +66,8 @@ object ServoraRoutes {
 
     const val PROPERTY_ID = "propertyId"
 
+    const val CONTACT_ID = "contactId"
+
     const val JOB_ID = "jobId"
 
     const val CUSTOMER_DETAIL = "customer/detail/{customerId}"
@@ -64,9 +75,21 @@ object ServoraRoutes {
     const val CUSTOMER_JOBS = "customer/jobs/{customerId}"
     const val CUSTOMER_CREATE = "customer/create"
     const val CUSTOMER_ADD_PROPERTY = "customer/properties/new/{customerId}"
+    const val CUSTOMER_ADD_CONTACT = "customer/contacts/new/{customerId}"
+    const val CUSTOMER_EDIT_CONTACT = "customer/contacts/edit/{customerId}/{contactId}"
     const val PROPERTY_DETAIL = "customer/properties/detail/{customerId}/{propertyId}"
     const val PROPERTY_EDIT = "customer/properties/edit/{customerId}/{propertyId}"
     const val JOB_DETAIL = "job/detail/{jobId}"
+
+    /**
+     * Create Job, with the Customer as an **optional** argument.
+     *
+     * Launching it from a customer passes that customer's id, and the form then treats the Customer as
+     * fixed context rather than asking for one again (`BR-012`). Launching it without an id is the same
+     * destination with the searchable Customer selector, which is what a Jobs entry point added later
+     * uses — so the route is one screen, not two.
+     */
+    const val JOB_CREATE = "job/create?$CUSTOMER_ID={$CUSTOMER_ID}"
 
     fun customerDetail(customerId: String): String = "customer/detail/${Uri.encode(customerId)}"
 
@@ -77,6 +100,12 @@ object ServoraRoutes {
     fun customerAddProperty(customerId: String): String =
         "customer/properties/new/${Uri.encode(customerId)}"
 
+    fun customerAddContact(customerId: String): String =
+        "customer/contacts/new/${Uri.encode(customerId)}"
+
+    fun customerEditContact(customerId: String, contactId: String): String =
+        "customer/contacts/edit/${Uri.encode(customerId)}/${Uri.encode(contactId)}"
+
     fun propertyDetail(customerId: String, propertyId: String): String =
         "customer/properties/detail/${Uri.encode(customerId)}/${Uri.encode(propertyId)}"
 
@@ -84,6 +113,19 @@ object ServoraRoutes {
         "customer/properties/edit/${Uri.encode(customerId)}/${Uri.encode(propertyId)}"
 
     fun jobDetail(jobId: String): String = "job/detail/${Uri.encode(jobId)}"
+
+    /**
+     * Create Job, optionally for [customerId].
+     *
+     * A `null` customer produces the route with the argument absent, which is how the destination's
+     * optional argument is declared: the user then searches for the Customer.
+     */
+    fun jobCreate(customerId: String? = null): String =
+        if (customerId == null) {
+            "job/create"
+        } else {
+            "job/create?${ServoraRoutes.CUSTOMER_ID}=${Uri.encode(customerId)}"
+        }
 }
 
 private fun NavBackStackEntry.customerId(): String =
@@ -92,11 +134,29 @@ private fun NavBackStackEntry.customerId(): String =
 private fun NavBackStackEntry.propertyId(): String =
     arguments?.getString(ServoraRoutes.PROPERTY_ID).orEmpty()
 
+private fun NavBackStackEntry.contactId(): String =
+    arguments?.getString(ServoraRoutes.CONTACT_ID).orEmpty()
+
 private fun NavBackStackEntry.jobId(): String =
     arguments?.getString(ServoraRoutes.JOB_ID).orEmpty()
 
 private fun customerIdArgument() =
     listOf(navArgument(ServoraRoutes.CUSTOMER_ID) { type = NavType.StringType })
+
+/**
+ * The Create Job destination's optional Customer argument.
+ *
+ * `nullable` with no default is what makes the argument **absent** when the route is opened without one:
+ * a route that supplied an empty default would make "no customer" and "the empty id" the same thing
+ * (`BR-042`).
+ */
+private fun optionalCustomerIdArgument() = listOf(
+    navArgument(ServoraRoutes.CUSTOMER_ID) {
+        type = NavType.StringType
+        nullable = true
+        defaultValue = null
+    },
+)
 
 private fun jobIdArgument() =
     listOf(navArgument(ServoraRoutes.JOB_ID) { type = NavType.StringType })
@@ -104,6 +164,11 @@ private fun jobIdArgument() =
 private fun propertyArguments() = listOf(
     navArgument(ServoraRoutes.CUSTOMER_ID) { type = NavType.StringType },
     navArgument(ServoraRoutes.PROPERTY_ID) { type = NavType.StringType },
+)
+
+private fun contactArguments() = listOf(
+    navArgument(ServoraRoutes.CUSTOMER_ID) { type = NavType.StringType },
+    navArgument(ServoraRoutes.CONTACT_ID) { type = NavType.StringType },
 )
 
 /**
@@ -129,8 +194,17 @@ fun ServoraNavHost(
     addPropertyViewModel: AddPropertyViewModel,
     propertyDetailViewModel: PropertyDetailViewModel,
     editPropertyViewModel: EditPropertyViewModel,
+    addContactViewModel: AddContactViewModel,
+    editContactViewModel: EditContactViewModel,
+    removeContactViewModel: RemoveContactViewModel,
     jobDetailsViewModel: JobDetailsViewModel,
+    createJobViewModel: CreateJobViewModel,
     permissions: CustomerPermissionsUiState,
+    /**
+     * Resolves the display name of the customer a destination belongs to, or `null` while it is not
+     * known. The Create Job destination uses it to draw the customer it was opened for as context.
+     */
+    customerName: (customerId: String) -> String?,
     rootContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -148,17 +222,51 @@ fun ServoraNavHost(
             // customer it already holds, so a recomposition cannot start a second request
             // (`BR-001`).
             LaunchedEffect(customerId) { customersViewModel.openCustomerDetail(customerId) }
+            // Removing a contact person acts on this customer, so the removal's session is this
+            // destination instance: leaving the screen and returning starts without the previous
+            // attempt's answer, which is what keeps a refusal the user walked away from out of the
+            // next visit (`BR-042`).
+            removeContactViewModel.start(customerId, entry.id)
+            val contactRemoval by removeContactViewModel.uiState.collectAsState()
             CustomerDetailScreen(
                 state = state.customerDetail ?: CustomerDetailUiState(customerId, isLoading = true),
                 canViewProperties = permissions.canViewProperties,
                 canAddProperty = permissions.canCreateProperty,
+                canCreateJob = permissions.canCreateJob,
+                // The contact capabilities are their own set (`BR-095`), so each action is drawn on
+                // the code that would perform it and never on `customers.edit` (`BR-007`, `BR-011`).
+                canCreateContact = permissions.canCreateContact,
+                canEditContact = permissions.canEditContact,
+                canRemoveContact = permissions.canRemoveContact,
+                contactRemoval = contactRemoval,
                 onAddProperty = {
                     // The Add Property destination begins its own form session before it composes,
                     // so nothing has to be reset here and a previous attempt's terminal state cannot
                     // make the new screen report itself saved on entry.
                     navController.push(ServoraRoutes.customerAddProperty(customerId))
                 },
+                onCreateJob = {
+                    // The Job form is opened for this customer, so the customer is its context rather
+                    // than something to search for again (`BR-012`).
+                    navController.push(ServoraRoutes.jobCreate(customerId))
+                },
                 onSeeAllJobs = { navController.push(ServoraRoutes.customerJobs(customerId)) },
+                onAddContact = {
+                    navController.push(ServoraRoutes.customerAddContact(customerId))
+                },
+                onEditContact = { contactId ->
+                    navController.push(ServoraRoutes.customerEditContact(customerId, contactId))
+                },
+                onRemoveContact = removeContactViewModel::remove,
+                onDismissContactRemovalFailure = removeContactViewModel::dismissFailure,
+                onContactRemoved = {
+                    // The contact left every ordinary view on the backend, so the customer's detail is
+                    // re-read rather than patched locally, and the contacts are what the API now
+                    // reports (`BR-001`, `BR-033`, `BR-095`). Acknowledging the signal keeps
+                    // re-entering this screen from reading again.
+                    customersViewModel.reloadCustomerDetail(customerId)
+                    removeContactViewModel.acknowledgeRemoved()
+                },
                 onRetry = customersViewModel::retryCustomerDetail,
                 onOpenProperty = { propertyId ->
                     navController.push(
@@ -198,6 +306,66 @@ fun ServoraNavHost(
                     customersViewModel.reload()
                     navController.popBackStack()
                 },
+            )
+        }
+
+        composable(ServoraRoutes.CUSTOMER_ADD_CONTACT, customerIdArgument()) { entry ->
+            val customerId = entry.customerId()
+            // Reaching this screen directly, such as from a restored back stack, must still read the
+            // customer whose name the destination's context line shows, and must scope the form to
+            // that customer.
+            LaunchedEffect(customerId) { customersViewModel.openCustomerDetail(customerId) }
+            // The destination instance is the form session. Beginning it before the screen composes
+            // is what keeps a previous session's validation or submission error out of this one;
+            // recomposing this same instance passes the same id, which the ViewModel ignores, so a
+            // configuration change still keeps what the user typed.
+            addContactViewModel.start(customerId, entry.id)
+            val state by addContactViewModel.uiState.collectAsState()
+            AddContactScreen(
+                state = state,
+                onFirstNameChange = addContactViewModel::onFirstNameChange,
+                onLastNameChange = addContactViewModel::onLastNameChange,
+                onPhoneChange = addContactViewModel::onPhoneChange,
+                onEmailChange = addContactViewModel::onEmailChange,
+                onPrimaryChange = addContactViewModel::onPrimaryChange,
+                onSave = addContactViewModel::save,
+                onCancel = { navController.navigateUp() },
+                onSaved = {
+                    // The contact exists on the backend now, so the customer's detail — and with it
+                    // the contacts it reports — is re-read rather than patched locally (`BR-001`).
+                    customersViewModel.reloadCustomerDetail(customerId)
+                    navController.popBackStack()
+                },
+            )
+        }
+
+        composable(ServoraRoutes.CUSTOMER_EDIT_CONTACT, contactArguments()) { entry ->
+            val customerId = entry.customerId()
+            val contactId = entry.contactId()
+            // The customer's name is the destination's context line; the contact itself is read by the
+            // form, through the customer detail projection (`BR-095`).
+            LaunchedEffect(customerId) { customersViewModel.openCustomerDetail(customerId) }
+            // The destination instance is the form session: the form reads the contact it edits, and
+            // re-entering the same instance keeps what the user entered. A new instance reads the
+            // contact again, so no value or message from the previous session is carried over.
+            editContactViewModel.start(customerId, contactId, entry.id)
+            val state by editContactViewModel.uiState.collectAsState()
+            AddContactScreen(
+                state = state,
+                onFirstNameChange = editContactViewModel::onFirstNameChange,
+                onLastNameChange = editContactViewModel::onLastNameChange,
+                onPhoneChange = editContactViewModel::onPhoneChange,
+                onEmailChange = editContactViewModel::onEmailChange,
+                onPrimaryChange = editContactViewModel::onPrimaryChange,
+                onSave = editContactViewModel::save,
+                onCancel = { navController.navigateUp() },
+                onSaved = {
+                    // The edit is on the backend now, so the customer's detail is re-read rather than
+                    // patched locally (`BR-001`).
+                    customersViewModel.reloadCustomerDetail(customerId)
+                    navController.popBackStack()
+                },
+                saveLabelRes = R.string.contact_edit_action,
             )
         }
 
@@ -317,13 +485,23 @@ fun ServoraNavHost(
                 // a cancellation (`BR-042`).
                 onUnavailable = jobDetailsViewModel::photoPickerUnavailable,
             )
-            JobDetailsScreen(
+            JobDetailsOverviewScreen(
                 state = state,
                 canUpdateJob = permissions.canUpdateJob,
                 // The evidence capability is its own, so a technician who records field evidence is
                 // offered the photo sources without holding the Job update capability (`BR-009`).
                 canAddEvidencePhoto = permissions.canAddEvidencePhoto,
                 canViewTechnicians = permissions.canViewTechnicians,
+                // The Customer destination is the office read (`customers.view`). A session holding only
+                // the field capabilities is not offered a tap the API would refuse, and reads the
+                // customer's contact details in place instead (`BR-011`, `BR-092`).
+                canOpenCustomer = permissions.canOpenCustomers,
+                // The Visit's field lifecycle is the technician's own capability set (`BR-009`,
+                // `BR-066`), so the field action is drawn on it and never on the office's Job update:
+                // a Manager without them is offered no field action (`BR-007`, `BR-011`).
+                canUpdateAssignedVisit = permissions.canUpdateAssignedVisit,
+                canRecordVisitOutcome = permissions.canRecordVisitOutcome,
+                canAddVisitNote = permissions.canAddVisitNote,
                 onRetry = jobDetailsViewModel::retry,
                 onRetryActivity = jobDetailsViewModel::retryActivity,
                 // The customer the Job belongs to is one this organization owns, so the row opens the
@@ -336,6 +514,11 @@ fun ServoraNavHost(
                 onOpenInMaps = { address -> openAddressInMaps(context, address) },
                 onLoadAssignableTechnicians = jobDetailsViewModel::loadAssignableTechnicians,
                 onChangeJobStatus = { status -> jobDetailsViewModel.changeJobStatus(status) },
+                onChangeVisitStatus = { status, outcome, summary ->
+                    jobDetailsViewModel.changeVisitStatus(status, outcome, summary)
+                },
+                onDiscardQueuedVisitAction = jobDetailsViewModel::discardQueuedVisitAction,
+                onDiscardQueuedVisitNote = jobDetailsViewModel::discardQueuedVisitNote,
                 onAddActivityText = jobDetailsViewModel::addActivityText,
                 onRescheduleVisit = jobDetailsViewModel::rescheduleVisit,
                 onAssignTechnicians = jobDetailsViewModel::assignVisitTechnicians,
@@ -447,6 +630,44 @@ fun ServoraNavHost(
                 },
             )
         }
+
+        // Create Job, with the Customer optional (`BR-094`). The destination instance is the form
+        // session, begun before the screen composes so a previous attempt's validation or submission
+        // error cannot be drawn again.
+        composable(ServoraRoutes.JOB_CREATE, optionalCustomerIdArgument()) { entry ->
+            val customerId = entry.arguments?.getString(ServoraRoutes.CUSTOMER_ID)
+            // The fixed Customer's name is the one its detail destination already read; without it the
+            // form asks the user to search instead (`BR-012`).
+            val customerName = customerId?.let(customerName)
+            createJobViewModel.start(customerId, customerName, entry.id)
+            val state by createJobViewModel.uiState.collectAsState()
+            CreateJobScreen(
+                state = state,
+                onCustomerQueryChange = createJobViewModel::onCustomerQueryChange,
+                onCustomerPickerOpen = createJobViewModel::onCustomerPickerOpen,
+                onSelectCustomer = createJobViewModel::selectCustomer,
+                onRetryCustomers = createJobViewModel::retryCustomers,
+                onSelectProperty = createJobViewModel::selectProperty,
+                onRetryProperties = createJobViewModel::retryProperties,
+                onTitleChange = createJobViewModel::onTitleChange,
+                onDescriptionChange = createJobViewModel::onDescriptionChange,
+                onSubmit = createJobViewModel::submit,
+                onCancel = { navController.navigateUp() },
+                onCreated = { jobId ->
+                    // The Job exists on the backend, so the customer's Job rows and counts are re-read
+                    // rather than patched locally (`BR-001`), and the form leaves the back stack so Back
+                    // from the new Job returns to where the user started rather than to the form.
+                    customerId?.let { createdFor ->
+                        customersViewModel.reloadCustomerDetail(createdFor)
+                    }
+                    customersViewModel.reload()
+                    navController.navigate(ServoraRoutes.jobDetail(jobId)) {
+                        popUpTo(ServoraRoutes.JOB_CREATE) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -520,8 +741,31 @@ fun servoraTopBarState(
             navController = navController,
         )
 
+        ServoraRoutes.JOB_CREATE -> pushedScreenTopBar(
+            title = stringResource(R.string.job_create_title),
+            navController = navController,
+        )
+
         ServoraRoutes.CUSTOMER_ADD_PROPERTY -> ServoraTopBarState(
             title = stringResource(R.string.property_add_title),
+            isRoot = false,
+            onBack = { navController.navigateUp() },
+            subtitle = customerName(
+                entry?.arguments?.getString(ServoraRoutes.CUSTOMER_ID).orEmpty(),
+            ),
+        )
+
+        ServoraRoutes.CUSTOMER_ADD_CONTACT -> ServoraTopBarState(
+            title = stringResource(R.string.contact_add_title),
+            isRoot = false,
+            onBack = { navController.navigateUp() },
+            subtitle = customerName(
+                entry?.arguments?.getString(ServoraRoutes.CUSTOMER_ID).orEmpty(),
+            ),
+        )
+
+        ServoraRoutes.CUSTOMER_EDIT_CONTACT -> ServoraTopBarState(
+            title = stringResource(R.string.contact_edit_title),
             isRoot = false,
             onBack = { navController.navigateUp() },
             subtitle = customerName(

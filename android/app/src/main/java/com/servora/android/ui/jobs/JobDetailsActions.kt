@@ -28,6 +28,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -57,15 +59,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import android.text.format.DateFormat
 import com.servora.android.R
+import com.servora.android.data.jobs.QueuedVisitFieldAction
+import com.servora.android.data.jobs.QueuedVisitNote
+import com.servora.android.data.offline.OutboxFailureReason
+import com.servora.android.data.offline.OutboxOperationState
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.AssignmentRole
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.components.JobStatusPill
 import com.servora.android.ui.components.StatusDot
+import com.servora.android.ui.components.VisitStatusPill
 import com.servora.android.ui.components.jobStatusAccent
 import com.servora.android.ui.components.jobStatusLabel
+import com.servora.android.ui.components.visitStatusLabel
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -109,6 +119,45 @@ const val JobDetailsVisitActionsTag = "job-details-visit-actions"
 
 /** Identifies the Reschedule action, which sits with the Visit's schedule (`BR-073`). */
 const val JobDetailsRescheduleActionTag = "job-details-action-reschedule"
+
+/**
+ * Identifies the represented Visit's field lifecycle control (`BR-074`).
+ *
+ * It is the Visit's own status chip, and it **is** the control that moves the Visit — the same
+ * confirmed pattern the Job's status control follows (`docs/tracker/020-android-job-details-status-control.md`),
+ * so the status a technician wants to change is the thing they tap.
+ */
+const val JobDetailsVisitStatusActionTag = "job-details-visit-status-action"
+
+/** Identifies the destination the Visit is in now, which the control's menu states rather than offers. */
+const val JobDetailsVisitStatusCurrentTag = "job-details-visit-status-current"
+
+/** Identifies one destination the Visit may move to (`BR-074`, `BR-075`). */
+fun jobDetailsVisitStatusOptionTag(status: String): String =
+    "job-details-visit-status-option-$status"
+
+/** Identifies the sheet a completion states its outcome in (`BR-077`, `BR-078`). */
+const val JobDetailsVisitCompletionSheetTag = "job-details-visit-completion-sheet"
+
+/** Identifies one outcome the sheet offers (`BR-078`). */
+fun jobDetailsVisitOutcomeOptionTag(outcome: String): String =
+    "job-details-visit-outcome-$outcome"
+
+/** Identifies the summary `BR-077` requires with the outcome. */
+const val JobDetailsVisitOutcomeSummaryTag = "job-details-visit-outcome-summary"
+
+/** Identifies the sheet's confirmation, which is the action that completes the Visit. */
+const val JobDetailsVisitCompleteConfirmTag = "job-details-visit-complete-confirm"
+
+/** Identifies the notice that states what the queue is still holding for this Job (`§7`). */
+const val JobDetailsVisitPendingTag = "job-details-visit-pending"
+
+/** Identifies the discard of a refused field action (`BR-032`, `BR-014`). */
+fun jobDetailsVisitPendingDiscardTag(operationId: String): String =
+    "job-details-visit-pending-discard-$operationId"
+
+/** Identifies one note the queue is still holding (`§7`). */
+fun jobDetailsQueuedNoteTag(operationId: String): String = "job-details-queued-note-$operationId"
 
 /**
  * Identifies the Manage technicians action, which sits with the crew it changes (`BR-068`, `BR-069`).
@@ -535,6 +584,20 @@ internal fun jobActionFailureMessage(
         com.servora.android.data.jobs.JobActionFailure.VISIT_NOT_RESCHEDULABLE ->
             R.string.job_action_error_visit_not_reschedulable
 
+        // The Visit's own lifecycle answers (`docs/api/job-actions.md` §7), reported separately from
+        // the Job's so the technician is told which state machine refused the change (`BR-059`).
+        com.servora.android.data.jobs.JobActionFailure.VISIT_TRANSITION_NOT_ALLOWED ->
+            R.string.job_action_error_visit_transition
+
+        com.servora.android.data.jobs.JobActionFailure.VISIT_SCHEDULING_CONDITION_NOT_MET ->
+            R.string.job_action_error_visit_scheduling
+
+        com.servora.android.data.jobs.JobActionFailure.JOB_CLOSED_FOR_FIELD_WORK ->
+            R.string.job_action_error_job_closed
+
+        com.servora.android.data.jobs.JobActionFailure.VISIT_OPERATION_REUSED ->
+            R.string.job_action_error_visit_operation_reused
+
         com.servora.android.data.jobs.JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE ->
             R.string.job_action_error_technicians_not_assignable
 
@@ -561,6 +624,7 @@ internal fun jobActionCompletionMessage(kind: JobActionKind): Int =
         JobActionKind.RESCHEDULE -> R.string.job_action_done_reschedule
         JobActionKind.ASSIGNMENT -> R.string.job_action_done_assignment
         JobActionKind.ACTIVITY_TEXT -> R.string.job_action_done_activity_text
+        JobActionKind.VISIT_STATUS_CHANGE -> R.string.job_action_done_visit_status
     }
 
 /**
@@ -1054,3 +1118,440 @@ private fun conflictLine(conflict: ScheduleConflict, zone: ZoneId): String {
     val who = conflict.technicianName ?: "?"
     return "$who · #${conflict.jobNumber} · $window"
 }
+
+/*
+ * The Visit's field action (`BR-074`, `BR-075`, `BR-077`, `BR-078`).
+ *
+ * It is drawn exactly as the Job's status control is, because that pattern is already confirmed
+ * (`docs/tracker/020-android-job-details-status-control.md`): the Visit's **status chip is the
+ * control**, so the state a technician wants to change is the thing they tap, and its menu lists
+ * exactly the destinations the backend reported. The client holds no second copy of the Visit's
+ * lifecycle, so no destination is invented and none the API offers is hidden for a reason the client
+ * guessed (`BR-022`, `BR-041`, `BR-058`, `BR-059`).
+ *
+ * The two state machines stay separate: this control moves the **Visit**, and the Job's status
+ * control moves the Job. Neither is drawn in place of the other (`BR-059`).
+ */
+
+/**
+ * The Visit's own status control (`BR-074`).
+ *
+ * The chip the Visit card already presents **is** the control, wearing the Visit's own label and a
+ * trailing chevron that says it opens something. The menu states where the Visit is now and then
+ * lists the destinations the API reported, so no lifecycle rule is re-implemented here (`BR-041`).
+ *
+ * A destination that completes the Visit opens the outcome sheet instead of being sent, because
+ * `BR-077` requires an outcome with the completion and the API refuses one without it. Every other
+ * destination is one explicit action, sent as it is chosen — including `BR-075`'s correction back to
+ * `SCHEDULED`, which is the only way that correction is offered (`BR-067`).
+ */
+@Composable
+internal fun VisitStatusAction(
+    status: VisitStatus,
+    allowedTransitions: List<VisitStatus>,
+    enabled: Boolean,
+    onSelect: (VisitStatus) -> Unit,
+    onComplete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        VisitStatusControlPill(
+            status = status,
+            enabled = enabled,
+            onClick = { expanded = true },
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            VisitStatusCurrentRow(status = status)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            allowedTransitions.forEach { destination ->
+                VisitStatusTransitionItem(destination = destination) {
+                    expanded = false
+                    if (destination == VisitStatus.COMPLETED) {
+                        onComplete()
+                    } else {
+                        onSelect(destination)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The Visit status chip as the control that moves it: the chip, plus the affordance that it opens. */
+@Composable
+private fun VisitStatusControlPill(
+    status: VisitStatus,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    VisitStatusPill(
+        status = status,
+        modifier = Modifier.testTag(JobDetailsVisitStatusActionTag),
+        trailing = {
+            Icon(
+                painter = painterResource(R.drawable.ic_chevron_down),
+                contentDescription = null,
+                modifier = Modifier.size(StatusControlIndicatorSize),
+            )
+        },
+        onClick = onClick,
+        enabled = enabled,
+        // The chip states the Visit's status and not what tapping it does, so the action is named
+        // separately (`BR-028`).
+        onClickLabel = stringResource(R.string.job_action_change_visit_status),
+    )
+}
+
+/** The status the Visit is in, stated at the head of the menu rather than offered as a choice. */
+@Composable
+private fun VisitStatusCurrentRow(status: VisitStatus) {
+    Row(
+        modifier = Modifier
+            .width(JobStatusMenuWidth)
+            .heightIn(min = 40.dp)
+            .testTag(JobDetailsVisitStatusCurrentTag)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            modifier = Modifier.weight(1f),
+            text = stringResource(visitStatusLabel(status)),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Icon(
+            painter = painterResource(R.drawable.ic_check_circle),
+            contentDescription = stringResource(R.string.job_details_status_current),
+            modifier = Modifier.size(StatusControlIndicatorSize),
+        )
+    }
+}
+
+/**
+ * One destination the Visit may move to, named by the Visit status it produces.
+ *
+ * The label is the shared Visit vocabulary's, so the control names the same code the chip and the
+ * timeline name it with (`BR-028`, `BR-041`).
+ */
+@Composable
+private fun VisitStatusTransitionItem(destination: VisitStatus, onClick: () -> Unit) {
+    DropdownMenuItem(
+        modifier = Modifier
+            .width(JobStatusMenuWidth)
+            .testTag(jobDetailsVisitStatusOptionTag(destination.name)),
+        text = {
+            Text(
+                text = stringResource(visitStatusLabel(destination)),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        onClick = onClick,
+    )
+}
+
+/** The localized label one outcome code is presented with (`BR-028`, `BR-041`). */
+internal fun visitOutcomeLabel(outcome: VisitOutcome): Int =
+    when (outcome) {
+        VisitOutcome.RESOLVED -> R.string.job_activity_outcome_resolved
+        VisitOutcome.NEEDS_PARTS -> R.string.job_activity_outcome_needs_parts
+        VisitOutcome.NEEDS_FOLLOWUP -> R.string.job_activity_outcome_needs_followup
+        VisitOutcome.NEEDS_QUOTE_APPROVAL -> R.string.job_activity_outcome_needs_quote_approval
+        VisitOutcome.UNABLE_TO_COMPLETE -> R.string.job_activity_outcome_unable_to_complete
+    }
+
+/**
+ * The sheet a completion states its outcome in (`BR-077`, `BR-078`).
+ *
+ * The API requires the outcome type **and** a summary with a completion, so the sheet asks for both
+ * and refuses to send a completion that omits either — which is what turns "the Visit is finished"
+ * into a record of what resulted from the field attempt (`BR-077`). It is one operation: the
+ * destination and the outcome travel in the same request, so no partial outcome is ever stored.
+ *
+ * The outcome codes are the API's (`BR-078`) and their labels are localized; the summary is the
+ * technician's own text and is never translated (`BR-028`).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun VisitCompletionSheet(
+    isSubmitting: Boolean,
+    onConfirm: (VisitOutcome, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var outcome by rememberSaveable { mutableStateOf<VisitOutcome?>(null) }
+    var summary by remember { mutableStateOf("") }
+    val trimmed = summary.trim()
+    val canConfirm = outcome != null && trimmed.isNotEmpty() && !isSubmitting
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag(JobDetailsVisitCompletionSheetTag),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.job_visit_complete_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.job_visit_complete_outcome_label),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            VisitOutcomeOptions(
+                selected = outcome,
+                enabled = !isSubmitting,
+                onSelect = { chosen -> outcome = chosen },
+            )
+            OutlinedTextField(
+                value = summary,
+                onValueChange = { text -> summary = text },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(JobDetailsVisitOutcomeSummaryTag),
+                label = { Text(stringResource(R.string.job_visit_complete_summary_label)) },
+                placeholder = {
+                    Text(stringResource(R.string.job_visit_complete_summary_placeholder))
+                },
+                minLines = 3,
+                enabled = !isSubmitting,
+                supportingText = {
+                    // The summary is required, so the sheet says so rather than letting the API refuse
+                    // a completion the technician believed was complete (`BR-077`, `BR-042`).
+                    Text(stringResource(R.string.job_visit_complete_summary_required))
+                },
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDismiss, enabled = !isSubmitting) {
+                    Text(stringResource(R.string.job_action_cancel))
+                }
+                Button(
+                    onClick = { outcome?.let { chosen -> onConfirm(chosen, trimmed) } },
+                    enabled = canConfirm,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.testTag(JobDetailsVisitCompleteConfirmTag),
+                ) {
+                    Text(stringResource(R.string.job_visit_complete_confirm))
+                }
+            }
+        }
+    }
+}
+
+/** The five outcome types `BR-078` defines, offered as a single-choice list. */
+@Composable
+private fun VisitOutcomeOptions(
+    selected: VisitOutcome?,
+    enabled: Boolean,
+    onSelect: (VisitOutcome) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        VisitOutcome.entries.forEach { option ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .toggleable(
+                        value = option == selected,
+                        enabled = enabled,
+                        role = Role.RadioButton,
+                        onValueChange = { onSelect(option) },
+                    )
+                    .testTag(jobDetailsVisitOutcomeOptionTag(option.name)),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = option == selected, onClick = null, enabled = enabled)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(visitOutcomeLabel(option)),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What the queue is still holding for this Job (`§7`, `BR-014`).
+ *
+ * It is the technician's own provisional work — the Visit transition and the notes the backend has not
+ * answered for — presented beside the records they will change rather than inside Job Activity, which
+ * is what the backend reported (`BR-080`). Nothing here is drawn as applied: a waiting action says it
+ * is waiting, and one the backend **refused** says why and offers to discard it, because `BR-014`
+ * requires a failed synchronization to stay visible when the user has to decide about it (`BR-032`).
+ */
+@Composable
+internal fun VisitFieldPendingNotice(
+    action: QueuedVisitFieldAction?,
+    notes: List<QueuedVisitNote>,
+    onDiscardAction: (String) -> Unit,
+    onDiscardNote: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (action == null && notes.isEmpty()) {
+        return
+    }
+    val refused = action?.isAwaitingSync == false || notes.any { note -> !note.isAwaitingSync }
+    Surface(
+        modifier = modifier.fillMaxWidth().testTag(JobDetailsVisitPendingTag),
+        shape = MaterialTheme.shapes.medium,
+        color = if (refused) {
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+        } else {
+            MaterialTheme.colorScheme.secondary
+        },
+        contentColor = if (refused) {
+            MaterialTheme.colorScheme.onErrorContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.job_visit_pending_title),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            action?.let { queued ->
+                PendingVisitActionRow(
+                    action = queued,
+                    onDiscard = { onDiscardAction(queued.operationId) },
+                )
+            }
+            notes.forEach { note ->
+                PendingNoteRow(note = note, onDiscard = { onDiscardNote(note.operationId) })
+            }
+        }
+    }
+}
+
+/** One waiting Visit transition: what it will do, how far it has got, and why if it was refused. */
+@Composable
+private fun PendingVisitActionRow(
+    action: QueuedVisitFieldAction,
+    onDiscard: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = stringResource(
+                R.string.job_visit_pending_action,
+                stringResource(visitStatusLabel(action.status)),
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = stringResource(pendingSyncStateText(action.state)),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (!action.isAwaitingSync) {
+            action.failure?.let { reason ->
+                Text(
+                    text = stringResource(pendingFailureText(reason)),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            DiscardRefusedAction(onDiscard = onDiscard, operationId = action.operationId)
+        }
+    }
+}
+
+/** One waiting note: its own text, how far it has got, and why if it was refused. */
+@Composable
+private fun PendingNoteRow(note: QueuedVisitNote, onDiscard: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(text = note.body, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = stringResource(pendingSyncStateText(note.state)),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (!note.isAwaitingSync) {
+            note.failure?.let { reason ->
+                Text(
+                    text = stringResource(pendingFailureText(reason)),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            DiscardRefusedAction(onDiscard = onDiscard, operationId = note.operationId)
+        }
+    }
+}
+
+/** The one action a refused field action offers: the user finishes with it (`BR-032`, `BR-014`). */
+@Composable
+private fun DiscardRefusedAction(onDiscard: () -> Unit, operationId: String) {
+    TextButton(
+        onClick = onDiscard,
+        modifier = Modifier.testTag(jobDetailsVisitPendingDiscardTag(operationId)),
+    ) {
+        Text(stringResource(R.string.job_visit_pending_discard))
+    }
+}
+
+/** How far a queued operation has got, as the notice states it (`§6`, §7). */
+internal fun pendingSyncStateText(state: OutboxOperationState): Int =
+    when (state) {
+        OutboxOperationState.PENDING -> R.string.job_visit_pending_queued
+        OutboxOperationState.IN_FLIGHT -> R.string.job_visit_pending_sending
+        OutboxOperationState.FAILED -> R.string.job_visit_pending_retrying
+        OutboxOperationState.REJECTED -> R.string.job_visit_pending_refused
+    }
+
+/**
+ * The localized reason a queued operation did not apply (`BR-028`, `BR-041`).
+ *
+ * The reasons are the queue's own classification of the API's answers (`§6`), so the notice says what
+ * actually happened rather than "something went wrong".
+ */
+internal fun pendingFailureText(failure: OutboxFailureReason): Int =
+    when (failure) {
+        OutboxFailureReason.UNAUTHENTICATED -> R.string.job_action_error_unauthenticated
+        OutboxFailureReason.NOT_AUTHORIZED -> R.string.job_action_error_forbidden
+        OutboxFailureReason.STALE -> R.string.job_visit_pending_stale
+        OutboxFailureReason.INVALID -> R.string.job_action_error_validation
+        OutboxFailureReason.NOT_FOUND -> R.string.job_action_error_not_found
+        OutboxFailureReason.SERVER -> R.string.job_action_error_server
+        OutboxFailureReason.NETWORK -> R.string.job_action_error_network
+        OutboxFailureReason.UNEXPECTED -> R.string.job_action_error_unexpected
+    }
+
+/**
+ * The localized report that an action was **queued** rather than applied (`BR-014`, §7).
+ *
+ * It is deliberately not the "done" message: nothing has been applied, and the screen says so
+ * (`BR-001`, `BR-086`).
+ */
+internal fun jobActionQueuedMessage(kind: JobActionKind): Int =
+    when (kind) {
+        JobActionKind.ACTIVITY_TEXT -> R.string.job_action_queued_activity_text
+        JobActionKind.VISIT_STATUS_CHANGE -> R.string.job_action_queued_visit_status
+        // The other actions are online-only, so nothing queues them; the mapping stays total for the
+        // same reason the failure mapping does (`BR-042`).
+        JobActionKind.STATUS_CHANGE,
+        JobActionKind.RESCHEDULE,
+        JobActionKind.ASSIGNMENT,
+        -> R.string.job_action_queued_generic
+    }
+
+
+
+
+
+

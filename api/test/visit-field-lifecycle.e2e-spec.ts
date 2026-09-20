@@ -5,6 +5,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
+  CUSTOMER_PERMISSIONS,
   JOB_PERMISSIONS,
   VISIT_PERMISSIONS,
   type PermissionCode,
@@ -398,6 +399,10 @@ describe('visit field lifecycle (e2e)', () => {
       .expect(200)
       .expect((response) => {
         expect(response.body.selectedVisit.status).toBe('SCHEDULED');
+        // The Visit's own answer is about the caller's place on the crew, not about the capability:
+        // this session holds only the read capability, and the action stays the client's own gate
+        // (`BR-011`).
+        expect(response.body.selectedVisit.fieldActionable).toBe(true);
       });
 
     // ... and the write it does not name is refused by the API, not by a hidden button (`BR-007`).
@@ -435,6 +440,206 @@ describe('visit field lifecycle (e2e)', () => {
     );
     expect(await statusHistory(visit.id)).toHaveLength(1);
   });
+  it('tells a caller the Visit it may not drive, instead of offering a refusal (`BR-041`, `ADR-019` D3)', async () => {
+    const session = await signInTechnician();
+    const colleague = await newMembership();
+    const { job, property } = await jobWithVisit({
+      visitStatus: 'DRAFT',
+      schedule: false,
+    });
+
+    // The colleague's attempt is over and still open, so it is the Job's **selected** Visit — the
+    // "overdue" Visit the home and the schedule present with that condition (`BR-081`, `BR-074`). The
+    // technician's own attempt is an older one, so the Job read reaches them through it.
+    const overdue = await newVisit({
+      jobId: job.id,
+      propertyId: property?.id,
+      status: 'SCHEDULED',
+      scheduledStart: new Date(Date.now() - 3_600_000),
+      scheduledEnd: new Date(Date.now() - 1_800_000),
+    });
+    await assign({
+      visitId: overdue.id,
+      technicianMembershipId: colleague.id,
+      roleCode: 'LEAD',
+    });
+    const own = await newVisit({
+      jobId: job.id,
+      status: 'CANCELED',
+      scheduledStart: new Date(Date.now() - 86_400_000),
+      scheduledEnd: new Date(Date.now() - 82_800_000),
+    });
+    await assign({
+      visitId: own.id,
+      technicianMembershipId: session.membershipId,
+      roleCode: 'LEAD',
+    });
+
+    // The read admits them and reports the Visit the Job is represented by — which is not theirs to
+    // drive. The answer is the scope the field route enforces, so a client does not have to offer an
+    // action the route refuses and then report the refusal as a Visit that is gone.
+    const read = await request(app.getHttpServer())
+      .get(`${base}/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(read.body.selectedVisit).toMatchObject({
+      id: overdue.id,
+      fieldActionable: false,
+      // It is offered no destination either: every one of them would be refused, so `BR-093` requires
+      // the projection to expose none of them (`BR-041`).
+      allowedStatusTransitions: [],
+    });
+
+    // The action itself is still refused the way it always was (`ADR-019` D2).
+    await changeStatus(session, job.id, overdue.id, {
+      status: 'EN_ROUTE',
+    }).expect(404);
+  });
+
+  it('refuses a session holding the field capabilities but not the office one, on no crew (`BR-093`)', async () => {
+    // An office session holds the field write capability too — the seeded Manager role holds the whole
+    // catalogue. Holding it is not office authorization: `BR-093` makes crew membership govern a caller
+    // who does **not** hold the office capability, so this member writes only a Visit their own crew
+    // includes and is refused one they do not (never `403`: the Visit is not disclosed as existing).
+    const session = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS,
+      VISIT_PERMISSIONS.RECORD_OUTCOME,
+    ]);
+    const crew = await newMembership();
+    const { job, visit } = await jobWithVisit({
+      visitStatus: 'SCHEDULED',
+      crew: [{ membershipId: crew.id, roleCode: 'LEAD' }],
+    });
+
+    const read = await request(app.getHttpServer())
+      .get(`${base}/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(read.body.selectedVisit).toMatchObject({
+      id: visit.id,
+      fieldActionable: false,
+      allowedStatusTransitions: [],
+    });
+
+    await changeStatus(session, job.id, visit.id, {
+      status: 'COMPLETED',
+      outcomeCode: 'RESOLVED',
+      outcomeSummary: 'Done.',
+    }).expect(404);
+    expect(await statusHistory(visit.id)).toEqual([]);
+  });
+
+  it('lets an office member complete a Visit they are not on the crew of (`BR-093`, `ADR-019` D7)', async () => {
+    // The office capability that reaches Visit writes is the route's second authorization: this member
+    // is on no crew at all, and `BR-093` exempts them from crew membership without weakening the scope
+    // that governs a technician (`BR-066`).
+    const office = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      JOB_PERMISSIONS.UPDATE,
+      VISIT_PERMISSIONS.RECORD_OUTCOME,
+    ]);
+    const crew = await newMembership();
+    const { job, visit } = await jobWithVisit({
+      jobStatus: 'IN_PROGRESS',
+      visitStatus: 'IN_PROGRESS',
+      crew: [{ membershipId: crew.id, roleCode: 'LEAD' }],
+    });
+
+    const read = await request(app.getHttpServer())
+      .get(`${base}/${job.id}`)
+      .set('Authorization', `Bearer ${office.accessToken}`)
+      .expect(200);
+    expect(read.body.selectedVisit).toMatchObject({
+      id: visit.id,
+      fieldActionable: true,
+      // The whole working table, the completion included: this caller holds the capability a completion
+      // requires of every caller (`BR-009`, `BR-077`).
+      allowedStatusTransitions: [
+        'DRAFT',
+        'SCHEDULED',
+        'EN_ROUTE',
+        'ON_SITE',
+        'COMPLETED',
+      ],
+    });
+    // The Visit keeps the crew it has: the office member driving it is not added to it.
+    expect(read.body.technicians).toMatchObject([
+      { membershipId: crew.id, roleCode: 'LEAD' },
+    ]);
+
+    await changeStatus(office, job.id, visit.id, {
+      status: 'COMPLETED',
+      outcomeCode: 'RESOLVED',
+      outcomeSummary: 'Closed by the office after the technician called in.',
+    }).expect(200);
+
+    // Office completion is a technician completion in every respect short of who may perform it: one
+    // recorded transition, `BR-077`'s outcome, and the Job consequence `ADR-019` D4 decides (`BR-093`).
+    const history = await statusHistory(visit.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      fromStatus: 'IN_PROGRESS',
+      toStatus: 'COMPLETED',
+      isCorrection: false,
+    });
+    expect(await visitRow(visit.id)).toMatchObject({
+      status: 'COMPLETED',
+      outcomeCode: 'RESOLVED',
+      outcomeSummary: 'Closed by the office after the technician called in.',
+    });
+    const outcomes = await database.db
+      .select()
+      .from(visitOutcomeHistory)
+      .where(eq(visitOutcomeHistory.visitId, visit.id));
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({ outcomeCode: 'RESOLVED' });
+    expect(await jobRow(job.id)).toMatchObject({ status: 'PENDING_REVIEW' });
+
+    // Both records name the member who actually performed the action, never the crew's Lead
+    // (`BR-033`, `BR-067`, `BR-093`).
+    const [statusRow] = await database.db
+      .select({ actorMembershipId: visitStatusHistory.actorMembershipId })
+      .from(visitStatusHistory)
+      .where(eq(visitStatusHistory.visitId, visit.id))
+      .limit(1);
+    expect(statusRow?.actorMembershipId).toBe(office.membershipId);
+    expect(outcomes[0]?.actorMembershipId).toBe(office.membershipId);
+    expect(statusRow?.actorMembershipId).not.toBe(crew.id);
+  });
+
+  it('offers the office caller every other destination, but the completion only with its own capability (`BR-093`)', async () => {
+    const office = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      JOB_PERMISSIONS.UPDATE,
+    ]);
+    const { job, visit } = await jobWithVisit({ visitStatus: 'SCHEDULED' });
+
+    const read = await request(app.getHttpServer())
+      .get(`${base}/${job.id}`)
+      .set('Authorization', `Bearer ${office.accessToken}`)
+      .expect(200);
+    expect(read.body.selectedVisit).toMatchObject({
+      fieldActionable: true,
+      // The office capability admits the caller, and the completion is absent because the capability a
+      // completion requires of **every** caller is not held (`BR-009`, `BR-077`).
+      allowedStatusTransitions: ['DRAFT', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'],
+    });
+
+    // The destinations the projection offered are the ones the route applies ...
+    await changeStatus(office, job.id, visit.id, { status: 'EN_ROUTE' }).expect(200);
+
+    // ... and the one it did not offer is refused by the API rather than by a hidden control
+    // (`BR-007`).
+    await changeStatus(office, job.id, visit.id, {
+      status: 'COMPLETED',
+      outcomeCode: 'RESOLVED',
+      outcomeSummary: 'Done.',
+    }).expect(403);
+    expect(await statusHistory(visit.id)).toHaveLength(1);
+  });
+
+
 
   it('applies the whole normal lifecycle, one recorded transition at a time', async () => {
     const session = await signInTechnician();
@@ -452,7 +657,15 @@ describe('visit field lifecycle (e2e)', () => {
     expect(scheduled.body.selectedVisit).toMatchObject({
       status: 'SCHEDULED',
       version: 2,
-      allowedStatusTransitions: ['EN_ROUTE'],
+      // `BR-074` offers the whole working vocabulary in either direction, read from the server's own
+      // table so the client holds no copy of the lifecycle (`BR-041`).
+      allowedStatusTransitions: [
+        'DRAFT',
+        'EN_ROUTE',
+        'ON_SITE',
+        'IN_PROGRESS',
+        'COMPLETED',
+      ],
       reschedulable: true,
     });
     // Reaching `SCHEDULED` records nothing on the Job: `ADR-019` D4 gives the scheduling move no Job
@@ -467,7 +680,13 @@ describe('visit field lifecycle (e2e)', () => {
     expect(enRoute.body.selectedVisit).toMatchObject({
       status: 'EN_ROUTE',
       version: 3,
-      allowedStatusTransitions: ['ON_SITE', 'SCHEDULED'],
+      allowedStatusTransitions: [
+        'DRAFT',
+        'SCHEDULED',
+        'ON_SITE',
+        'IN_PROGRESS',
+        'COMPLETED',
+      ],
     });
     // Work has started, so the Job is in progress (`BR-058`, `ADR-019` D4).
     expect(await jobHistory(job.id)).toEqual([
@@ -494,7 +713,15 @@ describe('visit field lifecycle (e2e)', () => {
     expect(completed.body.selectedVisit).toMatchObject({
       status: 'COMPLETED',
       version: 6,
-      allowedStatusTransitions: [],
+      // A completed Visit is reopenable (`BR-074`), so it is the one historical status that is not a
+      // dead end.
+      allowedStatusTransitions: [
+        'DRAFT',
+        'SCHEDULED',
+        'EN_ROUTE',
+        'ON_SITE',
+        'IN_PROGRESS',
+      ],
     });
 
     // Every applied transition is recorded once, in order, with the device's own instant beside the
@@ -541,27 +768,21 @@ describe('visit field lifecycle (e2e)', () => {
     ]);
   });
 
-  it('refuses every destination the visit lifecycle does not permit, naming the ones it does', async () => {
+  it('refuses only standing still and the dispatch pair, and names what the visit may take', async () => {
     const session = await signInTechnician();
     const { job, visit } = await jobWithVisit({
       visitStatus: 'SCHEDULED',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
 
-    // `BR-074` is a chain, not a menu: a Visit does not skip a step, never returns to an active status
-    // once historical, and never stands still (`BR-067` says a status that does not change is not a
-    // transition). `CANCELED` and `NO_SHOW` are dispatch actions no capability authorizes today
-    // (`BR-066`, `BR-076`, `ADR-019` D7).
-    const refused: Record<string, unknown>[] = [
-      { status: 'DRAFT' },
-      { status: 'ON_SITE' },
-      { status: 'IN_PROGRESS' },
-      { status: 'COMPLETED', outcomeCode: 'RESOLVED', outcomeSummary: 'Done.' },
+    // `BR-074`'s free movement means a working Visit reaches every other working status, so what is left
+    // to refuse is standing still (`BR-067` says a status that does not change is not a transition) and
+    // the two dispatch actions no field caller may take (`BR-066`, `BR-076`, `ADR-019` D7).
+    for (const body of [
+      { status: 'SCHEDULED' },
       { status: 'CANCELED' },
       { status: 'NO_SHOW' },
-      { status: 'SCHEDULED' },
-    ];
-    for (const body of refused) {
+    ]) {
       const response = await changeStatus(
         session,
         job.id,
@@ -573,7 +794,7 @@ describe('visit field lifecycle (e2e)', () => {
         details: {
           from: 'SCHEDULED',
           to: body.status,
-          allowed: ['EN_ROUTE'],
+          allowed: ['DRAFT', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED'],
         },
       });
     }
@@ -581,6 +802,151 @@ describe('visit field lifecycle (e2e)', () => {
     // Nothing was applied and nothing was recorded.
     expect((await visitRow(visit.id))?.status).toBe('SCHEDULED');
     expect(await statusHistory(visit.id)).toEqual([]);
+  });
+
+  it('skips a step and steps backward, one recorded transition each', async () => {
+    const session = await signInTechnician();
+    const crew = [{ membershipId: session.membershipId, roleCode: 'LEAD' as const }];
+
+    // A technician who never tapped "en route" is not made to walk the chain: `SCHEDULED →
+    // IN_PROGRESS` is one permitted transition (`BR-074`).
+    const skipping = await jobWithVisit({
+      jobStatus: 'SCHEDULED',
+      visitStatus: 'SCHEDULED',
+      crew,
+    });
+    const started = await changeStatus(
+      session,
+      skipping.job.id,
+      skipping.visit.id,
+      { status: 'IN_PROGRESS' },
+    ).expect(200);
+    expect(started.body.selectedVisit).toMatchObject({
+      status: 'IN_PROGRESS',
+      version: 2,
+    });
+    expect(
+      (await statusHistory(skipping.visit.id)).map((row) => [
+        row.fromStatus,
+        row.toStatus,
+        row.isCorrection,
+      ]),
+    ).toEqual([['SCHEDULED', 'IN_PROGRESS', false]]);
+
+    // A technician who tapped too far ahead steps back: `ON_SITE → EN_ROUTE` is one transition, and it
+    // is recorded as what it is rather than rewriting the status it corrects (`BR-067`, `BR-075`).
+    const backward = await jobWithVisit({
+      jobStatus: 'IN_PROGRESS',
+      visitStatus: 'ON_SITE',
+      crew,
+    });
+    await changeStatus(session, backward.job.id, backward.visit.id, {
+      status: 'EN_ROUTE',
+    }).expect(200);
+    expect((await visitRow(backward.visit.id))?.status).toBe('EN_ROUTE');
+    expect(
+      (await statusHistory(backward.visit.id)).map((row) => [
+        row.fromStatus,
+        row.toStatus,
+        row.isCorrection,
+      ]),
+    ).toEqual([['ON_SITE', 'EN_ROUTE', false]]);
+    // Stepping back has no Job consequence: `BR-058` has no backwards Job destination, so the Job keeps
+    // the status the forward work gave it (`ADR-019` D4).
+    expect(await jobRow(backward.job.id)).toMatchObject({ status: 'IN_PROGRESS' });
+    expect(await jobHistory(backward.job.id)).toEqual([]);
+  });
+
+  it('reopens a completed visit, clearing its current outcome and taking the job out of review', async () => {
+    const session = await signInTechnician();
+    const { job, visit } = await jobWithVisit({
+      jobStatus: 'NEW',
+      visitStatus: 'DRAFT',
+      crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
+    });
+
+    await changeStatus(session, job.id, visit.id, {
+      status: 'IN_PROGRESS',
+    }).expect(200);
+    await changeStatus(session, job.id, visit.id, {
+      status: 'COMPLETED',
+      outcomeCode: 'RESOLVED',
+      outcomeSummary: 'Done the first time.',
+    }).expect(200);
+    // No Visit remains active and the outcome resolves the Job, so `BR-061` lets it await review.
+    expect(await jobRow(job.id)).toMatchObject({ status: 'PENDING_REVIEW' });
+
+    // The technician completed it by mistake and reopens it into a working status (`BR-074`).
+    const reopened = await changeStatus(session, job.id, visit.id, {
+      status: 'IN_PROGRESS',
+    }).expect(200);
+    expect(reopened.body.selectedVisit).toMatchObject({
+      status: 'IN_PROGRESS',
+    });
+
+    // The reopen is one recorded transition, and every earlier event is still there (`BR-067`, `BR-075`).
+    expect(
+      (await statusHistory(visit.id)).map((row) => [
+        row.fromStatus,
+        row.toStatus,
+        row.isCorrection,
+      ]),
+    ).toEqual([
+      ['DRAFT', 'IN_PROGRESS', false],
+      ['IN_PROGRESS', 'COMPLETED', false],
+      ['COMPLETED', 'IN_PROGRESS', false],
+    ]);
+
+    // The previous completion and its outcome stay in append-only history, while the Visit holds **no**
+    // current outcome until it is completed again (`BR-074`, `BR-079`).
+    expect(await visitRow(visit.id)).toMatchObject({
+      status: 'IN_PROGRESS',
+      outcomeCode: null,
+      outcomeSummary: null,
+      outcomeRecordedAt: null,
+      outcomeRecordedByMembershipId: null,
+    });
+    const outcomes = await database.db
+      .select()
+      .from(visitOutcomeHistory)
+      .where(eq(visitOutcomeHistory.visitId, visit.id));
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({
+      outcomeCode: 'RESOLVED',
+      outcomeSummary: 'Done the first time.',
+    });
+
+    // A Job must not await review while its field work is unfinished, so it returns to `IN_PROGRESS` and
+    // the move is recorded (`BR-061`, `BR-074`).
+    expect(await jobRow(job.id)).toMatchObject({ status: 'IN_PROGRESS' });
+    expect(await jobHistory(job.id)).toEqual([
+      { fromStatus: 'NEW', toStatus: 'IN_PROGRESS' },
+      { fromStatus: 'IN_PROGRESS', toStatus: 'PENDING_REVIEW' },
+      { fromStatus: 'PENDING_REVIEW', toStatus: 'IN_PROGRESS' },
+    ]);
+
+    // Completing it again requires a **new** outcome, which becomes the Visit's current one (`BR-077`).
+    await changeStatus(session, job.id, visit.id, {
+      status: 'COMPLETED',
+    }).expect(400);
+    await changeStatus(session, job.id, visit.id, {
+      status: 'COMPLETED',
+      outcomeCode: 'NEEDS_PARTS',
+      outcomeSummary: 'Ordered the igniter.',
+    }).expect(200);
+    expect(await visitRow(visit.id)).toMatchObject({
+      status: 'COMPLETED',
+      outcomeCode: 'NEEDS_PARTS',
+      outcomeSummary: 'Ordered the igniter.',
+    });
+    expect(
+      await database.db
+        .select()
+        .from(visitOutcomeHistory)
+        .where(eq(visitOutcomeHistory.visitId, visit.id)),
+    ).toHaveLength(2);
+    // The follow-up outcome keeps the Job in progress rather than awaiting review (`BR-061`, `BR-078`).
+    expect(await jobRow(job.id)).toMatchObject({ status: 'IN_PROGRESS' });
   });
 
   it('refuses a completion that carries no outcome (`BR-077`)', async () => {

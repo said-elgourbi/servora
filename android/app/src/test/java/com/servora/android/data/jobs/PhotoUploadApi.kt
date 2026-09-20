@@ -43,6 +43,15 @@ class PhotoUploadApi : JobDetailsApi {
         JobActivityDto(jobId = jobId, events = emptyList())
     }
 
+    /**
+     * The tests this fake serves never create a Job: they are about what the client sends for evidence
+     * and what it does with the answers (`BR-042`).
+     */
+    override suspend fun createJob(
+        authorization: String,
+        request: CreateJobRequest,
+    ): JobDetailsDto = throw AssertionError("these tests do not create a Job")
+
     var addJobAudioNoteCalls = 0
 
     /**
@@ -55,6 +64,13 @@ class PhotoUploadApi : JobDetailsApi {
 
     var audioContentCalls = 0
     var lastAudioNoteId: String? = null
+
+    override suspend fun changeVisitStatus(
+        authorization: String,
+        jobId: String,
+        visitId: String,
+        request: ChangeVisitStatusRequestDto,
+    ): JobDetailsDto = throw AssertionError("these tests do not apply a Visit transition")
 
     override suspend fun addJobAudioNote(
         authorization: String,

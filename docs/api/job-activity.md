@@ -9,8 +9,9 @@ event vocabulary), `BR-028` (stable codes, localized labels) and `docs/domain/jo
 §6 (the Visit sequence is a presentation label, never an identifier).
 
 References: `BR-001`, `BR-006`, `BR-007`, `BR-020`, `BR-041`, `BR-042`, `BR-058`, `BR-067`, `BR-068`,
-`BR-073`, `BR-074`, `BR-077`, `BR-078`, `BR-080`, `BR-088`, `BR-089`,
-`docs/tracker/022-android-job-activity-timeline.md`, `docs/tracker/029-photo-evidence-phases.md`.
+`BR-073`, `BR-074`, `BR-077`, `BR-078`, `BR-079`, `BR-080`, `BR-088`, `BR-089`,
+`docs/tracker/022-android-job-activity-timeline.md`, `docs/tracker/029-photo-evidence-phases.md`,
+`docs/tracker/048-android-job-activity-visit-outcome.md`.
 
 ## 1. Conventions
 
@@ -105,6 +106,12 @@ it; the API never returns presentation text (`BR-028`).
 
 `fromStatus`/`toStatus` are the status codes the kind's vocabulary defines (`BR-058` for a Job,
 `BR-074` for a Visit); the kind names which vocabulary the codes belong to.
+
+`VISIT_OUTCOME_RECORDED` is **history**: every outcome a Visit recorded appears here, in append-only order,
+so a Visit that was completed and reopened and then completed again has more than one such event. The
+Visit's **current** outcome — the one that answers "what did this field attempt result in?" — is not
+derived from this read: it travels on the Visit itself, as `visits[].outcomeCode` on `GET /jobs/:id`
+(`docs/api/job-details.md` §3.2, `BR-079`).
 
 `photoId` is the photo the entry records, and the value its bytes are read with
 (`GET /jobs/:id/photos/:photoId/content`, `docs/api/job-photos.md` §4). `photoPhase` is the field-work

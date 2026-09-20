@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { DatabaseService } from '../database/database.service.js';
 import {
   jobAudioNoteRemovals,
@@ -12,7 +12,6 @@ import {
   userProfiles,
   visitNotes,
   visitOutcomeHistory,
-  visits,
   visitScheduleHistory,
   visitStatusHistory,
   visitTechnicianHistory,
@@ -20,6 +19,7 @@ import {
 import { memberName } from '../members/member-name.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
 import type { AssignmentRoleCode } from './job.types.js';
+import { readJobVisits } from './visit-assignment.js';
 
 /**
  * The Job Activity read (`BR-080`).
@@ -230,20 +230,14 @@ export async function readJobActivity(
   jobId: string,
   options: JobActivityOptions = {},
 ): Promise<JobActivityEventDto[]> {
-  const visitRows = await db
-    .select({ id: visits.id, createdAt: visits.createdAt })
-    .from(visits)
-    .where(
-      and(
-        eq(visits.organizationId, scope.organizationId),
-        eq(visits.jobId, jobId),
-      ),
-    )
-    .orderBy(asc(visits.createdAt), asc(visits.id));
-
-  const sequenceByVisit = new Map<string, number>();
-  visitRows.forEach((visit, index) => sequenceByVisit.set(visit.id, index + 1));
-  const visitIds = [...sequenceByVisit.keys()];
+  // The Job's Visits in their own sequence. The `Visit N` label is derived here exactly as it is in
+  // every other projection that reports one, so two reads of the same Job cannot number its Visits
+  // differently (`BR-041`).
+  const jobVisits = await readJobVisits(db, scope, jobId);
+  const sequenceByVisit = new Map(
+    jobVisits.map((visit) => [visit.visitId, visit.sequence]),
+  );
+  const visitIds = jobVisits.map((visit) => visit.visitId);
 
   const [
     jobStatusRows,

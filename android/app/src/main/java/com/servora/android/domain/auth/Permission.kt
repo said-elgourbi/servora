@@ -5,6 +5,15 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     CUSTOMERS_CREATE("customers.create", aliases = setOf("create.customers", "CUSTOMER_CREATE")),
     CUSTOMERS_EDIT("customers.edit", aliases = setOf("edit.customers", "CUSTOMER_UPDATE")),
     CUSTOMERS_ARCHIVE("customers.archive", aliases = setOf("archive.customers", "CUSTOMER_DELETE")),
+    // Maintaining a Customer's contact persons is its own capability set (`BR-095`), following
+    // `BR-085`'s Property set: a role may legitimately maintain a Customer without being trusted to
+    // change the people the organization calls, so `customers.edit` authorizes no contact write.
+    // Reading a Customer's contacts adds no capability — they are part of the projections the office
+    // read (`customers.view`) and the assigned-customer read (`BR-092`) already authorize. A capability
+    // named here is a UI gate only: the backend remains the authority (`BR-007`, `BR-011`).
+    CUSTOMERS_CONTACTS_CREATE("customers.contacts.create"),
+    CUSTOMERS_CONTACTS_EDIT("customers.contacts.edit"),
+    CUSTOMERS_CONTACTS_REMOVE("customers.contacts.remove"),
     // Property capabilities are independent of the customer capabilities (`BR-085`); a Property
     // action is never inferred from a customer permission.
     PROPERTIES_VIEW("properties.view"),
@@ -17,7 +26,15 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     // under the `resource.action` spelling the Jobs feature may define later (`BR-006`, `BR-041`).
     // A capability named here is a UI gate only: the backend remains the authority (`BR-007`).
     JOB_UPDATE("JOB_UPDATE", aliases = setOf("jobs.update", "update.jobs")),
+    /**
+     * Creating a Job (`BR-008`, `BR-094`). The code is the foundation catalogue's own — `BR-008` names
+     * "create jobs" as a Manager default and the default Manager role already holds it — so this is the
+     * capability the API enforces on `POST /jobs`, not an inference from the update one. A capability
+     * named here is a UI gate only: the backend remains the authority (`BR-007`, `BR-011`).
+     */
+    JOB_CREATE("JOB_CREATE", aliases = setOf("jobs.create", "create.jobs")),
     TECHNICIAN_VIEW("TECHNICIAN_VIEW", aliases = setOf("technicians.view", "view.technicians")),
+    SCHEDULE_VIEW_ORG("schedule.view_org"),
     // The evidence capabilities the API enforces on the Job photo routes (`BR-006`, `BR-015`,
     // `BR-027`; `docs/decisions/015-evidence-capabilities.md`). Adding evidence is its own capability
     // rather than a Job one, because the person who records it is the technician on site, who holds
@@ -51,6 +68,27 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     // them, so no gate is named here before anything draws on it. A capability named here is a UI
     // gate only: the backend remains the authority (`BR-007`, `BR-011`).
     VISIT_VIEW_ASSIGNED("VISIT_VIEW_ASSIGNED"),
+    VISIT_CREATE_SCHEDULE("visits.create_schedule"),
+    VISIT_UPDATE_SCHEDULE("visits.update_schedule"),
+    VISIT_ASSIGN_TECHNICIANS("visits.assign_technicians"),
+    VISIT_REQUEST_FOLLOW_UP("visits.request_follow_up"),
+    VISIT_REVIEW_REQUESTS("visits.review_requests"),
+    // Driving an assigned Visit through its field lifecycle (`BR-074`, `BR-075`) is the first of the
+    // three field capabilities the Job Details field action draws on (`BR-009`, `ADR-019` D1). The
+    // API enforces it on `PATCH /jobs/:id/visits/:visitId/status` and scopes the route to the
+    // caller's own current crew, so a Visit their assignment does not reach is answered `404`
+    // (`ADR-019` D2, D3). The route's other authorization is the office's `JOB_UPDATE`, which needs no
+    // crew membership (`BR-093`), so a session may reach the action through either.
+    VISIT_UPDATE_ASSIGNED_STATUS("VISIT_UPDATE_ASSIGNED_STATUS"),
+    // Adding a note to an assigned Visit (`BR-009`, `BR-027`). It is the capability the API enforces
+    // on `POST /jobs/:id/visits/:visitId/notes` for a field caller, which is why a technician reaches
+    // that route without holding the office's `JOB_UPDATE` (`docs/api/job-actions.md` §2).
+    VISIT_ADD_NOTE("VISIT_ADD_NOTE"),
+    // Recording the outcome a completion requires (`BR-077`, `BR-078`). The API asks for it as a
+    // second question on the `COMPLETED` destination of the Visit status route, so a caller holding
+    // only `VISIT_UPDATE_ASSIGNED_STATUS` is refused with `403` (`BR-009`, `BR-007`). A capability
+    // named here is a UI gate only: the backend remains the authority (`BR-007`, `BR-011`).
+    VISIT_RECORD_OUTCOME("VISIT_RECORD_OUTCOME"),
 }
 
 class PermissionChecker(granted: Set<String>) {

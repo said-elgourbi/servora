@@ -384,6 +384,13 @@ export const customerCompanies = pgTable('customer_companies', {
 
 // ------------------------------------------------------- customer_contacts
 
+/**
+ * Contact people for a customer (`BR-023`, `BR-095`).
+ *
+ * Two invariants live in the database rather than in the code path that happens to remember them
+ * (`BR-001`, `Project.md` §17): at most one contact per customer is primary, and a removal records
+ * both when it happened and which member performed it.
+ */
 export const customerContacts = pgTable(
   'customer_contacts',
   {
@@ -399,10 +406,24 @@ export const customerContacts = pgTable(
     isPrimary: boolean('is_primary').notNull().default(false),
     isBillingContact: boolean('is_billing_contact').notNull().default(false),
     isJobContact: boolean('is_job_contact').notNull().default(false),
+    /** Soft removal (`BR-095`; `ADR-022` D8): the record survives so who removed it stays answerable. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedByMembershipId: uuid('removed_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    version: integer('version').notNull().default(1),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
+    uniqueIndex('customer_contacts_primary_unique')
+      .on(table.customerId)
+      .where(sql`${table.isPrimary}`),
+    check('customer_contacts_version_check', sql`${table.version} > 0`),
+    check(
+      'customer_contacts_removal_state_check',
+      sql`(${table.removedAt} is not null) = (${table.removedByMembershipId} is not null)`,
+    ),
     index('customer_contacts_customer_id_idx').on(table.customerId),
     index('customer_contacts_email_idx').on(table.email),
   ],
@@ -1147,6 +1168,87 @@ export const visits = pgTable(
       table.organizationId,
       table.scheduledStart,
     ),
+  ],
+);
+
+// --------------------------------------------------- follow-up visit requests
+
+export const followUpVisitRequests = pgTable(
+  'follow_up_visit_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    sourceVisitId: uuid('source_visit_id').references(() => visits.id, {
+      onDelete: 'set null',
+    }),
+    requestingTechnicianMembershipId: uuid(
+      'requesting_technician_membership_id',
+    )
+      .notNull()
+      .references(() => organizationMembers.id),
+    proposedStart: timestamp('proposed_start', { withTimezone: true }).notNull(),
+    proposedEnd: timestamp('proposed_end', { withTimezone: true }).notNull(),
+    reason: text('reason').notNull(),
+    sameTechnicianPreferred: boolean('same_technician_preferred')
+      .notNull()
+      .default(false),
+    status: varchar('status', { length: 30 }).notNull().default('PENDING'),
+    reviewerMembershipId: uuid('reviewer_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewNote: text('review_note'),
+    createdVisitId: uuid('created_visit_id').references(() => visits.id, {
+      onDelete: 'set null',
+    }),
+    version: integer('version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      'follow_up_visit_requests_status_check',
+      sql`${table.status} in ('PENDING', 'NEEDS_CLARIFICATION', 'APPROVED', 'REJECTED')`,
+    ),
+    check(
+      'follow_up_visit_requests_schedule_order_check',
+      sql`${table.proposedEnd} > ${table.proposedStart}`,
+    ),
+    check(
+      'follow_up_visit_requests_reason_check',
+      sql`length(btrim(${table.reason})) > 0`,
+    ),
+    check(
+      'follow_up_visit_requests_review_pair_check',
+      sql`(${table.reviewerMembershipId} is null) = (${table.reviewedAt} is null)`,
+    ),
+    check(
+      'follow_up_visit_requests_created_visit_status_check',
+      sql`${table.createdVisitId} is null or ${table.status} = 'APPROVED'`,
+    ),
+    check('follow_up_visit_requests_version_check', sql`${table.version} > 0`),
+    index('follow_up_visit_requests_organization_status_idx').on(
+      table.organizationId,
+      table.status,
+      table.createdAt,
+    ),
+    index('follow_up_visit_requests_job_idx').on(
+      table.organizationId,
+      table.jobId,
+    ),
+    index('follow_up_visit_requests_requester_idx').on(
+      table.organizationId,
+      table.requestingTechnicianMembershipId,
+      table.createdAt,
+    ),
+    uniqueIndex('follow_up_visit_requests_created_visit_unique')
+      .on(table.organizationId, table.createdVisitId)
+      .where(sql`${table.createdVisitId} is not null`),
   ],
 );
 

@@ -3,6 +3,7 @@ package com.servora.android.ui.jobs
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.AssignableTechniciansResult
 import com.servora.android.data.jobs.AudioCollaborators
+import com.servora.android.data.jobs.CreateJobRequest
 import com.servora.android.data.jobs.FakeJobAudioEvidenceCache
 import com.servora.android.data.jobs.FakeJobAudioPlayer
 import com.servora.android.data.jobs.FakeJobPhotoExporter
@@ -11,6 +12,7 @@ import com.servora.android.data.jobs.FakeJobPhotoPickedItems
 import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobActivityResult
+import com.servora.android.data.jobs.JobCreateResult
 import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.jobs.JobDetailsResult
 import com.servora.android.data.jobs.JobPhotoExportOutcome
@@ -22,7 +24,11 @@ import com.servora.android.data.jobs.JobPhotoPickedItems
 import com.servora.android.data.jobs.JobPhotoSession
 import com.servora.android.data.jobs.MAX_JOB_PHOTO_BYTES
 import com.servora.android.data.jobs.PhotoCollaborators
+import com.servora.android.data.jobs.QueuedVisitFieldAction
+import com.servora.android.data.jobs.QueuedVisitNote
 import com.servora.android.data.jobs.TEST_CLOCK
+import com.servora.android.data.jobs.VisitNote
+import com.servora.android.data.jobs.VisitStatusChange
 import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.data.offline.OutboxFailureReason
 import com.servora.android.domain.model.AssignableTechnician
@@ -37,6 +43,8 @@ import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.isRemovable
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -852,6 +860,10 @@ private class PhotoJobRepository(
     private val activity: List<JobActivityEvent> = emptyList(),
 ) : JobDetailsRepository {
 
+    /** These tests are about photo work, so creating a Job is not exercised here. */
+    override suspend fun createJob(request: CreateJobRequest): JobCreateResult =
+        throw AssertionError("these tests do not create a Job")
+
     /**
      * How many times the timeline was read, so a test can tell the re-read an accepted upload earns
      * from the one a refusal the technician discarded must not cause (`BR-001`, `BR-080`, `D6c`).
@@ -882,11 +894,22 @@ private class PhotoJobRepository(
         return JobActivityResult.Success(activity)
     }
 
-    override suspend fun addVisitNote(
-        jobId: String,
-        visitId: String,
-        body: String,
-    ): ActivityWriteResult = unsupported()
+    override suspend fun addVisitNoteRequest(note: VisitNote): ActivityWriteResult = unsupported()
+
+    override suspend fun changeVisitStatus(action: VisitStatusChange): JobActionResult =
+        unsupported()
+
+    override suspend fun queuedVisitAction(jobId: String): QueuedVisitFieldAction? = null
+
+    override suspend fun queuedVisitNotes(jobId: String): List<QueuedVisitNote> = emptyList()
+
+    override suspend fun discardQueuedVisitAction(jobId: String, operationId: String): Boolean =
+        unsupported()
+
+    override suspend fun discardQueuedVisitNote(jobId: String, operationId: String): Boolean =
+        unsupported()
+
+    override val appliedOperations: Flow<Unit> = MutableSharedFlow()
 
     override suspend fun removeJobPhoto(
         jobId: String,

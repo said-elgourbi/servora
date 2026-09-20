@@ -3,10 +3,57 @@ export const CUSTOMER_PERMISSIONS = {
   CREATE: 'customers.create',
   EDIT: 'customers.edit',
   ARCHIVE: 'customers.archive',
+  /**
+   * Reading the Customer behind a Job the caller is assigned to (`BR-092`; `ADR-021` D1).
+   *
+   * It is a **distinct** capability rather than an inference from the Visit capabilities the default
+   * Technician role already holds: `BR-006` requires a capability to name one thing a role can
+   * plausibly hold on its own, and a company may give a contractor the assigned-Visit workflow
+   * without handing them the customer's phone number and the office's notes about that customer.
+   * `customers.view` is the organization-wide capability — it guards the customer list, the customer
+   * detail, `GET /customers/:id/jobs` and `GET /home/manager` — so granting it to a technician in
+   * order to show one customer's phone number is exactly what `BR-009` rules out.
+   *
+   * The scope is the assignment, never the Customer: the block is reached through the Jobs the
+   * caller's own current crew includes, which is the scope the Job read already applies
+   * (`ADR-019` D2). It is enforced on `GET /jobs/:id` as the read's **second** authorization
+   * question, asked in the service because a route declares either an all-of requirement or an
+   * any-of one and never both (`ADR-019` D1, `ADR-021` D2).
+   */
+  VIEW_ASSIGNED: 'customers.view_assigned',
 } as const;
 
 export type CustomerPermission =
   (typeof CUSTOMER_PERMISSIONS)[keyof typeof CUSTOMER_PERMISSIONS];
+
+/**
+ * The contact-person capability catalogue (`BR-095`; `ADR-022` D4).
+ *
+ * A dedicated set rather than `customers.edit`: this is `BR-085`'s Property position applied to a
+ * different asset — a role may legitimately maintain a Customer without being trusted to change or
+ * delete the people the organization calls — and `BR-006` requires a capability to name one thing a
+ * role can plausibly hold on its own. `customers.edit` therefore no longer authorizes any contact
+ * write.
+ *
+ * The codes follow the resource-prefixed `resource.action` convention (`BR-006`, `BR-041`) and are
+ * enforced by `POST /customers/:id/contacts`, `PATCH /customers/:id/contacts/:contactId` and
+ * `DELETE /customers/:id/contacts/:contactId`. The default **Manager** role holds all three
+ * (`BR-008` direction) and the default Technician role holds none of them (`BR-009`); like every
+ * capability they stay grantable and revocable per role and per member (`BR-004`, `BR-006`).
+ *
+ * **No read capability is added.** Reading a Customer's contacts in the office stays under
+ * `customers.view`, and the technician's field read stays under `customers.view_assigned`
+ * (`BR-092`): the contacts are part of the Customer projections those reads already return, never a
+ * route of their own.
+ */
+export const CUSTOMER_CONTACT_PERMISSIONS = {
+  CREATE: 'customers.contacts.create',
+  EDIT: 'customers.contacts.edit',
+  REMOVE: 'customers.contacts.remove',
+} as const;
+
+export type CustomerContactPermission =
+  (typeof CUSTOMER_CONTACT_PERMISSIONS)[keyof typeof CUSTOMER_CONTACT_PERMISSIONS];
 
 /**
  * The Property capability catalogue (`BR-085`).
@@ -40,8 +87,15 @@ export type PropertyPermission =
  *
  * This is the same interim-authorization pattern the Job read already follows, where `GET /jobs/:id`
  * is guarded by the existing `customers.view` capability until the Jobs capability set is defined.
+ *
+ * `CREATE` is the existing `JOB_CREATE` code, and it is **not** an interim choice: `BR-008` names
+ * "create jobs" as a Manager default, the catalogue already defines the code with its bilingual name
+ * and description, and migration `0004_woozy_spitfire` already grants it to the default Manager role.
+ * Creating a Job therefore uses the capability that already exists for it rather than reusing
+ * `JOB_UPDATE`, which names a different action (`BR-006`).
  */
 export const JOB_PERMISSIONS = {
+  CREATE: 'JOB_CREATE',
   UPDATE: 'JOB_UPDATE',
 } as const;
 
@@ -62,6 +116,13 @@ export const TECHNICIAN_PERMISSIONS = {
 
 export type TechnicianPermission =
   (typeof TECHNICIAN_PERMISSIONS)[keyof typeof TECHNICIAN_PERMISSIONS];
+
+export const SCHEDULE_PERMISSIONS = {
+  VIEW_ORG: 'schedule.view_org',
+} as const;
+
+export type SchedulePermission =
+  (typeof SCHEDULE_PERMISSIONS)[keyof typeof SCHEDULE_PERMISSIONS];
 
 /**
  * The evidence capability catalogue (`BR-006`, `BR-015`, `BR-027`, `BR-091`; tracker 029 D1/D1b,
@@ -125,6 +186,16 @@ export type EvidencePermission =
 export const VISIT_PERMISSIONS = {
   /** Read the Visits a caller is assigned to (`BR-009`) — the capability a field caller reads a Job by (`ADR-019` D2). */
   VIEW_ASSIGNED: 'VISIT_VIEW_ASSIGNED',
+  /** Create and schedule a Visit directly, without a pending request. */
+  CREATE_SCHEDULE: 'visits.create_schedule',
+  /** Schedule or reschedule an existing Visit. */
+  UPDATE_SCHEDULE: 'visits.update_schedule',
+  /** Assign technicians to a Visit. */
+  ASSIGN_TECHNICIANS: 'visits.assign_technicians',
+  /** Request another Visit without creating a confirmed appointment. */
+  REQUEST_FOLLOW_UP: 'visits.request_follow_up',
+  /** Review, clarify, approve, or reject a pending follow-up request. */
+  REVIEW_REQUESTS: 'visits.review_requests',
   /** Advance the field status of an assigned Visit (`BR-074`, `ADR-019` D4). */
   UPDATE_ASSIGNED_STATUS: 'VISIT_UPDATE_ASSIGNED_STATUS',
   /** Add a note to an assigned Visit (`BR-077`, `ADR-019` D3). */
@@ -138,9 +209,11 @@ export type VisitPermission =
 
 export type PermissionCode =
   | CustomerPermission
+  | CustomerContactPermission
   | PropertyPermission
   | JobPermission
   | TechnicianPermission
+  | SchedulePermission
   | EvidencePermission
   | VisitPermission
   | (string & {});

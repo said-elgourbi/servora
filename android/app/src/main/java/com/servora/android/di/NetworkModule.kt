@@ -7,6 +7,8 @@ import com.servora.android.data.customers.PropertiesApi
 import com.servora.android.data.home.ManagerHomeApi
 import com.servora.android.data.home.TechnicianHomeApi
 import com.servora.android.data.jobs.JobDetailsApi
+import com.servora.android.data.schedule.ScheduleApi
+import com.servora.android.data.schedule.VisitRequestsApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -80,4 +82,14 @@ object NetworkModule {
     @Singleton
     fun provideJobDetailsApi(retrofit: Retrofit): JobDetailsApi =
         retrofit.create(JobDetailsApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideScheduleApi(retrofit: Retrofit): ScheduleApi =
+        retrofit.create(ScheduleApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideVisitRequestsApi(retrofit: Retrofit): VisitRequestsApi =
+        retrofit.create(VisitRequestsApi::class.java)
 }

@@ -46,7 +46,7 @@ NAME ?= migration
 migration: api-build ## Generate a new migration, e.g. `make migration NAME=add_technician_profile`
 	cd $(API_DIR) && npm run db:generate -- --name $(NAME)
 
-seed: api-build ## Seed the local development database with the two foundation QA accounts
+seed: api-build ## Seed the local database: the two QA accounts and the demo dataset (replaces it)
 	cd $(API_DIR) && npm run db:seed
 
 # ------------------------------------------------------------ object storage

@@ -24,6 +24,8 @@ import com.servora.android.data.jobs.JobPhotoRecordResult
 import com.servora.android.data.jobs.JobPhotoRefusal
 import com.servora.android.data.jobs.JobPhotoSession
 import com.servora.android.data.jobs.ActivityWriteResult
+import com.servora.android.data.jobs.VisitNote
+import com.servora.android.data.jobs.VisitStatusChange
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CapturedJobPhoto
 import com.servora.android.domain.model.EvidencePhase
@@ -33,10 +35,13 @@ import com.servora.android.domain.model.PendingJobAudioNote
 import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitStatus
 import com.servora.android.domain.model.isRefusedUpload
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Clock
 import java.time.Instant
+import java.util.UUID
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -153,6 +158,17 @@ class JobDetailsViewModel @Inject constructor(
         // Where it has got to is collected apart from the screen's state, for the same reason (`A11`).
         viewModelScope.launch {
             audioPlayer.progress.collect { progress -> _audioPlaybackProgress.value = progress }
+        }
+        // A replay the backend accepted changed the Job, so the screen reads it again rather than
+        // keeping a picture the applied action has moved past — and the queue that was presenting the
+        // action as waiting stops doing so at the same moment (`§7`, `BR-001`).
+        viewModelScope.launch {
+            repository.appliedOperations.collect {
+                val jobId = _uiState.value.jobId
+                if (jobId.isNotEmpty()) {
+                    reloadAfterSync(jobId)
+                }
+            }
         }
     }
 
@@ -305,7 +321,84 @@ class JobDetailsViewModel @Inject constructor(
         )
     }
 
-    /** Adds one text-only update to the represented Visit's Activity (`BR-027`, `BR-077`). */
+    /**
+     * Moves the represented Visit through its field lifecycle (`BR-074`), recording the outcome
+     * `BR-077` requires when it is a completion.
+     *
+     * [confirmConflicts] is true only when the technician has been shown the `BR-070` conflicts the
+     * API reported and accepted them. The request carries a fresh idempotency key and the device
+     * instant, so it is applied at most once and can be queued rather than lost when the API cannot be
+     * reached (`BR-031`, `BR-014`).
+     */
+    fun changeVisitStatus(
+        status: VisitStatus,
+        outcome: VisitOutcome? = null,
+        outcomeSummary: String? = null,
+    ) {
+        val details = _uiState.value.details ?: return
+        val visit = details.selectedVisit ?: return
+        submit(
+            JobActionRequest.VisitTransition(
+                jobId = details.id,
+                visitId = visit.id,
+                status = status,
+                outcome = outcome,
+                outcomeSummary = outcomeSummary,
+                visitVersion = visit.version,
+                operationId = UUID.randomUUID().toString(),
+                capturedAt = clock.instant(),
+            ),
+        )
+    }
+
+    /**
+     * Discards a field action the backend **refused** once the technician has finished with it
+     * (`BR-032`, `BR-014`).
+     *
+     * The action is read back from the queue afterwards, so what the screen presents as waiting is
+     * what the queue actually holds. An action that may still apply is not removed by the queue, so a
+     * discard can decide nothing that could still be applied.
+     */
+    fun discardQueuedVisitAction(operationId: String) {
+        discardQueuedVisitWork(operationId)
+    }
+
+    /** The same for a refused note (`BR-032`, `BR-014`). */
+    fun discardQueuedVisitNote(operationId: String) {
+        discardQueuedVisitWork(operationId)
+    }
+
+    private fun discardQueuedVisitWork(operationId: String) {
+        val jobId = _uiState.value.jobId
+        if (jobId.isEmpty() || actionInFlight) {
+            return
+        }
+        actionInFlight = true
+        viewModelScope.launch {
+            repository.discardQueuedVisitAction(jobId, operationId)
+            val queuedAction = repository.queuedVisitAction(jobId)
+            val queuedNotes = repository.queuedVisitNotes(jobId)
+            actionInFlight = false
+            _uiState.update { current ->
+                if (current.jobId != jobId) {
+                    current
+                } else {
+                    current.copy(
+                        queuedVisitAction = queuedAction,
+                        queuedVisitNotes = queuedNotes,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Adds one text-only update to the represented Visit's Activity (`BR-027`, `BR-013`).
+     *
+     * The update carries its own idempotency key and device instant, so the API cannot record it
+     * twice and an update the API cannot be reached for is queued on the device rather than lost
+     * (`BR-014`, `ADR-019` D5).
+     */
     fun addActivityText(body: String) {
         val text = body.trim()
         if (text.isEmpty() || actionInFlight) {
@@ -319,34 +412,62 @@ class JobDetailsViewModel @Inject constructor(
             current.copy(
                 isSubmitting = true,
                 completedAction = null,
+                actionQueued = false,
                 actionFailure = null,
             )
         }
         viewModelScope.launch {
-            val result = repository.addVisitNote(
-                jobId = details.id,
-                visitId = visit.id,
-                body = text,
+            val result = repository.addVisitNoteRequest(
+                VisitNote(
+                    jobId = details.id,
+                    visitId = visit.id,
+                    body = text,
+                    operationId = UUID.randomUUID().toString(),
+                    capturedAt = clock.instant(),
+                ),
             )
             actionInFlight = false
+            val queued = if (result is ActivityWriteResult.Queued) {
+                repository.queuedVisitNotes(details.id)
+            } else {
+                null
+            }
             _uiState.update { current ->
-                when (result) {
-                    is ActivityWriteResult.Success ->
-                        current.copy(
-                            isSubmitting = false,
-                            activity = result.events,
-                            // The write's own answer is the backend's, so the timeline is current
-                            // again (`§7`).
-                            activitySource = ReadSource.BACKEND,
-                            activityFailure = null,
-                            completedAction = JobActionKind.ACTIVITY_TEXT,
-                        )
+                if (current.jobId != details.id) {
+                    current
+                } else {
+                    when (result) {
+                        is ActivityWriteResult.Success ->
+                            current.copy(
+                                isSubmitting = false,
+                                activity = result.events,
+                                // The write's own answer is the backend's, so the timeline is current
+                                // again (`§7`).
+                                activitySource = ReadSource.BACKEND,
+                                activityFailure = null,
+                                completedAction = JobActionKind.ACTIVITY_TEXT,
+                                actionQueued = false,
+                            )
 
-                    is ActivityWriteResult.Failure ->
-                        current.copy(
-                            isSubmitting = false,
-                            actionFailure = result.reason,
-                        )
+                        // The API could not be reached, so the update is waiting rather than recorded:
+                        // the timeline stays what the backend reported and the waiting note is shown
+                        // from the queue (`§7`, `BR-080`).
+                        ActivityWriteResult.Queued ->
+                            current.copy(
+                                isSubmitting = false,
+                                queuedVisitNotes = queued ?: current.queuedVisitNotes,
+                                completedAction = JobActionKind.ACTIVITY_TEXT,
+                                actionQueued = true,
+                                actionFailure = null,
+                            )
+
+                        is ActivityWriteResult.Failure ->
+                            current.copy(
+                                isSubmitting = false,
+                                actionFailure = result.reason,
+                                actionQueued = false,
+                            )
+                    }
                 }
             }
         }
@@ -385,6 +506,23 @@ class JobDetailsViewModel @Inject constructor(
                     ),
                     confirmed = true,
                 )
+
+            // The same operation is resent, with the same idempotency key, so accepting the conflicts
+            // applies the transition once rather than twice (`BR-070`, `BR-031`).
+            is PendingJobAction.VisitTransition ->
+                submit(
+                    JobActionRequest.VisitTransition(
+                        jobId = details.id,
+                        visitId = visit.id,
+                        status = pending.status,
+                        outcome = pending.outcome,
+                        outcomeSummary = pending.outcomeSummary,
+                        visitVersion = visit.version,
+                        operationId = pending.operationId,
+                        capturedAt = pending.capturedAt,
+                    ),
+                    confirmed = true,
+                )
         }
     }
 
@@ -396,7 +534,7 @@ class JobDetailsViewModel @Inject constructor(
     /** Acknowledges the outcome the screen has reported, so it is not reported twice. */
     fun dismissActionMessage() {
         _uiState.update { current ->
-            current.copy(completedAction = null, actionFailure = null)
+            current.copy(completedAction = null, actionQueued = false, actionFailure = null)
         }
     }
 
@@ -436,6 +574,7 @@ class JobDetailsViewModel @Inject constructor(
             current.copy(
                 isSubmitting = true,
                 completedAction = null,
+                actionQueued = false,
                 actionFailure = null,
                 pendingConfirmation = null,
             )
@@ -443,46 +582,80 @@ class JobDetailsViewModel @Inject constructor(
         viewModelScope.launch {
             val result = request.send(repository, confirmed)
             actionInFlight = false
+            // A queued action is presented from the queue, so what is waiting is read back rather than
+            // assumed from the reply (`BR-041`, §7).
+            val queuedAction = if (result is JobActionResult.Queued) {
+                repository.queuedVisitAction(request.jobId)
+            } else {
+                null
+            }
             _uiState.update { current ->
-                when (result) {
-                    is JobActionResult.Success ->
-                        current.copy(
-                            isSubmitting = false,
-                            details = result.details,
-                            // An action's answer is the backend's own state, so what the screen now
-                            // shows is current rather than the last answer it reported (`§7`).
-                            detailsSource = ReadSource.BACKEND,
-                            completedAction = request.kind,
-                            actionFailure = null,
-                            pendingConfirmation = null,
-                            // The action answered with the Job as it now stands, so the read failure
-                            // it replaced is gone (`BR-001`).
-                            failureReason = null,
-                        )
+                if (current.jobId != request.jobId) {
+                    current
+                } else {
+                    when (result) {
+                        is JobActionResult.Success ->
+                            current.copy(
+                                isSubmitting = false,
+                                details = result.details,
+                                // An action's answer is the backend's own state, so what the screen now
+                                // shows is current rather than the last answer it reported (`§7`).
+                                detailsSource = ReadSource.BACKEND,
+                                completedAction = request.kind,
+                                actionQueued = false,
+                                actionFailure = null,
+                                pendingConfirmation = null,
+                                // The action answered with the Job as it now stands, so the read failure
+                                // it replaced is gone (`BR-001`).
+                                failureReason = null,
+                            )
 
-                    is JobActionResult.Conflicts -> {
-                        val pending = request.pending(result.conflicts)
-                        if (pending == null) {
-                            // The API reported a conflict for an action that cannot have one. An
-                            // answer this build cannot place is reported rather than presented
-                            // (`BR-042`).
+                        // The API could not be reached, so the action is waiting rather than applied: the
+                        // screen keeps the last state the backend reported and shows the action beside
+                        // the Visit it will move (`BR-001`, §7).
+                        is JobActionResult.Queued ->
                             current.copy(
                                 isSubmitting = false,
-                                actionFailure = JobActionFailure.UNEXPECTED,
+                                details = result.details ?: current.details,
+                                detailsSource = if (result.details != null) {
+                                    ReadSource.WORKING_SET
+                                } else {
+                                    current.detailsSource
+                                },
+                                queuedVisitAction = queuedAction ?: current.queuedVisitAction,
+                                completedAction = request.kind,
+                                actionQueued = true,
+                                actionFailure = null,
+                                pendingConfirmation = null,
                             )
-                        } else {
-                            current.copy(
-                                isSubmitting = false,
-                                pendingConfirmation = pending,
-                            )
+
+                        is JobActionResult.Conflicts -> {
+                            val pending = request.pending(result.conflicts)
+                            if (pending == null) {
+                                // The API reported a conflict for an action that cannot have one. An
+                                // answer this build cannot place is reported rather than presented
+                                // (`BR-042`).
+                                current.copy(
+                                    isSubmitting = false,
+                                    actionFailure = JobActionFailure.UNEXPECTED,
+                                    actionQueued = false,
+                                )
+                            } else {
+                                current.copy(
+                                    isSubmitting = false,
+                                    pendingConfirmation = pending,
+                                    actionQueued = false,
+                                )
+                            }
                         }
-                    }
 
-                    is JobActionResult.Failure ->
-                        current.copy(
-                            isSubmitting = false,
-                            actionFailure = result.reason,
-                        )
+                        is JobActionResult.Failure ->
+                            current.copy(
+                                isSubmitting = false,
+                                actionFailure = result.reason,
+                                actionQueued = false,
+                            )
+                    }
                 }
             }
             if (result is JobActionResult.Success) {
@@ -780,6 +953,16 @@ class JobDetailsViewModel @Inject constructor(
                             activityFailure = null,
                             photoFailure = null,
                             photoMessage = JobPhotoMessage.EVIDENCE_REMOVED,
+                        )
+
+                    // A removal is online-only: its route takes no idempotency key, so it is never
+                    // queued (`BR-089`, `offline-first-architecture.md` §5, §13.2). The branch keeps
+                    // the mapping total without inventing a meaning for an answer this operation
+                    // cannot produce (`BR-042`).
+                    ActivityWriteResult.Queued ->
+                        current.copy(
+                            photoRemoval = null,
+                            photoFailure = JobPhotoFailure.REMOVAL_FAILED,
                         )
 
                     is ActivityWriteResult.Failure ->
@@ -1410,6 +1593,15 @@ class JobDetailsViewModel @Inject constructor(
                             audioMessage = JobAudioMessage.EVIDENCE_REMOVED,
                         )
 
+                    // A removal is online-only, so nothing queues it (`BR-089`, §13.2). The branch
+                    // keeps the mapping total without inventing a meaning for an answer this
+                    // operation cannot produce (`BR-042`).
+                    ActivityWriteResult.Queued ->
+                        current.copy(
+                            audioRemoval = null,
+                            audioFailure = JobAudioFailure.REMOVAL_FAILED,
+                        )
+
                     is ActivityWriteResult.Failure ->
                         current.copy(
                             audioRemoval = null,
@@ -1493,14 +1685,25 @@ class JobDetailsViewModel @Inject constructor(
         }
     }
 
-    private fun read(jobId: String) {
+    private fun read(jobId: String, keepContent: Boolean = false) {
         readInFlight = true
-        _uiState.value = JobDetailsUiState(jobId = jobId, isLoading = true)
-        // A pick belongs to the Job it was made for, so a read of another Job takes nothing with it.
-        pickedPhotos.clear()
-        skippedPhotos.clear()
+        if (keepContent) {
+            // A re-read after a replay the backend accepted replaces the Job **in place**: the content
+            // stays on screen while the newer answer arrives, so a background synchronization does not
+            // flash the loading state over the work the technician is reading (`BR-012`, §7).
+            _uiState.update { current -> current.copy(jobId = jobId) }
+        } else {
+            _uiState.value = JobDetailsUiState(jobId = jobId, isLoading = true)
+            // A pick belongs to the Job it was made for, so a read of another Job takes nothing with it.
+            pickedPhotos.clear()
+            skippedPhotos.clear()
+        }
         viewModelScope.launch {
             val result = repository.loadJobDetails(jobId)
+            // The field work the queue is still holding is read with the Job, so what is presented as
+            // waiting is the real queue rather than a second copy of it (`BR-041`, §7).
+            val queuedAction = repository.queuedVisitAction(jobId)
+            val queuedNotes = repository.queuedVisitNotes(jobId)
             readInFlight = false
             _uiState.update { current ->
                 if (current.jobId != jobId) {
@@ -1516,9 +1719,12 @@ class JobDetailsViewModel @Inject constructor(
                                 // the last one it reported (`§2`, `§7`).
                                 detailsSource = result.source,
                                 failureReason = null,
+                                queuedVisitAction = queuedAction,
+                                queuedVisitNotes = queuedNotes,
                                 // A fresh Job read re-asks for that Job's activity rather than
-                                // carrying the previous Job's (`BR-001`).
-                                activity = null,
+                                // carrying the previous Job's (`BR-001`) — unless the content is being
+                                // kept, in which case the timeline stays until its own answer arrives.
+                                activity = if (keepContent) current.activity else null,
                                 activityFailure = null,
                                 activitySource = ReadSource.BACKEND,
                             )
@@ -1544,6 +1750,19 @@ class JobDetailsViewModel @Inject constructor(
                 observeAudioNotes(jobId)
             }
         }
+    }
+
+    /**
+     * Re-reads the Job after a replay the backend accepted (`§7`).
+     *
+     * The queued work is read with it, so an action that has just been applied or refused stops being
+     * presented as waiting the moment the backend answers (`BR-001`, §6).
+     */
+    private fun reloadAfterSync(jobId: String) {
+        if (readInFlight) {
+            return
+        }
+        read(jobId, keepContent = true)
     }
 
     /** Reads the Job's chronological activity after the Job itself was read (`BR-080`). */
@@ -1644,6 +1863,12 @@ private fun JobActionFailure.toAudioRemovalFailure(): JobAudioFailure =
         JobActionFailure.JOB_CANCELLATION_UNAVAILABLE,
         JobActionFailure.VISIT_NOT_RESCHEDULABLE,
         JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE,
+        // The Visit field lifecycle's own codes cannot be returned by the audio removal route either,
+        // for the same reason (`BR-042`).
+        JobActionFailure.VISIT_TRANSITION_NOT_ALLOWED,
+        JobActionFailure.VISIT_SCHEDULING_CONDITION_NOT_MET,
+        JobActionFailure.JOB_CLOSED_FOR_FIELD_WORK,
+        JobActionFailure.VISIT_OPERATION_REUSED,
         JobActionFailure.SERVER,
         JobActionFailure.UNEXPECTED,
         -> JobAudioFailure.REMOVAL_FAILED
@@ -1702,6 +1927,12 @@ private fun JobActionFailure.toRemovalFailure(): JobPhotoFailure =
         JobActionFailure.JOB_CANCELLATION_UNAVAILABLE,
         JobActionFailure.VISIT_NOT_RESCHEDULABLE,
         JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE,
+        // The Visit field lifecycle's own codes cannot be returned by the photo removal route either,
+        // for the same reason (`BR-042`).
+        JobActionFailure.VISIT_TRANSITION_NOT_ALLOWED,
+        JobActionFailure.VISIT_SCHEDULING_CONDITION_NOT_MET,
+        JobActionFailure.JOB_CLOSED_FOR_FIELD_WORK,
+        JobActionFailure.VISIT_OPERATION_REUSED,
         -> JobPhotoFailure.REMOVAL_FAILED
     }
 
@@ -1730,6 +1961,9 @@ private sealed interface JobActionRequest {
     /** The action this request performs, for the confirmation the screen reports. */
     val kind: JobActionKind
 
+    /** The Job the action belongs to, so a reply is only applied to the Job it was asked for. */
+    val jobId: String
+
     /** The action as the screen presents it while the user decides about its conflicts. */
     fun pending(conflicts: List<ScheduleConflict>): PendingJobAction?
 
@@ -1740,7 +1974,7 @@ private sealed interface JobActionRequest {
     ): JobActionResult
 
     data class Status(
-        val jobId: String,
+        override val jobId: String,
         val status: JobStatus,
         val note: String?,
         val jobVersion: Int,
@@ -1766,7 +2000,7 @@ private sealed interface JobActionRequest {
     }
 
     data class Reschedule(
-        val jobId: String,
+        override val jobId: String,
         val visitId: String,
         val scheduledStart: Instant,
         val scheduledEnd: Instant,
@@ -1793,7 +2027,7 @@ private sealed interface JobActionRequest {
     }
 
     data class Assignment(
-        val jobId: String,
+        override val jobId: String,
         val visitId: String,
         val assignments: List<TechnicianAssignment>,
         val visitVersion: Int,
@@ -1814,5 +2048,53 @@ private sealed interface JobActionRequest {
 
         override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction =
             PendingJobAction.Assign(assignments, conflicts)
+    }
+
+    /**
+     * One Visit status transition, with the outcome a completion carries (`BR-074`, `BR-077`).
+     *
+     * The identity, the device instant and the version are held here rather than regenerated on a
+     * confirmed resend, because the resend is the **same** business operation: it carries the same
+     * idempotency key, so the API applies it once however many times the request is sent (`BR-031`).
+     */
+    data class VisitTransition(
+        override val jobId: String,
+        val visitId: String,
+        val status: VisitStatus,
+        val outcome: VisitOutcome?,
+        val outcomeSummary: String?,
+        val visitVersion: Int,
+        val operationId: String,
+        val capturedAt: Instant,
+    ) : JobActionRequest {
+        override val kind: JobActionKind = JobActionKind.VISIT_STATUS_CHANGE
+
+        override suspend fun send(
+            repository: JobDetailsRepository,
+            confirmed: Boolean,
+        ): JobActionResult =
+            repository.changeVisitStatus(
+                VisitStatusChange(
+                    jobId = jobId,
+                    visitId = visitId,
+                    status = status,
+                    outcome = outcome,
+                    outcomeSummary = outcomeSummary,
+                    confirmConflicts = confirmed,
+                    operationId = operationId,
+                    capturedAt = capturedAt,
+                    expectedVersion = visitVersion,
+                ),
+            )
+
+        override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction =
+            PendingJobAction.VisitTransition(
+                status = status,
+                outcome = outcome,
+                outcomeSummary = outcomeSummary,
+                operationId = operationId,
+                capturedAt = capturedAt,
+                conflicts = conflicts,
+            )
     }
 }

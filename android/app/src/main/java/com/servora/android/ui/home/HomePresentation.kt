@@ -18,6 +18,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -140,6 +141,44 @@ internal fun formatScheduledTime(scheduledStart: String, locale: Locale): String
     } catch (unreadable: DateTimeParseException) {
         null
     }
+
+/**
+ * A Visit's window in the device's own locale, as "9:00 – 10:00".
+ *
+ * A Visit with no agreed end is presented as the start alone, and one whose start cannot be read
+ * reports nothing rather than a fabricated time (`BR-042`, `BR-072`).
+ */
+internal fun formatScheduledRange(start: String, end: String?, locale: Locale): String? {
+    val from = formatScheduledTime(start, locale) ?: return null
+    val to = end?.let { formatScheduledTime(it, locale) }
+    return if (to == null) from else "$from – $to"
+}
+
+/**
+ * Who is going to be there (`BR-068`).
+ *
+ * Assigned technicians are named, Lead first, as the backend ordered them. A Visit with nobody
+ * assigned says so, and a Visit whose assigned members have no profile yet reports how many are
+ * assigned rather than claiming the work is unassigned (`BR-020`).
+ *
+ * Both home screens and the schedule present this fact, so it is defined once here: a Visit must not
+ * be described differently depending on which screen is showing it (`BR-041`).
+ */
+@Composable
+internal fun techniciansSummary(names: List<String?>, crewSize: Int): String {
+    val named = names.filterNotNull()
+    if (named.isNotEmpty()) {
+        return named.joinToString(separator = ", ")
+    }
+    if (crewSize == 0) {
+        return stringResource(R.string.customers_job_unassigned)
+    }
+    return pluralStringResource(
+        R.plurals.home_schedule_technicians,
+        crewSize,
+        crewSize,
+    )
+}
 
 /** The address parts as one line, or `null` when no part of it was preserved (`BR-056`). */
 internal fun formattedAddressLine(

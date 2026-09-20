@@ -19,16 +19,22 @@ import com.servora.android.ui.appearance.AppAppearance
 import com.servora.android.ui.appearance.LocalAppAppearance
 import com.servora.android.ui.auth.AuthFlowScreen
 import com.servora.android.ui.auth.SessionViewModel
+import com.servora.android.ui.customers.AddContactViewModel
 import com.servora.android.ui.customers.AddCustomerViewModel
 import com.servora.android.ui.customers.AddPropertyViewModel
 import com.servora.android.ui.customers.CustomersViewModel
+import com.servora.android.ui.customers.EditContactViewModel
 import com.servora.android.ui.customers.EditCustomerViewModel
 import com.servora.android.ui.customers.EditPropertyViewModel
 import com.servora.android.ui.customers.PropertyDetailViewModel
+import com.servora.android.ui.customers.RemoveContactViewModel
 import com.servora.android.ui.home.ManagerHomeViewModel
 import com.servora.android.ui.home.TechnicianHomeViewModel
+import com.servora.android.ui.jobs.CreateJobViewModel
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.passwordreset.PasswordResetViewModel
+import com.servora.android.ui.schedule.ScheduleViewModel
+import com.servora.android.ui.schedule.TechnicianScheduleViewModel
 import com.servora.android.ui.signin.SignInViewModel
 import com.servora.android.ui.sms.SmsSignInViewModel
 import com.servora.android.ui.theme.ServoraTheme
@@ -61,9 +67,15 @@ class MainActivity : AppCompatActivity() {
     private val addPropertyViewModel: AddPropertyViewModel by viewModels()
     private val propertyDetailViewModel: PropertyDetailViewModel by viewModels()
     private val editPropertyViewModel: EditPropertyViewModel by viewModels()
+    private val addContactViewModel: AddContactViewModel by viewModels()
+    private val editContactViewModel: EditContactViewModel by viewModels()
+    private val removeContactViewModel: RemoveContactViewModel by viewModels()
     private val managerHomeViewModel: ManagerHomeViewModel by viewModels()
     private val technicianHomeViewModel: TechnicianHomeViewModel by viewModels()
     private val jobDetailsViewModel: JobDetailsViewModel by viewModels()
+    private val createJobViewModel: CreateJobViewModel by viewModels()
+    private val scheduleViewModel: ScheduleViewModel by viewModels()
+    private val technicianScheduleViewModel: TechnicianScheduleViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,9 +97,15 @@ class MainActivity : AppCompatActivity() {
                             addPropertyViewModel = addPropertyViewModel,
                             propertyDetailViewModel = propertyDetailViewModel,
                             editPropertyViewModel = editPropertyViewModel,
+                            addContactViewModel = addContactViewModel,
+                            editContactViewModel = editContactViewModel,
+                            removeContactViewModel = removeContactViewModel,
                             managerHomeViewModel = managerHomeViewModel,
                             technicianHomeViewModel = technicianHomeViewModel,
                             jobDetailsViewModel = jobDetailsViewModel,
+                            createJobViewModel = createJobViewModel,
+                            scheduleViewModel = scheduleViewModel,
+                            technicianScheduleViewModel = technicianScheduleViewModel,
                             // Ending a session must also drop the session-scoped UI state: the
                             // customer list belongs to the session that read it (`BR-001`).
                             onSignOut = {
@@ -103,6 +121,12 @@ class MainActivity : AppCompatActivity() {
                                 addPropertyViewModel.reset()
                                 editPropertyViewModel.reset()
                                 propertyDetailViewModel.reset()
+                                // The contact form and the removal hold business data and outcomes
+                                // read or taken with the ending session, so they are released with it
+                                // (`BR-001`).
+                                addContactViewModel.reset()
+                                editContactViewModel.reset()
+                                removeContactViewModel.reset()
                                 // The manager home holds the operation the ending session read, so
                                 // it is released with it (`BR-001`).
                                 managerHomeViewModel.reset()
@@ -112,6 +136,15 @@ class MainActivity : AppCompatActivity() {
                                 // The Job Details screen holds a Job read with the ending session,
                                 // so it is released with it (`BR-001`).
                                 jobDetailsViewModel.reset()
+                                // The Create Job form holds values entered with the ending session,
+                                // so it is released with it (`BR-001`).
+                                createJobViewModel.reset()
+                                // The schedule holds the operation the ending session read, so it
+                                // is released with it (`BR-001`).
+                                scheduleViewModel.reset()
+                                // The technician's schedule holds the day the ending session read,
+                                // so it is released with it (`BR-001`).
+                                technicianScheduleViewModel.reset()
                                 sessionViewModel.signOut()
                             },
                         )
