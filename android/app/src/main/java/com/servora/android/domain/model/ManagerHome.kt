@@ -4,7 +4,9 @@ package com.servora.android.domain.model
  * Stable, machine-readable Visit status codes (`BR-074`).
  *
  * The backend's vocabulary is the only one (`BR-041`): the UI resolves a localized label for a code
- * and never invents one of its own.
+ * and never invents one of its own. `NO_SHOW` is not a Visit status in the canonical lifecycle — an
+ * attempt that did not happen is a cancellation with its own reason — so it is absent rather than
+ * kept as a state nothing can produce.
  */
 enum class VisitStatus {
     DRAFT,
@@ -14,27 +16,69 @@ enum class VisitStatus {
     IN_PROGRESS,
     COMPLETED,
     CANCELED,
-    NO_SHOW,
+    ;
+
+    companion object {
+        /**
+         * The four states a technician selects between directly (`BR-074`).
+         *
+         * They are the selector's vocabulary and the order it presents them in, which is the order a
+         * successful field attempt usually follows — the order is a presentation, never a required
+         * path: the API's own `allowedStatusTransitions` decides which of them the Visit may be moved
+         * to right now, and each one is a destination of its own (`BR-074`).
+         *
+         * `DRAFT` is not one of them (an unscheduled Visit is not work a technician is doing),
+         * `COMPLETED` is not (finishing a Visit is the explicit completion action, `BR-077`) and
+         * `CANCELED` is not (cancelling is a dispatch action, `BR-066`, `BR-076`).
+         */
+        val technicianWorkingStates: List<VisitStatus> = listOf(
+            SCHEDULED,
+            EN_ROUTE,
+            ON_SITE,
+            IN_PROGRESS,
+        )
+    }
 }
 
 /**
  * Why a Job or Visit is on the manager home's "Needs attention" list.
  *
- * Each kind is a condition the backend derived from authoritative records (`BR-060`, `BR-061`,
- * `BR-072`, `BR-074`). The client presents the condition; it never decides one (`BR-001`).
+ * Each kind is a condition the backend derived from authoritative records (`BR-060`, `BR-072`,
+ * `BR-074`, `BR-078`). The client presents the condition; it never decides one (`BR-001`), and it holds
+ * no second copy of the vocabulary: a kind this build does not know fails the whole read rather than
+ * being dropped, because a screen that dropped one would describe an operation that is not the one the
+ * backend reported (`BR-042`).
  */
 enum class ManagerAttentionKind {
-    /** A Visit still `SCHEDULED` after its scheduled window ended. */
+    /** A Visit still `SCHEDULED` after its scheduled window ended (`BR-072`, `BR-074`). */
     VISIT_OVERDUE,
 
-    /** A Job awaiting the office review only an authorized user performs. */
-    JOB_PENDING_REVIEW,
-
-    /** A Job with no active Visit, so it needs scheduling. */
+    /** A Job with no active Visit, so it needs scheduling (`BR-060`). */
     JOB_NEEDS_SCHEDULING,
+
+    /**
+     * The Job's latest completed Visit reported `NEEDS_FOLLOW_UP` and no later Visit is actionable, so
+     * another field attempt has to be arranged (`BR-078`).
+     */
+    FOLLOW_UP_NEEDS_SCHEDULING,
+
+    /**
+     * The Job's latest completed Visit reported `NEEDS_PARTS`: the work waits on parts, and the absence
+     * of a further Visit is deliberate rather than an oversight (`BR-078`).
+     */
+    PARTS_REQUIRED,
+
+    /** The Job's latest completed Visit reported `UNABLE_TO_COMPLETE` (`BR-078`). */
+    UNABLE_TO_COMPLETE,
 }
 
-/** One item of the manager home's "Needs attention" list. */
+/**
+ * One item of the manager home's "Needs attention" list.
+ *
+ * The API also reports a `reasonCode` beside the kind. It is `null` for every condition the API derives
+ * today, because no structured reason catalogue is approved, so the client models no field for it and
+ * invents no reason vocabulary of its own (`BR-042`).
+ */
 data class ManagerAttentionItem(
     val kind: ManagerAttentionKind,
     val jobId: String,

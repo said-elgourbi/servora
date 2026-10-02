@@ -9,22 +9,20 @@ package com.servora.android.domain.model
  *
  * The codes are stable and machine-readable and the labels are localized (`BR-028`, `BR-041`). The
  * follow-up expectation is derived from the code by the backend (`BR-078`); no `follow_up_required`
- * flag is modelled here, because `BR-078` confirms there is none.
+ * flag is modelled here, because `BR-078` confirms there is none. The catalogue is closed and exactly
+ * these four: a code the API does not have is refused rather than presented (`BR-042`).
  */
 enum class VisitOutcome {
     /** The work was completed successfully; no follow-up is expected. */
     RESOLVED,
 
+    /** The work requires another field attempt. */
+    NEEDS_FOLLOW_UP,
+
     /** The work requires parts. */
     NEEDS_PARTS,
 
-    /** The work requires another field attempt. */
-    NEEDS_FOLLOWUP,
-
-    /** The work requires a quote or approval, which is a business follow-up. */
-    NEEDS_QUOTE_APPROVAL,
-
-    /** The work could not be completed. */
+    /** The work could not be completed; the technician states why. */
     UNABLE_TO_COMPLETE,
 }
 

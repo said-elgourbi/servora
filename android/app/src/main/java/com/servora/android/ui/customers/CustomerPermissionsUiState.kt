@@ -65,6 +65,18 @@ data class CustomerPermissionsUiState(
     val canUpdateAssignedVisit: Boolean = false,
     val canAddVisitNote: Boolean = false,
     val canRecordVisitOutcome: Boolean = false,
+    // Scheduling a Visit and reviewing a follow-up request are the two capabilities the API enforces
+    // on `POST /jobs/:id/visits` and on the request routes (`docs/api/visit-requests.md`, `BR-071`,
+    // `BR-FV-004`). They are read from their own codes and never inferred from the Job update one
+    // (`BR-006`, `BR-011`), and the approval asks for both because the API asks for both.
+    val canScheduleVisit: Boolean = false,
+    val canReviewVisitRequests: Boolean = false,
+    // Submitting a follow-up Visit request is the field capability the API enforces on
+    // `POST /jobs/:id/visit-requests` (`BR-FV-001`, `docs/api/visit-requests.md`). It is read from its
+    // own code and never inferred from the visit-status, note or outcome capabilities the technician
+    // also holds (`BR-006`, `BR-011`): a company may withhold the request and keep the field work.
+    val canRequestFollowUpVisit: Boolean = false,
+    val canReportAdHocWork: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -101,4 +113,12 @@ fun customerPermissionsUiState(
         canUpdateAssignedVisit = permissionChecker.has(Permission.VISIT_UPDATE_ASSIGNED_STATUS),
         canAddVisitNote = permissionChecker.has(Permission.VISIT_ADD_NOTE),
         canRecordVisitOutcome = permissionChecker.has(Permission.VISIT_RECORD_OUTCOME),
+        // Scheduling a Visit and reviewing a request are their own codes (`BR-071`, `BR-FV-004`),
+        // read from the capabilities the API enforces on their routes.
+        canScheduleVisit = permissionChecker.has(Permission.VISIT_CREATE_SCHEDULE),
+        canReviewVisitRequests = permissionChecker.has(Permission.VISIT_REVIEW_REQUESTS),
+        // Requesting a follow-up Visit is its own code too (`BR-FV-001`), read from the capability the
+        // API enforces on the request route and never from the office scheduling one.
+        canRequestFollowUpVisit = permissionChecker.has(Permission.VISIT_REQUEST_FOLLOW_UP),
+        canReportAdHocWork = permissionChecker.has(Permission.VISIT_REPORT_AD_HOC_WORK),
     )

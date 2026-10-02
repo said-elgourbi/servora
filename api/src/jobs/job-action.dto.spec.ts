@@ -4,6 +4,7 @@ import {
   parseAssignVisitTechniciansDto,
   parseChangeJobStatusDto,
   parseChangeVisitStatusDto,
+  parseCompleteVisitDto,
   parseRescheduleVisitDto,
 } from './job-action.dto.js';
 
@@ -19,11 +20,11 @@ describe('job action requests', () => {
     it('accepts a known status with an optional note', () => {
       expect(
         parseChangeJobStatusDto({
-          status: 'PENDING_REVIEW',
+          status: 'ACTIVE',
           note: ' Work done ',
         }),
       ).toEqual({
-        status: 'PENDING_REVIEW',
+        status: 'ACTIVE',
         note: 'Work done',
         expectedVersion: null,
       });
@@ -125,11 +126,12 @@ describe('job action requests', () => {
       });
     });
 
-    it('requires the outcome a completion records (`BR-077`, `BR-078`)', () => {
-      expect(() => parseChangeVisitStatusDto({ status: 'COMPLETED' })).toThrow(
-        DomainValidationError,
-      );
-      // A code is not enough: `BR-077` requires the outcome type *and* its summary.
+    it('leaves completion outcome recording to the explicit operation', () => {
+      expect(parseChangeVisitStatusDto({ status: 'COMPLETED' })).toMatchObject({
+        status: 'COMPLETED',
+        outcomeCode: null,
+        outcomeSummary: null,
+      });
       expect(() =>
         parseChangeVisitStatusDto({
           status: 'COMPLETED',
@@ -142,9 +144,11 @@ describe('job action requests', () => {
           outcomeSummary: 'Replaced the igniter.',
         }),
       ).toThrow(DomainValidationError);
+    });
+
+    it('requires the outcome a completion records (`BR-077`, `BR-078`)', () => {
       expect(
-        parseChangeVisitStatusDto({
-          status: 'COMPLETED',
+        parseCompleteVisitDto({
           outcomeCode: 'NEEDS_PARTS',
           outcomeSummary: ' Ordered the igniter. ',
         }),
@@ -152,6 +156,10 @@ describe('job action requests', () => {
         outcomeCode: 'NEEDS_PARTS',
         outcomeSummary: 'Ordered the igniter.',
       });
+      expect(() => parseCompleteVisitDto({})).toThrow(DomainValidationError);
+      expect(() =>
+        parseCompleteVisitDto({ outcomeCode: 'UNABLE_TO_COMPLETE' }),
+      ).toThrow(DomainValidationError);
     });
 
     it('refuses an outcome on a destination that stores none', () => {
@@ -166,7 +174,7 @@ describe('job action requests', () => {
       ).toThrow(DomainValidationError);
     });
 
-    it('refuses a Visit status Servora does not have, and the two no route applies', () => {
+    it('refuses Visit statuses Servora does not have', () => {
       expect(() => parseChangeVisitStatusDto({ status: 'PAUSED' })).toThrow(
         DomainValidationError,
       );
@@ -174,13 +182,11 @@ describe('job action requests', () => {
       expect(() => parseChangeVisitStatusDto({ status: 'PENDING_REVIEW' })).toThrow(
         DomainValidationError,
       );
-      // `CANCELED` and `NO_SHOW` are refused by the lifecycle table, not by the parser, so the API can
-      // answer with the destinations the Visit really has (`BR-074`, `BR-066`).
+      expect(() => parseChangeVisitStatusDto({ status: 'NO_SHOW' })).toThrow(
+        DomainValidationError,
+      );
       expect(parseChangeVisitStatusDto({ status: 'CANCELED' }).status).toBe(
         'CANCELED',
-      );
-      expect(parseChangeVisitStatusDto({ status: 'NO_SHOW' }).status).toBe(
-        'NO_SHOW',
       );
     });
 

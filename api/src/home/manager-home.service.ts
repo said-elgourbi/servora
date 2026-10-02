@@ -26,7 +26,10 @@ import type { OrganizationScope } from '../tenancy/tenant-scope.js';
 import type {
   AssignmentRoleCode,
   JobStatus,
-} from '../customers/customer-detail.dto.js';
+  VisitOutcomeCode,
+  VisitStatus,
+} from '../jobs/job.types.js';
+import { deriveJobAttention } from '../jobs/job-attention.js';
 import {
   MANAGER_HOME_ATTENTION_LIMIT,
   NEEDS_SCHEDULING_ACTIVE_VISIT_STATUSES,
@@ -46,7 +49,6 @@ import type {
   ManagerHomeDaySummary,
   ManagerHomeTechnician,
   ManagerHomeVisit,
-  VisitStatus,
 } from './manager-home.dto.js';
 
 /** Everything one manager home read assembles. */
@@ -88,6 +90,13 @@ interface JobConditionRow {
   readonly customerName: string;
 }
 
+/** One Visit row used to derive Job-level operational attention. */
+interface JobAttentionVisitRow extends JobConditionRow {
+  readonly visitId: string;
+  readonly visitStatus: string;
+  readonly outcomeCode: string | null;
+}
+
 /**
  * Assembles the manager home (`GET /home/manager`) from authoritative records.
  *
@@ -119,13 +128,13 @@ export class ManagerHomeService {
       dayVisits,
       overdueVisits,
       schedulingJobs,
-      reviewJobs,
+      operationalAttentionRows,
     ] = await Promise.all([
       readViewerDisplayName(this.db, scope, userId),
       this.findDayVisits(scope, day),
       this.findOverdueVisits(scope, now),
       this.findSchedulingCandidates(scope),
-      this.findJobsAwaitingReview(scope),
+      this.findOperationalAttentionVisits(scope),
     ]);
 
     const technicians = await this.techniciansForVisits(scope, [
@@ -138,12 +147,19 @@ export class ManagerHomeService {
       return visit === null ? [] : [visit];
     });
 
+    const operationalAttention = toOperationalAttentionItems(
+      operationalAttentionRows,
+    );
+    const operationalAttentionJobIds = new Set(
+      operationalAttention.map((item) => item.jobId),
+    );
+
     const attention = [
       ...overdueVisits.map((row) => toOverdueItem(row)),
-      ...reviewJobs.map((row) => toJobConditionItem('JOB_PENDING_REVIEW', row)),
-      ...schedulingJobs.map((row) =>
-        toJobConditionItem('JOB_NEEDS_SCHEDULING', row),
-      ),
+      ...operationalAttention,
+      ...schedulingJobs
+        .map((row) => toJobConditionItem('JOB_NEEDS_SCHEDULING', row))
+        .filter((item) => !operationalAttentionJobIds.has(item.jobId)),
     ].sort(compareAttentionItems);
 
     return {
@@ -158,7 +174,7 @@ export class ManagerHomeService {
   /**
    * The Visits scheduled inside the requested local day, excluding the ones that did not happen.
    *
-   * A `CANCELED` or `NO_SHOW` Visit is not work happening today, so it is excluded from the day's
+   * A `CANCELED` Visit is not work happening today, so it is excluded from the day's
    * schedule and from its counts (`BR-074`). A `COMPLETED` Visit stays in the list: it is what the
    * day has produced so far, and the summary and the list must describe the same set.
    */
@@ -270,12 +286,24 @@ export class ManagerHomeService {
       .orderBy(asc(jobs.jobNumber));
   }
 
-  /** The Jobs awaiting the office review only an authorized user can perform (`BR-061`, `BR-062`). */
-  private async findJobsAwaitingReview(
+  /**
+   * Visits needed to derive Job-level operational attention from the latest completed outcome.
+   *
+   * This read deliberately carries both completed Visits and future/actionable Visits for active Jobs:
+   * the former decides what happened most recently, while the latter clears the follow-up scheduling
+   * condition when the office has already scheduled the return attempt.
+   */
+  private async findOperationalAttentionVisits(
     scope: OrganizationScope,
-  ): Promise<JobConditionRow[]> {
+  ): Promise<JobAttentionVisitRow[]> {
     return this.db
-      .select(jobConditionSelection)
+      .select({
+        ...jobConditionSelection,
+        visitId: visits.id,
+        visitStatus: visits.status,
+        outcomeCode: visits.outcomeCode,
+        visitCreatedAt: visits.createdAt,
+      })
       .from(jobs)
       .innerJoin(
         customers,
@@ -284,14 +312,15 @@ export class ManagerHomeService {
           eq(customers.organizationId, scope.organizationId),
         ),
       )
-      .where(
+      .innerJoin(
+        visits,
         and(
-          jobScope(scope),
-          activeCustomer(),
-          eq(jobs.status, 'PENDING_REVIEW'),
+          eq(visits.jobId, jobs.id),
+          eq(visits.organizationId, scope.organizationId),
         ),
       )
-      .orderBy(asc(jobs.jobNumber));
+      .where(and(jobScope(scope), activeCustomer(), eq(jobs.status, 'ACTIVE')))
+      .orderBy(asc(jobs.jobNumber), asc(visits.createdAt), asc(visits.id));
   }
 
   /** The technicians currently assigned to each Visit, Lead first (`BR-068`). */
@@ -451,6 +480,7 @@ function toOverdueItem(row: VisitContextRow): ManagerAttentionItem {
     customerId: row.customerId,
     customerName: row.customerName,
     visitId: row.visitId,
+    reasonCode: null,
     scheduledStart: row.scheduledStart,
     scheduledEnd: row.scheduledEnd,
   };
@@ -458,7 +488,7 @@ function toOverdueItem(row: VisitContextRow): ManagerAttentionItem {
 
 /** A Job-level condition as an attention item: it carries no Visit of its own (`BR-060`). */
 function toJobConditionItem(
-  kind: 'JOB_PENDING_REVIEW' | 'JOB_NEEDS_SCHEDULING',
+  kind: 'JOB_NEEDS_SCHEDULING',
   row: JobConditionRow,
 ): ManagerAttentionItem {
   return {
@@ -470,9 +500,51 @@ function toJobConditionItem(
     customerId: row.customerId,
     customerName: row.customerName,
     visitId: null,
+    reasonCode: null,
     scheduledStart: null,
     scheduledEnd: null,
   };
+}
+
+function toOperationalAttentionItems(
+  rows: readonly JobAttentionVisitRow[],
+): ManagerAttentionItem[] {
+  const grouped = new Map<string, JobAttentionVisitRow[]>();
+  for (const row of rows) {
+    grouped.set(row.jobId, [...(grouped.get(row.jobId) ?? []), row]);
+  }
+
+  const items: ManagerAttentionItem[] = [];
+  for (const jobRows of grouped.values()) {
+    const first = jobRows[0];
+    if (first === undefined) {
+      continue;
+    }
+    for (const attention of deriveJobAttention({
+      jobStatus: first.jobStatus as JobStatus,
+      visits: jobRows.map((row, index) => ({
+        visitId: row.visitId,
+        sequence: index + 1,
+        status: row.visitStatus as VisitStatus,
+        outcomeCode: row.outcomeCode as VisitOutcomeCode | null,
+      })),
+    })) {
+      items.push({
+        kind: attention.code,
+        jobId: first.jobId,
+        jobNumber: first.jobNumber,
+        jobTitle: first.jobTitle,
+        jobStatus: first.jobStatus as JobStatus,
+        customerId: first.customerId,
+        customerName: first.customerName,
+        visitId: attention.relevantVisitId,
+        reasonCode: attention.reasonCode,
+        scheduledStart: null,
+        scheduledEnd: null,
+      });
+    }
+  }
+  return items;
 }
 
 /**

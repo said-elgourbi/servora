@@ -12,6 +12,7 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -34,7 +35,9 @@ import retrofit2.HttpException
  * A refusal is reported as what it is: no longer authorized (`403`), the Job is gone (`404`), or the
  * request is invalid (`400`/`413`/`422`) — a refusal that would be the API's answer for the container
  * itself is reported the same way, because the device cannot make the API accept bytes it refuses
- * (`ADR-018` A2). The queued row and the local file are kept in every one of those cases, so nothing the
+ * (`ADR-018` A2) — or the Job has been **closed** under the technician (`409
+ * JOB_CLOSED_FOR_FIELD_WORK`, read from the API's stable code rather than assumed from the status —
+ * `BR-079`). The queued row and the local file are kept in every one of those cases, so nothing the
  * technician recorded is discarded by a client decision (`BR-032`).
  */
 @Singleton
@@ -44,6 +47,7 @@ internal class JobAudioUploadHandler @Inject constructor(
     private val payloads: JobAudioPayloads,
     private val pending: PendingJobAudioNoteStore,
     private val files: JobAudioFiles,
+    private val json: Json,
 ) : OfflineOperationHandler {
 
     override val operationTypes: Set<String> = JobAudioOperations.ALL
@@ -55,6 +59,12 @@ internal class JobAudioUploadHandler @Inject constructor(
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
         val bytes = files.readBytes(payload.localPath)
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.NOT_FOUND)
+        // Evidence belongs to the Visit it was recorded on (`BR-047`, `BR-091`), and the API refuses an
+        // upload that names none. A payload with no Visit is one an earlier build wrote: it is refused
+        // rather than uploaded with an invented attribution, and the row and the bytes stay on the device
+        // until the technician explicitly discards them (`BR-014`, `BR-032`, `BR-042`).
+        val visitId = payload.visitId?.takeIf { it.isNotBlank() }
+            ?: return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
 
         val accessToken = sessionAuthenticator.accessToken()
             ?: return ReplayOutcome.Unauthenticated
@@ -63,6 +73,7 @@ internal class JobAudioUploadHandler @Inject constructor(
             accessToken = accessToken,
             jobId = operation.targetId,
             audioNoteId = operation.operationId,
+            visitId = visitId,
             phase = phase,
             payload = payload,
             bytes = bytes,
@@ -82,6 +93,7 @@ internal class JobAudioUploadHandler @Inject constructor(
         accessToken: String,
         jobId: String,
         audioNoteId: String,
+        visitId: String,
         phase: EvidencePhase,
         payload: JobAudioOperationPayload,
         bytes: ByteArray,
@@ -91,6 +103,7 @@ internal class JobAudioUploadHandler @Inject constructor(
                 authorization = "Bearer $accessToken",
                 jobId = jobId,
                 clientOperationId = audioNoteId.toRequestBody(TEXT_PART.toMediaType()),
+                visitId = visitId.toRequestBody(TEXT_PART.toMediaType()),
                 phase = phase.name.toRequestBody(TEXT_PART.toMediaType()),
                 note = payload.note
                     ?.takeIf { it.isNotBlank() }
@@ -107,13 +120,15 @@ internal class JobAudioUploadHandler @Inject constructor(
             if (failure.code() == HTTP_UNAUTHORIZED) {
                 when (val renewal = sessionAuthenticator.renew(accessToken)) {
                     is SessionRenewal.Renewed ->
-                        send(renewal.accessToken, jobId, audioNoteId, phase, payload, bytes)
+                        send(renewal.accessToken, jobId, audioNoteId, visitId, phase, payload, bytes)
 
                     SessionRenewal.Rejected -> AudioUploadAttempt.Unauthenticated
                     SessionRenewal.Unavailable -> AudioUploadAttempt.Undelivered
                 }
             } else {
-                AudioUploadAttempt.Refused(uploadFailureReason(failure.code()))
+                AudioUploadAttempt.Refused(
+                    uploadFailureReason(failure.code(), failure.apiErrorCode(json)),
+                )
             }
         } catch (failure: IOException) {
             AudioUploadAttempt.Undelivered

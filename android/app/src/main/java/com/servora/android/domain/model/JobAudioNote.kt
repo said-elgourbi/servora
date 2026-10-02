@@ -16,6 +16,15 @@ data class PendingJobAudioNote(
     /** The idempotency key the app generated once, before the recording started (`BR-031`, §5). */
     val audioNoteId: String,
     val jobId: String,
+    /**
+     * The Visit the recording was made during (`BR-047`, `BR-071`, `BR-091`), or `null` when the record
+     * was written before the link existed.
+     *
+     * The audio kind's own copy of [PendingJobPhoto.visitId]: evidence belongs to the field attempt it
+     * was recorded on (`BR-080`), the upload carries it, and a draft without one is refused by the
+     * replay rather than uploaded with an invented attribution (`BR-042`).
+     */
+    val visitId: String?,
     /** The app-private path the recording was written to. Never a blob in the local database. */
     val localPath: String,
     /**

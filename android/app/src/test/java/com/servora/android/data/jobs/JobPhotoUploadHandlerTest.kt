@@ -44,6 +44,9 @@ class JobPhotoUploadHandlerTest {
 
         assertEquals(ReplayOutcome.Applied, outcome)
         assertEquals("photo-1", api.lastClientOperationId)
+        // A photo is recorded against the Visit it was taken on (`BR-047`, `BR-080`); the API refuses an
+        // upload that names none.
+        assertEquals(VISIT_ID, api.lastVisitId)
         assertEquals("DURING_WORK", api.lastPhase)
         assertEquals(photo.capturedAt, api.lastCapturedAt)
         assertEquals("Sawdust on the belt", api.lastNote)
@@ -115,6 +118,27 @@ class JobPhotoUploadHandlerTest {
 
         assertEquals(ReplayOutcome.Rejected(OutboxFailureReason.NOT_FOUND), outcome)
         assertEquals(setOf(photo.localPath), files.storedPaths)
+    }
+
+    @Test
+    fun `reads the API's code to tell a closed Job from a stale version`() = runTest {
+        // `409` alone is not the answer: a closed Job and a version conflict share the status but need
+        // different words, so the API's stable code decides (`BR-041`, `BR-079`).
+        val photo = pendingPhoto()
+        pending.record(photo)
+        files.writeCapture(photo.localPath)
+
+        api.addJobPhotoAnswer = { throw httpError(409, "JOB_CLOSED_FOR_FIELD_WORK") }
+        val closed = handler().replay(queuedRow(photo))
+
+        api.addJobPhotoAnswer = { throw httpError(409, "VERSION_CONFLICT") }
+        val stale = handler().replay(queuedRow(photo))
+
+        assertEquals(ReplayOutcome.Rejected(OutboxFailureReason.JOB_CLOSED), closed)
+        assertEquals(ReplayOutcome.Rejected(OutboxFailureReason.STALE), stale)
+        // Nothing the technician captured is discarded by either refusal (`BR-032`).
+        assertEquals(setOf(photo.localPath), files.storedPaths)
+        assertEquals(photo.photoId, pending.find(photo.photoId)?.photoId)
     }
 
     @Test
@@ -202,6 +226,7 @@ class JobPhotoUploadHandlerTest {
     ) = PendingJobPhoto(
         photoId = "photo-1",
         jobId = JOB_ID,
+        visitId = VISIT_ID,
         localPath = "app-private/job-photos/user-1/photo-1.${extensionOf(mimeType)}",
         phase = phase,
         note = "Sawdust on the belt",
@@ -235,15 +260,29 @@ class JobPhotoUploadHandlerTest {
         payloads = payloads,
         pending = pending,
         files = files,
+        json = Json,
     )
 
     private companion object {
         const val JOB_ID = "job-1"
 
+        /** The Visit the photo is recorded on (`BR-047`, `BR-080`). */
+        const val VISIT_ID = "visit-1"
+
         /** A response the API refused with, as Retrofit reports it (`dev.md` §7). */
         fun httpError(code: Int): HttpException =
             HttpException(
                 Response.error<Any>(code, "{}".toResponseBody("application/json".toMediaType())),
+            )
+
+        /** A refusal that carries the API's stable code, which is what a `409` is classified by. */
+        fun httpError(code: Int, errorCode: String): HttpException =
+            HttpException(
+                Response.error<Any>(
+                    code,
+                    """{"statusCode":$code,"code":"$errorCode","message":"refused"}"""
+                        .toResponseBody("application/json".toMediaType()),
+                ),
             )
     }
 }

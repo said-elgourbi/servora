@@ -65,4 +65,16 @@ data class TechnicianHomeUiState(
             home.nextVisit == null &&
             home.visits.isEmpty() &&
             home.upcomingTotal == 0
+
+    /**
+     * The day on screen could not be refreshed, so it is not the newest answer the backend holds.
+     *
+     * A failed read keeps the known day rather than blanking it (`BR-013`), and this is what says so:
+     * a screen that showed a stale day without a word would let a technician believe work they had
+     * already finished is still waiting (`BR-014`, `BR-001`). It is the same statement the manager home
+     * already makes (`ManagerHomeUiState.showsUnrefreshedNotice`), because the two homes present one
+     * situation in one way (`BR-010`, `BR-041`).
+     */
+    val showsUnrefreshedNotice: Boolean
+        get() = home != null && failureReason != null && !showsLastReportedNotice
 }

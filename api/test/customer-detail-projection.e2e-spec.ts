@@ -344,7 +344,7 @@ describe('customer detail projections (e2e)', () => {
       organizationId: organization.id,
       jobId: job.id,
       propertyId: property.id,
-      status: 'NO_SHOW',
+      status: 'CANCELED',
       scheduledStart: recentPastStart,
       scheduledEnd: new Date(now - 1_800_000),
     });

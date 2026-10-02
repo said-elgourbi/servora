@@ -113,6 +113,7 @@
     <!-- Customers (`customers.*` permissions). -->
     <string name="nav_home">Home</string>
     <string name="nav_schedule">Schedule</string>
+    <string name="nav_work">Work</string>
     <string name="nav_customers">Customers</string>
     <string name="nav_settings">Settings</string>
 
@@ -138,11 +139,13 @@
     <string name="home_attention_all_clear_title">You\'re all caught up</string>
     <string name="home_attention_all_clear_detail">Nothing needs your attention right now.</string>
     <string name="home_attention_overdue_title">Job #%1$d is overdue</string>
-    <string name="home_attention_review_title">Job #%1$d is waiting for review</string>
     <string name="home_attention_scheduling_title">Job #%1$d needs scheduling</string>
+    <string name="home_attention_follow_up_title">Job #%1$d needs a follow-up visit</string>
+    <string name="home_attention_parts_title">Job #%1$d is waiting on parts</string>
+    <string name="home_attention_unable_to_complete_title">Job #%1$d could not be completed</string>
     <string name="home_attention_detail_format">%1$s · %2$s</string>
     <string name="home_attention_scheduled">Scheduled %1$s</string>
-    <string name="home_attention_open">Open the customer</string>
+    <string name="home_attention_open">Open the job</string>
     <string name="home_attention_expand">Show the items that need attention</string>
     <string name="home_attention_collapse">Hide the items that need attention</string>
     <string name="home_today_title">Today</string>
@@ -169,7 +172,6 @@
     <string name="visit_status_in_progress">In progress</string>
     <string name="visit_status_completed">Completed</string>
     <string name="visit_status_canceled">Canceled</string>
-    <string name="visit_status_no_show">No show</string>
     <string name="home_visit_status_overdue">Overdue</string>
     <string name="home_loading">Loading today…</string>
     <string name="home_error_title">Couldn\'t load today</string>
@@ -198,7 +200,7 @@
     -->
     <string name="schedule_lane_schedule">Schedule</string>
     <string name="schedule_lane_unassigned">Unassigned</string>
-    <string name="schedule_lane_requests">Requests</string>
+    <string name="schedule_lane_requests">Visit requests</string>
     <plurals name="schedule_unassigned_more">
         <item quantity="one">%1$d more waiting for a technician</item>
         <item quantity="other">%1$d more waiting for a technician</item>
@@ -232,14 +234,70 @@
     <string name="schedule_empty_requests_title">No pending requests</string>
     <string name="schedule_empty_requests_detail">No follow-up visits are waiting for review.</string>
     <string name="schedule_request_same_technician">Same technician preferred</string>
+    <string name="schedule_request_preferred_technician">Preferred technician: %1$s</string>
+    <string name="schedule_request_preferred_technician_unknown">Preferred technician: requester</string>
+    <string name="schedule_request_previous_visit">Previous visit · %1$s</string>
+    <string name="schedule_request_job_context">Job #%1$d · %2$s</string>
+    <string name="schedule_request_customer_context">%1$s</string>
     <string name="schedule_request_open_job">Open job</string>
-    <string name="schedule_request_clarify">Clarify</string>
+    <string name="schedule_request_clarify">Ask tech</string>
     <string name="schedule_request_reject">Reject</string>
+    <string name="schedule_request_more_actions">More request actions</string>
+    <string name="schedule_request_schedule">Schedule</string>
+    <!--
+      The record a Clarify or a Reject is taken with (`BR-FV-013`). A rejection closes the request without
+      creating a Visit, so its reason is the only thing that can state why; a clarification's question is
+      offered but not required, because no rule requires one (`BR-042`).
+    -->
+    <string name="schedule_request_review_cancel">Cancel</string>
+    <string name="schedule_request_clarify_title">Return for clarification</string>
+    <string name="schedule_request_clarify_message">The request stays open and can still be approved or rejected here. What you write is recorded on it.</string>
+    <string name="schedule_request_clarify_note">What is still needed? (optional)</string>
+    <string name="schedule_request_clarify_confirm">Return it</string>
+    <string name="schedule_request_reject_title">Reject the request</string>
+    <string name="schedule_request_reject_message">No visit is created and the request is closed. What you write is recorded as the reason it was refused.</string>
+    <string name="schedule_request_reject_note">Why is it refused?</string>
+    <string name="schedule_request_reject_confirm">Reject</string>
+    <!-- The decision the API applied, and a decision it did not apply (`BR-001`, `BR-FV-013`). -->
+    <string name="schedule_request_returned">Request returned for clarification.</string>
+    <string name="schedule_request_rejected">Request rejected.</string>
+    <string name="schedule_request_decision_failed">The decision was not recorded — the request is unchanged.</string>
+    <!-- A request the office has returned for clarification: unresolved and still awaiting a decision (`BR-FV-012`). -->
+    <string name="schedule_request_needs_clarification">Returned for clarification</string>
+    <!--
+      The follow-up request's own statuses (`BR-FV-012`), so a technician reading their own requests sees
+      the same state the office decided it in. A clarified request keeps the office screen's own label
+      above, because it is one status and one vocabulary (`BR-041`).
+    -->
+    <string name="request_status_pending">Awaiting review</string>
+    <string name="request_status_approved">Approved</string>
+    <string name="request_status_rejected">Rejected</string>
+    <!--
+      Approving a pending request (`BR-FV-004`, `BR-FV-005`). Approval is the decision that creates the
+      Visit, so it opens the schedule form rather than accepting the technician's proposal as an
+      appointment (`BR-FV-003`, `BR-FV-010`).
+    -->
+    <string name="schedule_request_approve">Accept</string>
+    <string name="schedule_request_reschedule">Reschedule</string>
+    <string name="schedule_request_approve_title">Approve and schedule</string>
+    <string name="schedule_request_approve_message">State when the visit is and who carries it. The request is approved when you confirm.</string>
+    <string name="schedule_request_approve_confirm">Approve &amp; schedule</string>
+    <string name="schedule_request_approved">Visit scheduled — the request is approved.</string>
     <!-- A crew longer than the card's one line: the names that fit, then how many more are assigned. -->
     <string name="schedule_crew_more">%1$s +%2$d</string>
     <string name="schedule_customer_property_format">%1$s · %2$s</string>
     <string name="schedule_loading">Loading the schedule…</string>
     <string name="schedule_error_title">Couldn\'t load the schedule</string>
+    <string name="work_tab_all_visits">All visits</string>
+    <string name="work_tab_unassigned_jobs_count">Unassigned · %1$d</string>
+    <string name="work_tab_visit_requests_count">Requests · %1$d</string>
+    <string name="work_search_placeholder">Search job, customer, address, tech…</string>
+    <string name="work_filter_all">All</string>
+    <string name="work_filter_scheduled">Scheduled</string>
+    <string name="work_filter_unassigned">Unassigned</string>
+    <string name="work_filter_overdue">Overdue</string>
+    <string name="work_empty_jobs_title">No jobs match</string>
+    <string name="work_empty_jobs_detail">Try another search or filter.</string>
     <!--
       The technician's schedule (`GET /schedule` answered for the caller's own work): the week, the day
       and the Visits assigned to the signed-in technician. The screen answers "what is assigned to me,
@@ -257,6 +315,62 @@
     <string name="technician_schedule_empty_detail">Nothing is assigned to you on this day.</string>
     <string name="technician_schedule_loading">Loading your schedule…</string>
     <string name="technician_schedule_error_title">Couldn\'t load your schedule</string>
+    <!--
+      The second view of My Schedule: the technician's own follow-up requests and the office's answer to
+      each of them (`BR-FV-012`, `BR-FV-013`) — how the technician learns that the visit they asked for
+      was approved, returned for clarification or refused. A request is a proposal rather than an
+      appointment (`BR-FV-002`), so its window is stated as what the technician proposed and the Visit
+      an approval created is what the Schedule view itself shows (`BR-FV-005`).
+    -->
+    <string name="technician_schedule_tab_schedule">Schedule</string>
+    <string name="technician_schedule_tab_requests">Visit requests</string>
+    <string name="technician_requests_loading">Loading your requests…</string>
+    <string name="technician_requests_error_title">Couldn\'t load your requests</string>
+    <string name="technician_requests_unrefreshed">Couldn\'t refresh your requests.</string>
+    <string name="technician_requests_empty_title">No requests</string>
+    <string name="technician_requests_empty_detail">You have not asked for another visit.</string>
+    <string name="technician_requests_proposed">You proposed · %1$s</string>
+    <string name="technician_requests_proposed_none">You proposed no time</string>
+    <string name="technician_request_job">Job #%1$d · %2$s</string>
+    <string name="technician_request_status_label">Status</string>
+    <string name="technician_request_proposed_label">Proposed visit</string>
+    <string name="technician_request_source_visit_label">Previous visit</string>
+    <string name="technician_request_reason_label">Reason for another visit</string>
+    <string name="technician_request_preference_label">Technician preference</string>
+    <string name="technician_request_preference_none">No technician preference</string>
+    <string name="technician_request_office_note_label">Office response</string>
+    <!-- The office's own words: what a clarification still needs, or why a request was refused (`BR-FV-013`). -->
+    <string name="technician_requests_note">Office note: %1$s</string>
+    <!--
+      A returned request's clarification conversation, and the composer that answers it (`BR-FV-012`).
+      The exchange is the request's own history: the office's question, the technician's answer, and the
+      action that gives one. Both surfaces read the same thread, so the speakers are named once here.
+    -->
+    <string name="follow_up_conversation_you">You</string>
+    <string name="follow_up_conversation_office">Office</string>
+    <string name="follow_up_conversation_technician">Technician</string>
+    <!-- Who wrote a message and when; the moment is resolved by the platform in the device's language (`BR-028`). -->
+    <string name="follow_up_conversation_speaker">%1$s · %2$s</string>
+    <string name="technician_request_answer_action">Answer</string>
+    <string name="technician_request_answer_title">Answer the office</string>
+    <string name="technician_request_answer_message">The office returned this request and said what it still needs. Your answer is recorded on the request and puts it back in front of the office.</string>
+    <string name="technician_request_answer_question">The office asked: %1$s</string>
+    <string name="technician_request_answer_label">Your answer</string>
+    <string name="technician_request_answer_send">Send answer</string>
+    <string name="technician_request_answer_recorded">Answer recorded — the office has the request again.</string>
+    <string name="technician_request_answer_failed">The answer was not recorded — the request is unchanged.</string>
+    <!--
+      The request details destination: one of the technician's own requests, opened by tapping its row
+      in the Requests list. A request is a proposal about another field attempt (`BR-FV-002`), so the
+      destination is about the proposal and the office's decision on it, and the Job it is for is one
+      action away (`BR-066`).
+    -->
+    <string name="technician_request_detail_title">Request details</string>
+    <string name="technician_request_detail_conversation_label">With the office</string>
+    <string name="technician_request_detail_open_job">View job details</string>
+    <string name="technician_request_detail_unavailable_title">This request isn\'t available</string>
+    <string name="technician_request_detail_unavailable_detail">It is not in your requests. Open Requests to read the ones you raised.</string>
+    <string name="manager_request_detail_unavailable_detail">This request is no longer available to review.</string>
     <string name="customers_title">Customers</string>
     <string name="customers_subtitle">Manage customers and their service properties</string>
     <string name="customers_search_placeholder">Name, phone, address…</string>
@@ -400,9 +514,7 @@
     <string name="customers_job_unassigned">Unassigned</string>
     <!-- Stable Job status codes rendered as labels (`BR-058`, `BR-041`). -->
     <string name="customers_job_status_new">New</string>
-    <string name="customers_job_status_scheduled">Scheduled</string>
-    <string name="customers_job_status_in_progress">In progress</string>
-    <string name="customers_job_status_pending_review">Pending review</string>
+    <string name="customers_job_status_active">Active</string>
     <string name="customers_job_status_completed">Completed</string>
     <string name="customers_job_status_canceled">Canceled</string>
 
@@ -581,6 +693,14 @@
     <string name="job_details_customer_email_label">Email</string>
     <string name="job_details_customer_notes_label">Notes</string>
     <!--
+      The three sections a technician reads before working (`BR-012`, `BR-092`): where the work is, who
+      they can reach there, and what the office recorded that they need to know. Each is its own labelled
+      section rather than a row inside the Job's own information, so an access instruction is not buried
+      among the Job's metadata.
+    -->
+    <string name="job_details_location_label">Location</string>
+    <string name="job_details_contacts_label">Contacts</string>
+    <!--
       The Customer's other ways of being reached on the Job card (`BR-095`): the disclosure holding them
       is closed by default, so the number a technician came for is the one on screen.
     -->
@@ -604,7 +724,6 @@
       update belongs to. Each section is labelled for what it belongs to, so one is never read as
       another, and a Visit's activity group is headed `Visit N · date`.
     -->
-    <string name="job_details_overview_label">Job overview</string>
     <!--
       The label of the section presenting the Visit the read represents (`BR-081`). It states when that
       field attempt is for, as of the device's own clock and zone, so the section never tells the reader
@@ -618,19 +737,6 @@
     <string name="job_details_no_selected_visit_detail">This job has no visit with a schedule yet.</string>
     <string name="job_details_visit_activity_label">Visit activity</string>
     <string name="job_details_visit_activity_empty">Nothing has been recorded on this visit yet.</string>
-    <string name="job_details_visit_time_label">Scheduled time</string>
-    <string name="job_details_visit_time_range">%1$s – %2$s</string>
-    <!--
-      What the field attempt resulted in (`BR-077`, `BR-078`). It is the Visit's own **current** outcome
-      the API reports, so the row is drawn only when the Visit holds one: a Visit that was reopened after
-      completion holds none, and a Visit that has not been completed holds none either (`BR-079`).
-    -->
-    <string name="job_details_visit_outcome_label">Outcome</string>
-    <!--
-      The crew a Visit's group states is the crew the read reports, which is who **is assigned** to the
-      field attempt (`BR-068`): Servora does not record who attended one, so the label never claims it.
-    -->
-    <string name="job_details_assigned_technicians_label">Assigned technicians</string>
     <string name="job_details_job_updates_label">General job updates</string>
     <string name="job_details_job_updates_empty">No job-wide updates yet.</string>
 
@@ -648,16 +754,34 @@
       and the date is what the group was for (`BR-052`, `BR-072`).
     -->
     <string name="job_activity_visit_title_format">Visit %1$d · %2$s</string>
+    <!--
+      What a folded Visit group states under its heading: where the field attempt ended up and what it
+      resulted in — `Completed · Needs follow-up` (`BR-074`, `BR-078`, `BR-080`). The status is the
+      Visit's own state and the outcome is the Visit's own recorded outcome, so a Visit that holds none
+      states its status alone (`BR-079`, `BR-042`).
+    -->
+    <string name="job_activity_visit_summary_format">%1$s · %2$s</string>
     <string name="job_activity_visit_expand_label">Expand visit %1$d</string>
     <string name="job_activity_visit_collapse_label">Collapse visit %1$d</string>
     <!-- The group holding the updates that belong to the Job and to no Visit (`BR-080`). -->
     <string name="job_activity_general_expand_label">Expand general job updates</string>
     <string name="job_activity_general_collapse_label">Collapse general job updates</string>
+    <string name="job_activity_admin_label">Administrative history · %1$d</string>
+    <string name="job_activity_admin_expand_label">Expand administrative history</string>
+    <string name="job_activity_admin_collapse_label">Collapse administrative history</string>
     <!-- The state a collapsed or expanded group reports to a screen reader (`BR-028`). -->
     <string name="job_activity_group_expanded">Expanded</string>
     <string name="job_activity_group_collapsed">Collapsed</string>
     <string name="job_activity_empty_title">No activity yet</string>
     <string name="job_activity_empty_message">Updates from the team will appear here.</string>
+    <string name="job_activity_note_edit">Edit</string>
+    <string name="job_activity_note_delete">Delete</string>
+    <string name="job_activity_note_edit_title">Edit update</string>
+    <string name="job_activity_note_edit_label">Update</string>
+    <string name="job_activity_note_save">Save</string>
+    <string name="job_activity_note_delete_title">Delete update</string>
+    <string name="job_activity_note_delete_reason">Reason</string>
+    <string name="job_activity_note_delete_confirm">Delete</string>
     <string name="job_activity_error_message">Couldn\'t load activity.</string>
     <string name="job_activity_add_update">Add update</string>
     <!--
@@ -673,8 +797,21 @@
     <string name="job_activity_cancel_update">Cancel</string>
     <string name="job_activity_job_status_changed">Updated job status to %1$s</string>
     <string name="job_activity_job_status_changed_generic">Updated job status</string>
-    <string name="job_activity_visit_status_changed">Updated visit status to %1$s</string>
-    <string name="job_activity_visit_status_changed_generic">Updated visit status</string>
+    <!--
+      A Visit status change is stated in the language of the field, not as a status code being assigned
+      (`BR-012`, `BR-080`): a technician reads what happened on the visit — `Work started`, `Arrived on
+      site` — rather than `Updated visit status to IN_PROGRESS`. One string per destination the field
+      status route offers, so a code this build cannot name still reports itself generically rather than
+      wrongly (`BR-042`). The wording is presentation only: the event, its statuses, its actor and its
+      time are the API's own records and are not altered by it (`BR-001`, `BR-067`).
+    -->
+    <string name="job_activity_visit_status_scheduled">Visit scheduled</string>
+    <string name="job_activity_visit_status_en_route">En route</string>
+    <string name="job_activity_visit_status_on_site">Arrived on site</string>
+    <string name="job_activity_visit_status_in_progress">Work started</string>
+    <string name="job_activity_visit_status_completed">Visit completed</string>
+    <string name="job_activity_visit_status_canceled">Visit canceled</string>
+    <string name="job_activity_visit_status_changed_generic">Visit status updated</string>
     <string name="job_activity_property_changed">Changed the job\'s location</string>
     <string name="job_activity_customer_changed">Changed the job\'s customer</string>
     <string name="job_activity_visit_scheduled">Scheduled the visit</string>
@@ -682,12 +819,16 @@
     <string name="job_activity_technician_assigned">Assigned %1$s as %2$s</string>
     <string name="job_activity_technician_removed">Removed %1$s</string>
     <string name="job_activity_technician_role_changed">Changed %1$s role from %2$s to %3$s</string>
-    <string name="job_activity_outcome_recorded">Recorded outcome: %1$s</string>
-    <string name="job_activity_outcome_recorded_generic">Recorded an outcome</string>
+    <!--
+      The outcome an entry records, stated as the outcome itself (`BR-078`, `BR-080`): the completion and
+      what resulted from it are rendered as one account — `Visit completed` followed by `Needs follow-up`
+      — rather than as two visually unrelated events. An outcome code this build cannot name reports
+      itself generically rather than being given another outcome's label (`BR-042`).
+    -->
+    <string name="job_activity_outcome_recorded_generic">Outcome recorded</string>
     <string name="job_activity_outcome_resolved">Resolved</string>
     <string name="job_activity_outcome_needs_parts">Needs parts</string>
-    <string name="job_activity_outcome_needs_followup">Needs follow-up</string>
-    <string name="job_activity_outcome_needs_quote_approval">Needs quote approval</string>
+    <string name="job_activity_outcome_needs_follow_up">Needs follow-up</string>
     <string name="job_activity_outcome_unable_to_complete">Unable to complete</string>
 
     <!--
@@ -746,6 +887,7 @@
     <string name="job_photo_error_type_not_accepted">That photo is not a format Servora accepts. Take or choose a JPEG, PNG or WebP image.</string>
     <string name="job_photo_error_too_large">That photo is too large to upload. Retake it at a smaller size.</string>
     <string name="job_photo_error_not_saved">The photo could not be saved on this device.</string>
+    <string name="job_photo_error_no_visit">This photo has no visit to belong to. Open the job again.</string>
     <string name="job_photo_error_not_read">That photo could not be read from this device.</string>
     <string name="job_photo_error_picker_unavailable">The device\'s photo picker could not be opened.</string>
     <!--
@@ -801,6 +943,29 @@
     <string name="job_action_change_status">Change status</string>
     <string name="job_action_reschedule">Reschedule</string>
     <string name="job_action_manage_technicians">Manage technicians</string>
+    <!--
+      Scheduling a further Visit on a Job (`BR-071`, `BR-072`). Addition to a Job's work is represented by
+      another Visit, never by a new Job (`BR-047`, `BR-051`), so the action sits with the Visit's own.
+    -->
+    <string name="job_action_schedule_visit">Schedule a visit</string>
+    <string name="job_action_schedule_follow_up_visit">Schedule follow-up visit</string>
+    <string name="job_action_done_schedule_visit">Visit scheduled.</string>
+    <!--
+      Proposing a follow-up Visit (`BR-FV-001`, `BR-FV-003`). It is a request the office reviews rather
+      than a scheduled Visit (`BR-FV-002`), so both the action and its confirmation say so and never
+      claim a visit was booked.
+    -->
+    <string name="job_action_request_follow_up">Request another visit</string>
+    <string name="job_action_done_follow_up_request">Follow-up requested. The office will review it.</string>
+    <string name="job_follow_up_request_sent">Request sent</string>
+    <string name="job_follow_up_request_title">Follow-up visit request</string>
+    <string name="job_follow_up_request_source">From previous visit · %1$s</string>
+    <string name="job_follow_up_request_source_generic">Created from a previous visit</string>
+    <string name="job_follow_up_request_awaiting_schedule">Approved · Awaiting scheduling</string>
+    <string name="job_follow_up_request_scheduled_for">Scheduled for %1$s</string>
+    <string name="job_follow_up_request_open">Open visit request</string>
+    <string name="job_follow_up_request_review">Review request</string>
+    <string name="job_follow_up_request_view">View request</string>
     <string name="job_action_ok">OK</string>
     <string name="job_action_cancel">Cancel</string>
     <string name="job_action_dismiss">Dismiss</string>
@@ -809,15 +974,15 @@
     <string name="job_action_done_reschedule">Visit rescheduled successfully</string>
     <string name="job_action_done_assignment">Visit crew updated successfully</string>
     <string name="job_action_done_activity_text">Update added successfully</string>
+    <string name="job_action_done_activity_text_edit">Update corrected successfully</string>
+    <string name="job_action_done_activity_text_remove">Update removed from the timeline</string>
     <string name="job_action_error_unauthenticated">Your session has ended. Sign in again.</string>
     <string name="job_action_error_forbidden">You do not have permission to change jobs.</string>
     <string name="job_action_error_not_found">This job or visit is no longer available.</string>
     <string name="job_action_error_validation">The change was refused. Check the values and try again.</string>
     <string name="job_action_error_version_conflict">The job changed since you opened it. Reopen it and try again.</string>
     <string name="job_action_error_transition">The job cannot move to that status from where it is.</string>
-    <string name="job_action_error_review_condition">The job cannot await review yet: work is still open or the last visit did not resolve it.</string>
     <string name="job_action_error_completion_blocked">This job can\'t be completed while it has active visits.</string>
-    <string name="job_action_error_cancellation_unavailable">Cancelling a job is not available yet.</string>
     <string name="job_action_error_visit_not_reschedulable">Only a scheduled visit can be rescheduled.</string>
     <string name="job_action_error_technicians_not_assignable">One or more technicians cannot be assigned.</string>
     <string name="job_action_error_network">Check your connection and try again.</string>
@@ -827,16 +992,39 @@
     <string name="job_action_error_visit_scheduling">The visit can\'t be scheduled yet: it needs a location, a schedule and a crew with exactly one lead.</string>
     <string name="job_action_error_job_closed">This job is closed, so no visit work can be recorded on it.</string>
     <string name="job_action_error_visit_operation_reused">This update was already used for another visit.</string>
-    <string name="job_action_change_visit_status">Change visit status</string>
+    <!--
+      The follow-up request's own two answers to an approval (`BR-FV-012`, `docs/api/visit-requests.md`):
+      the request moved on since it was read, or it is no longer open for review at all.
+    -->
+    <string name="job_action_error_visit_request_changed">This request changed since you read it. Refresh the schedule and try again.</string>
+    <string name="job_action_error_visit_request_reviewed">This request has already been reviewed. Refresh the schedule to see its outcome.</string>
     <string name="job_action_done_visit_status">Visit status updated</string>
+    <string name="job_action_done_visit_completion">Visit completed</string>
     <string name="job_action_queued_visit_status">Saved on this device. The visit will be updated when you\'re back online.</string>
+    <string name="job_action_queued_visit_completion">Saved on this device. The visit will be completed when you\'re back online.</string>
     <string name="job_action_queued_activity_text">Saved on this device. The update will be sent when you\'re back online.</string>
     <string name="job_action_queued_generic">Saved on this device. It will be applied when you\'re back online.</string>
+    <!--
+      Completing a visit (`BR-077`, `BR-078`). Completion is its own action rather than a status, so it
+      is named for what it does, and each outcome is explained in one line so a technician in the field
+      can choose without reading the catalogue. The text the API requires with the outcome is asked for
+      as a reason when the visit could not be completed and as a summary otherwise, which is what the
+      API itself calls it.
+    -->
+    <string name="job_visit_status_label">Visit status</string>
+    <string name="job_visit_complete_action">Complete visit</string>
     <string name="job_visit_complete_title">Complete visit</string>
     <string name="job_visit_complete_outcome_label">Outcome</string>
+    <string name="job_visit_complete_outcome_resolved_support">The work is finished and nothing more is needed.</string>
+    <string name="job_visit_complete_outcome_needs_followup_support">Another visit is needed to finish the work.</string>
+    <string name="job_visit_complete_outcome_needs_parts_support">The work needs parts before it can be finished.</string>
+    <string name="job_visit_complete_outcome_unable_support">The work could not be done. Say why.</string>
     <string name="job_visit_complete_summary_label">Summary</string>
     <string name="job_visit_complete_summary_placeholder">What happened on site?</string>
     <string name="job_visit_complete_summary_required">Required: state what resulted from the visit.</string>
+    <string name="job_visit_complete_reason_label">Reason</string>
+    <string name="job_visit_complete_reason_placeholder">Why couldn\'t the work be completed?</string>
+    <string name="job_visit_complete_reason_required">Required: state why the work could not be completed.</string>
     <string name="job_visit_complete_confirm">Complete visit</string>
     <string name="job_visit_pending_title">Waiting to sync</string>
     <string name="job_visit_pending_action">Visit → %1$s</string>
@@ -845,7 +1033,18 @@
     <string name="job_visit_pending_retrying">Couldn\'t send. It will be tried again.</string>
     <string name="job_visit_pending_refused">Not applied</string>
     <string name="job_visit_pending_stale">The visit changed, or the new time conflicts with another visit. Reopen the job and try again.</string>
+    <string name="job_visit_pending_job_closed">This job was canceled or completed, so the visit can no longer be updated. Ask the office if the work is still needed.</string>
     <string name="job_visit_pending_discard">Discard</string>
+
+    <!--
+      A job the office has closed (`BR-062`, `BR-079`). Nothing further may be recorded under it, so its
+      field controls are gone; the cancellation is stated prominently because it materially changes the
+      work the technician was sent to do.
+    -->
+    <string name="job_details_job_canceled_title">This job was canceled</string>
+    <string name="job_details_job_canceled_message">The office canceled this job, so no visit work can be recorded on it. Anything already recorded stays readable below.</string>
+    <string name="job_details_job_completed_title">This job is complete</string>
+    <string name="job_details_job_completed_message">The job is closed, so its visits and evidence are read-only. More work needs the office to reopen it.</string>
 
     <!-- Rescheduling a visit (`BR-073`). -->
     <string name="job_reschedule_title">Reschedule visit</string>
@@ -868,6 +1067,36 @@
     <string name="job_conflict_title">This time overlaps another visit</string>
     <string name="job_conflict_message">The same technician is already booked. You can still schedule this visit.</string>
     <string name="job_conflict_confirm">Schedule anyway</string>
+
+    <!--
+      The form that schedules a Visit (`BR-068`, `BR-071`, `BR-072`). One form serves the direct schedule
+      and the approval of a follow-up request, because both state the same window and crew. It asks for
+      one visit date and the two times that day, because a field attempt starts and ends on the same day.
+    -->
+    <string name="schedule_visit_title">Schedule a visit</string>
+    <string name="schedule_visit_message">State when the visit is and who carries it. The visit is created when you confirm.</string>
+    <string name="schedule_visit_confirm">Schedule visit</string>
+    <string name="schedule_visit_date_label">Visit date</string>
+    <string name="schedule_visit_start_time_label">Start time</string>
+    <string name="schedule_visit_end_time_label">End time</string>
+    <string name="schedule_visit_crew_label">Technicians</string>
+    <string name="schedule_visit_problem_end">The end time must be after the start time.</string>
+    <string name="schedule_visit_problem_crew">Choose at least one technician.</string>
+    <string name="schedule_visit_problem_lead">Choose which technician leads the visit.</string>
+
+    <!--
+      Proposing a follow-up Visit (`BR-FV-001`, `BR-FV-003`). The form asks for the window the
+      technician suggests, why another visit is needed, and whether they would like to carry it out —
+      and for no crew, because who performs the visit is the office's decision (`BR-FV-004`). The
+      message states that nothing is booked yet (`BR-FV-002`, `BR-FV-010`), and the date and time labels
+      are the scheduling form's own, so both forms name one window the same way.
+    -->
+    <string name="request_follow_up_title">Request another visit</string>
+    <string name="request_follow_up_message">Say when the follow-up visit should happen and why it is needed. The office reviews the request and confirms the schedule — nothing is booked yet.</string>
+    <string name="request_follow_up_reason_label">Why another visit is needed</string>
+    <string name="request_follow_up_reason_placeholder">For example: the part has to be ordered.</string>
+    <string name="request_follow_up_problem_reason">Say why another visit is needed.</string>
+    <string name="request_follow_up_confirm">Send request</string>
 
     <!--
       The consequential Job status changes the user confirms before the change is sent (`BR-058`,
@@ -907,6 +1136,7 @@
     <string name="job_audio_error_recording_failed">The recording could not be finished, so nothing was saved.</string>
     <string name="job_audio_error_recording_empty">The recording came out empty, so nothing was saved.</string>
     <string name="job_audio_error_recording_not_saved">The recording could not be saved on this device.</string>
+    <string name="job_audio_error_no_visit">This recording has no visit to belong to. Open the job again.</string>
     <string name="job_audio_error_not_queued">The recording could not be saved yet. It is still on this device.</string>
     <string name="job_audio_error_already_submitted">That recording is already queued for upload.</string>
     <!--
@@ -981,4 +1211,30 @@
     <string name="job_create_error_conflict">The customer or the property cannot take new work right now.</string>
     <string name="job_create_error_network">Check your network and try again.</string>
     <string name="job_create_error_server">The job could not be created. Please try again.</string>
+
+    <string name="technician_ad_hoc_report_action">Report ad-hoc work</string>
+    <string name="technician_ad_hoc_report_title">Report ad-hoc work</string>
+    <string name="technician_ad_hoc_report_customer">Customer, if known</string>
+    <string name="technician_ad_hoc_report_property">Property, if known</string>
+    <string name="technician_ad_hoc_report_known_work">Known work record, if any</string>
+    <string name="technician_ad_hoc_report_started">Started at</string>
+    <string name="technician_ad_hoc_report_ended">Ended at</string>
+    <string name="technician_ad_hoc_report_outcome">Outcome</string>
+    <string name="technician_ad_hoc_report_summary">What happened</string>
+    <string name="technician_ad_hoc_report_notes">Notes</string>
+    <string name="technician_ad_hoc_report_submit">Submit report</string>
+    <string name="technician_ad_hoc_report_recorded">Report sent for office review.</string>
+    <string name="technician_ad_hoc_report_failed">Report could not be sent.</string>
+    <string name="technician_ad_hoc_report_queued">Report saved. It will be sent when you are back online.</string>
+    <string name="technician_ad_hoc_report_problem_summary">Describe what happened before submitting.</string>
+    <string name="technician_ad_hoc_report_work_window">When the work happened</string>
+    <string name="technician_ad_hoc_report_unknown_customer">I can’t find the customer</string>
+    <string name="technician_ad_hoc_report_use_customer_search">Search for the customer instead</string>
+    <string name="technician_ad_hoc_report_reported_name">Customer name</string>
+    <string name="technician_ad_hoc_report_reported_phone">Customer phone</string>
+    <string name="technician_ad_hoc_report_reported_address">Customer address</string>
+    <string name="technician_ad_hoc_report_no_property">No property is listed for this customer.</string>
+    <string name="technician_ad_hoc_report_property_unnamed">Unnamed property</string>
+    <string name="technician_ad_hoc_report_related_work">Related work, if any</string>
+    <string name="technician_ad_hoc_report_no_related_work">No related work is listed for this customer.</string>
 </resources>

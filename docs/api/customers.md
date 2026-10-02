@@ -283,7 +283,7 @@ renders. It requires `properties.view`.
 - `archivedAt` is `null` while the Property is `ACTIVE`; it is current state, never history.
 - `archiveImpact.activeJobCount` counts the Property's Jobs whose status is not `COMPLETED` or
   `CANCELED`; `archiveImpact.activeVisitCount` counts the Visits of those Jobs whose status is not
-  `COMPLETED`, `CANCELED` or `NO_SHOW` (`BR-074`, `BR-083`). This is the `archiveWarningOpenWork`
+  `COMPLETED` or `CANCELED` (`BR-074`, `BR-083`). This is the `archiveWarningOpenWork`
   classification, deliberately not the derived `needsSchedulingActiveVisit` set (`BR-060`). A
   `DRAFT` Visit counts as open work.
 - `canBePermanentlyDeleted` is the API's answer to whether `BR-082`'s precondition holds right now.

@@ -190,3 +190,22 @@ Open question 2 (`preferredContactMethod` and `language`), open question 4 (the 
 set's re-review) and open question 5 (reaching the Customer from a Job the technician no longer serves) are
 untouched and remain open. D1, D2, D4 and D5 are unchanged, and the block's own fields (`email`, `phone`,
 `notes`) stay byte-for-byte as this record defined them.
+
+## Addendum — 2026-09-20 (the Job Details half of D6 landed)
+
+**Status:** Accepted (no new decision; the implementation of the one recorded on 2026-09-18).
+
+The decision update above records that tap-to-call and tap-to-email were decided **on both surfaces**, and
+only the Customer Detail card drew them at the time. The Job Details half is now implemented by
+`docs/tracker/052-android-technician-job-details-redesign.md`: the page's **Contacts** section draws the
+effective primary contact's phone and email, and every folded other way of reaching the Customer, through
+the same `CustomerContactLine` affordance and the same `dialIntent` / `mailIntent` / `startContactIntent`
+actions.
+
+Those four moved from `ui/customers/CustomersScreen.kt` to a new `ui/components/ServoraContacts.kt`
+(`dev.md` §15): three features now draw one contact line, and the design system's own rule for a shared
+primitive is that it lives in `ui/components` rather than in one feature package, so the app cannot dial one
+value in one screen and compose it differently in another (`BR-041`). The behaviour is unchanged — the
+customers list still passes no action so a tap opens the customer, and Customer Detail and Job Details pass
+the dialer and the mail client — and no route, capability, contract or database object was touched.
+

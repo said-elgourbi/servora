@@ -93,12 +93,7 @@ export class PropertyNotAvailableForNewWorkError extends Error {
  * This is the Job lifecycle's non-terminal set (`BR-058`). It is the `archiveWarningOpenWork`
  * classification, which is deliberately not the derived `needsSchedulingActiveVisit` set (`BR-060`).
  */
-const ARCHIVE_WARNING_OPEN_JOB_STATUSES = [
-  'NEW',
-  'SCHEDULED',
-  'IN_PROGRESS',
-  'PENDING_REVIEW',
-] as const;
+const ARCHIVE_WARNING_OPEN_JOB_STATUSES = ['NEW', 'ACTIVE'] as const;
 
 /**
  * The Visit statuses that are historical (`BR-074`).
@@ -109,7 +104,6 @@ const ARCHIVE_WARNING_OPEN_JOB_STATUSES = [
 const ARCHIVE_WARNING_TERMINAL_VISIT_STATUSES = [
   'COMPLETED',
   'CANCELED',
-  'NO_SHOW',
 ] as const;
 
 /**

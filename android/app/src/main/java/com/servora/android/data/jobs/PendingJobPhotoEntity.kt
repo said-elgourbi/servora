@@ -37,6 +37,13 @@ internal data class PendingJobPhotoEntity(
     @PrimaryKey val photoId: String,
     val subjectId: String,
     val jobId: String,
+    /**
+     * The Visit the photo was recorded during (`BR-047`).
+     *
+     * Nullable because a row written before the link existed has none; the upload is refused for such a
+     * row rather than sent with an invented attribution (`BR-042`). Every row this build writes has it.
+     */
+    val visitId: String?,
     val localPath: String,
     val phase: String?,
     val note: String?,

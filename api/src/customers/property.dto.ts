@@ -181,8 +181,8 @@ export function parsePropertyLifecycleDto(
  * The authoritative open-work counts the archive confirmation displays (`BR-083`).
  *
  * `activeJobCount` counts the Property's Jobs whose status is not terminal (`BR-058`);
- * `activeVisitCount` counts the Visits of those Jobs whose status is not `COMPLETED`, `CANCELED` or
- * `NO_SHOW` (`BR-074`). This is the `archiveWarningOpenWork` classification, and it is deliberately
+ * `activeVisitCount` counts the Visits of those Jobs whose status is not `COMPLETED` or
+ * `CANCELED` (`BR-074`). This is the `archiveWarningOpenWork` classification, and it is deliberately
  * not the derived `needsSchedulingActiveVisit` set of `BR-060`.
  */
 export interface PropertyArchiveImpactDto {

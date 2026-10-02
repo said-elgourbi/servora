@@ -46,7 +46,7 @@ omitted date answers for today in the submitted zone, which is the day `GET /hom
 The lane answers "what still needs somebody?" from records that already exist:
 
 ```text
-visits.status NOT IN ('COMPLETED', 'CANCELED', 'NO_SHOW')   -- BR-062's open Visit, BR-074's historical set
+visits.status NOT IN ('COMPLETED', 'CANCELED')   -- BR-062's open Visit, BR-074's historical set
 AND NOT EXISTS (visit_technicians for the Visit)
 ```
 

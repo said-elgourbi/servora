@@ -72,7 +72,6 @@ describe('UNASSIGNED_EXCLUDED_VISIT_STATUSES', () => {
     expect([...UNASSIGNED_EXCLUDED_VISIT_STATUSES]).toEqual([
       'COMPLETED',
       'CANCELED',
-      'NO_SHOW',
     ]);
   });
 

@@ -12,6 +12,16 @@ data class PendingJobPhoto(
     /** The idempotency key the app generated once, before the first upload attempt (§5). */
     val photoId: String,
     val jobId: String,
+    /**
+     * The Visit the photo was recorded during (`BR-047`, `BR-071`), or `null` when the record was
+     * written before the link existed.
+     *
+     * Evidence belongs to the field attempt it was recorded on, which is what lets the Activity section
+     * read the photo with that Visit's account (`BR-080`). The upload carries it, and the API refuses an
+     * upload that names none — so a draft with no Visit (only one written by an earlier build) is
+     * refused by the replay rather than uploaded with an invented attribution (`BR-042`, `BR-014`).
+     */
+    val visitId: String?,
     /** The app-private path the captured bytes were written to. Never a blob in the local database. */
     val localPath: String,
     /**

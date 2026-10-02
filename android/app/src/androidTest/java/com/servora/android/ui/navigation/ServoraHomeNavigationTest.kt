@@ -39,6 +39,12 @@ import com.servora.android.data.home.ManagerHomeRepository
 import com.servora.android.data.home.ManagerHomeResult
 import com.servora.android.data.home.TechnicianHomeRepository
 import com.servora.android.data.home.TechnicianHomeResult
+import com.servora.android.data.schedule.AdHocReportCustomerOptionsResult
+import com.servora.android.data.schedule.AdHocReportJobOptionsResult
+import com.servora.android.data.schedule.AdHocReportPropertyOptionsResult
+import com.servora.android.data.schedule.AdHocWorkReportDraft
+import com.servora.android.data.schedule.AdHocWorkReportResult
+import com.servora.android.data.schedule.AdHocWorkReportsRepository
 import com.servora.android.data.schedule.ScheduleRepository
 import com.servora.android.data.schedule.ScheduleResult
 import com.servora.android.data.schedule.VisitRequestReviewResult
@@ -69,9 +75,15 @@ import com.servora.android.domain.model.CustomerProperty
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.FollowUpVisitRequest
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.ManagerHome
 import com.servora.android.domain.model.ManagerHomeTodaySummary
+import com.servora.android.domain.model.Schedule
+import com.servora.android.domain.model.ScheduleDay
+import com.servora.android.domain.model.ScheduleScope
+import com.servora.android.domain.model.ScheduleScopeKind
+import com.servora.android.domain.model.ScheduleVisit
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.ui.components.ServoraTopBarBackTag
 import com.servora.android.ui.components.ServoraTopBarSubtitleTag
@@ -113,11 +125,14 @@ import com.servora.android.ui.home.ManagerHomeViewModel
 import com.servora.android.ui.home.TechnicianHomeContentTag
 import com.servora.android.ui.home.TechnicianHomeNextVisitTag
 import com.servora.android.ui.home.TechnicianHomeViewModel
+import com.servora.android.ui.home.technicianHomeOpenJobTag
 import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.data.jobs.QueuedVisitFieldAction
 import com.servora.android.data.jobs.QueuedVisitNote
+import com.servora.android.data.jobs.VisitCompletion
 import com.servora.android.data.jobs.VisitNote
 import com.servora.android.data.jobs.VisitStatusChange
+import com.servora.android.data.jobs.VisitRequestSubmitResult
 import com.servora.android.data.jobs.inertJobAudioEvidenceCache
 import com.servora.android.data.jobs.inertJobAudioPlayer
 import com.servora.android.data.jobs.inertJobAudioSession
@@ -126,12 +141,15 @@ import com.servora.android.data.jobs.inertJobPhotoPickedItems
 import com.servora.android.data.jobs.inertJobPhotoSession
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.schedule.ScheduleViewModel
+import com.servora.android.ui.schedule.TechnicianScheduleContentTag
 import com.servora.android.ui.schedule.TechnicianScheduleFailureTag
 import com.servora.android.ui.schedule.TechnicianScheduleViewModel
+import com.servora.android.ui.schedule.technicianScheduleVisitTag
 import com.servora.android.ui.theme.ServoraTheme
 import java.time.Clock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -150,6 +168,14 @@ class ServoraHomeNavigationTest {
     @get:Rule val composeTestRule = createAndroidComposeRule<ComponentActivity>()
 
     private lateinit var viewModel: CustomersViewModel
+
+    /** The field home's reads, so a test can tell a re-read from the answer already held. */
+    private lateinit var technicianHomeRepository: FakeTechnicianHomeRepository
+
+    /** The schedule's reads, for the same reason, on whichever audience opened it. */
+    private lateinit var scheduleRepository: FakeScheduleRepository
+
+    private lateinit var technicianHomeViewModel: TechnicianHomeViewModel
 
     @Test
     fun openingACustomerPushesTheViewCustomerScreen() {
@@ -404,6 +430,57 @@ class ServoraHomeNavigationTest {
         composeTestRule.onNodeWithTag(TechnicianScheduleFailureTag).assertIsDisplayed()
     }
 
+    @Test
+    fun returningFromAJobReadsTheFieldDayAgain() {
+        render(canOpenCustomers = false, canViewAssignedWork = true)
+        val readsBefore = technicianHomeRepository.reads
+
+        // The technician opens the Job the day sent them to and comes back to the day (`BR-012`).
+        composeTestRule.onNodeWithTag(technicianHomeOpenJobTag(FIELD_JOB_ID)).performClick()
+        composeTestRule.waitForIdle()
+        pressSystemBack()
+
+        // The day is read again on return, so the Visit is stated with the status the field left it in
+        // rather than with the one the screen was left showing (`BR-001`, `BR-074`).
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT) {
+            technicianHomeRepository.reads == readsBefore + 1
+        }
+        assertEquals(
+            VisitStatus.EN_ROUTE,
+            technicianHomeViewModel.uiState.value.home?.nextVisit?.visitStatus,
+        )
+    }
+
+    @Test
+    fun returningFromAJobReadsTheScheduleAgain() {
+        render(
+            canOpenCustomers = false,
+            canViewAssignedWork = true,
+            scheduleDay = technicianScheduleDay(),
+        )
+
+        // The technician opens My Schedule, which holds one Visit, and then the Job it belongs to
+        // (`BR-009`, `BR-012`).
+        composeTestRule.onNodeWithText(string(R.string.nav_schedule)).performClick()
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT) {
+            scheduleRepository.reads == 1
+        }
+        composeTestRule.onNodeWithTag(TechnicianScheduleContentTag).assertIsDisplayed()
+        val readsBefore = scheduleRepository.reads
+
+        composeTestRule
+            .onNodeWithTag(technicianScheduleVisitTag(SCHEDULE_VISIT_ID))
+            .performClick()
+        composeTestRule.waitForIdle()
+        pressSystemBack()
+
+        // The schedule is read again on return, so the destination states a field attempt as the backend
+        // now holds it rather than as the screen was left showing it (`BR-001`, `BR-072`, `BR-074`).
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT) {
+            scheduleRepository.reads == readsBefore + 1
+        }
+    }
+
     private fun render(
         jobCount: Int = 1,
         contacts: List<CustomerContact> = emptyList(),
@@ -416,6 +493,8 @@ class ServoraHomeNavigationTest {
         canRemoveContact: Boolean = true,
         canOpenCustomers: Boolean = true,
         canViewAssignedWork: Boolean = false,
+        /** The day the schedule answers, or `null` for a read that reports failure (`BR-042`). */
+        scheduleDay: Schedule? = null,
     ) {
         val repository = FakeCustomersRepository(jobCount = jobCount, contacts = contacts)
         viewModel = CustomersViewModel(repository)
@@ -438,11 +517,16 @@ class ServoraHomeNavigationTest {
         val managerHomeViewModel = ManagerHomeViewModel(FakeManagerHomeRepository())
         // The technician home is wired by the shell too; the fake answers the caller's own day,
         // because a session holding only the field capability lands on it (`ADR-019` D6).
-        val technicianHomeViewModel =
-            TechnicianHomeViewModel(FakeTechnicianHomeRepository())
-        // The schedule is wired by the shell too. These tests cover navigation and never open it,
-        // so the fake reports that the read failed rather than answering a day.
-        val scheduleViewModel = ScheduleViewModel(FakeScheduleRepository(), FakeVisitRequestsRepository())
+        technicianHomeRepository = FakeTechnicianHomeRepository()
+        technicianHomeViewModel = TechnicianHomeViewModel(technicianHomeRepository)
+        // The schedule is wired by the shell too. These tests cover navigation, so unless a test needs a
+        // day it reports that the read failed rather than answering one.
+        scheduleRepository = FakeScheduleRepository(scheduleDay)
+        val scheduleViewModel = ScheduleViewModel(
+            scheduleRepository,
+            FakeVisitRequestsRepository(),
+            FakeJobDetailsRepository(),
+        )
         // The Job Details destination is wired by the shell too; the fake answers "not found",
         // because these tests cover navigation rather than Job behaviour.
         val jobDetailsViewModel = JobDetailsViewModel(
@@ -465,7 +549,11 @@ class ServoraHomeNavigationTest {
         // Hoisted out of the composable like the other destinations: a ViewModel is constructed by its
         // owner, not by a composable's body.
         val technicianScheduleViewModel =
-            TechnicianScheduleViewModel(FakeScheduleRepository())
+            TechnicianScheduleViewModel(
+                scheduleRepository,
+                FakeVisitRequestsRepository(),
+                FakeAdHocWorkReportsRepository(),
+            )
         composeTestRule.setContent {
             ServoraTheme {
                 ServoraHomeScreen(
@@ -846,6 +934,8 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
     override suspend fun changeVisitStatus(action: VisitStatusChange): JobActionResult =
         unreachable()
 
+    override suspend fun completeVisit(action: VisitCompletion): JobActionResult = unreachable()
+
     override suspend fun queuedVisitAction(jobId: String): QueuedVisitFieldAction? = null
 
     override suspend fun queuedVisitNotes(jobId: String): List<QueuedVisitNote> = emptyList()
@@ -857,6 +947,8 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
         unreachable()
 
     override val appliedOperations: Flow<Unit> = emptyFlow()
+
+    override val refusedOperations: Flow<Unit> = emptyFlow()
 
     override suspend fun removeJobPhoto(
         jobId: String,
@@ -900,6 +992,37 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
     override suspend fun loadAssignableTechnicians(): AssignableTechniciansResult =
         unreachable()
 
+    // The navigation tests never schedule a Visit or approve a request: the requests lane is opened by
+    // its own tests.
+    override suspend fun createVisit(
+        jobId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        confirmConflicts: Boolean,
+    ): JobActionResult = unreachable()
+
+    override suspend fun approveVisitRequest(
+        jobId: String,
+        requestId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        expectedStatus: FollowUpVisitRequestStatus,
+        expectedVersion: Int,
+        confirmConflicts: Boolean,
+    ): JobActionResult = unreachable()
+
+    /** The navigation tests never propose a follow-up Visit. */
+    override suspend fun requestFollowUpVisit(
+        jobId: String,
+        sourceVisitId: String,
+        proposedStart: Instant,
+        proposedEnd: Instant,
+        reason: String,
+        sameTechnicianPreferred: Boolean,
+    ): VisitRequestSubmitResult = unreachable()
+
     private fun unreachable(): Nothing =
         throw AssertionError("the navigation tests do not act on a Job")
 }
@@ -910,13 +1033,30 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
  * These tests cover navigation and never open the Schedule destination, so nothing here needs a day
  * to render.
  */
-private class FakeScheduleRepository : ScheduleRepository {
+/**
+ * A [ScheduleRepository] that answers the day it was given, or reports that the read failed.
+ *
+ * It counts its reads, because the shell's contract is that a destination left and re-entered is read
+ * again: only a re-read can state a Visit in the status the field left it in (`BR-001`, `BR-074`).
+ */
+private class FakeScheduleRepository(
+    private val day: Schedule? = null,
+) : ScheduleRepository {
+
+    /** How many times a day has been read. */
+    var reads = 0
+        private set
 
     override suspend fun loadSchedule(
         localDate: String,
         timeZone: String,
         membershipIds: List<String>,
-    ): ScheduleResult = ScheduleResult.Failure(CustomersFailureReason.NETWORK)
+    ): ScheduleResult {
+        reads += 1
+        return day
+            ?.let { schedule -> ScheduleResult.Success(schedule) }
+            ?: ScheduleResult.Failure(CustomersFailureReason.NETWORK)
+    }
 }
 
 private class FakeVisitRequestsRepository : VisitRequestsRepository {
@@ -925,33 +1065,71 @@ private class FakeVisitRequestsRepository : VisitRequestsRepository {
 
     override suspend fun askForClarification(
         request: FollowUpVisitRequest,
+        note: String,
     ): VisitRequestReviewResult =
         VisitRequestReviewResult.Success(request)
 
-    override suspend fun reject(request: FollowUpVisitRequest): VisitRequestReviewResult =
+    override suspend fun reject(
+        request: FollowUpVisitRequest,
+        note: String,
+    ): VisitRequestReviewResult =
         VisitRequestReviewResult.Success(request)
+
+    /**
+     * These tests cover navigation, so no answer is sent; the fake answers with the request it was
+     * given rather than pretending an answer was recorded (`BR-001`).
+     */
+    override suspend fun reply(
+        request: FollowUpVisitRequest,
+        body: String,
+    ): VisitRequestReviewResult =
+        VisitRequestReviewResult.Success(request)
+}
+
+/** An [AdHocWorkReportsRepository] that answers empty options and a successful submit. */
+private class FakeAdHocWorkReportsRepository : AdHocWorkReportsRepository {
+    override suspend fun searchCustomers(query: String): AdHocReportCustomerOptionsResult =
+        AdHocReportCustomerOptionsResult.Success(emptyList())
+
+    override suspend fun listProperties(customerId: String): AdHocReportPropertyOptionsResult =
+        AdHocReportPropertyOptionsResult.Success(emptyList())
+
+    override suspend fun listJobs(customerId: String): AdHocReportJobOptionsResult =
+        AdHocReportJobOptionsResult.Success(emptyList())
+
+    override suspend fun submit(report: AdHocWorkReportDraft): AdHocWorkReportResult =
+        AdHocWorkReportResult.Success
 }
 
 /**
  * A [TechnicianHomeRepository] that answers the caller's own day with one Visit to do next.
  *
- * These tests cover navigation, so the day is the smallest one that renders the field home.
+ * These tests cover navigation, so the day is the smallest one that renders the field home. The Visit's
+ * status is the one the second read reports and later, so a test can tell a re-read of the day from the
+ * answer already held: only a re-read can state the Visit's new status (`BR-001`, `BR-074`).
  */
 private class FakeTechnicianHomeRepository : TechnicianHomeRepository {
 
-    override suspend fun loadTechnicianHome(timeZone: String): TechnicianHomeResult =
-        TechnicianHomeResult.Success(
+    /** How many times the day has been read. */
+    var reads = 0
+        private set
+
+    override suspend fun loadTechnicianHome(timeZone: String): TechnicianHomeResult {
+        reads += 1
+        return TechnicianHomeResult.Success(
             TechnicianHome(
                 displayName = "Mike Johnson",
                 nextVisit = TechnicianHomeVisit(
                     visitId = "visit-1",
-                    visitStatus = VisitStatus.SCHEDULED,
+                    // The first answer is the Visit as the technician found it; every later read is the
+                    // Visit as the field left it.
+                    visitStatus = if (reads == 1) VisitStatus.SCHEDULED else VisitStatus.EN_ROUTE,
                     scheduledStart = "2026-09-17T13:00:00.000Z",
                     scheduledEnd = "2026-09-17T14:00:00.000Z",
-                    jobId = "job-1",
+                    jobId = FIELD_JOB_ID,
                     jobNumber = 1042,
                     jobTitle = "Furnace repair",
-                    jobStatus = JobStatus.SCHEDULED,
+                    jobStatus = JobStatus.ACTIVE,
                     customerId = "customer-1",
                     customerName = "ABC Property Management",
                     address = null,
@@ -965,4 +1143,46 @@ private class FakeTechnicianHomeRepository : TechnicianHomeRepository {
                 attentionTotal = 0,
             ),
         )
+    }
 }
+
+/** The Job the field home's next Visit belongs to, which the home opens. */
+private const val FIELD_JOB_ID = "job-1"
+
+/** The Visit the field schedule holds, which the schedule opens onto its Job. */
+private const val SCHEDULE_VISIT_ID = "visit-schedule-1"
+
+/**
+ * The technician's own day with the one Visit the schedule re-entry test opens (`BR-009`, `BR-072`).
+ *
+ * The day is the smallest one that renders a schedule row: the test is about the destination being read
+ * again, not about what a day holds, so the times are fixed and the crew is empty (`BR-068`).
+ */
+private fun technicianScheduleDay(): Schedule = Schedule(
+    day = ScheduleDay(localDate = "2026-09-17", timeZone = "America/Toronto"),
+    scope = ScheduleScope(
+        kind = ScheduleScopeKind.SELF,
+        membershipId = "membership-1",
+    ),
+    technicians = emptyList(),
+    visits = listOf(
+        ScheduleVisit(
+            visitId = SCHEDULE_VISIT_ID,
+            visitStatus = VisitStatus.SCHEDULED,
+            scheduledStart = "2026-09-17T13:00:00.000Z",
+            scheduledEnd = "2026-09-17T14:00:00.000Z",
+            jobId = FIELD_JOB_ID,
+            jobNumber = 1042,
+            jobTitle = "Furnace repair",
+            customerId = "customer-1",
+            customerName = "ABC Property Management",
+            address = null,
+            technicians = emptyList(),
+            isOverdue = false,
+        ),
+    ),
+    unassigned = emptyList(),
+    unassignedTotal = 0,
+    hasUnassignedLane = false,
+)
+

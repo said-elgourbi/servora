@@ -50,18 +50,23 @@ function audioMp4(seconds = 18, handlers: readonly string[] = ['soun']): Buffer 
 
 const OPERATION_ID = '6f1a8d1e-4b26-4f8f-9a34-2b7c9e0d5a11';
 
+/** The Visit the evidence belongs to (`BR-047`). */
+const VISIT_ID = '4c9e2b77-1d4a-42f0-8c31-9a0f5d2e6b03';
+
 describe('job audio note requests', () => {
   describe('fields', () => {
     it('accepts a known phase, an optional note and the device instant', () => {
       expect(
         parseCreateJobAudioNoteDto({
           clientOperationId: OPERATION_ID,
+          visitId: VISIT_ID,
           phase: 'AFTER_WORK',
           note: '  Customer agreed to the return visit  ',
           capturedAt: '2026-09-16T09:12:00.000Z',
         }),
       ).toEqual({
         clientOperationId: OPERATION_ID,
+        visitId: VISIT_ID,
         phase: 'AFTER_WORK',
         note: 'Customer agreed to the return visit',
         capturedAt: new Date('2026-09-16T09:12:00.000Z'),
@@ -71,6 +76,7 @@ describe('job audio note requests', () => {
     it('treats a blank note as no note, because the recording is the evidence', () => {
       const dto = parseCreateJobAudioNoteDto({
         clientOperationId: OPERATION_ID,
+        visitId: VISIT_ID,
         phase: 'DURING_WORK',
         note: '   ',
       });
@@ -83,6 +89,7 @@ describe('job audio note requests', () => {
       expect(() =>
         parseCreateJobAudioNoteDto({
           clientOperationId: OPERATION_ID,
+          visitId: VISIT_ID,
           phase: 'BEFORE_AFTER',
         }),
       ).toThrow(DomainValidationError);
@@ -99,6 +106,22 @@ describe('job audio note requests', () => {
         parseCreateJobAudioNoteDto({
           phase: 'DURING_WORK',
           clientOperationId: 'not-a-uuid',
+          visitId: VISIT_ID,
+        }),
+      ).toThrow(DomainValidationError);
+    });
+
+    it('requires the Visit the recording belongs to, because evidence is field work', () => {
+      // A recording is made during a Visit (`BR-047`, `BR-080`), so a request that names none — or one
+      // that is not a Visit id at all — is refused rather than stored with no attribution (`BR-042`).
+      expect(() =>
+        parseCreateJobAudioNoteDto({ clientOperationId: OPERATION_ID, phase: 'DURING_WORK' }),
+      ).toThrow(DomainValidationError);
+      expect(() =>
+        parseCreateJobAudioNoteDto({
+          clientOperationId: OPERATION_ID,
+          visitId: 'not-a-uuid',
+          phase: 'DURING_WORK',
         }),
       ).toThrow(DomainValidationError);
     });
@@ -107,6 +130,7 @@ describe('job audio note requests', () => {
       expect(() =>
         parseCreateJobAudioNoteDto({
           clientOperationId: OPERATION_ID,
+          visitId: VISIT_ID,
           phase: 'AFTER_WORK',
           note: 'x'.repeat(MAX_JOB_AUDIO_NOTE_LENGTH + 1),
         }),

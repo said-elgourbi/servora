@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  compareAttentionItems,
   compareChronologically,
+  selectAttentionVisits,
   selectNextVisit,
   toTechnicianHomeDto,
 } from './technician-home.dto.js';
-import type { TechnicianHomeVisit } from './technician-home.dto.js';
+import type {
+  TechnicianAttentionItem,
+  TechnicianHomeVisit,
+} from './technician-home.dto.js';
 
 const NOW = new Date('2026-09-14T15:00:00.000Z');
 
@@ -19,7 +24,7 @@ function visit(
     jobId: 'job-1',
     jobNumber: 1,
     jobTitle: 'Furnace repair',
-    jobStatus: 'SCHEDULED',
+    jobStatus: 'ACTIVE',
     customerId: 'customer-1',
     customerName: 'ABC Property Management',
     address: null,
@@ -72,6 +77,82 @@ describe('compareChronologically', () => {
     expect([underWay, overdue].sort(compareChronologically)).toEqual([
       overdue,
       underWay,
+    ]);
+  });
+});
+
+describe('selectAttentionVisits', () => {
+  it('does not repeat the Visit the read already offers as the next one', () => {
+    const next = visit({ visitId: 'next', overdue: true });
+
+    expect(selectAttentionVisits([next], next, [])).toEqual([]);
+  });
+
+  it("does not repeat a Visit today's own list already states", () => {
+    const today = visit({ visitId: 'today', overdue: true });
+
+    expect(selectAttentionVisits([today], null, [today])).toEqual([]);
+  });
+
+  it('states late work from an earlier day the screen says nowhere else', () => {
+    const earlierDay = visit({
+      visitId: 'earlier-day',
+      overdue: true,
+      scheduledStart: new Date('2026-09-13T09:00:00.000Z'),
+      scheduledEnd: new Date('2026-09-13T10:00:00.000Z'),
+    });
+    const next = visit({ visitId: 'next' });
+
+    // The attempt is neither what the technician does next nor part of today, so the section is the
+    // only place this screen names it (`BR-012`).
+    expect(selectAttentionVisits([earlierDay], next, [next])).toEqual([
+      earlierDay,
+    ]);
+  });
+});
+
+describe('compareAttentionItems', () => {
+  function item(
+    overrides: Partial<TechnicianAttentionItem> = {},
+  ): TechnicianAttentionItem {
+    return {
+      kind: 'VISIT_OVERDUE',
+      visitId: 'visit-1',
+      jobId: 'job-1',
+      jobNumber: 1,
+      jobTitle: 'Furnace repair',
+      jobStatus: 'ACTIVE',
+      customerId: 'customer-1',
+      customerName: 'ABC Property Management',
+      scheduledStart: new Date('2026-09-14T09:00:00.000Z'),
+      scheduledEnd: new Date('2026-09-14T10:00:00.000Z'),
+      ...overrides,
+    };
+  }
+
+  it('puts the attempt that has been overdue longest first', () => {
+    const recentlyDue = item({
+      visitId: 'recently-due',
+      scheduledStart: new Date('2026-09-14T13:00:00.000Z'),
+    });
+    const longOverdue = item({
+      visitId: 'long-overdue',
+      scheduledStart: new Date('2026-09-13T09:00:00.000Z'),
+    });
+
+    expect([recentlyDue, longOverdue].sort(compareAttentionItems)).toEqual([
+      longOverdue,
+      recentlyDue,
+    ]);
+  });
+
+  it('breaks a tie between two attempts due at the same instant by Job number', () => {
+    const laterJob = item({ visitId: 'later-job', jobNumber: 1049 });
+    const earlierJob = item({ visitId: 'earlier-job', jobNumber: 1042 });
+
+    expect([laterJob, earlierJob].sort(compareAttentionItems)).toEqual([
+      earlierJob,
+      laterJob,
     ]);
   });
 });
@@ -173,7 +254,7 @@ describe('toTechnicianHomeDto', () => {
             jobId: 'job-1',
             jobNumber: 1042,
             jobTitle: 'Furnace repair',
-            jobStatus: 'SCHEDULED',
+            jobStatus: 'ACTIVE',
             customerId: 'customer-1',
             customerName: 'ABC Property Management',
             scheduledStart: new Date('2026-09-14T09:00:00.000Z'),

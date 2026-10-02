@@ -72,9 +72,13 @@ internal fun JobPhotoReviewSheet(
         sheetState = sheetState,
         modifier = Modifier.testTag(JobPhotoReviewSheetTag),
     ) {
+        // The body scrolls and the two decisions stay on screen: with the note focused the sheet is
+        // shorter than its content, so a decision *inside* the scrolling region would scroll away with
+        // it (`docs/design/android-design-system.md`).
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .weight(1f, fill = false)
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
@@ -124,31 +128,35 @@ internal fun JobPhotoReviewSheet(
                     .testTag(JobPhotoReviewNoteTag),
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            TextButton(
+                onClick = onDiscard,
+                enabled = !isBusy,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(EvidencePhaseButtonHeight)
+                    .testTag(JobPhotoReviewDiscardTag),
             ) {
-                TextButton(
-                    onClick = onDiscard,
-                    enabled = !isBusy,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(EvidencePhaseButtonHeight)
-                        .testTag(JobPhotoReviewDiscardTag),
-                ) {
-                    Text(stringResource(R.string.job_photo_review_discard))
-                }
-                Button(
-                    onClick = { onConfirm(phase, note.trim().takeIf { it.isNotEmpty() }) },
-                    enabled = !isBusy,
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(EvidencePhaseButtonHeight)
-                        .testTag(JobPhotoReviewConfirmTag),
-                ) {
-                    Text(stringResource(R.string.job_photo_review_confirm))
-                }
+                Text(stringResource(R.string.job_photo_review_discard))
+            }
+            Button(
+                onClick = { onConfirm(phase, note.trim().takeIf { it.isNotEmpty() }) },
+                enabled = !isBusy,
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(EvidencePhaseButtonHeight)
+                    .testTag(JobPhotoReviewConfirmTag),
+            ) {
+                Text(stringResource(R.string.job_photo_review_confirm))
             }
         }
     }

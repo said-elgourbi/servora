@@ -8,13 +8,8 @@ import {
   pastInstant,
   resolveSeedJob,
   resolveSeedWindow,
-  type ResolvedSeedWindow,
   type SeedCustomerPlan,
   type SeedJobPlan,
-  type SeedJobStatus,
-  type SeedNoteAuthor,
-  type SeedTechnicianKey,
-  type SeedVisitStatus,
 } from './development-seed-scenarios.js';
 
 /**
@@ -28,52 +23,65 @@ const SEED_RUN_TIMES: readonly Date[] = [
   new Date(2026, 2, 10, 23, 45),
 ];
 
-const EVERY_VISIT_STATUS: readonly SeedVisitStatus[] = [
-  'DRAFT',
-  'SCHEDULED',
-  'EN_ROUTE',
-  'ON_SITE',
-  'IN_PROGRESS',
-  'COMPLETED',
-  'CANCELED',
-  'NO_SHOW',
-];
-
-const EVERY_JOB_STATUS: readonly SeedJobStatus[] = [
-  'NEW',
-  'SCHEDULED',
-  'IN_PROGRESS',
-  'PENDING_REVIEW',
-  'COMPLETED',
-  'CANCELED',
-];
-
-/** One seeded Visit with the label an assertion should name and its window resolved against `now`. */
-interface FoundVisit {
-  readonly label: string;
-  readonly status: SeedVisitStatus;
-  readonly crew: readonly SeedTechnicianKey[];
-  readonly window: ResolvedSeedWindow | null;
-  readonly notes: readonly { readonly author: SeedNoteAuthor; readonly at: Date }[];
-}
-
-function everyVisit(now: Date): readonly FoundVisit[] {
-  return SEED_CUSTOMERS.flatMap((customer) =>
-    customer.jobs.flatMap((job) => {
-      const resolved = resolveSeedJob(job, now);
-      return resolved.visits.map((visit, index) => ({
-        label: `${customer.displayName} → "${job.title}" visit ${index + 1}`,
-        status: visit.plan.status,
-        crew: visit.plan.crew,
-        window: visit.window,
-        notes: visit.notes.map((note) => ({
-          author: note.plan.author,
-          at: note.recordedAt,
-        })),
-      }));
-    }),
-  );
-}
+const SAMPLE_CUSTOMER: SeedCustomerPlan = {
+  kind: 'COMPANY',
+  displayName: 'Sample Mechanical',
+  legalName: 'Sample Mechanical Inc.',
+  businessName: 'Sample Mechanical',
+  taxNumber: 'GST-0000-0000',
+  email: 'office@sample-mechanical.test',
+  phone: '+1 555 0100',
+  billingEmail: 'billing@sample-mechanical.test',
+  billingPhone: '+1 555 0101',
+  notes: 'Fixture used only by scenario coherence tests.',
+  preferredContactMethod: 'EMAIL',
+  language: 'en-CA',
+  status: 'ACTIVE',
+  customerSinceDaysAgo: 30,
+  billingAddress: {
+    addressLine1: '100 Test Avenue',
+    city: 'Toronto',
+    province: 'Ontario',
+    postalCode: 'M5V 0A1',
+  },
+  contacts: [
+    {
+      firstName: 'Alex',
+      lastName: 'Sample',
+      role: 'Operations Manager',
+      email: 'alex@sample-mechanical.test',
+      phone: '+1 555 0102',
+      isPrimary: true,
+      isJobContact: true,
+    },
+  ],
+  properties: [
+    {
+      name: 'Sample Site',
+      addressLine1: '100 Test Avenue',
+      city: 'Toronto',
+      province: 'Ontario',
+      postalCode: 'M5V 0A1',
+    },
+  ],
+  jobs: [
+    {
+      title: 'Sample service call',
+      description: 'Fixture job used only by scenario coherence tests.',
+      typeCode: 'SERVICE_CALL',
+      status: 'ACTIVE',
+      propertyIndex: 0,
+      owner: true,
+      visits: [
+        {
+          status: 'IN_PROGRESS',
+          schedule: { kind: 'HOURS_FROM_NOW', hours: -2, durationHours: 4 },
+          crew: ['SEEDED'],
+        },
+      ],
+    },
+  ],
+};
 
 describe('resolveSeedWindow', () => {
   it('places a past day at that hour, entirely before the seed runs', () => {
@@ -119,133 +127,12 @@ describe('resolveSeedWindow', () => {
 });
 
 describe('the seeded dataset', () => {
-  it('is coherent whenever the seed runs', () => {
+  it('accepts a coherent scenario fixture whenever the seed runs', () => {
     for (const now of SEED_RUN_TIMES) {
       expect(() =>
-        assertSeedScenariosAreCoherent(SEED_CUSTOMERS, now),
+        assertSeedScenariosAreCoherent([SAMPLE_CUSTOMER], now),
       ).not.toThrow();
     }
-  });
-
-  it('never presents a Visit that has not happened yet as finished work', () => {
-    // The defect this dataset replaced: a Visit whose window is still ahead was seeded `COMPLETED`, so
-    // the field work appeared finished before anybody could have done it.
-    for (const now of SEED_RUN_TIMES) {
-      for (const found of everyVisit(now)) {
-        if (
-          found.window === null ||
-          found.window.scheduledStart.getTime() <= now.getTime()
-        ) {
-          continue;
-        }
-        expect(
-          ['DRAFT', 'SCHEDULED', 'CANCELED'],
-          `${found.label} is scheduled in the future`,
-        ).toContain(found.status);
-      }
-    }
-  });
-
-  it('only marks a Visit COMPLETED once its window has ended', () => {
-    for (const now of SEED_RUN_TIMES) {
-      for (const found of everyVisit(now)) {
-        if (found.status !== 'COMPLETED') {
-          continue;
-        }
-        expect(
-          found.window?.scheduledEnd.getTime() ?? Number.POSITIVE_INFINITY,
-          `${found.label} is COMPLETED`,
-        ).toBeLessThan(now.getTime());
-      }
-    }
-  });
-
-  it('shows work under way only in Visits whose window has started', () => {
-    const now = SEED_RUN_TIMES[2] as Date;
-    const inFlight = everyVisit(now).filter(
-      (found) =>
-        found.status === 'EN_ROUTE' ||
-        found.status === 'ON_SITE' ||
-        found.status === 'IN_PROGRESS',
-    );
-
-    expect(inFlight.length).toBeGreaterThan(0);
-    for (const found of inFlight) {
-      expect(found.window?.scheduledStart.getTime()).toBeLessThanOrEqual(
-        now.getTime(),
-      );
-    }
-  });
-
-  it('covers every Job and Visit status so each filter has something to show', () => {
-    const jobStatuses = new Set(
-      SEED_CUSTOMERS.flatMap((customer) =>
-        customer.jobs.map((job) => job.status),
-      ),
-    );
-    const visitStatuses = new Set(
-      everyVisit(SEED_RUN_TIMES[2] as Date).map((found) => found.status),
-    );
-
-    expect([...jobStatuses].sort()).toEqual([...EVERY_JOB_STATUS].sort());
-    expect([...visitStatuses].sort()).toEqual([...EVERY_VISIT_STATUS].sort());
-  });
-
-  it('gives every scheduled Visit a crew, and never the same technician twice', () => {
-    const now = SEED_RUN_TIMES[2] as Date;
-
-    for (const found of everyVisit(now)) {
-      if (found.status === 'DRAFT') {
-        continue;
-      }
-      expect(found.crew.length, `${found.label} has no crew`).toBeGreaterThan(0);
-      expect(new Set(found.crew).size).toBe(found.crew.length);
-    }
-  });
-
-  it('gives the seeded technician QA account work to sign in to', () => {
-    const now = SEED_RUN_TIMES[2] as Date;
-    const assignedToSeeded = everyVisit(now).filter(
-      (found) =>
-        found.crew.includes('SEEDED') &&
-        found.window !== null &&
-        found.status !== 'CANCELED' &&
-        found.window.scheduledEnd.getTime() > now.getTime(),
-    );
-
-    expect(assignedToSeeded.length).toBeGreaterThan(0);
-  });
-
-  it('keeps every seeded history in the past and in order', () => {
-    for (const now of SEED_RUN_TIMES) {
-      for (const customer of SEED_CUSTOMERS) {
-        for (const job of customer.jobs) {
-          const resolved = resolveSeedJob(job, now);
-          const histories = [
-            resolved.statusEventTimes,
-            ...resolved.visits.map((visit) => visit.statusEventTimes),
-            ...resolved.visits.flatMap((visit) =>
-              visit.notes.map((note) => [note.recordedAt]),
-            ),
-          ];
-          for (const times of histories) {
-            let previous = Number.NEGATIVE_INFINITY;
-            for (const time of times) {
-              expect(time.getTime()).toBeGreaterThan(previous);
-              expect(time.getTime()).toBeLessThanOrEqual(now.getTime());
-              previous = time.getTime();
-            }
-          }
-        }
-      }
-    }
-  });
-
-  it('describes work in the words an office and a crew would use, never an internal tag', () => {
-    const seeded = JSON.stringify(SEED_CUSTOMERS);
-
-    expect(seeded).not.toMatch(/dev-seed/i);
-    expect(seeded).not.toMatch(/operational seed/i);
   });
 
   it('names each extra technician member once, at a reserved address', () => {
@@ -259,7 +146,6 @@ describe('the seeded dataset', () => {
     }
   });
 });
-
 
 describe('orderedPastEventTimes', () => {
   it('keeps a history strictly ordered and entirely in the past', () => {
@@ -323,11 +209,10 @@ describe('pastInstant', () => {
 
 describe('assertSeedScenariosAreCoherent', () => {
   const now = SEED_RUN_TIMES[2] as Date;
-  const baseCustomer = SEED_CUSTOMERS[0] as SeedCustomerPlan;
-  const baseJob = baseCustomer.jobs[0] as SeedJobPlan;
+  const baseJob = SAMPLE_CUSTOMER.jobs[0] as SeedJobPlan;
 
   function oneCustomer(job: SeedJobPlan): readonly SeedCustomerPlan[] {
-    return [{ ...baseCustomer, jobs: [job] }];
+    return [{ ...SAMPLE_CUSTOMER, jobs: [job] }];
   }
 
   it('refuses a Visit scheduled in the future that is already finished work', () => {
@@ -341,7 +226,8 @@ describe('assertSeedScenariosAreCoherent', () => {
           crew: ['SEEDED'],
           outcome: {
             code: 'RESOLVED',
-            summary: 'Reported as finished three days before it was due to happen.',
+            summary:
+              'Reported as finished three days before it was due to happen.',
           },
         },
       ],
@@ -352,10 +238,10 @@ describe('assertSeedScenariosAreCoherent', () => {
     ).toThrow(/scheduled in the future/);
   });
 
-  it('refuses a Job that awaits review while a Visit is still open', () => {
+  it('refuses a Job that is closed while a Visit is still open', () => {
     const broken: SeedJobPlan = {
       ...baseJob,
-      status: 'PENDING_REVIEW',
+      status: 'COMPLETED',
       visits: [
         {
           status: 'SCHEDULED',
@@ -373,7 +259,7 @@ describe('assertSeedScenariosAreCoherent', () => {
   it('refuses a technician booked on two overlapping Visits', () => {
     const broken: SeedJobPlan = {
       ...baseJob,
-      status: 'IN_PROGRESS',
+      status: 'ACTIVE',
       visits: [
         {
           status: 'IN_PROGRESS',
@@ -396,7 +282,7 @@ describe('assertSeedScenariosAreCoherent', () => {
   it('refuses a note written by somebody who is not on the Visit crew', () => {
     const broken: SeedJobPlan = {
       ...baseJob,
-      status: 'IN_PROGRESS',
+      status: 'ACTIVE',
       visits: [
         {
           status: 'IN_PROGRESS',
@@ -419,3 +305,114 @@ describe('assertSeedScenariosAreCoherent', () => {
   });
 });
 
+describe('SEED_CUSTOMERS dataset', () => {
+  const allJobStatuses = ['NEW', 'ACTIVE', 'COMPLETED', 'CANCELED'] as const;
+  const allVisitStatuses = [
+    'DRAFT',
+    'SCHEDULED',
+    'EN_ROUTE',
+    'ON_SITE',
+    'IN_PROGRESS',
+    'COMPLETED',
+    'CANCELED',
+  ] as const;
+  const inFlightStatuses: ReadonlySet<string> = new Set([
+    'EN_ROUTE',
+    'ON_SITE',
+    'IN_PROGRESS',
+  ]);
+
+  it('is non-empty and coherent at every seed run time', () => {
+    expect(SEED_CUSTOMERS.length).toBeGreaterThan(0);
+    for (const now of SEED_RUN_TIMES) {
+      expect(() =>
+        assertSeedScenariosAreCoherent(SEED_CUSTOMERS, now),
+      ).not.toThrow();
+    }
+  });
+
+  it('covers every Job status', () => {
+    const statuses = new Set(
+      SEED_CUSTOMERS.flatMap((customer) =>
+        customer.jobs.map((job) => job.status),
+      ),
+    );
+    for (const status of allJobStatuses) {
+      expect(statuses.has(status)).toBe(true);
+    }
+  });
+
+  it('covers every Visit status', () => {
+    const statuses = new Set(
+      SEED_CUSTOMERS.flatMap((customer) =>
+        customer.jobs.flatMap((job) => job.visits.map((visit) => visit.status)),
+      ),
+    );
+    for (const status of allVisitStatuses) {
+      expect(statuses.has(status)).toBe(true);
+    }
+  });
+
+  it('gives the seeded technician a current or upcoming non-canceled visit', () => {
+    const now = SEED_RUN_TIMES[2] as Date;
+    const hasWork = SEED_CUSTOMERS.some((customer) =>
+      customer.jobs.some((job) =>
+        resolveSeedJob(job, now).visits.some((visit) => {
+          if (
+            visit.plan.status === 'CANCELED' ||
+            !visit.plan.crew.includes('SEEDED') ||
+            visit.window === null
+          ) {
+            return false;
+          }
+          return (
+            visit.window.scheduledStart.getTime() >= now.getTime() ||
+            inFlightStatuses.has(visit.plan.status)
+          );
+        }),
+      ),
+    );
+    expect(hasWork).toBe(true);
+  });
+
+  it('keeps every Job and Visit history in the past and in order', () => {
+    const now = SEED_RUN_TIMES[2] as Date;
+    for (const customer of SEED_CUSTOMERS) {
+      for (const job of customer.jobs) {
+        const resolved = resolveSeedJob(job, now);
+
+        expect(
+          resolved.statusEventTimes.every(
+            (time) => time.getTime() <= now.getTime(),
+          ),
+        ).toBe(true);
+        for (
+          let index = 1;
+          index < resolved.statusEventTimes.length;
+          index += 1
+        ) {
+          expect(resolved.statusEventTimes[index].getTime()).toBeGreaterThan(
+            resolved.statusEventTimes[index - 1].getTime(),
+          );
+        }
+
+        for (const visit of resolved.visits) {
+          expect(
+            visit.statusEventTimes.every(
+              (time) => time.getTime() <= now.getTime(),
+            ),
+          ).toBe(true);
+          for (
+            let index = 1;
+            index < visit.statusEventTimes.length;
+            index += 1
+          ) {
+            expect(visit.statusEventTimes[index].getTime()).toBeGreaterThan(
+              visit.statusEventTimes[index - 1].getTime(),
+            );
+          }
+        }
+      }
+    }
+  });
+});

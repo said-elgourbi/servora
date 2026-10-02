@@ -22,7 +22,7 @@ function visit(
     jobId: 'job-1',
     jobNumber: 1,
     jobTitle: 'Furnace repair',
-    jobStatus: 'SCHEDULED',
+    jobStatus: 'ACTIVE',
     customerId: 'customer-1',
     customerName: 'ABC Property Management',
     address: null,
@@ -123,20 +123,18 @@ describe('compareAttentionItems', () => {
     };
   }
 
-  it('puts what has gone wrong before what is waiting and what is unplanned', () => {
+  it('puts what has gone wrong before what still has to be planned', () => {
     const scheduling = item({ kind: 'JOB_NEEDS_SCHEDULING', jobNumber: 1 });
-    const review = item({ kind: 'JOB_PENDING_REVIEW', jobNumber: 2 });
     const overdue = item({
       kind: 'VISIT_OVERDUE',
       jobNumber: 3,
       scheduledStart: new Date('2026-09-14T13:00:00.000Z'),
     });
 
-    const ordered = [scheduling, review, overdue].sort(compareAttentionItems);
+    const ordered = [scheduling, overdue].sort(compareAttentionItems);
 
     expect(ordered.map((row) => row.kind)).toEqual([
       'VISIT_OVERDUE',
-      'JOB_PENDING_REVIEW',
       'JOB_NEEDS_SCHEDULING',
     ]);
   });
@@ -190,7 +188,7 @@ describe('toManagerHomeDto', () => {
           jobId: 'job-1',
           jobNumber: 1042,
           jobTitle: 'Furnace repair',
-          jobStatus: 'SCHEDULED',
+          jobStatus: 'ACTIVE',
           customerId: 'customer-1',
           customerName: 'ABC Property Management',
           visitId: 'visit-1',

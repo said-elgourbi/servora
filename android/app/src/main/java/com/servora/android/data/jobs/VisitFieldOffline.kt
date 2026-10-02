@@ -9,24 +9,45 @@ import java.time.Instant
 import kotlinx.serialization.Serializable
 
 /**
- * One Visit status transition as the technician asked for it (`BR-074`, `BR-075`, `BR-077`).
+ * One Visit working-status transition as the technician asked for it (`BR-074`, `BR-075`).
  *
  * It carries the identity and the provenance of the action rather than only its destination, because
  * a transition that the API could not be reached for is **queued** and replayed later
  * (`BR-014`, `BR-031`): [operationId] is the idempotency key, [capturedAt] is the device instant the
  * technician acted, and [expectedVersion] is the Visit version the screen saw, which `ADR-019` D5
  * decided is the version a queued command keeps — a stale one is refused rather than re-based.
+ *
+ * It carries no outcome, because finishing the Visit is not one of these destinations: `COMPLETED` is
+ * reached through [VisitCompletion], which is the operation that records one (`BR-077`).
  */
 data class VisitStatusChange(
     val jobId: String,
     val visitId: String,
     val status: VisitStatus,
-    /** The outcome recorded with a completion (`BR-077`), absent for any other destination. */
-    val outcome: VisitOutcome? = null,
-    /** The summary `BR-077` requires with the outcome. */
-    val outcomeSummary: String? = null,
     /** True only when the technician accepted the `BR-070` conflicts the API reported. */
     val confirmConflicts: Boolean = false,
+    val operationId: String,
+    val capturedAt: Instant,
+    val expectedVersion: Int,
+)
+
+/**
+ * One Visit completion as the technician asked for it (`BR-077`, `BR-078`).
+ *
+ * It is the completion's own action rather than a destination of [VisitStatusChange], because a
+ * completion is an explicit business operation with its own requirements: the API records the outcome
+ * `BR-077` requires with it, on its own route, and asks for the outcome capability of every caller
+ * (`BR-009`, `BR-093`). Everything else about it is the same as a working-state transition — the
+ * idempotency key, the device instant and the version the technician saw — so a completion the API
+ * could not be reached for is queued and replayed exactly as a transition is (`ADR-019` D5).
+ */
+data class VisitCompletion(
+    val jobId: String,
+    val visitId: String,
+    /** The outcome `BR-077` requires with a completion. */
+    val outcome: VisitOutcome,
+    /** The summary `BR-077` requires with the outcome; the reason when the Visit could not be completed. */
+    val outcomeSummary: String,
     val operationId: String,
     val capturedAt: Instant,
     val expectedVersion: Int,
@@ -47,13 +68,18 @@ data class VisitNote(
  * The field operations this feature queues
  * (`docs/architecture/offline-first-architecture.md` §4).
  *
- * One code for the Visit's status transition, because the API has one route for it: a completion
- * records the outcome `BR-077` requires in the same request, so separating the transition from the
- * outcome would let the two disagree. One code for the note, on its own route — a note is append-only
- * and carries no version, so idempotency alone covers a repeat of it (`ADR-019` D5).
+ * One code for the Visit's field status, because the technician's action is one — the Visit reaches
+ * the state they chose — whether that state is a working status or `COMPLETED`. The API splits the
+ * completion into its own route because the outcome `BR-077` requires has its own requirements and its
+ * own capability, so the replay picks the route from the recorded destination; the row the device
+ * writes is the same shape either way, which is also what lets a row an earlier build queued for a
+ * completion still replay with the meaning it was made with (`BR-014`).
+ *
+ * One code for the note, on its own route — a note is append-only and carries no version, so
+ * idempotency alone covers a repeat of it (`ADR-019` D5).
  */
 object VisitFieldOperationTypes {
-    /** The Visit's field status transition, a completion's outcome included (`BR-074`, `BR-077`). */
+    /** The Visit's field status: a working transition, or the completion that records an outcome. */
     const val CHANGE_STATUS = "visit.status.change"
 
     /** One text update added to a Visit's activity (`BR-013`, `BR-027`). */
@@ -75,7 +101,7 @@ object VisitFieldOperationTypes {
 internal data class VisitFieldOperationPayload(
     val visitId: String,
     val status: String,
-    /** The outcome recorded with a completion (`BR-077`), absent for any other destination. */
+    /** The outcome a completion records (`BR-077`), absent for a working-status destination. */
     val outcomeCode: String? = null,
     /** The summary `BR-077` requires with the outcome. */
     val outcomeSummary: String? = null,

@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.theme.stateColors
@@ -132,13 +133,12 @@ private fun jobStatusColors(status: JobStatus): StatusChipColors {
         JobStatus.CANCELED ->
             StatusChipColors(scheme.errorContainer.copy(alpha = 0.4f), scheme.error)
 
-        JobStatus.IN_PROGRESS ->
+        // A Job that has entered execution is the platform's own accent; a Job that has not is quiet,
+        // because nothing has started yet (`BR-058`).
+        JobStatus.ACTIVE ->
             StatusChipColors(scheme.primaryContainer, scheme.onPrimaryContainer)
 
-        JobStatus.PENDING_REVIEW ->
-            StatusChipColors(scheme.tertiaryContainer, scheme.onTertiaryContainer)
-
-        JobStatus.NEW, JobStatus.SCHEDULED ->
+        JobStatus.NEW ->
             StatusChipColors(scheme.secondary, scheme.onSurfaceVariant)
     }
 }
@@ -169,7 +169,7 @@ internal fun VisitStatusPill(
                 MaterialTheme.stateColors.success,
             )
 
-        VisitStatus.CANCELED, VisitStatus.NO_SHOW ->
+        VisitStatus.CANCELED ->
             StatusChipColors(scheme.errorContainer.copy(alpha = 0.4f), scheme.error)
 
         VisitStatus.EN_ROUTE, VisitStatus.ON_SITE, VisitStatus.IN_PROGRESS ->
@@ -181,6 +181,56 @@ internal fun VisitStatusPill(
 
     StatusChip(
         label = stringResource(visitStatusLabel(status)),
+        colors = colors,
+        modifier = modifier,
+        leading = leading,
+        trailing = trailing,
+        onClick = onClick,
+        enabled = enabled,
+        onClickLabel = onClickLabel,
+    )
+}
+
+/**
+ * The follow-up visit request's status chip (`BR-FV-012`).
+ *
+ * A request is neither a Job nor a Visit — it is a proposal awaiting an office decision
+ * (`BR-FV-002`) — so it is a third chip rather than a reuse of either: presenting a request's state in
+ * a Visit's vocabulary would say the two are the same thing (`BR-042`, `BR-047`, `BR-059`). It follows
+ * [VisitStatusPill] exactly, and its colours say only what the office has done with the request:
+ * nothing decided yet is quiet, a question the office asked is the tertiary accent, the answer that
+ * creates a Visit is the platform's success colour, and the answer that refuses one is the error role.
+ */
+@Composable
+internal fun RequestStatusPill(
+    status: FollowUpVisitRequestStatus,
+    modifier: Modifier = Modifier,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+    enabled: Boolean = true,
+    onClickLabel: String? = null,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val colors = when (status) {
+        FollowUpVisitRequestStatus.APPROVED ->
+            StatusChipColors(
+                MaterialTheme.stateColors.successContainer.copy(alpha = 0.28f),
+                MaterialTheme.stateColors.success,
+            )
+
+        FollowUpVisitRequestStatus.REJECTED ->
+            StatusChipColors(scheme.errorContainer.copy(alpha = 0.4f), scheme.error)
+
+        FollowUpVisitRequestStatus.NEEDS_CLARIFICATION ->
+            StatusChipColors(scheme.tertiaryContainer, scheme.onTertiaryContainer)
+
+        FollowUpVisitRequestStatus.PENDING ->
+            StatusChipColors(scheme.secondary, scheme.onSurfaceVariant)
+    }
+
+    StatusChip(
+        label = stringResource(requestStatusLabel(status)),
         colors = colors,
         modifier = modifier,
         leading = leading,
@@ -274,9 +324,7 @@ private fun Modifier.statusControl(onClickLabel: String?): Modifier = semantics 
 internal fun jobStatusLabel(status: JobStatus): Int =
     when (status) {
         JobStatus.NEW -> R.string.customers_job_status_new
-        JobStatus.SCHEDULED -> R.string.customers_job_status_scheduled
-        JobStatus.IN_PROGRESS -> R.string.customers_job_status_in_progress
-        JobStatus.PENDING_REVIEW -> R.string.customers_job_status_pending_review
+        JobStatus.ACTIVE -> R.string.customers_job_status_active
         JobStatus.COMPLETED -> R.string.customers_job_status_completed
         JobStatus.CANCELED -> R.string.customers_job_status_canceled
     }
@@ -296,5 +344,23 @@ internal fun visitStatusLabel(status: VisitStatus): Int =
         VisitStatus.IN_PROGRESS -> R.string.visit_status_in_progress
         VisitStatus.COMPLETED -> R.string.visit_status_completed
         VisitStatus.CANCELED -> R.string.visit_status_canceled
-        VisitStatus.NO_SHOW -> R.string.visit_status_no_show
+    }
+
+/**
+ * The localized label a follow-up visit request's status code is presented with (`BR-028`,
+ * `BR-FV-012`).
+ *
+ * A clarified request is labelled with the office screen's own words for it
+ * (`R.string.schedule_request_needs_clarification`), because it is **one** status: the technician's
+ * record of what the office asked and the office's own card must not describe the same state in two
+ * vocabularies (`BR-041`).
+ */
+internal fun requestStatusLabel(status: FollowUpVisitRequestStatus): Int =
+    when (status) {
+        FollowUpVisitRequestStatus.PENDING -> R.string.request_status_pending
+        FollowUpVisitRequestStatus.NEEDS_CLARIFICATION ->
+            R.string.schedule_request_needs_clarification
+
+        FollowUpVisitRequestStatus.APPROVED -> R.string.request_status_approved
+        FollowUpVisitRequestStatus.REJECTED -> R.string.request_status_rejected
     }

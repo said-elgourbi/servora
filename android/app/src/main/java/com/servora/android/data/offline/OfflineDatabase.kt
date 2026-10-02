@@ -17,7 +17,7 @@ import com.servora.android.data.jobs.PendingJobPhotoEntity
  * with Room's own mechanism and **never** through a destructive fallback: a local schema change must
  * carry pending work forward rather than drop it (§3, `BR-014`). `1.json` under `android/app/schemas`
  * is the baseline `MIGRATION_1_2` is written against, `2.json` is what `MIGRATION_2_3` is written
- * against, and `3.json` is the current export.
+ * against, `3.json` is what `MIGRATION_3_4` is written against, and `4.json` is the current export.
  */
 @Database(
     entities = [
@@ -26,7 +26,7 @@ import com.servora.android.data.jobs.PendingJobPhotoEntity
         PendingJobPhotoEntity::class,
         PendingJobAudioNoteEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 internal abstract class OfflineDatabase : RoomDatabase() {

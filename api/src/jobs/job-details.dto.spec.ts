@@ -1,6 +1,6 @@
 import { toJobDetailsDto, type JobDetails } from './job-details.dto.js';
 import type { CustomerContact } from '../customers/customer.types.js';
-import type { Job, VisitStatus } from './job.types.js';
+import type { Job, VisitOutcomeCode, VisitStatus } from './job.types.js';
 
 const CREATED = new Date('2026-01-01T00:00:00.000Z');
 const ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
@@ -62,7 +62,7 @@ describe('job details projection', () => {
   it('projects the Job with the selected Visit and the technicians assigned to it', () => {
     const details: JobDetails = {
       job: jobRow({
-        status: 'SCHEDULED',
+        status: 'ACTIVE',
         description: 'Annual inspection.',
         propertyId: PROPERTY_ID,
         propertyAddressSnapshot: {
@@ -107,12 +107,12 @@ describe('job details projection', () => {
       jobNumber: 1042,
       title: 'Furnace repair',
       description: 'Annual inspection.',
-      status: 'SCHEDULED',
+      status: 'ACTIVE',
       // The client draws its status actions from the server's own lifecycle table (`BR-058`,
       // `BR-041`): every structurally permitted destination for the Job's status, whether or not the
       // Job qualifies for it right now, and cancellation is absent while its reason catalogue is open
       // (`BR-061`, `BR-062`, `BR-064`).
-      allowedStatusTransitions: ['IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED'],
+      allowedStatusTransitions: ['COMPLETED', 'CANCELED'],
       version: 1,
       customerId: CUSTOMER_ID,
       customerName: 'Martha Reynolds',
@@ -159,7 +159,7 @@ describe('job details projection', () => {
     const visit = (status: VisitStatus) =>
       toJobDetailsDto(
         {
-          job: jobRow({ status: 'SCHEDULED' }),
+          job: jobRow({ status: 'ACTIVE' }),
           customerId: CUSTOMER_ID,
           customerName: 'Martha Reynolds',
           customerContactDetails: {
@@ -183,50 +183,15 @@ describe('job details projection', () => {
         { officeVisitWriter: true, recordsVisitOutcome: true },
       ).selectedVisit?.allowedStatusTransitions;
 
-    // `BR-074` permits free movement between the working statuses in either direction, so every working
-    // destination is offered and a `COMPLETED` Visit is reopenable.
-    expect(visit('DRAFT')).toEqual([
-      'SCHEDULED',
-      'EN_ROUTE',
-      'ON_SITE',
-      'IN_PROGRESS',
-      'COMPLETED',
-    ]);
-    expect(visit('SCHEDULED')).toEqual([
-      'DRAFT',
-      'EN_ROUTE',
-      'ON_SITE',
-      'IN_PROGRESS',
-      'COMPLETED',
-    ]);
-    expect(visit('EN_ROUTE')).toEqual([
-      'DRAFT',
-      'SCHEDULED',
-      'ON_SITE',
-      'IN_PROGRESS',
-      'COMPLETED',
-    ]);
-    expect(visit('ON_SITE')).toEqual([
-      'DRAFT',
-      'SCHEDULED',
-      'EN_ROUTE',
-      'IN_PROGRESS',
-      'COMPLETED',
-    ]);
-    expect(visit('IN_PROGRESS')).toEqual([
-      'DRAFT',
-      'SCHEDULED',
-      'EN_ROUTE',
-      'ON_SITE',
-      'COMPLETED',
-    ]);
-    expect(visit('COMPLETED')).toEqual([
-      'DRAFT',
-      'SCHEDULED',
-      'EN_ROUTE',
-      'ON_SITE',
-      'IN_PROGRESS',
-    ]);
+    // `BR-074` permits free movement between the working statuses in either direction, so every other
+    // working destination is offered. Internal draft and terminal statuses are not ordinary field
+    // destinations.
+    expect(visit('DRAFT')).toEqual([]);
+    expect(visit('SCHEDULED')).toEqual(['EN_ROUTE', 'ON_SITE', 'IN_PROGRESS']);
+    expect(visit('EN_ROUTE')).toEqual(['SCHEDULED', 'ON_SITE', 'IN_PROGRESS']);
+    expect(visit('ON_SITE')).toEqual(['SCHEDULED', 'EN_ROUTE', 'IN_PROGRESS']);
+    expect(visit('IN_PROGRESS')).toEqual(['SCHEDULED', 'EN_ROUTE', 'ON_SITE']);
+    expect(visit('COMPLETED')).toEqual([]);
 
     // A Visit never stands still: the status it already holds is not a destination (`BR-074`).
     for (const status of [
@@ -240,10 +205,8 @@ describe('job details projection', () => {
       expect(visit(status)).not.toContain(status);
     }
 
-    // `CANCELED` and `NO_SHOW` are truly terminal and remain destinations of no field route: `BR-066`
-    // makes them dispatch actions and no capability authorizes one (`BR-042`, `ADR-019` D7).
+    // `CANCELED` is terminal and remains a destination of no field route.
     expect(visit('CANCELED')).toEqual([]);
-    expect(visit('NO_SHOW')).toEqual([]);
     for (const status of [
       'DRAFT',
       'SCHEDULED',
@@ -282,7 +245,7 @@ describe('job details projection', () => {
 
   it('reports an empty crew for a selected Visit nobody is assigned to', () => {
     const dto = toJobDetailsDto({
-      job: jobRow({ status: 'SCHEDULED' }),
+      job: jobRow({ status: 'ACTIVE' }),
       customerId: CUSTOMER_ID,
       customerName: 'Martha Reynolds',
       customerContactDetails: {
@@ -308,7 +271,7 @@ describe('job details projection', () => {
 
   it('answers the field action for the caller, from the same crew the field route checks', () => {
     const details = (): JobDetails => ({
-      job: jobRow({ status: 'SCHEDULED' }),
+      job: jobRow({ status: 'ACTIVE' }),
       customerId: CUSTOMER_ID,
       customerName: 'Martha Reynolds',
       customerContactDetails: {
@@ -332,8 +295,8 @@ describe('job details projection', () => {
 
     // Any technician on the crew may drive the Visit, not only the Lead (`ADR-019` D3).
     expect(
-      toJobDetailsDto(details(), { callerMembershipId: 'member-2' }).selectedVisit
-        ?.fieldActionable,
+      toJobDetailsDto(details(), { callerMembershipId: 'member-2' })
+        .selectedVisit?.fieldActionable,
     ).toBe(true);
 
     // A caller the Job read admits through **another** Visit of the Job may not: the field route
@@ -354,7 +317,6 @@ describe('job details projection', () => {
     }).selectedVisit;
     expect(office?.fieldActionable).toBe(true);
     expect(office?.allowedStatusTransitions).toEqual([
-      'DRAFT',
       'EN_ROUTE',
       'ON_SITE',
       'IN_PROGRESS',
@@ -368,10 +330,18 @@ describe('job details projection', () => {
         officeVisitWriter: true,
         recordsVisitOutcome: true,
       }).selectedVisit?.allowedStatusTransitions,
-    ).toEqual(['DRAFT', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED']);
+    ).toEqual(['EN_ROUTE', 'ON_SITE', 'IN_PROGRESS']);
+    expect(
+      toJobDetailsDto(details(), {
+        officeVisitWriter: true,
+        recordsVisitOutcome: true,
+      }).selectedVisit?.completionAllowed,
+    ).toBe(true);
 
     // A caller the API can place nowhere — the fail-closed answer (`BR-042`).
-    expect(toJobDetailsDto(details()).selectedVisit?.fieldActionable).toBe(false);
+    expect(toJobDetailsDto(details()).selectedVisit?.fieldActionable).toBe(
+      false,
+    );
   });
 
   it('reports no field action for a Job with no Visit at all', () => {
@@ -394,7 +364,6 @@ describe('job details projection', () => {
 
     expect(dto.selectedVisit).toBeNull();
   });
-
 
   it('keeps the known parts of a partly empty address snapshot and reports no address when absent', () => {
     const partlyKnown = toJobDetailsDto({
@@ -441,7 +410,7 @@ describe('job details projection', () => {
 
   it('reports the Customer contact details only when the read was asked for them', () => {
     const details: JobDetails = {
-      job: jobRow({ status: 'SCHEDULED' }),
+      job: jobRow({ status: 'ACTIVE' }),
       customerId: CUSTOMER_ID,
       customerName: 'Martha Reynolds',
       customerContactDetails: {
@@ -581,6 +550,61 @@ describe('job details projection', () => {
     expect(
       Object.keys(dto.customerContactDetails?.contacts[0] ?? {}).sort(),
     ).toEqual(['email', 'firstName', 'isPrimary', 'lastName', 'phone']);
+    expect(dto.readOnlyReason).toBeNull();
+    expect(dto.attention).toEqual([]);
+  });
+
+  it('reports closed Jobs as read-only and does not keep stale active-work attention', () => {
+    const details = (
+      status: 'COMPLETED' | 'CANCELED',
+      outcomeCode: 'NEEDS_FOLLOW_UP' | 'NEEDS_PARTS' | 'UNABLE_TO_COMPLETE',
+    ): JobDetails => ({
+      job: jobRow({ status }),
+      customerId: CUSTOMER_ID,
+      customerName: 'Martha Reynolds',
+      customerContactDetails: {
+        email: null,
+        phone: null,
+        notes: null,
+        contacts: [],
+      },
+      selectedVisit: {
+        visitId: 'visit-1',
+        status: 'COMPLETED',
+        scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+        scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+        version: 3,
+      },
+      technicians: [],
+      visits: [
+        {
+          visitId: 'visit-1',
+          sequence: 1,
+          status: 'COMPLETED',
+          outcomeCode,
+          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          version: 3,
+          technicians: [],
+        },
+      ],
+    });
+
+    expect(
+      toJobDetailsDto(details('COMPLETED', 'NEEDS_FOLLOW_UP')),
+    ).toMatchObject({
+      readOnlyReason: 'JOB_COMPLETED',
+      attention: [],
+    });
+    expect(toJobDetailsDto(details('CANCELED', 'NEEDS_PARTS'))).toMatchObject({
+      readOnlyReason: 'JOB_CANCELED',
+      attention: [],
+    });
+    expect(
+      toJobDetailsDto(details('COMPLETED', 'UNABLE_TO_COMPLETE')),
+    ).toMatchObject({
+      attention: [],
+    });
   });
 
   it('reports a Customer with no contact persons as an empty list', () => {
@@ -615,7 +639,7 @@ describe('job details projection', () => {
    */
   it('reports every Visit of the Job with its sequence, its schedule and its own crew', () => {
     const dto = toJobDetailsDto({
-      job: jobRow({ status: 'SCHEDULED' }),
+      job: jobRow({ status: 'ACTIVE' }),
       customerId: CUSTOMER_ID,
       customerName: 'Martha Reynolds',
       customerContactDetails: {
@@ -749,5 +773,170 @@ describe('job details projection', () => {
     // A Job with no Visit reports an empty list rather than an absent field, so the response's shape
     // does not depend on whether the Job has any Visit (`BR-051`).
     expect(toJobDetailsDto(base).visits).toEqual([]);
+  });
+
+  it('answers canScheduleVisit from the capability, the Job state and the Visit shape', () => {
+    const base: JobDetails = {
+      job: jobRow({ status: 'ACTIVE' }),
+      customerId: CUSTOMER_ID,
+      customerName: 'Martha Reynolds',
+      customerContactDetails: {
+        email: null,
+        phone: null,
+        notes: null,
+        contacts: [],
+      },
+      selectedVisit: null,
+      technicians: [],
+      visits: [],
+    };
+
+    // An open Job with no represented Visit may be scheduled by a caller holding the capability.
+    expect(
+      toJobDetailsDto(base, { canCreateSchedule: true }).canScheduleVisit,
+    ).toBe(true);
+    // Without the capability the answer is false.
+    expect(toJobDetailsDto(base).canScheduleVisit).toBe(false);
+
+    // A represented Visit that is COMPLETED with a follow-up outcome admits a follow-up.
+    const completedFollowUp = toJobDetailsDto(
+      {
+        ...base,
+        selectedVisit: {
+          visitId: 'visit-1',
+          status: 'COMPLETED',
+          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          version: 1,
+        },
+        visits: [
+          {
+            visitId: 'visit-1',
+            sequence: 1,
+            status: 'COMPLETED',
+            outcomeCode: 'NEEDS_FOLLOW_UP',
+            scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+            scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+            version: 1,
+            technicians: [],
+          },
+        ],
+      },
+      { canCreateSchedule: true },
+    );
+    expect(completedFollowUp.canScheduleVisit).toBe(true);
+
+    // A represented Visit that is still scheduled/active is not a scheduling opportunity.
+    const activeVisit = toJobDetailsDto(
+      {
+        ...base,
+        selectedVisit: {
+          visitId: 'visit-2',
+          status: 'SCHEDULED',
+          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          version: 1,
+        },
+        visits: [
+          {
+            visitId: 'visit-2',
+            sequence: 1,
+            status: 'SCHEDULED',
+            outcomeCode: null,
+            scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+            scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+            version: 1,
+            technicians: [],
+          },
+        ],
+      },
+      { canCreateSchedule: true },
+    );
+    expect(activeVisit.canScheduleVisit).toBe(false);
+
+    // A closed Job admits no scheduling, whatever its Visit shape (`BR-062`, `BR-063`).
+    const closedJob = toJobDetailsDto(
+      { ...base, job: jobRow({ status: 'COMPLETED' }) },
+      { canCreateSchedule: true },
+    );
+    expect(closedJob.canScheduleVisit).toBe(false);
+  });
+
+  it('answers requestFollowUpAllowed from the Visit shape alone', () => {
+    const base: JobDetails = {
+      job: jobRow({ status: 'ACTIVE' }),
+      customerId: CUSTOMER_ID,
+      customerName: 'Martha Reynolds',
+      customerContactDetails: {
+        email: null,
+        phone: null,
+        notes: null,
+        contacts: [],
+      },
+      selectedVisit: null,
+      technicians: [],
+      visits: [],
+    };
+
+    const completed = (outcomeCode: VisitOutcomeCode | null) =>
+      toJobDetailsDto({
+        ...base,
+        selectedVisit: {
+          visitId: 'visit-1',
+          status: 'COMPLETED',
+          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          version: 1,
+        },
+        visits: [
+          {
+            visitId: 'visit-1',
+            sequence: 1,
+            status: 'COMPLETED',
+            outcomeCode,
+            scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+            scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+            version: 1,
+            technicians: [],
+          },
+        ],
+      });
+
+    // A completed attempt whose outcome expects a follow-up admits a request (`BR-078`).
+    expect(completed('NEEDS_FOLLOW_UP').selectedVisit?.requestFollowUpAllowed).toBe(true);
+    expect(completed('NEEDS_PARTS').selectedVisit?.requestFollowUpAllowed).toBe(true);
+    expect(completed('UNABLE_TO_COMPLETE').selectedVisit?.requestFollowUpAllowed).toBe(true);
+    // A resolved attempt declares no follow-up is required, so no request action is offered.
+    expect(completed('RESOLVED').selectedVisit?.requestFollowUpAllowed).toBe(false);
+    // A completed attempt that holds no outcome holds no expectation either (`BR-077`, `BR-079`).
+    expect(completed(null).selectedVisit?.requestFollowUpAllowed).toBe(false);
+
+    // A represented Visit that is not completed is not a request opportunity (`BR-FV-008`).
+    const scheduled = toJobDetailsDto({
+      ...base,
+      selectedVisit: {
+        visitId: 'visit-2',
+        status: 'SCHEDULED',
+        scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+        scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+        version: 1,
+      },
+      visits: [
+        {
+          visitId: 'visit-2',
+          sequence: 1,
+          status: 'SCHEDULED',
+          outcomeCode: null,
+          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          version: 1,
+          technicians: [],
+        },
+      ],
+    });
+    expect(scheduled.selectedVisit?.requestFollowUpAllowed).toBe(false);
+
+    // A Job with no represented Visit has no field attempt to request another Visit for.
+    expect(toJobDetailsDto(base).selectedVisit).toBeNull();
   });
 });

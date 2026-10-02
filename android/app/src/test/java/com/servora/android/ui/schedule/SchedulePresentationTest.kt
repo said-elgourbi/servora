@@ -1,6 +1,9 @@
 package com.servora.android.ui.schedule
 
+import com.servora.android.domain.model.ScheduleAddress
 import com.servora.android.domain.model.ScheduleTechnician
+import com.servora.android.domain.model.ScheduleVisit
+import com.servora.android.domain.model.VisitStatus
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -193,6 +196,66 @@ class SchedulePresentationTest {
     }
 
     @Test
+    fun `work search matches jobs by operation facts`() {
+        val visits = filterWorkVisits(
+            scheduled = listOf(workVisit(jobNumber = 42, jobTitle = "Boiler repair")),
+            unassigned = listOf(
+                workVisit(
+                    visitId = "visit-2",
+                    jobNumber = 43,
+                    customerName = "Côté Foods",
+                    technicians = emptyList(),
+                ),
+            ),
+            query = "cote",
+            filter = WorkJobFilter.ALL,
+        )
+
+        assertEquals(listOf("visit-2"), visits.map { it.visitId })
+    }
+
+    @Test
+    fun `work filters separate scheduled unassigned and overdue jobs`() {
+        val scheduled = listOf(
+            workVisit(visitId = "scheduled", isOverdue = false),
+            workVisit(visitId = "overdue", isOverdue = true),
+        )
+        val unassigned = listOf(workVisit(visitId = "unassigned", technicians = emptyList()))
+
+        assertEquals(
+            listOf("scheduled", "overdue"),
+            filterWorkVisits(scheduled, unassigned, query = "", filter = WorkJobFilter.SCHEDULED)
+                .map { it.visitId },
+        )
+        assertEquals(
+            listOf("unassigned"),
+            filterWorkVisits(scheduled, unassigned, query = "", filter = WorkJobFilter.UNASSIGNED)
+                .map { it.visitId },
+        )
+        assertEquals(
+            listOf("overdue"),
+            filterWorkVisits(scheduled, unassigned, query = "", filter = WorkJobFilter.OVERDUE)
+                .map { it.visitId },
+        )
+    }
+
+    @Test
+    fun `work filters ignore contradictory unassigned rows that already have a crew`() {
+        val assigned = workVisit(visitId = "assigned", technicians = listOf(technician()))
+        val unassigned = workVisit(visitId = "unassigned", technicians = emptyList())
+
+        assertEquals(
+            listOf("unassigned"),
+            filterWorkVisits(
+                scheduled = emptyList(),
+                unassigned = listOf(assigned, unassigned),
+                query = "",
+                filter = WorkJobFilter.UNASSIGNED,
+            ).map { it.visitId },
+        )
+    }
+
+    @Test
     fun `states the now cue's clock in the device's own language`() {
         val instant = Instant.parse("2026-09-07T14:35:00Z")
 
@@ -227,4 +290,34 @@ private fun state(
     selectedDate = selectedDate,
     displayedWeekStart = selectedDate,
     lane = lane,
+)
+
+private fun workVisit(
+    visitId: String = "visit-1",
+    jobNumber: Int = 41,
+    jobTitle: String = "Annual service",
+    customerName: String = "Northwind",
+    isOverdue: Boolean = false,
+    technicians: List<ScheduleTechnician> = listOf(technician(name = "Priya Raman")),
+): ScheduleVisit = ScheduleVisit(
+    visitId = visitId,
+    visitStatus = VisitStatus.SCHEDULED,
+    scheduledStart = "2026-09-07T13:00:00Z",
+    scheduledEnd = "2026-09-07T14:00:00Z",
+    jobId = "job-$visitId",
+    jobNumber = jobNumber,
+    jobTitle = jobTitle,
+    customerId = "customer-1",
+    customerName = customerName,
+    address = ScheduleAddress(
+        propertyName = "Main plant",
+        addressLine1 = "100 Rue King",
+        addressLine2 = null,
+        city = "Montréal",
+        province = "QC",
+        postalCode = "H3A 2T6",
+        country = "CA",
+    ),
+    technicians = technicians,
+    isOverdue = isOverdue,
 )

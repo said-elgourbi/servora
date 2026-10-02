@@ -28,4 +28,12 @@ interface VisitRequestsApi {
         @Path("requestId") requestId: String,
         @Body request: FollowUpVisitReviewRequestDto,
     ): FollowUpVisitRequestDto
+
+    @POST("jobs/{jobId}/visit-requests/{requestId}/reply")
+    suspend fun reply(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("requestId") requestId: String,
+        @Body request: FollowUpVisitReplyRequestDto,
+    ): FollowUpVisitRequestDto
 }

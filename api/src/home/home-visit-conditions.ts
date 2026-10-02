@@ -16,11 +16,11 @@ import type { VisitStatus } from '../jobs/job.types.js';
 /**
  * The Visit statuses that are not work of the day (`BR-074`).
  *
- * A `CANCELED` or `NO_SHOW` Visit is an attempt that did not happen, so it is excluded from a day's
- * schedule and from its counts rather than being presented as an attempt someone must account for.
- * A `COMPLETED` Visit stays: it is what the day has produced so far.
+ * A `CANCELED` Visit is an attempt that did not happen, so it is excluded from a day's schedule and
+ * from its counts rather than being presented as an attempt someone must account for. A `COMPLETED`
+ * Visit stays: it is what the day has produced so far.
  */
-export const NOT_DAY_WORK_VISIT_STATUSES = ['CANCELED', 'NO_SHOW'] as const;
+export const NOT_DAY_WORK_VISIT_STATUSES = ['CANCELED'] as const;
 
 /**
  * The Visit statuses whose field work has started (`BR-074`).

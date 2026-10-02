@@ -143,6 +143,24 @@ internal fun formatScheduledTime(scheduledStart: String, locale: Locale): String
     }
 
 /**
+ * A Visit's local date and time, for rows that may include tomorrow or later work.
+ *
+ * Home previews can contain work outside today's schedule, so showing only "1:00 PM" leaves the day
+ * ambiguous. This keeps the compact time-only format available for truly same-day rows while letting
+ * "Up next" and "Upcoming" state the date explicitly.
+ */
+internal fun formatScheduledDateTime(scheduledStart: String, locale: Locale): String? =
+    try {
+        val scheduled = Instant.parse(scheduledStart).atZone(ZoneId.systemDefault())
+        val datePattern = DateFormat.getBestDateTimePattern(locale, "MMMEd")
+        val date = scheduled.format(DateTimeFormatter.ofPattern(datePattern, locale))
+        val time = scheduled.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale))
+        "$date · $time"
+    } catch (unreadable: DateTimeParseException) {
+        null
+    }
+
+/**
  * A Visit's window in the device's own locale, as "9:00 – 10:00".
  *
  * A Visit with no agreed end is presented as the start alone, and one whose start cannot be read
@@ -229,6 +247,7 @@ internal fun HomeVisitStatusPill(
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 color = color,
+                maxLines = 1,
             )
         }
     }
@@ -269,7 +288,6 @@ internal fun homeVisitStatusLabel(status: VisitStatus, isOverdue: Boolean): Int 
             VisitStatus.IN_PROGRESS -> R.string.visit_status_in_progress
             VisitStatus.COMPLETED -> R.string.visit_status_completed
             VisitStatus.CANCELED -> R.string.visit_status_canceled
-            VisitStatus.NO_SHOW -> R.string.visit_status_no_show
         }
     }
 

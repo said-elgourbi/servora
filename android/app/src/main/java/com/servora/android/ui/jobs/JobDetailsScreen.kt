@@ -205,10 +205,13 @@ fun JobDetailsScreen(
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
     onLoadAssignableTechnicians: () -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
-    onChangeVisitStatus: (status: VisitStatus, outcome: VisitOutcome?, summary: String?) -> Unit,
+    onChangeVisitStatus: (status: VisitStatus) -> Unit,
+    onCompleteVisit: (outcome: VisitOutcome, summary: String) -> Unit,
     onDiscardQueuedVisitAction: (operationId: String) -> Unit,
     onDiscardQueuedVisitNote: (operationId: String) -> Unit,
     onAddActivityText: (body: String) -> Unit,
+    onEditVisitNote: (noteId: String, body: String) -> Unit,
+    onRemoveVisitNote: (noteId: String, reason: String) -> Unit,
     onRescheduleVisit: (start: Instant, end: Instant) -> Unit,
     onAssignTechnicians: (assignments: List<TechnicianAssignment>) -> Unit,
     onConfirmPendingAction: () -> Unit,
@@ -228,6 +231,7 @@ fun JobDetailsScreen(
     onSavePermissionResult: (Boolean) -> Unit,
     canViewEvidence: Boolean,
     canRemoveEvidence: Boolean,
+    canManageVisitNotes: Boolean,
     canAddAudio: Boolean,
     canRemoveAudioEvidence: Boolean,
     onSelectAudioPhase: (EvidencePhase) -> Unit,
@@ -383,7 +387,7 @@ fun JobDetailsScreen(
                     // that destination for a session that does not hold it (`BR-009`, `BR-077`).
                     canChangeVisitStatus = (canUpdateAssignedVisit || canUpdateJob) &&
                         state.canChangeVisitStatus,
-                    canRecordVisitOutcome = canRecordVisitOutcome,
+                    canCompleteVisit = canRecordVisitOutcome && state.canCompleteVisit,
                     canOpenCustomer = canOpenCustomer,
                     onOpenCustomer = onOpenCustomer,
                     onOpenInMaps = onOpenInMaps,
@@ -393,12 +397,15 @@ fun JobDetailsScreen(
                     },
                     onOpenReschedule = { showReschedule = true },
                     onChangeJobStatus = onChangeJobStatus,
-                    onChangeVisitStatus = { status -> onChangeVisitStatus(status, null, null) },
+                    onChangeVisitStatus = onChangeVisitStatus,
                     onOpenVisitCompletion = { showVisitCompletion = true },
                     onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
                     onDiscardQueuedVisitNote = onDiscardQueuedVisitNote,
                     onRetryActivity = onRetryActivity,
                     onOpenPhoto = { photoId -> viewedPhotoId = photoId },
+                    canManageVisitNotes = canManageVisitNotes,
+                    onEditVisitNote = onEditVisitNote,
+                    onRemoveVisitNote = onRemoveVisitNote,
                     photoImages = photoImages,
                     // The recordings on this Job, as the timeline draws them: what the device player is
                     // playing, what the session may remove, and the two actions a recording offers
@@ -443,15 +450,17 @@ fun JobDetailsScreen(
             }
 
             // One action adds anything to the Job's Activity: it opens the sheet that states what kind
-            // of update it is (`BR-012`, `BR-027`). It needs no represented Visit, because a photo is
-            // Job-level evidence even when the Job has no Visit yet (`BR-015`, `BR-051`), and each kind
-            // it offers is drawn on the capability the API enforces for that kind: the Job update
-            // capability for a note, and the evidence capability for a photo (`BR-006`, `BR-007`). A
-            // technician who may record evidence therefore reaches the camera and the picker without
-            // being given the Manager's Job capability (`BR-009`,
+            // of update it is (`BR-012`, `BR-027`). A technician-created update is Visit-scoped, so the
+            // API's own answer on whether that Visit still takes field work (`addUpdateAllowed`) is part
+            // of the gate: a Job the office canceled or completed while the technician was offline
+            // offers no Add update at all (`BR-062`, `BR-079`). Each kind is then drawn on the capability
+            // the API enforces for it — the Job update capability for a note, the evidence capability for
+            // a photo (`BR-006`, `BR-007`), and a technician who may record evidence therefore reaches
+            // the camera and the picker without the Manager's Job capability (`BR-009`,
             // `docs/decisions/015-evidence-capabilities.md`).
             if (
                 details != null &&
+                state.canAddVisitUpdate &&
                 (canUpdateJob || canAddEvidencePhoto || canAddAudio) &&
                 !state.holdsUnacceptedEvidence
             ) {
@@ -588,14 +597,15 @@ fun JobDetailsScreen(
         )
     }
 
-    // The Visit's completion: the outcome `BR-077` requires is stated here, and the destination and
-    // the outcome travel to the API in one request, so no partial outcome is ever stored.
+    // The Visit's completion: the outcome `BR-077` requires is stated here, and submitting sends the
+    // completion operation itself, so the recorded outcome and the Visit's finished state are one
+    // recorded fact (`BR-077`, `BR-078`).
     if (details != null && showVisitCompletion && details.selectedVisit != null) {
         VisitCompletionSheet(
             isSubmitting = state.isSubmitting,
             onConfirm = { outcome, summary ->
                 showVisitCompletion = false
-                onChangeVisitStatus(VisitStatus.COMPLETED, outcome, summary)
+                onCompleteVisit(outcome, summary)
             },
             onDismiss = { showVisitCompletion = false },
         )
@@ -648,7 +658,7 @@ fun JobDetailsScreen(
 
     state.pendingConfirmation?.let { pending ->
         ScheduleConflictDialog(
-            pending = pending,
+            conflicts = pending.conflicts,
             isSubmitting = state.isSubmitting,
             onConfirm = onConfirmPendingAction,
             onDismiss = onDismissPendingAction,
@@ -762,7 +772,7 @@ private fun JobDetailsContent(
     canUpdateJob: Boolean,
     canManageTechnicians: Boolean,
     canChangeVisitStatus: Boolean,
-    canRecordVisitOutcome: Boolean,
+    canCompleteVisit: Boolean,
     canOpenCustomer: Boolean,
     onOpenCustomer: (customerId: String) -> Unit,
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
@@ -775,6 +785,9 @@ private fun JobDetailsContent(
     onDiscardQueuedVisitNote: (operationId: String) -> Unit,
     onRetryActivity: () -> Unit,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     photoImages: JobPhotoImages,
     audio: JobActivityAudio,
 ) {
@@ -813,10 +826,10 @@ private fun JobDetailsContent(
             } else {
                 null
             },
-            // The Visit's field action: the destinations the API reported, minus the one this session
-            // cannot complete because it does not hold the outcome capability (`BR-009`, `BR-077`).
+            // The Visit's working states are the API's own answer (`BR-074`), and the completion is its
+            // own action beside them, gated on the API's answer for this Visit (`BR-077`, `BR-093`).
             canChangeVisitStatus = canChangeVisitStatus,
-            canRecordVisitOutcome = canRecordVisitOutcome,
+            canCompleteVisit = canCompleteVisit,
             actionEnabled = state.canAct,
             onChangeVisitStatus = onChangeVisitStatus,
             onOpenVisitCompletion = onOpenVisitCompletion,
@@ -837,6 +850,9 @@ private fun JobDetailsContent(
             state = state,
             onRetry = onRetryActivity,
             onOpenPhoto = onOpenPhoto,
+            canManageVisitNotes = canManageVisitNotes,
+            onEditVisitNote = onEditVisitNote,
+            onRemoveVisitNote = onRemoveVisitNote,
             photoImages = photoImages,
             audio = audio,
         )
@@ -947,7 +963,7 @@ private fun JobVisitCard(
     canReschedule: Boolean,
     onReschedule: (() -> Unit)?,
     canChangeVisitStatus: Boolean,
-    canRecordVisitOutcome: Boolean,
+    canCompleteVisit: Boolean,
     actionEnabled: Boolean,
     onChangeVisitStatus: (VisitStatus) -> Unit,
     onOpenVisitCompletion: () -> Unit,
@@ -963,21 +979,22 @@ private fun JobVisitCard(
     val addressText = address
         ?.let { snapshot -> addressLine(snapshot) }
         ?.takeIf { it.isNotBlank() }
-    // The destinations the Visit's own lifecycle offers, minus the completion when this session does
-    // not hold the capability the API asks for on it (`BR-009`, `BR-077`). Filtering by a
-    // **capability** is the client's own gate; filtering by an inferred Visit state is deliberately not
-    // done, so every destination the API reports is offered and its refusal is presented
-    // (`BR-007`, `BR-041`).
-    val destinations = details.selectedVisit
-        ?.allowedStatusTransitions
-        ?.filter { destination -> destination != VisitStatus.COMPLETED || canRecordVisitOutcome }
-        .orEmpty()
+    // The working states the Visit may be driven to, as the API reported them (`BR-074`). The list is
+    // already narrowed to what this caller may execute, so no lifecycle rule is re-implemented here
+    // (`BR-041`, `BR-093`); a Job the office has closed offers no destination at all (`BR-062`,
+    // `BR-079`).
+    val destinations = if (details.readOnlyReason == null) {
+        details.selectedVisit?.allowedStatusTransitions.orEmpty()
+    } else {
+        emptyList()
+    }
     val canDriveVisit = canChangeVisitStatus && destinations.isNotEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(JobDetailsSectionSpacing)) {
         SectionLabel(
             label = stringResource(R.string.job_details_visit_label),
             count = null,
         )
+        details.readOnlyReason?.let { reason -> JobReadOnlyNotice(reason = reason) }
         InfoCard {
             InformationRow(
                 label = stringResource(R.string.job_details_visit_date_label),
@@ -985,17 +1002,7 @@ private fun JobVisitCard(
                 modifier = Modifier.testTag(JobDetailsScheduleTag),
                 trailing = details.selectedVisit?.let { visit ->
                     {
-                        if (canDriveVisit) {
-                            // The Visit's status chip **is** the control that moves it, so the state
-                            // the technician wants to change is the thing they tap (`BR-074`).
-                            VisitStatusAction(
-                                status = visit.status,
-                                allowedTransitions = destinations,
-                                enabled = actionEnabled,
-                                onSelect = onChangeVisitStatus,
-                                onComplete = onOpenVisitCompletion,
-                            )
-                        } else {
+                        if (!canDriveVisit) {
                             // Presented, not controlled: an action nobody may perform is not one to
                             // offer (`BR-006`, `BR-007`).
                             VisitStatusPill(status = visit.status)
@@ -1003,6 +1010,36 @@ private fun JobVisitCard(
                     }
                 },
             )
+            if (canDriveVisit && details.selectedVisit != null) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.job_visit_status_label),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // The four technician working states are the control, and the state the Visit is in
+                    // is the selected chip: every one of the four is a destination of its own (`BR-074`).
+                    VisitWorkingStatusSelector(
+                        status = details.selectedVisit.status,
+                        allowedTransitions = destinations,
+                        enabled = actionEnabled,
+                        onSelect = onChangeVisitStatus,
+                    )
+                }
+            }
+            if (canCompleteVisit) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // Completion records the outcome `BR-077` requires, so it is its own action rather than
+                // a state of the row above (`BR-077`, `BR-093`).
+                VisitCompleteAction(
+                    enabled = actionEnabled,
+                    onClick = onOpenVisitCompletion,
+                )
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             // A Job with no address has nothing to navigate to, so the row is only tappable — and only
             // marked as opening a map — when there is a location to open (`BR-056`).

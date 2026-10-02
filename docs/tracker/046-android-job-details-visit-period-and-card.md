@@ -1,5 +1,7 @@
 # Tracker 046 — Job Details: the represented Visit stated by when it is, in a card that heads its activity
 
+> **Superseded vocabulary, 2026-09-20.** The implemented behaviour this tracker records is described in it with the Job statuses and Visit statuses that were current then — `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW` and `NO_SHOW`. Those are retired: a Job is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED` (`BR-058`), a Visit is `DRAFT`, `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or `CANCELED` (`BR-074`), `BR-061` is **REMOVED**, and operational attention is derived (`BR-060`). The behaviour this tracker **decided** stands; only the vocabulary in its prose is historic. See `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+
 **Status: IMPLEMENTED** (the presentation rule with its JVM tests, the section label and the group's card,
 the English and French strings and the focused tests; **Android physical-device QA is the product owner's**,
 `qa.md` §7)
@@ -14,6 +16,12 @@ separation) and `docs/tracker/045-android-job-activity-visit-groups.md` (the per
 
 Design reference: none — no Figma screen exists for the redesigned page, so the established Servora
 Material 3 visual language and its card convention are followed (`docs/design/android-design-system.md`)
+
+**Amended by `docs/tracker/052-android-technician-job-details-redesign.md` (2026-09-20).** The **period
+rule** this tracker decided is unchanged: the section is still labelled for when the represented Visit is
+for. The **card** it added to an expanded activity group is removed: the date is the group's heading, and
+the scheduled window, the outcome and the crew belong to the Visit section, so a group reveals its own
+activity and evidence rather than a second copy of what the page already states (`BR-047`, `BR-012`).
 
 ## What this slice changes
 

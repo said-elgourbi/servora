@@ -177,7 +177,7 @@ describe('technician home endpoint (e2e)', () => {
         jobNumber: jobNumberSequence,
         customerId: values.customerId,
         title: values.title,
-        status: values.status ?? 'SCHEDULED',
+        status: values.status ?? 'ACTIVE',
         propertyId: values.propertyId,
         propertyAddressSnapshot: { addressLine1: '987 Cedar Lane' },
       })
@@ -344,14 +344,12 @@ describe('technician home endpoint (e2e)', () => {
     expect(first.jobTitle).toBe('Morning furnace repair');
     expect(first.customerName).toBe('Technician Home Customer');
     expect(first.address.addressLine1).toBe('987 Cedar Lane');
-    // The overdue condition and the attention list are the API's own answers, decided from the
-    // schedule and the **server** clock, so they are asserted against those same two facts rather
-    // than against a fixed expectation that would depend on the hour the suite runs at (`BR-001`).
-    const expectedOverdue = [morning.visit, afternoon.visit].filter(
-      (visit) => visit.scheduledEnd.getTime() < Date.now(),
-    );
+    // The overdue condition is the API's own answer, decided from the schedule and the **server**
+    // clock, so it is asserted against those same two facts rather than against a fixed expectation
+    // that would depend on the hour the suite runs at (`BR-001`).
     expect(first.overdue).toBe(
-      morning.visit.scheduledEnd.getTime() < Date.now(),
+      morning.visit.scheduledEnd !== null &&
+        morning.visit.scheduledEnd.getTime() < Date.now(),
     );
     // The whole crew travels, Lead first (`BR-068`).
     expect(
@@ -367,13 +365,9 @@ describe('technician home endpoint (e2e)', () => {
       response.body.upcoming.map((row: { visitId: string }) => row.visitId),
     ).toEqual([tomorrow.visit.id]);
     expect(response.body.upcomingTotal).toBe(1);
-    // Only the caller's own overdue work can be reported, and nothing later than the clock.
-    expect(
-      response.body.attention.items
-        .map((item: { visitId: string }) => item.visitId)
-        .sort(),
-    ).toEqual(expectedOverdue.map((visit) => visit.id).sort());
-    expect(response.body.attention.total).toBe(expectedOverdue.length);
+    // Both Visits are today's, and the day's own rows state whatever is overdue about them, so the
+    // section does not repeat them: it states late work the screen says nowhere else (`BR-041`).
+    expect(response.body.attention).toEqual({ total: 0, items: [] });
   });
 
   it("still scopes the read to the caller's own work when they hold the office capability", async () => {
@@ -528,7 +522,7 @@ describe('technician home derivation (e2e)', () => {
         jobNumber: (derivationJobNumber += 1),
         customerId: customer.id,
         title: values.title ?? 'Derivation job',
-        status: 'SCHEDULED',
+        status: 'ACTIVE',
         propertyId: property.id,
         propertyAddressSnapshot: { addressLine1: '5 Derivation Way' },
       })
@@ -595,12 +589,6 @@ describe('technician home derivation (e2e)', () => {
       status: 'SCHEDULED',
       start: at(12),
     });
-    const noShow = await seedVisit({
-      organizationId: organization.id,
-      crew: [member.id],
-      status: 'NO_SHOW',
-      start: at(14),
-    });
     const later = await seedVisit({
       organizationId: organization.id,
       crew: [member.id],
@@ -616,17 +604,14 @@ describe('technician home derivation (e2e)', () => {
       now,
     );
 
-    // Chronological, and a canceled or no-show attempt is not work of the day (`BR-074`). What the
-    // day has produced so far stays: it is the technician's own record of it.
+    // Chronological, and a canceled attempt is not work of the day (`BR-074`). What the day has
+    // produced so far stays: it is the technician's own record of it.
     expect(read.visits.map((visit) => visit.visitId)).toEqual([
       completed.visit.id,
       scheduled.visit.id,
       later.visit.id,
     ]);
     expect(read.visits.some((visit) => visit.visitId === canceled.visit.id)).toBe(
-      false,
-    );
-    expect(read.visits.some((visit) => visit.visitId === noShow.visit.id)).toBe(
       false,
     );
   });
@@ -661,7 +646,7 @@ describe('technician home derivation (e2e)', () => {
     expect(read.nextVisit?.visitId).not.toBe(notStarted.visit.id);
   });
 
-  it('reports an overdue Visit to the technician and offers it as the next one', async () => {
+  it('offers an overdue Visit as the next one without repeating it in the section', async () => {
     const organization = await newOrganization();
     const { member, user } = await newMembership(organization.id);
     const scope = { organizationId: organization.id };
@@ -688,14 +673,66 @@ describe('technician home derivation (e2e)', () => {
       now,
     );
 
-    expect(read.attentionTotal).toBe(1);
-    expect(read.attention[0]?.kind).toBe('VISIT_OVERDUE');
-    expect(read.attention[0]?.visitId).toBe(overdue.visit.id);
-    // The overdue condition is derived from the schedule and the server clock, never stored.
+    // The overdue condition is derived from the schedule and the server clock, never stored, and
+    // nothing has started, so the late attempt is what the technician does next (`BR-012`).
     expect(read.nextVisit?.visitId).toBe(overdue.visit.id);
+    expect(read.nextVisit?.overdue).toBe(true);
+    // It leads the screen, and the card that leads with it states its own condition, so the section
+    // does not describe the same attempt a second time (`BR-041`).
+    expect(read.attentionTotal).toBe(0);
+    expect(read.attention).toEqual([]);
     // It is not part of today, so the day list and the condition describe different sets.
     expect(read.visits.map((visit) => visit.visitId)).toEqual([
       laterToday.visit.id,
+    ]);
+  });
+
+  it('states late work the screen says nowhere else, longest overdue first', async () => {
+    const organization = await newOrganization();
+    const { member, user } = await newMembership(organization.id);
+    const scope = { organizationId: organization.id };
+
+    // Work under way is what the technician does next, so neither late attempt leads the screen.
+    const underWay = await seedVisit({
+      organizationId: organization.id,
+      crew: [member.id],
+      status: 'IN_PROGRESS',
+      start: at(9),
+    });
+    const olderOverdue = await seedVisit({
+      organizationId: organization.id,
+      crew: [member.id],
+      status: 'SCHEDULED',
+      start: new Date(day.start.getTime() - 30 * 3_600_000),
+    });
+    const newerOverdue = await seedVisit({
+      organizationId: organization.id,
+      crew: [member.id],
+      status: 'SCHEDULED',
+      start: new Date(day.start.getTime() - 11 * 3_600_000),
+    });
+
+    const read = await service.readTechnicianHome(
+      scope,
+      user.id,
+      member.id,
+      day,
+      now,
+    );
+
+    expect(read.nextVisit?.visitId).toBe(underWay.visit.id);
+    // Neither attempt is part of today's list and neither is the next Visit, so the section is the
+    // only place this screen names them — and the one that has waited longest comes first (`BR-012`).
+    expect(read.attentionTotal).toBe(2);
+    expect(read.attention.map((item) => item.visitId)).toEqual([
+      olderOverdue.visit.id,
+      newerOverdue.visit.id,
+    ]);
+    expect(read.attention.every((item) => item.kind === 'VISIT_OVERDUE')).toBe(
+      true,
+    );
+    expect(read.visits.map((visit) => visit.visitId)).toEqual([
+      underWay.visit.id,
     ]);
   });
 
@@ -842,4 +879,3 @@ describe('technician home derivation (e2e)', () => {
     expect(read.attentionTotal).toBe(0);
   });
 });
-

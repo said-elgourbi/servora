@@ -1,5 +1,6 @@
 package com.servora.android.ui.jobs
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,12 +17,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +49,6 @@ import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
 import com.servora.android.ui.components.initials
 import com.servora.android.ui.components.jobStatusLabel
-import com.servora.android.ui.components.visitStatusLabel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -108,10 +114,18 @@ internal fun JobActivitySection(
     state: JobDetailsUiState,
     onRetry: () -> Unit,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     photoImages: JobPhotoImages = JobPhotoImages.None,
     audio: JobActivityAudio = JobActivityAudio(),
     modifier: Modifier = Modifier,
 ) {
+    var editNoteId by rememberSaveable(state.jobId) { mutableStateOf<String?>(null) }
+    var editNoteBody by rememberSaveable(state.jobId) { mutableStateOf("") }
+    var removeNoteId by rememberSaveable(state.jobId) { mutableStateOf<String?>(null) }
+    var removeNoteReason by rememberSaveable(state.jobId) { mutableStateOf("") }
+
     Column(modifier = modifier.fillMaxWidth().testTag(JobActivityTag)) {
         SectionLabel(
             label = stringResource(R.string.job_activity_label),
@@ -155,12 +169,127 @@ internal fun JobActivitySection(
                         jobId = state.jobId,
                         photoImages = photoImages,
                         onOpenPhoto = onOpenPhoto,
+                        canManageVisitNotes = canManageVisitNotes,
+                        onEditVisitNote = { noteId, body ->
+                            editNoteId = noteId
+                            editNoteBody = body
+                        },
+                        onRemoveVisitNote = { noteId, _ ->
+                            removeNoteId = noteId
+                            removeNoteReason = ""
+                        },
                         audio = audio,
                     )
                 }
             }
         }
     }
+
+    editNoteId?.let { noteId ->
+        VisitNoteEditDialog(
+            body = editNoteBody,
+            isSubmitting = state.isSubmitting,
+            onBodyChange = { editNoteBody = it },
+            onConfirm = {
+                onEditVisitNote(noteId, editNoteBody)
+                editNoteId = null
+                editNoteBody = ""
+            },
+            onDismiss = {
+                editNoteId = null
+                editNoteBody = ""
+            },
+        )
+    }
+
+    removeNoteId?.let { noteId ->
+        VisitNoteRemovalDialog(
+            reason = removeNoteReason,
+            isSubmitting = state.isSubmitting,
+            onReasonChange = { removeNoteReason = it },
+            onConfirm = {
+                onRemoveVisitNote(noteId, removeNoteReason)
+                removeNoteId = null
+                removeNoteReason = ""
+            },
+            onDismiss = {
+                removeNoteId = null
+                removeNoteReason = ""
+            },
+        )
+    }
+}
+
+@Composable
+private fun VisitNoteEditDialog(
+    body: String,
+    isSubmitting: Boolean,
+    onBodyChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.job_activity_note_edit_title)) },
+        text = {
+            OutlinedTextField(
+                value = body,
+                onValueChange = onBodyChange,
+                minLines = 3,
+                label = { Text(stringResource(R.string.job_activity_note_edit_label)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !isSubmitting && body.isNotBlank(),
+                onClick = onConfirm,
+            ) {
+                Text(stringResource(R.string.job_activity_note_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.job_action_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun VisitNoteRemovalDialog(
+    reason: String,
+    isSubmitting: Boolean,
+    onReasonChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.job_activity_note_delete_title)) },
+        text = {
+            OutlinedTextField(
+                value = reason,
+                onValueChange = onReasonChange,
+                minLines = 3,
+                label = { Text(stringResource(R.string.job_activity_note_delete_reason)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !isSubmitting && reason.isNotBlank(),
+                onClick = onConfirm,
+            ) {
+                Text(stringResource(R.string.job_activity_note_delete_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.job_action_cancel))
+            }
+        },
+    )
 }
 
 @Composable
@@ -219,6 +348,9 @@ internal fun ActivityTimeline(
     jobId: String,
     photoImages: JobPhotoImages,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     audio: JobActivityAudio,
     modifier: Modifier = Modifier,
 ) {
@@ -230,6 +362,9 @@ internal fun ActivityTimeline(
                 jobId = jobId,
                 photoImages = photoImages,
                 onOpenPhoto = onOpenPhoto,
+                canManageVisitNotes = canManageVisitNotes,
+                onEditVisitNote = onEditVisitNote,
+                onRemoveVisitNote = onRemoveVisitNote,
                 audio = audio,
             )
         }
@@ -243,6 +378,9 @@ private fun ActivityEventRow(
     jobId: String,
     photoImages: JobPhotoImages,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     audio: JobActivityAudio,
 ) {
     Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
@@ -300,6 +438,23 @@ private fun ActivityEventRow(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+            if (
+                event.kind == JobActivityKind.VISIT_NOTE_ADDED &&
+                event.noteRemovedAt == null &&
+                canManageVisitNotes
+            ) {
+                Row(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TextButton(onClick = { onEditVisitNote(event.id, event.body.orEmpty()) }) {
+                        Text(stringResource(R.string.job_activity_note_edit))
+                    }
+                    TextButton(onClick = { onRemoveVisitNote(event.id, event.body.orEmpty()) }) {
+                        Text(stringResource(R.string.job_activity_note_delete))
+                    }
                 }
             }
         }
@@ -417,9 +572,9 @@ private fun activityTitle(event: JobActivityEvent): String =
         }
 
         JobActivityKind.VISIT_STATUS_CHANGED -> {
-            val label = localizedVisitStatus(event.toStatus)
-            if (label != null) {
-                stringResource(R.string.job_activity_visit_status_changed, label)
+            val phrase = activityVisitStatusTitle(event.toStatus)
+            if (phrase != null) {
+                stringResource(phrase)
             } else {
                 stringResource(R.string.job_activity_visit_status_changed_generic)
             }
@@ -456,12 +611,11 @@ private fun activityTitle(event: JobActivityEvent): String =
             )
 
         JobActivityKind.VISIT_OUTCOME_RECORDED -> {
-            val outcome = localizedOutcome(event.outcomeCode)
-            if (outcome != null) {
-                stringResource(R.string.job_activity_outcome_recorded, outcome)
-            } else {
-                stringResource(R.string.job_activity_outcome_recorded_generic)
-            }
+            // The outcome is stated as itself rather than announced as a record being written: the
+            // completion above it and what resulted from it then read as one account — `Visit completed`
+            // followed by `Needs follow-up` (`BR-078`, `BR-080`, `BR-012`).
+            localizedOutcome(event.outcomeCode)
+                ?: stringResource(R.string.job_activity_outcome_recorded_generic)
         }
 
         JobActivityKind.VISIT_NOTE_ADDED -> event.body.orEmpty()
@@ -536,10 +690,25 @@ private fun localizedJobStatus(code: String?): String? =
     code?.let { value -> JobStatus.entries.firstOrNull { it.name == value } }
         ?.let { stringResource(jobStatusLabel(it)) }
 
-@Composable
-private fun localizedVisitStatus(code: String?): String? =
-    code?.let { value -> VisitStatus.entries.firstOrNull { it.name == value } }
-        ?.let { stringResource(visitStatusLabel(it)) }
+/**
+ * The field phrase one `VISIT_STATUS_CHANGED` destination is stated with (`BR-074`, `BR-080`).
+ *
+ * A destination is named for what it means in the field — `Work started`, `Arrived on site` — rather
+ * than by the code it stores, so the timeline reads as an account of the work. The destination is the
+ * API's own `toStatus` value, and a code this build does not know has no phrase: the entry then reports
+ * itself generically instead of being given another status's wording (`BR-041`, `BR-042`).
+ */
+@StringRes
+internal fun activityVisitStatusTitle(code: String?): Int? =
+    when (code) {
+        VisitStatus.SCHEDULED.name -> R.string.job_activity_visit_status_scheduled
+        VisitStatus.EN_ROUTE.name -> R.string.job_activity_visit_status_en_route
+        VisitStatus.ON_SITE.name -> R.string.job_activity_visit_status_on_site
+        VisitStatus.IN_PROGRESS.name -> R.string.job_activity_visit_status_in_progress
+        VisitStatus.COMPLETED.name -> R.string.job_activity_visit_status_completed
+        VisitStatus.CANCELED.name -> R.string.job_activity_visit_status_canceled
+        else -> null
+    }
 
 @Composable
 private fun localizedRole(code: String?): String =

@@ -8,16 +8,22 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.servora.android.R
@@ -34,9 +40,12 @@ import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobContactPerson
 import com.servora.android.domain.model.JobCustomerContact
 import com.servora.android.domain.model.JobDetails
+import com.servora.android.domain.model.JobDetailsFollowUpVisitRequest
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobDetailsVisitSummary
+import com.servora.android.domain.model.JobReadOnlyReason
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitOutcome
@@ -76,27 +85,25 @@ class JobDetailsOverviewScreenTest {
     fun statesTheJobsOwnInformationAsTheJobs() {
         render(details = overviewJob())
 
-        composeTestRule.onNodeWithTag(JobOverviewSectionTag).assertIsDisplayed()
-        composeTestRule
-            .onNodeWithText(string(R.string.job_details_overview_label))
-            .assertIsDisplayed()
+        // The Job's own identity is the page's heading rather than a card among the record cards, so what
+        // the job is and what it is for are read before anything else (`BR-012`, `BR-052`, `BR-053`).
+        composeTestRule.onNodeWithTag(JobHeaderSectionTag).assertIsDisplayed()
         composeTestRule
             .onNodeWithText(string(R.string.job_details_job_number_format, 1042))
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Furnace repair").assertIsDisplayed()
         composeTestRule.onNodeWithText("Blower motor is noisy.").assertIsDisplayed()
-        composeTestRule.onNodeWithTag(JobDetailsCustomerTag).assertIsDisplayed()
-        composeTestRule.onNodeWithText("Martha Reynolds").assertIsDisplayed()
-        composeTestRule.onNodeWithTag(JobDetailsAddressTag).assertIsDisplayed()
-        composeTestRule
-            .onNodeWithText("987 Cedar Lane, Ottawa, ON K1A 0B1")
-            .assertIsDisplayed()
-        // The Job's status is the Job's, and the represented Visit's is the Visit's: two state machines
-        // presented apart (`BR-058`, `BR-059`, `BR-074`). The Visit's own status is asked for by where it
-        // sits, because the Visit's activity group states it as well and the two must not be confused.
-        composeTestRule
-            .onNodeWithText(string(R.string.customers_job_status_scheduled))
-            .assertIsDisplayed()
+
+        // Where the work is, and who can be reached there, are their own sections rather than rows of the
+        // Job's metadata (`BR-049`, `BR-092`, `BR-012`).
+        composeTestRule.onNodeWithTag(JobLocationSectionTag).assertExists()
+        composeTestRule.onNodeWithText("987 Cedar Lane, Ottawa, ON K1A 0B1").assertExists()
+        composeTestRule.onNodeWithTag(JobContactsSectionTag).assertExists()
+        composeTestRule.onNodeWithTag(JobDetailsCustomerTag).assertExists()
+        composeTestRule.onNodeWithText("Martha Reynolds").assertExists()
+
+        // The represented Visit's own status is the Visit's: two state machines, presented apart
+        // (`BR-058`, `BR-059`, `BR-074`).
         composeTestRule
             .onNode(
                 hasText(string(R.string.visit_status_en_route)) and
@@ -106,10 +113,159 @@ class JobDetailsOverviewScreenTest {
     }
 
     @Test
-    fun leadsWithThePrimaryContactPhoneAndKeepsTheOtherNumbersFolded() {
-        // `BR-095`: the Job card presents **one** phone — the effective primary contact's — and keeps every
-        // other way of reaching the customer behind a disclosure that starts closed, so the number a
-        // technician came for is the one on screen (`BR-012`).
+    fun keepsFollowUpRequestInASeparateCardBelowThePreviousVisit() {
+        val job = overviewJob()
+        render(
+            details = job.copy(
+                followUpVisitRequest = JobDetailsFollowUpVisitRequest(
+                    id = "request-1",
+                    jobId = job.id,
+                    sourceVisitId = job.selectedVisit?.id,
+                    requestingTechnicianMembershipId = "membership-1",
+                    status = FollowUpVisitRequestStatus.PENDING,
+                    version = 0,
+                ),
+            ),
+            canRequestFollowUpVisit = true,
+        )
+
+        composeTestRule
+            .onNodeWithTag(JobDetailsFollowUpRequestTag)
+            .assertIsDisplayed()
+            .assertHasClickAction()
+            .assert(!hasAnyAncestor(hasTestTag(JobDetailsVisitCardTag)))
+        composeTestRule.onNodeWithText(string(R.string.request_status_pending)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.job_follow_up_request_open)).assertIsDisplayed()
+    }
+
+    @Test
+    fun givesManagersAReviewActionOnTheSeparateRequestCard() {
+        val job = overviewJob()
+        render(
+            details = job.copy(
+                followUpVisitRequest = JobDetailsFollowUpVisitRequest(
+                    id = "request-1",
+                    jobId = job.id,
+                    sourceVisitId = job.selectedVisit?.id,
+                    requestingTechnicianMembershipId = "membership-1",
+                    status = FollowUpVisitRequestStatus.PENDING,
+                    version = 0,
+                ),
+            ),
+            canReviewVisitRequests = true,
+        )
+
+        composeTestRule.onNodeWithText(string(R.string.job_follow_up_request_review)).assertIsDisplayed()
+    }
+
+    @Test
+    fun showsNoRoutineJobStatusToASessionThatCannotChangeIt() {
+        // `ACTIVE` states only that the request is open, which a technician acting on an assigned Visit
+        // already knows, so the page draws no status for a session that cannot act on the Job (`BR-012`).
+        render(details = overviewJob(), canUpdateJob = false)
+
+        composeTestRule.onNodeWithTag(JobStatusSectionTag).assertDoesNotExist()
+        composeTestRule
+            .onNodeWithText(string(R.string.customers_job_status_active))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun surfacesACanceledJobProminentlyInsteadOfAStatusChip() {
+        // A Job that has stopped being open is what materially changes the work: it is reported by the
+        // notice above everything the technician came to do (`BR-062`, `BR-079`, `BR-012`).
+        render(
+            details = overviewJob().copy(readOnlyReason = JobReadOnlyReason.JOB_CANCELED),
+            canUpdateJob = false,
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsReadOnlyNoticeTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobStatusSectionTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun keepsTheJobStatusControlForASessionThatMayChangeIt() {
+        // The chip that presents the Job's status **is** the control that changes it, so a session that may
+        // move the Job keeps it and nothing is drawn beside it
+        // (`docs/tracker/020-android-job-details-status-control.md`).
+        render(details = overviewJob(), canUpdateJob = true)
+
+        composeTestRule.onNodeWithTag(JobStatusSectionTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.customers_job_status_active))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun offersAddUpdateAsThePagesFloatingAction() {
+        // The technician's update is the write this page exists for, so it is the page's own floating
+        // action: it is on screen as soon as the Job is read, rather than only inside a card the reader
+        // has to reach (`BR-012`, `BR-027`).
+        render(details = overviewJob())
+
+        composeTestRule
+            .onNodeWithTag(JobDetailsAddActivityTag)
+            .assertIsDisplayed()
+            .assertHasClickAction()
+
+        // One write has one entry point, so the Visit card draws no second Add update action for the
+        // technician to choose between before choosing what they are recording (`BR-012`, `BR-041`).
+        composeTestRule
+            .onAllNodesWithText(string(R.string.job_activity_add_update))
+            .assertCountEquals(1)
+    }
+
+    @Test
+    fun withholdsTheFloatingAddUpdateWhenTheVisitTakesNoUpdate() {
+        // Whether the represented Visit still takes field work is the API's own answer
+        // (`addUpdateAllowed`), and it is where a technician who was offline finds that the office
+        // canceled or completed the Job (`BR-062`, `BR-079`, `BR-042`).
+        render(
+            details = overviewJob().let { job ->
+                job.copy(selectedVisit = job.selectedVisit?.copy(addUpdateAllowed = false))
+            },
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun drawsTheVisitsWorkingStatesAsOneBarInsideTheVisitSection() {
+        // The four working states are one control inside the Visit's own card, and the state the Visit
+        // holds is the selected segment, so a technician taps where they are and moves the Visit in one
+        // operation (`BR-074`, `BR-075`, `BR-012`).
+        render(details = overviewJob())
+
+        composeTestRule
+            .onNode(
+                hasTestTag(JobDetailsVisitStatusSelectorTag) and
+                    hasAnyAncestor(hasTestTag(JobCurrentVisitSectionTag)),
+            )
+            .assertIsDisplayed()
+
+        // The Visit is `EN_ROUTE` and the API reported `ON_SITE` and `SCHEDULED` for it: the state the
+        // Visit holds is the selected segment and is not offered, the reported destinations can be tapped,
+        // and a state the API did not report is neither (`BR-074`, `BR-041`).
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.EN_ROUTE.name))
+            .assertIsSelected()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.ON_SITE.name))
+            .assertIsEnabled()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.SCHEDULED.name))
+            .assertIsEnabled()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.IN_PROGRESS.name))
+            .assertIsNotEnabled()
+    }
+
+    @Test
+    fun leadsWithThePrimaryContactAndKeepsTheOtherWaysOfReachingTheCustomerFolded() {
+        // `BR-095`: the Contacts section presents **one** contact — the effective primary — with the
+        // values that person recorded, and keeps every other way of reaching the Customer behind a
+        // disclosure that starts closed, so the person a technician came for is the one on screen
+        // (`BR-012`).
         render(
             details = overviewJob().copy(
                 customerContactDetails = JobCustomerContact(
@@ -135,7 +291,16 @@ class JobDetailsOverviewScreenTest {
             ),
         )
 
-        composeTestRule.onNodeWithText("+15551234567").assertIsDisplayed()
+        composeTestRule
+            .onNode(
+                hasText("John Smith") and hasAnyAncestor(hasTestTag(JobDetailsContactPrimaryTag)),
+                useUnmergedTree = true,
+            )
+            .assertIsDisplayed()
+        // The primary contact's own values are the section's lines, and each one opens the application
+        // that reaches that person (`ADR-022` D6).
+        composeTestRule.onNodeWithText("+15551234567").assertIsDisplayed().assertHasClickAction()
+        composeTestRule.onNodeWithText("john@example.com").assertIsDisplayed().assertHasClickAction()
         composeTestRule.onNodeWithTag(JobDetailsCustomerPrimaryBadgeTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobDetailsCustomerOtherContactsToggleTag).assertHasClickAction()
         // The customer's own general line and the other contact person are folded away: nothing about
@@ -151,10 +316,10 @@ class JobDetailsOverviewScreenTest {
     }
 
     @Test
-    fun marksTheCustomersOwnPhoneWhenNoContactPersonIsFlagged() {
-        // Zero primary contacts is a legal state (`BR-095`): the customer is then its own primary, so its
-        // own number is the one the card leads with — with the badge — and every contact person is folded
-        // away behind it.
+    fun marksTheCustomerItselfAsThePrimaryWhenNoContactPersonIsFlagged() {
+        // Zero primary contacts is a legal state (`BR-095`): the Customer is then its own primary, so it is
+        // the contact the section leads with — with the badge — and every contact person is folded away
+        // behind it.
         render(
             details = overviewJob().copy(
                 customerContactDetails = JobCustomerContact(
@@ -185,8 +350,9 @@ class JobDetailsOverviewScreenTest {
 
     @Test
     fun presentsNoDisclosureWhenThereIsNoOtherWayOfReachingTheCustomer() {
-        // No contact person and no second number: there is nothing to fold, so the card states the
-        // customer's own number as its primary one and draws no disclosure (`BR-095`, `BR-012`).
+        // No contact person and no second number: there is nothing to fold, so the section states the
+        // Customer's own number as its primary one, with the marker on that number rather than on a second
+        // statement of the Customer's name, and draws no disclosure (`BR-095`, `BR-012`).
         render(
             details = overviewJob().copy(
                 customerContactDetails = JobCustomerContact(
@@ -200,6 +366,8 @@ class JobDetailsOverviewScreenTest {
         composeTestRule.onNodeWithText("+15145550142").assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobDetailsCustomerPrimaryBadgeTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobDetailsCustomerOtherContactsTag).assertDoesNotExist()
+        // The Customer is named once, by the row above the marker (`BR-012`).
+        composeTestRule.onAllNodesWithText("Martha Reynolds").assertCountEquals(1)
     }
 
     @Test
@@ -276,17 +444,26 @@ class JobDetailsOverviewScreenTest {
             )
             .assertIsDisplayed()
 
-        // The folded heading also states what the Visit's status is and who is on its crew (`BR-068`).
+        // The folded heading also states where the Visit ended up and what it resulted in: the completed
+        // earlier attempt reads `Completed · Resolved`, which is what a reader scans a group for
+        // (`BR-074`, `BR-078`, `BR-080`).
         composeTestRule
             .onNode(
-                hasText("Dave Past") and hasAnyAncestor(hasTestTag(jobActivityVisitToggleTag(VISIT_ONE_ID))),
+                hasText(
+                    string(
+                        R.string.job_activity_visit_summary_format,
+                        string(R.string.visit_status_completed),
+                        string(R.string.job_activity_outcome_resolved),
+                    ),
+                ) and hasAnyAncestor(hasTestTag(jobActivityVisitToggleTag(VISIT_ONE_ID))),
                 useUnmergedTree = true,
             )
             .assertIsDisplayed()
+        // The represented Visit holds no outcome yet, so its group states its status alone (`BR-079`).
         composeTestRule
             .onNode(
-                hasText(string(R.string.visit_status_completed)) and
-                    hasAnyAncestor(hasTestTag(jobActivityVisitToggleTag(VISIT_ONE_ID))),
+                hasText(string(R.string.visit_status_en_route)) and
+                    hasAnyAncestor(hasTestTag(jobActivityVisitToggleTag(VISIT_TWO_ID))),
                 useUnmergedTree = true,
             )
             .assertIsDisplayed()
@@ -328,52 +505,31 @@ class JobDetailsOverviewScreenTest {
     }
 
     @Test
-    fun headsAVisitsOwnActivityWithACardStatingThatVisit() {
+    fun revealsAVisitsOwnActivityWithoutRepeatingItsVisitCard() {
         render(details = overviewJob())
 
         composeTestRule.onNodeWithTag(jobActivityVisitToggleTag(VISIT_ONE_ID)).performClick()
 
-        // What the group reveals is headed by one card stating the Visit's own facts — the day it was for,
-        // the window it was scheduled for, what it resulted in and the crew assigned to it — and that
-        // Visit's entries follow it (`BR-047`, `BR-068`, `BR-072`, `BR-077`, `BR-080`).
-        val card = jobActivityVisitCardTag(VISIT_ONE_ID)
-        composeTestRule.onNodeWithTag(card).assertIsDisplayed()
+        // What the group reveals is that Visit's own evidence and its own entries, and nothing else
+        // (`BR-080`): the day it was for is the heading's, its status and outcome are the heading's
+        // summary, and the schedule, the crew and the outcome card belong to the Visit section rather than
+        // being stated a second time here (`BR-047`, `BR-012`).
+        composeTestRule.onNodeWithTag(jobActivityVisitBodyTag(VISIT_ONE_ID)).assertIsDisplayed()
         composeTestRule
-            .onNode(hasTestTag(jobActivityVisitDateTag(VISIT_ONE_ID)) and hasAnyAncestor(hasTestTag(card)))
+            .onNodeWithText(string(R.string.job_details_visit_activity_label))
             .assertIsDisplayed()
-        composeTestRule
-            .onNode(hasTestTag(jobActivityVisitTimeTag(VISIT_ONE_ID)) and hasAnyAncestor(hasTestTag(card)))
-            .assertIsDisplayed()
-        // The outcome the Visit holds, named beside the schedule it resulted from: the completed earlier
-        // field attempt says what it resulted in, and the label is the API's own code localized
-        // (`BR-078`, `BR-028`).
-        composeTestRule
-            .onNode(
-                hasTestTag(jobActivityVisitOutcomeTag(VISIT_ONE_ID)) and hasAnyAncestor(hasTestTag(card)),
-            )
-            .assertIsDisplayed()
-        composeTestRule
-            .onNode(
-                hasText(string(R.string.job_activity_outcome_resolved)) and
-                    hasAnyAncestor(hasTestTag(jobActivityVisitOutcomeTag(VISIT_ONE_ID))),
-                useUnmergedTree = true,
-            )
-            .assertIsDisplayed()
-        composeTestRule
-            .onNode(
-                hasTestTag(jobDetailsTechnicianTag("member-9")) and hasAnyAncestor(hasTestTag(card)),
-            )
-            .assertIsDisplayed()
-        composeTestRule
-            .onNode(hasText("Dave Past") and hasAnyAncestor(hasTestTag(card)))
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobActivityEventTag("visit-1-note")).assertIsDisplayed()
+        // The crew the earlier attempt was booked with is not repeated inside the group, and neither is a
+        // technician row for it (`BR-068`, `BR-012`).
+        composeTestRule.onNodeWithTag(jobDetailsTechnicianTag("member-9")).assertDoesNotExist()
+        composeTestRule.onNodeWithText("Dave Past").assertDoesNotExist()
     }
 
     @Test
     fun statesNoOutcomeForAVisitThatHoldsNone() {
         // The outcome is the Visit's **own current** outcome and not the history its activity holds
         // (`BR-079`): a Visit that holds none states none, rather than being given the outcome of another
-        // Visit or one it no longer has (`BR-042`).
+        // Visit or one it no longer has (`BR-042`). The heading's summary is where it is stated.
         val job = overviewJob()
         render(
             details = job.copy(
@@ -383,11 +539,18 @@ class JobDetailsOverviewScreenTest {
             ),
         )
 
-        composeTestRule.onNodeWithTag(jobActivityVisitToggleTag(VISIT_ONE_ID)).performClick()
-
-        composeTestRule.onNodeWithTag(jobActivityVisitBodyTag(VISIT_ONE_ID)).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(jobActivityVisitDateTag(VISIT_ONE_ID)).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(jobActivityVisitOutcomeTag(VISIT_ONE_ID)).assertDoesNotExist()
+        composeTestRule
+            .onNode(
+                hasText(string(R.string.job_activity_outcome_resolved)) and
+                    hasAnyAncestor(hasTestTag(jobActivityVisitToggleTag(VISIT_ONE_ID))),
+                useUnmergedTree = true,
+            )
+            .assertDoesNotExist()
+        composeTestRule
+            .onNodeWithTag(jobActivityVisitSummaryTag(VISIT_ONE_ID))
+            .assert(
+                hasText(string(R.string.visit_status_completed)),
+            )
     }
 
     @Test
@@ -409,33 +572,15 @@ class JobDetailsOverviewScreenTest {
     }
 
     @Test
-    fun expandingAVisitRevealsItsSummaryAndItsOwnActivityAndCollapsingHidesThemAgain() {
+    fun expandingAVisitRevealsItsOwnActivityAndCollapsingHidesItAgain() {
         render(details = overviewJob())
 
         val toggle = jobActivityVisitToggleTag(VISIT_ONE_ID)
         composeTestRule.onNodeWithTag(toggle).performClick()
 
         composeTestRule.onNodeWithTag(jobActivityVisitBodyTag(VISIT_ONE_ID)).assertIsDisplayed()
-        // The summary: the Visit's full date, the window it is scheduled for, and the crew assigned to it
-        // (`BR-068`, `BR-072`).
-        composeTestRule.onNodeWithTag(jobActivityVisitDateTag(VISIT_ONE_ID)).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(jobActivityVisitTimeTag(VISIT_ONE_ID)).assertIsDisplayed()
         composeTestRule
-            .onNode(
-                hasText(
-                    scheduledTimeRange("2026-09-07T13:00:00.000Z", "2026-09-07T15:00:00.000Z"),
-                ) and hasAnyAncestor(hasTestTag(jobActivityVisitBodyTag(VISIT_ONE_ID))),
-                useUnmergedTree = true,
-            )
-            .assertIsDisplayed()
-        composeTestRule
-            .onNodeWithText(string(R.string.job_details_assigned_technicians_label))
-            .assertIsDisplayed()
-        composeTestRule
-            .onNode(
-                hasText("Dave Past") and hasAnyAncestor(hasTestTag(jobActivityVisitBodyTag(VISIT_ONE_ID))),
-                useUnmergedTree = true,
-            )
+            .onNodeWithText(string(R.string.job_details_visit_activity_label))
             .assertIsDisplayed()
         // That Visit's own activity, and only that Visit's: the represented Visit's event is in its own
         // group and is never drawn twice (`BR-080`).
@@ -526,11 +671,16 @@ class JobDetailsOverviewScreenTest {
         render(details = overviewJob())
 
         // The events that belong to no Visit are the general group's, and no Visit's event is drawn
-        // there (`BR-080`).
+        // there (`BR-080`). The group holds office-level history rather than the technician's own field
+        // work, so it starts folded and is opened here (`BR-012`, tracker 051).
         composeTestRule.onNodeWithTag(JobActivityGeneralGroupTag).assertIsDisplayed()
         composeTestRule
             .onNodeWithText(string(R.string.job_details_job_updates_label))
             .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobActivityGeneralBodyTag).assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag(JobActivityGeneralToggleTag).performClick()
+
         composeTestRule.onNodeWithTag(jobActivityEventTag("job-1")).assertIsDisplayed()
         composeTestRule.onNodeWithTag(jobActivityEventTag("photo-1")).assertIsDisplayed()
         composeTestRule
@@ -566,11 +716,14 @@ class JobDetailsOverviewScreenTest {
             ),
         )
 
+        // An empty group says so once it is opened, and the Visit's own account is still drawn: an empty
+        // general group is not an empty page (`BR-042`, `BR-080`).
+        composeTestRule.onNodeWithTag(JobActivityGeneralToggleTag).performClick()
+
         composeTestRule.onNodeWithTag(JobActivityGeneralEmptyTag).assertIsDisplayed()
         composeTestRule
             .onNodeWithText(string(R.string.job_details_job_updates_empty))
             .assertIsDisplayed()
-        // The Visit's own account is still drawn: an empty general group is not an empty page.
         composeTestRule.onNodeWithTag(jobActivityEventTag("visit-2-note")).assertIsDisplayed()
     }
 
@@ -588,62 +741,25 @@ class JobDetailsOverviewScreenTest {
     }
 
     @Test
-    fun keepsTheHeadingControlsWhenAVisitCarriesLongTechnicianNames() {
-        val longCrew = listOf(
-            JobDetailsTechnician(
-                membershipId = "member-1",
-                name = "Alexandra Maximiliana Beauchamp-Stevenson",
-                role = AssignmentRole.LEAD,
-            ),
-            JobDetailsTechnician(
-                membershipId = "member-2",
-                name = "Bartholomew Fitzgerald-Wellington the Third",
-                role = AssignmentRole.TECHNICIAN,
-            ),
-            JobDetailsTechnician(
-                membershipId = "member-3",
-                name = "Christopher Constantine Van Der Meer",
-                role = AssignmentRole.TECHNICIAN,
-            ),
-        )
-        render(
-            details = overviewJob().copy(
-                visits = listOf(
-                    overviewVisitOne(),
-                    overviewVisitTwoSummary().copy(technicians = longCrew),
-                ),
-            ),
-        )
+    fun keepsTheHeadingDisclosureReachableAndTheSummaryStatedForEveryVisit() {
+        render(details = overviewJob())
 
-        // The heading wraps its title and its crew, so the status and the disclosure stay on the screen
-        // and reachable beside them (`BR-028`, `BR-012`).
-        val toggle = composeTestRule.onNodeWithTag(jobActivityVisitToggleTag(VISIT_TWO_ID))
-        toggle.assertIsDisplayed()
-        toggle.assertHasClickAction()
+        // The heading is the control for every Visit, whatever the group holds, and the summary it states
+        // is written out rather than left to a badge beside it (`BR-012`, `BR-028`, `BR-074`).
+        composeTestRule.onNodeWithTag(jobActivityVisitToggleTag(VISIT_ONE_ID))
+            .assertIsDisplayed()
+            .assertHasClickAction()
+        composeTestRule.onNodeWithTag(jobActivityVisitToggleTag(VISIT_TWO_ID))
+            .assertIsDisplayed()
+            .assertHasClickAction()
+        composeTestRule
+            .onNodeWithContentDescription(string(R.string.job_activity_visit_expand_label, 1))
+            .assertIsDisplayed()
         composeTestRule
             .onNodeWithContentDescription(string(R.string.job_activity_visit_collapse_label, 2))
             .assertIsDisplayed()
-        composeTestRule
-            .onNode(
-                hasText(string(R.string.visit_status_en_route)) and
-                    hasAnyAncestor(hasTestTag(jobActivityVisitToggleTag(VISIT_TWO_ID))),
-                useUnmergedTree = true,
-            )
-            .assertIsDisplayed()
-        // The group's summary lists the whole crew, so nothing is lost to the heading's shortening
-        // (`BR-068`).
-        composeTestRule
-            .onNode(
-                hasText("Alexandra Maximiliana Beauchamp-Stevenson"),
-                useUnmergedTree = true,
-            )
-            .assertIsDisplayed()
-        composeTestRule
-            .onNode(
-                hasText("Christopher Constantine Van Der Meer"),
-                useUnmergedTree = true,
-            )
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobActivityVisitSummaryTag(VISIT_ONE_ID)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobActivityVisitSummaryTag(VISIT_TWO_ID)).assertIsDisplayed()
     }
 
     @Test
@@ -665,7 +781,7 @@ class JobDetailsOverviewScreenTest {
 
         composeTestRule.onNodeWithTag(JobDetailsFailureTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobDetailsRetryTag).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(JobOverviewSectionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobHeaderSectionTag).assertDoesNotExist()
     }
 
     @Test
@@ -675,7 +791,7 @@ class JobDetailsOverviewScreenTest {
         render(state = JobDetailsUiState(jobId = OVERVIEW_JOB_ID, details = overviewJob(), activity = null))
 
         composeTestRule.onNodeWithTag(JobDetailsContentTag).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(JobOverviewSectionTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobHeaderSectionTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobCurrentVisitSectionTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobActivityGeneralEmptyTag).assertDoesNotExist()
     }
@@ -686,6 +802,145 @@ class JobDetailsOverviewScreenTest {
      * Every callback is defaulted so a test states only what it is about, and no test performs an action
      * here: what the actions do is the ViewModel's, which its own tests cover.
      */
+    @Test
+    fun withholdsScheduleVisitWhileTheRepresentedVisitIsActive() {
+        // The API answers `canScheduleVisit: false` for a Job whose represented Visit is active, so the
+        // schedule action is withheld and the Visit's own Reschedule/Manage technicians actions stay.
+        render()
+
+        composeTestRule.onNodeWithTag(JobDetailsScheduleVisitActionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsRescheduleActionTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsManageTechniciansActionTag).assertIsDisplayed()
+    }
+
+    @Test
+    fun offersInitialScheduleVisitWhenTheJobHasNoVisits() {
+        render(
+            details = overviewJob().copy(
+                selectedVisit = null,
+                technicians = emptyList(),
+                visits = emptyList(),
+                canScheduleVisit = true,
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsScheduleVisitActionTag).assertIsDisplayed().assertIsEnabled()
+        composeTestRule.onNodeWithText(string(R.string.job_details_no_selected_visit_detail)).assertIsDisplayed()
+    }
+
+    @Test
+    fun keepsInitialScheduleVisitVisibleButDisabledWhenTheJobHasNoProperty() {
+        render(
+            details = overviewJob().copy(
+                address = null,
+                selectedVisit = null,
+                technicians = emptyList(),
+                visits = emptyList(),
+                canScheduleVisit = true,
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsScheduleVisitActionTag).assertIsDisplayed().assertIsNotEnabled()
+    }
+
+    @Test
+    fun offersTheFollowUpRequestActionToASessionThatMayProposeOne() {
+        // The action is offered only for a completed Visit whose outcome expects a follow-up, which is
+        // the API's own answer (`BR-078`, `BR-FV-001`).
+        render(details = overviewJobCompletedWithFollowUp(), canRequestFollowUpVisit = true)
+
+        composeTestRule.onNodeWithTag(JobDetailsRequestFollowUpActionTag).assertIsDisplayed()
+    }
+
+    @Test
+    fun withholdsTheFollowUpRequestActionFromASessionThatMayNotProposeOne() {
+        // The action is drawn on the capability the API enforces on the request route, never inferred
+        // from the field work the session may do (`BR-006`, `BR-007`, `BR-011`): a Visit that admits a
+        // request is still withheld from a session that holds no request capability.
+        render(details = overviewJobCompletedWithFollowUp(), canRequestFollowUpVisit = false)
+
+        composeTestRule.onNodeWithTag(JobDetailsRequestFollowUpActionTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun withholdsTheFollowUpRequestActionForAResolvedCompletedVisit() {
+        // A `RESOLVED` completion declares no follow-up is required (`BR-078`), so the API reports
+        // `requestFollowUpAllowed: false` and the action is not offered even to a session that may
+        // propose one (`BR-FV-001`, `BR-042`).
+        val base = overviewJob()
+        val represented = requireNotNull(base.selectedVisit)
+        render(
+            details = base.copy(
+                selectedVisit = represented.copy(
+                    status = VisitStatus.COMPLETED,
+                    requestFollowUpAllowed = false,
+                ),
+                visits = base.visits.map { visit ->
+                    if (visit.id == represented.id) {
+                        visit.copy(status = VisitStatus.COMPLETED, outcome = VisitOutcome.RESOLVED)
+                    } else {
+                        visit
+                    }
+                },
+            ),
+            canRequestFollowUpVisit = true,
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsRequestFollowUpActionTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun submitsTheFollowUpReasonAndPreferenceTheTechnicianStated() {
+        var submittedReason: String? = null
+        var submittedPreference: Boolean? = null
+        render(
+            details = overviewJobCompletedWithFollowUp(),
+            canRequestFollowUpVisit = true,
+            onRequestFollowUpVisit = { reason, _, _, sameTechnicianPreferred ->
+                submittedReason = reason
+                submittedPreference = sameTechnicianPreferred
+            },
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsRequestFollowUpActionTag).performClick()
+
+        // `BR-FV-003` requires a reason with a proposal, so the form cannot be sent before one is stated:
+        // it says what is missing rather than sending a question it already knows the answer to
+        // (`BR-042`).
+        composeTestRule.onNodeWithTag(RequestFollowUpConfirmTag).assertIsNotEnabled()
+        composeTestRule.onNodeWithTag(RequestFollowUpReasonTag)
+            .performTextInput("The part has to be ordered.")
+        composeTestRule.onNodeWithTag(RequestFollowUpSameTechnicianTag).performClick()
+        composeTestRule.onNodeWithTag(RequestFollowUpConfirmTag).performClick()
+
+        assertEquals("The part has to be ordered.", submittedReason)
+        assertEquals(true, submittedPreference)
+    }
+
+    /**
+     * The request's decision is the sheet's foot, not part of its body (`BR-FV-001`, `BR-FV-003`).
+     *
+     * The reason is typed into, so the keyboard shortens the sheet and the body scrolls: an action inside
+     * that scrolling region leaves the screen with the body, and the technician has to dismiss the keyboard
+     * to submit the proposal — the defect reported in
+     * `docs/tracker/057-qa-issue-list-visit-workflow.md` §3. The keyboard cannot be shown or hidden from an
+     * instrumentation test, so what is asserted is where each part sits
+     * (`docs/design/android-design-system.md`, "Keyboard (IME) inset").
+     */
+    @Test
+    fun keepsTheFollowUpRequestsDecisionOutOfTheSheetsScrollingBody() {
+        render(details = overviewJobCompletedWithFollowUp(), canRequestFollowUpVisit = true)
+
+        composeTestRule.onNodeWithTag(JobDetailsRequestFollowUpActionTag).performClick()
+
+        composeTestRule
+            .onAllNodes(hasTestTag(RequestFollowUpReasonTag) and hasAnyAncestor(hasScrollAction()))
+            .assertCountEquals(1)
+        composeTestRule
+            .onAllNodes(hasTestTag(RequestFollowUpConfirmTag) and hasNoScrollableAncestor())
+            .assertCountEquals(1)
+    }
+
     private fun render(
         details: JobDetails = overviewJob(),
         state: JobDetailsUiState? = null,
@@ -695,7 +950,15 @@ class JobDetailsOverviewScreenTest {
         canAddVisitNote: Boolean = true,
         canAddEvidencePhoto: Boolean = true,
         canViewTechnicians: Boolean = true,
+        canReviewVisitRequests: Boolean = false,
+        canRequestFollowUpVisit: Boolean = false,
         canOpenCustomer: Boolean = true,
+        onRequestFollowUpVisit: (
+            reason: String,
+            start: Instant,
+            end: Instant,
+            sameTechnicianPreferred: Boolean,
+        ) -> Unit = { _, _, _, _ -> },
     ) {
         val screenState = state ?: JobDetailsUiState(
             jobId = OVERVIEW_JOB_ID,
@@ -717,6 +980,8 @@ class JobDetailsOverviewScreenTest {
                     canAddVisitNote = canAddVisitNote,
                     canAddEvidencePhoto = canAddEvidencePhoto,
                     canViewTechnicians = canViewTechnicians,
+                    canReviewVisitRequests = canReviewVisitRequests,
+                    canRequestFollowUpVisit = canRequestFollowUpVisit,
                     canOpenCustomer = canOpenCustomer,
                     onRetry = {},
                     onRetryActivity = {},
@@ -724,11 +989,15 @@ class JobDetailsOverviewScreenTest {
                     onOpenInMaps = {},
                     onLoadAssignableTechnicians = {},
                     onChangeJobStatus = {},
-                    onChangeVisitStatus = { _, _, _ -> },
+                    onChangeVisitStatus = {},
+                    onCompleteVisit = { _, _ -> },
                     onDiscardQueuedVisitAction = {},
                     onDiscardQueuedVisitNote = {},
                     onAddActivityText = {},
                     onRescheduleVisit = { _, _ -> },
+                    onScheduleVisit = { _, _, _ -> },
+                    onRequestFollowUpVisit = onRequestFollowUpVisit,
+                    onOpenRequest = {},
                     onAssignTechnicians = {},
                     onConfirmPendingAction = {},
                     onDismissPendingAction = {},
@@ -782,17 +1051,6 @@ class JobDetailsOverviewScreenTest {
             .atZone(ZoneId.systemDefault())
             .format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(deviceLocale()))
 
-    /** The window a Visit's summary states: its scheduled start and end, in the device's language. */
-    private fun scheduledTimeRange(scheduledStart: String, scheduledEnd: String): String {
-        val formatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(deviceLocale())
-        val zone = ZoneId.systemDefault()
-        return string(
-            R.string.job_details_visit_time_range,
-            Instant.parse(scheduledStart).atZone(zone).format(formatter),
-            Instant.parse(scheduledEnd).atZone(zone).format(formatter),
-        )
-    }
-
     /** The language the device is set to, which is the one the screen formats a Visit with (`BR-028`). */
     private fun deviceLocale(): Locale {
         val configuration =
@@ -814,8 +1072,8 @@ private fun overviewJob() = JobDetails(
     jobNumber = 1042,
     title = "Furnace repair",
     description = "Blower motor is noisy.",
-    status = JobStatus.SCHEDULED,
-    allowedStatusTransitions = listOf(JobStatus.IN_PROGRESS),
+    status = JobStatus.ACTIVE,
+    allowedStatusTransitions = listOf(JobStatus.COMPLETED, JobStatus.CANCELED),
     version = 7,
     customerId = "customer-1",
     customerName = "Martha Reynolds",
@@ -842,6 +1100,8 @@ private fun overviewJob() = JobDetails(
         reschedulable = true,
         allowedStatusTransitions = listOf(VisitStatus.ON_SITE, VisitStatus.SCHEDULED),
         fieldActionable = true,
+        completionAllowed = true,
+        addUpdateAllowed = true,
     ),
     technicians = listOf(
         JobDetailsTechnician(
@@ -889,11 +1149,27 @@ private fun overviewJob() = JobDetails(
     ),
 )
 
-/** The Visit the read represents, as its own row (`BR-081`). */
-private fun overviewVisitTwoSummary() = overviewJob().visits.single { visit -> visit.id == VISIT_TWO_ID }
-
-/** The Job's earlier Visit, as its own row (`BR-047`). */
-private fun overviewVisitOne() = overviewJob().visits.single { visit -> visit.id == VISIT_ONE_ID }
+/**
+ * The Job these tests read with its represented Visit completed with a follow-up outcome, so the
+ * request action is the API's own answer (`BR-078`, `BR-FV-001`).
+ */
+private fun overviewJobCompletedWithFollowUp(): JobDetails {
+    val base = overviewJob()
+    val represented = requireNotNull(base.selectedVisit)
+    return base.copy(
+        selectedVisit = represented.copy(
+            status = VisitStatus.COMPLETED,
+            requestFollowUpAllowed = true,
+        ),
+        visits = base.visits.map { visit ->
+            if (visit.id == represented.id) {
+                visit.copy(status = VisitStatus.COMPLETED, outcome = VisitOutcome.NEEDS_FOLLOW_UP)
+            } else {
+                visit
+            }
+        },
+    )
+}
 
 /**
  * The Job these tests read with its represented Visit moved to [day], scheduled and not under way
@@ -988,3 +1264,19 @@ private fun overviewJobWideEvents() = listOf(
         body = null,
     ),
 )
+
+/**
+ * Whether a node sits outside every scrolling region.
+ *
+ * A field is typed into inside a sheet's body, which shrinks and scrolls while the keyboard is up, and the
+ * sheet's decisions are its own foot — drawn under that body rather than inside it, so the keyboard cannot
+ * carry them off the screen (`docs/design/android-design-system.md`, "Keyboard (IME) inset";
+ * `docs/tracker/057-qa-issue-list-visit-workflow.md` §3). The keyboard itself cannot be shown or hidden from
+ * an instrumentation test, so the contract is asserted in this structural form.
+ */
+private fun hasNoScrollableAncestor(): SemanticsMatcher {
+    val insideAScrollingRegion = hasAnyAncestor(hasScrollAction())
+    return SemanticsMatcher("has no scrollable ancestor") { node ->
+        !insideAScrollingRegion.matches(node)
+    }
+}

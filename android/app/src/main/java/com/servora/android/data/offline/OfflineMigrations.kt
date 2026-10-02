@@ -82,6 +82,21 @@ internal object OfflineMigrations {
         }
     }
 
+    /**
+     * 3 → 4 adds the Visit each pending photo and recording was captured on (`BR-047`, `BR-080`).
+     *
+     * Evidence belongs to the field attempt it was recorded on, and the upload carries it. The column is
+     * added **nullable** on purpose: a draft written before the link existed has no Visit, and its upload
+     * is refused rather than sent with an invented attribution — so the technician's captured work is
+     * never silently dropped by the upgrade (`BR-014`, `BR-042`).
+     */
+    val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("alter table `pending_job_photos` add column `visitId` text")
+            db.execSQL("alter table `pending_job_audio_notes` add column `visitId` text")
+        }
+    }
+
     /** Every migration the database needs, in the order Room applies them. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 }

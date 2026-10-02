@@ -842,7 +842,7 @@ Android, Angular, API, Database
 None.
 
 **Notes:**
-The Job lifecycle is defined by BR-058 (states and transitions), BR-060 and BR-061 (derived conditions), BR-062 (completion), BR-063 (reopening) and BR-064/BR-065 (cancellation). The Visit lifecycle is defined by BR-074.
+The Job lifecycle is defined by BR-058 (states and transitions), BR-060 (derived attention), BR-062 (how a Job is closed), BR-063 (reopening) and BR-064/BR-065 (cancellation). The Visit lifecycle is defined by BR-074.
 
 **Status:**
 **CONFIRMED** — lifecycle defined by BR-058 – BR-065 and BR-074
@@ -1168,63 +1168,49 @@ Android, Angular, API, Database
 
 A Job has exactly one status from a shared, backend-validated vocabulary:
 
-| Code             | Meaning                                                |
-| ---------------- | ------------------------------------------------------ |
-| `NEW`            | Created; not yet scheduled                             |
-| `SCHEDULED`      | A Visit is scheduled                                   |
-| `IN_PROGRESS`    | Work has started and/or work remains                   |
-| `PENDING_REVIEW` | Field work appears finished and awaits business review |
-| `COMPLETED`      | Closed by an authorized office user                    |
-| `CANCELED`       | Canceled by an authorized user                         |
+| Code        | Meaning                                                       |
+| ----------- | ------------------------------------------------------------- |
+| `NEW`       | Created; has not entered execution or scheduling              |
+| `ACTIVE`    | The customer request is open and has entered execution        |
+| `COMPLETED` | The customer request has been resolved                        |
+| `CANCELED`  | The customer request was canceled rather than resolved        |
 
 Permitted transitions:
 
 ```text
-NEW             → SCHEDULED
-NEW             → IN_PROGRESS
-NEW             → PENDING_REVIEW
-NEW             → COMPLETED
+NEW         → ACTIVE
+NEW         → COMPLETED
+NEW         → CANCELED
 
-SCHEDULED       → IN_PROGRESS
-SCHEDULED       → PENDING_REVIEW
-SCHEDULED       → COMPLETED
+ACTIVE      → COMPLETED
+ACTIVE      → CANCELED
 
-IN_PROGRESS     → SCHEDULED
-IN_PROGRESS     → PENDING_REVIEW
-IN_PROGRESS     → COMPLETED
-
-PENDING_REVIEW  → SCHEDULED
-PENDING_REVIEW  → IN_PROGRESS
-PENDING_REVIEW  → COMPLETED
-
-NEW             → CANCELED
-SCHEDULED       → CANCELED
-IN_PROGRESS     → CANCELED
-PENDING_REVIEW  → CANCELED
-
-COMPLETED       → NEW
-CANCELED        → NEW
+COMPLETED   → ACTIVE
+CANCELED    → ACTIVE
 ```
 
-- **Any structurally permitted destination may be selected directly.** While a Job is open (`NEW`, `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW`) an authorized user may select **any other open status, forwards or backwards**, or `COMPLETED`. The Job reaches that status in **one** business operation, and that operation records **one** transition; a client must not reach a destination by issuing a series of transitions.
-- A Job is therefore never forced through the lifecycle one step at a time. `SCHEDULED → COMPLETED` and `IN_PROGRESS → SCHEDULED` are each one permitted transition.
+- **Any structurally permitted destination may be selected directly.** An authorized user may select **any** destination the Job's current status permits, in **one** business operation, and that operation records **one** transition; a client must not reach a destination by issuing a series of transitions.
+- A Job is therefore never forced through the lifecycle one step at a time. `NEW → COMPLETED` and `ACTIVE → CANCELED` are each one permitted transition.
 - A Job may not "change" to the status it already holds; that is not a transition.
-- `NEW` is not a destination for an open Job. It is reached only by reopening a terminal Job (BR-063).
-- `COMPLETED` and `CANCELED` are terminal. The **only** destination from either is `NEW`, through the explicit reopen (BR-063). No other destination is reachable from a terminal status.
-- The transition list is **structural**. Whether a listed destination may be entered right now is a runtime eligibility question owned by its own rule: BR-061 for `PENDING_REVIEW` and BR-062 for `COMPLETED`. A destination is therefore offered even when the Job does not currently qualify for it, and the operation is refused with that rule's own outcome. Eligibility must never be expressed by removing a structurally valid destination from the list.
+- `NEW` is not a destination for an open Job. It is reached only by reopening a terminal Job (BR-063). A Job that has entered execution is `ACTIVE`; it is never moved back to `NEW`.
+- `COMPLETED` and `CANCELED` are terminal. The **only** destination from either is `ACTIVE`, through the explicit reopen (BR-063). No other destination is reachable from a terminal status.
+- The transition list is **structural**. Whether a listed destination may be entered right now is a runtime eligibility question owned by its own rule: BR-062 for `COMPLETED`. A destination is therefore offered even when the Job does not currently qualify for it, and the operation is refused with that rule's own outcome. Eligibility must never be expressed by removing a structurally valid destination from the list.
 - Every status change records, in append-only history, the previous status, the new status, the user who made the change and the timestamp (BR-033, BR-067, BR-080).
 - Changing a Job's status **never** changes a Visit's status and never rewrites Visit history. The Job's business lifecycle and the field execution lifecycle are separate state machines (BR-059).
-- Job status advances as a consequence of Visit lifecycle events (BR-074) and the conditions in BR-060 and BR-061, and by the explicit authorized action above; the backend applies and validates the transition either way.
-- `COMPLETED`, `CANCELED` and reopening are explicit authorized actions (BR-062, BR-064, BR-063).
+- Job status advances as a consequence of Visit lifecycle events (BR-074) and the condition in BR-062, and by the explicit authorized action above; the backend applies and validates the transition either way.
+- `CANCELED` and reopening are explicit authorized actions (BR-063, BR-064). `COMPLETED` is reached by an explicit authorized action **or** by the resolving Visit completion BR-078 defines, as constrained by BR-062.
+- Operational attention is **not** a Job status and never appears in this vocabulary (`BR-060`, BR-042).
 - Clients must not invent their own Job status vocabulary (BR-041).
 
 **Exceptions:**
 None.
 
 **Notes:**
-This rule defines the lifecycle required by BR-022. Job cancellation appears above as a permitted transition but is not applied while BR-064's structured reason catalogue is undefined.
+This rule defines the lifecycle required by BR-022. Job cancellation appears above as a permitted transition; BR-064 requires a structured cancellation reason whose catalogue is undefined, so the API applies the change with the request's optional explanation and invents no reason vocabulary.
 
-**Changed decision (recorded under BR-040):** the transition list previously permitted only the next step forward, so a manager had to move a Job through every status in order and could not move one backwards. Product ownership confirmed that an authorized user selects any permitted destination in one operation, and that `NEW` is not a destination for an open Job. BR-061 and BR-062 remain runtime eligibility conditions over this list, and BR-062 now carries the completion invariant.
+**Changed decision (recorded under BR-040):** the transition list previously permitted only the next step forward, so a manager had to move a Job through every status in order and could not move one backwards. Product ownership confirmed that an authorized user selects any permitted destination in one operation, and that `NEW` is not a destination for an open Job. BR-062 remains a runtime eligibility condition over this list, and BR-062 carries the completion invariant.
+
+**Changed decision (recorded under BR-040, 2026-09-20):** product ownership replaced the six-status Job lifecycle with the four statuses above. `SCHEDULED` and `IN_PROGRESS` were two names for *the request is open and work has entered execution* and were collapsed into `ACTIVE`; `PENDING_REVIEW` was a business-review status with no decision behind it and is removed, because the review product ownership wanted is a **derived** attention condition rather than lifecycle state (`BR-060`), and a resolving Visit completion now closes the Job (BR-062, BR-078). The decision, its rationale and the migration are recorded in `docs/tracker/051-job-visit-lifecycle-redesign.md`.
 
 **Status:**
 **CONFIRMED**
@@ -1265,15 +1251,24 @@ Android, Angular, API
 
 **Expected behavior:**
 
-- If a Job's status is `NEW` or `IN_PROGRESS` and no Visit is in `SCHEDULED`, `EN_ROUTE`, `ON_SITE` or `IN_PROGRESS`, the Job surfaces a derived operational signal: "Needs Scheduling" / "No Active Visit".
-- A `CANCELED`, `NO_SHOW` or `COMPLETED` Visit does not count as active work.
+- If a Job's status is `NEW` or `ACTIVE` and no Visit is in `SCHEDULED`, `EN_ROUTE`, `ON_SITE` or `IN_PROGRESS`, the Job surfaces a derived operational signal: "Needs Scheduling" / "No Active Visit".
+- A `CANCELED` or `COMPLETED` Visit does not count as active work.
 - The signal is derived, not stored: it is not a Job status and must not be persisted as one.
 
 **Exceptions:**
 None.
 
 **Notes:**
+This condition, `BR-078`'s outcome-derived office actions and BR-072's overdue condition are the whole of
+"attention": attention answers *what does the office need to act on?*, and it never appears in the Job
+status vocabulary (`BR-058`). A client draws every one of them from the API's own answer rather than
+deriving a second copy (`BR-041`).
+
 The Visit set this condition considers is named `needsSchedulingActiveVisit`; the broader set the archive warning considers (`BR-083`) is named `archiveWarningOpenWork`. The two are deliberately different named concepts, because they answer different questions: a `DRAFT` Visit counts as open work for the archive warning but is not yet scheduled work for this signal. Neither vocabulary replaces the other.
+
+**Changed decision (recorded under BR-040, 2026-09-20):** the Job statuses this condition considers were
+`NEW` and `IN_PROGRESS`; with the new lifecycle (`BR-058`) they are `NEW` and `ACTIVE`. The condition
+itself is unchanged.
 
 **Status:**
 **CONFIRMED**
@@ -1282,13 +1277,21 @@ The Visit set this condition considers is named `needsSchedulingActiveVisit`; th
 
 ## BR-061 — Entry into PENDING_REVIEW
 
+> **REMOVED — this rule no longer applies.** `PENDING_REVIEW` is not part of the Job lifecycle
+> (`BR-058`). The condition it stated — a Job stays open while it still has a Visit to perform — is
+> carried by **BR-062**'s open-Visit invariant and by the Job consequence `BR-078` defines; the
+> business review it described is reported as **derived** operational attention (`BR-060`) rather than
+> as a Job status. The rule is kept here as a record of what it said, and nothing in Servora may
+> implement it. The changed decision is recorded under `BR-040` in
+> `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+
 **Description:**
-`PENDING_REVIEW` is a business-review state, not automatic completion.
+`PENDING_REVIEW` was a business-review state, not automatic completion.
 
 **Applies to:**
 Android, Angular, API, Database
 
-**Expected behavior:**
+**Expected behavior (superseded):**
 
 A Job may enter `PENDING_REVIEW` only when:
 
@@ -1298,7 +1301,7 @@ A Job may enter `PENDING_REVIEW` only when:
    Visit is necessary (BR-078, BR-FV-007).
 
 - If another Visit remains scheduled or active, the Job remains `IN_PROGRESS` even after a `RESOLVED` outcome.
-- Outcomes such as `NEEDS_PARTS`, `NEEDS_FOLLOWUP` and `UNABLE_TO_COMPLETE` keep the Job in `IN_PROGRESS`.
+- Outcomes such as `NEEDS_PARTS`, `NEEDS_FOLLOW_UP` and `UNABLE_TO_COMPLETE` keep the Job in `IN_PROGRESS`.
 - If a follow-up request exists for the latest completed Visit, the Job remains open while that
   request is pending or awaiting clarification. If an authorized office user rejects the request
   because no further Visit is required, that decision resolves the follow-up requirement for the
@@ -1315,38 +1318,51 @@ A Job may enter `PENDING_REVIEW` only when:
 None.
 
 **Notes:**
-The effect of the `NEEDS_QUOTE_APPROVAL` outcome on Job status is not decided.
+The rule is removed, not amended: `PENDING_REVIEW` never existed as a decision anyone made, and the
+consequences it carried are now split between `BR-062` (a Job is never closed over open Visits),
+`BR-078` (what a Visit outcome does to its Job) and `BR-060` (what the office must act on). The Job-status
+effect of the `NEEDS_QUOTE_APPROVAL` outcome this rule left open is resolved by the code's removal:
+`NEEDS_QUOTE_APPROVAL` is not in the `BR-078` outcome vocabulary at all.
 
 **Status:**
-**CONFIRMED**
-**OPEN QUESTION** — the Job-status effect of the `NEEDS_QUOTE_APPROVAL` outcome
+**REMOVED** (superseded by BR-058, BR-060, BR-062, BR-078)
 
 ---
 
-## BR-062 — Only an authorized office user closes a Job
+## BR-062 — How a Job is closed
 
 **Description:**
-Job completion is an explicit business action.
+A Job is closed by an explicit authorized action or by the Visit completion `BR-078` defines, and never
+while it still has open Visit work.
 
 **Applies to:**
 Android, Angular, API, Database
 
 **Expected behavior:**
 
-- Only a Manager/authorized office user can close a Job.
-- Closing requires an explicit business action and is a transition **into** `COMPLETED` (BR-058). `PENDING_REVIEW → COMPLETED` remains the normal path, and an open Job may also be closed directly from `SCHEDULED`, `IN_PROGRESS` or `NEW`, in one operation.
+- A Job reaches `COMPLETED` in exactly two ways, and both are one operation that records one transition:
+  - **an explicit business action** by a Manager/authorized office user, from an open status (`NEW` or
+    `ACTIVE`), as `BR-058` permits; or
+  - **the resolving Visit completion** `BR-078` defines — a Visit reaching `COMPLETED` with the outcome
+    `RESOLVED` — applied by the backend as that completion's consequence. There is no business-review
+    step between the field work and the closure.
 - A consequential transition such as closing a Job requires the user to confirm it explicitly before it is applied; a confirmation is a presentation of the decision, never a substitute for the rules below.
-- **A Job must not transition to `COMPLETED` while it has any open Visit.** A Visit is open while its status is not historical — that is, while it is anything other than `COMPLETED`, `CANCELED` or `NO_SHOW` (BR-074; the same classification BR-083 uses for an active Visit). The check is enforced by the backend as part of applying the transition and cannot be overridden by a client confirmation.
-  - `IN_PROGRESS` Job with an `IN_PROGRESS` Visit → refused.
-  - `SCHEDULED` Job with a `SCHEDULED` Visit → refused.
+- **A Job is never `COMPLETED` while it has any open Visit, whoever closes it.** A Visit is open while its status is not historical — that is, while it is anything other than `COMPLETED` or `CANCELED` (BR-074; the same classification BR-083 uses for an active Visit). The check is enforced by the backend as part of applying the change, it binds both ways of closing a Job, and it cannot be overridden by a client confirmation.
+  - `ACTIVE` Job with an `IN_PROGRESS` Visit → refused.
+  - `ACTIVE` Job with a `SCHEDULED` Visit → refused.
   - A `DRAFT` Visit is a field attempt that has not happened yet, so it is remaining work and the Job cannot be closed while it exists.
-  - `SCHEDULED` Job whose Visits are all `COMPLETED`, `CANCELED` or `NO_SHOW` → permitted.
+  - A Job whose Visits are all `COMPLETED` or `CANCELED` → permitted.
   - A Job with no Visit at all → permitted (administrative closure).
-  - The refusal is reported as its own outcome so a client can say why, and it is not a transition refusal: the destination is structurally permitted by BR-058.
+  - The refusal of an explicit close is reported as its own outcome so a client can say why, and it is not a transition refusal: the destination is structurally permitted by BR-058.
 - Closing a Job changes only the Job. It never changes or reopens a Visit's status and never rewrites Visit history (BR-059).
-- `final_outcome` is an optional Job field recording the overall result of the Job, set when the Job is closed; it must never be copied automatically from the latest Visit outcome.
-- Historical `CANCELED`, `NO_SHOW` or `COMPLETED` Visits do not prevent Job completion.
+- `final_outcome` is an optional Job field recording the overall result of the Job, set when the Job is closed by an explicit action; it must never be copied automatically from the latest Visit outcome.
+- Historical `CANCELED` or `COMPLETED` Visits do not prevent Job completion.
 - The governing condition is that no remaining work requires another Visit, which the open-Visit invariant above makes checkable.
+- **A closed Job receives no new Visit.** `COMPLETED` and `CANCELED` Jobs refuse the creation of a
+  further scheduled Visit (`POST /jobs/:id/visits`) with the same closed-Job refusal the field routes
+  give (`JOB_CLOSED_FOR_FIELD_WORK`). Reopening (`BR-063`) is the only way back, and a reopened Job
+  accepts scheduling again once it otherwise qualifies (`BR-072`). This applies to the office's direct
+  scheduling path and to approving a follow-up request alike, because both create the same kind of Visit.
 - Once completed:
   - the Job's terminal business history is preserved;
   - Visit outcomes become immutable (BR-079);
@@ -1359,8 +1375,15 @@ None.
 **Notes:**
 The catalogue of `final_outcome` values is not defined.
 
+**Changed decision (recorded under BR-040, 2026-09-20):** this rule previously said that only a
+Manager/authorized office user could close a Job and that `PENDING_REVIEW → COMPLETED` was the normal
+path. Product ownership removed the review status (`BR-058`) and confirmed that a resolving Visit
+completion closes the Job automatically. The open-Visit invariant is unchanged and now binds the
+consequence as well, so a resolving completion that leaves another Visit open keeps the Job `ACTIVE`.
+Recorded in `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+
 **Status:**
-**CONFIRMED** — explicit authorized completion
+**CONFIRMED** — the two ways a Job is closed, and the open-Visit invariant that binds both
 **OPEN QUESTION** — the `final_outcome` catalogue
 
 ---
@@ -1368,16 +1391,18 @@ The catalogue of `final_outcome` values is not defined.
 ## BR-063 — A completed or canceled Job may be reopened
 
 **Description:**
-Reopening returns the business request to the scheduling workflow.
+Reopening returns the business request to execution.
 
 **Applies to:**
 Android, Angular, API, Database
 
 **Expected behavior:**
 
-- Reopening transitions `COMPLETED → NEW` or `CANCELED → NEW` (BR-058).
-- Reopening is the **only** way a Job reaches `NEW`: an open Job is never moved back to `NEW` (BR-058).
-- Reopening never produces `IN_PROGRESS`; it does not imply that work is currently underway.
+- Reopening transitions `COMPLETED → ACTIVE` or `CANCELED → ACTIVE` (BR-058).
+- Reopening never produces `NEW`. `NEW` is the status of a Job that has not entered execution, and a Job
+  with history has entered it, so `NEW` is not a destination of this rule.
+- Reopening never implies that work is currently under way: it returns the request to execution, not to a
+  working Visit state.
 - Reopening does not modify or reopen historical completed or canceled Visits.
 - Reopening does not create a Visit automatically; a new Visit represents the new field attempt (BR-051).
 - Previous completion/cancellation history is preserved.
@@ -1386,6 +1411,13 @@ Android, Angular, API, Database
 
 **Exceptions:**
 None.
+
+**Notes:**
+**Changed decision (recorded under BR-040, 2026-09-20):** this rule previously said reopening transitions
+`COMPLETED → NEW` / `CANCELED → NEW`. Product ownership's review status was removed and `NEW` was narrowed
+to "has not entered execution" (`BR-058`), so reopening returns a terminal Job to `ACTIVE` — the status a
+Job with historical Visits really has. Recorded in
+`docs/tracker/051-job-visit-lifecycle-redesign.md`; the API applies `ACTIVE`.
 
 **Status:**
 **CONFIRMED**
@@ -1402,7 +1434,7 @@ Android, Angular, API, Database
 
 **Expected behavior:**
 
-- A Job may be canceled from `NEW`, `SCHEDULED`, `IN_PROGRESS` or `PENDING_REVIEW`, including after field work has started.
+- A Job may be canceled from `NEW` or `ACTIVE`, including after field work has started.
 - Cancellation is a separate explicit action with its own requirements. It is not folded into the ordinary status selector, and it is not applied as a plain destination while the structured reason catalogue remains undefined.
 - Every Job cancellation requires a structured cancellation reason and a mandatory explanation.
 - The explanation is especially important when field work has already occurred.
@@ -1466,7 +1498,7 @@ Android, Angular, API
 
 - Authorization is enforced by the API; UI restrictions are convenience only (BR-007).
 - Technicians can operate the field execution lifecycle of their assigned Visits: they may move a Visit directly between any working status, in either direction, including reopening a `COMPLETED` Visit (BR-074).
-- Technicians cannot perform Job-level or dispatch-management actions, including: cancel a Job, cancel a Visit, mark `NO_SHOW`, reopen a Job, change Job status, assign or remove technicians, or change a Job's Property.
+- Technicians cannot perform Job-level or dispatch-management actions, including: cancel a Job, cancel a Visit, reopen a Job, change Job status, assign or remove technicians, or change a Job's Property.
 - The exception is an explicit direct scheduling permission: a technician granted that permission may schedule a follow-up Visit directly under BR-FV-011. The permission is granted through the normal permission model and is not implied by the default Technician role.
 - Managers/authorized users perform those actions according to their permissions (BR-006).
 - The **Visit status route** is the one place the two scopes meet, and BR-093 keeps them distinct there: a
@@ -1574,8 +1606,8 @@ Archiving a Property:
 
 For the archive warning:
 
-- An **active Job** is a Job in `NEW`, `SCHEDULED`, `IN_PROGRESS` or `PENDING_REVIEW` (BR-058). `COMPLETED` and `CANCELED` Jobs are not active.
-- An **active Visit** is a Visit whose status is not `COMPLETED`, `CANCELED` or `NO_SHOW` (BR-074).
+- An **active Job** is a Job in `NEW` or `ACTIVE` (BR-058). `COMPLETED` and `CANCELED` Jobs are not active.
+- An **active Visit** is a Visit whose status is not `COMPLETED` or `CANCELED` (BR-074).
 
 **Exceptions:**
 None.
@@ -2301,7 +2333,7 @@ Android, Angular, API, Database
 - Rescheduling is permitted only while the Visit is `SCHEDULED`.
 - Every schedule change is recorded in schedule history.
 - Schedule history records: previous schedule, new schedule, actor, timestamp, and an optional reason.
-- A Visit that is `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED`, `CANCELED` or `NO_SHOW` cannot be rescheduled.
+- A Visit that is `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or `CANCELED` cannot be rescheduled.
 - If another field attempt is required, a new Visit is created (BR-071).
 
 **Exceptions:**
@@ -2327,30 +2359,34 @@ A Visit has exactly one status from a shared, backend-validated vocabulary:
 | Code          | Meaning                                  |
 | ------------- | ---------------------------------------- |
 | `DRAFT`       | Created; not scheduled                   |
-| `SCHEDULED`   | Scheduled (BR-072)                       |
+| `SCHEDULED`   | A real, actionable Visit exists (BR-072) |
 | `EN_ROUTE`    | Technician is travelling to the Property |
 | `ON_SITE`     | Technician has arrived                   |
 | `IN_PROGRESS` | Work is being performed                  |
 | `COMPLETED`   | Field attempt completed (BR-077)         |
 | `CANCELED`    | Canceled (BR-076)                        |
-| `NO_SHOW`     | The field attempt could not be performed |
 
 **Working statuses** — the field attempt is not over:
 
 ```text
-DRAFT, SCHEDULED, EN_ROUTE, ON_SITE, IN_PROGRESS, COMPLETED
+SCHEDULED, EN_ROUTE, ON_SITE, IN_PROGRESS
 ```
 
 **Historical statuses** — the field attempt is over:
 
 ```text
-CANCELED, NO_SHOW
+COMPLETED, CANCELED
 ```
+
+`DRAFT` is neither: it is a stored, unscheduled attempt. Nothing has happened to it, no technician is
+working on it, and it must never be presented as a technician's working state. The API creates no such
+Visit — the supported create operation schedules the Visit it creates — so a `DRAFT` is an attempt that
+was never scheduled, and it has no destination in the field status table below.
 
 The normal progression is the order a successful field attempt usually follows:
 
 ```text
-DRAFT → SCHEDULED → EN_ROUTE → ON_SITE → IN_PROGRESS → COMPLETED
+SCHEDULED → EN_ROUTE → ON_SITE → IN_PROGRESS → COMPLETED
 ```
 
 That order is the **usual path, not a required one.** Servora does not enforce a strict next-status
@@ -2361,45 +2397,46 @@ tap, and moving backward when the work genuinely goes back a step.
   between any two working statuses, in either direction, in **one** operation. A Visit does not have to
   be advanced one step at a time, and `SCHEDULED → IN_PROGRESS`, `ON_SITE → EN_ROUTE` and
   `IN_PROGRESS → SCHEDULED` are each one permitted transition.
-- **A `COMPLETED` Visit may be reopened.** A Visit completed by mistake, or one whose work must
-  continue, may be moved from `COMPLETED` back into any other working status. Reopening is simply the
-  `COMPLETED → working status` direction of the same free movement; it is not a separate operation and
-  it is not a hidden lifecycle of its own.
+- **Completing a Visit is its own explicit action, not a destination of the working-status selector.**
+  `COMPLETED` is reached through the completion operation, which carries the outcome BR-077 requires. A
+  Visit does not become `COMPLETED` by selecting a status.
+- **Reopening a `COMPLETED` Visit.** BR-074 permits a Visit completed by mistake, or one whose work must
+  continue, to be moved back into a working status. The turn is **not implemented**: no client offers it
+  and no client may invent it, because it would mean deciding the reopen's own rules. It remains an
+  **OPEN QUESTION** (`docs/api/job-actions.md` §10).
 - A Visit may not "change" to the status it already holds; that is not a transition.
-- **`CANCELED` and `NO_SHOW` remain truly terminal and are not field destinations.** They are dispatch
-  actions (BR-066): a Technician never takes either, and no working status is reachable from them.
-  They stay the terminal alternatives they always were:
+- **`CANCELED` remains truly terminal and is not a field destination.** It is a dispatch action
+  (BR-066): a Technician never takes it, and no working status is reachable from it. It stays the
+  terminal alternative it always was:
 
 ```text
 SCHEDULED   → CANCELED
 EN_ROUTE    → CANCELED
 ON_SITE     → CANCELED
 IN_PROGRESS → CANCELED
-
-SCHEDULED   → NO_SHOW
 ```
 
-- `CANCELED` and `NO_SHOW` are taken with the structured reason BR-076 requires. The reason
-  requirements are unchanged by this rule.
+- `CANCELED` is taken with the structured reason BR-076 requires. The reason requirements are unchanged
+  by this rule.
 - Free movement is **structural**. Whether a destination may be entered right now is runtime
   eligibility owned by its own rule — BR-072 for a Visit becoming `SCHEDULED` — so a destination is
   offered even when the Visit does not currently qualify for it, and the operation is refused with that
   rule's own outcome. Eligibility must never be expressed by removing a structurally valid destination
   from the list.
-- A Visit that reaches `COMPLETED` still records the outcome BR-077 requires, and a Visit completed
-  **again** after a reopen requires a **new** outcome (BR-077, BR-078).
+- A Visit that reaches `COMPLETED` still records the outcome BR-077 requires. A Visit completed **again**
+  after its reopen is implemented requires a **new** outcome (BR-077, BR-078).
 - Reopening a `COMPLETED` Visit preserves the previous completion, its status events and its recorded
   outcome in append-only history, but that outcome is **no longer the Visit's current outcome**: the
   Visit holds no current outcome until it is completed again.
-- **A Job must not await review while its field work is unfinished** (BR-061). If a Visit is moved into
-  a working status while its Job is `PENDING_REVIEW`, the Job leaves `PENDING_REVIEW` and returns to
-  `IN_PROGRESS`.
+- **A Job is never closed over open field work** (BR-062). A Visit is open while its status is not
+  `COMPLETED` or `CANCELED`, so moving a Visit back into a working status of a Job that the office had
+  already closed is refused (`JOB_CLOSED_FOR_FIELD_WORK`).
 - Every transition is validated by the backend (BR-022); clients must not invent their own Visit status
   vocabulary (BR-041).
 - Status history is append-only, and every status change records the previous status, the new status,
   the actor and the timestamp (BR-033, BR-067).
 - Ordinary field status changes and reversals require **no** reason dialog. A reason remains required
-  only where its own rule requires one (`CANCELED` and `NO_SHOW` — BR-076).
+  only where its own rule requires one (`CANCELED` — BR-076).
 - Clients must not invent a stricter lifecycle than this rule. The API projects the Visit's permitted
   destinations so a client draws the technician's action from the backend's own answer (BR-041).
 
@@ -2413,12 +2450,22 @@ Who may drive each transition is defined by BR-066 and the permission model (BR-
 **Changed decision (recorded under BR-040):** the lifecycle was previously a chain in which a Visit
 could only be advanced to the next status, plus the single backward correction `EN_ROUTE → SCHEDULED`
 (BR-075). Product ownership confirmed that a Technician may move a Visit directly between any working
-statuses in either direction, reopening a `COMPLETED` Visit included, because the chain did not account
-for the reality of field work. `CANCELED` and `NO_SHOW` were deliberately left unchanged: they remain
-office-only dispatch actions and remain truly terminal.
+statuses in either direction, because the chain did not account for the reality of field work.
+`CANCELED` was deliberately left unchanged: it remains an office-only dispatch action and remains truly
+terminal.
+
+**Changed decision (recorded under BR-040, 2026-09-20):** product ownership removed the `NO_SHOW` Visit
+status. It was a second name for *the field attempt did not happen*, which `CANCELED` already states with
+the structured reason BR-076 requires, and having both meant a Visit could be "over" in two ways that no
+rule told apart. A field attempt that could not be performed is canceled with the reason that explains it.
+`COMPLETED` is also no longer obtainable through the ordinary status selector: completing a Visit is the
+operation that carries its outcome (BR-077). Recorded in
+`docs/tracker/051-job-visit-lifecycle-redesign.md`.
 
 **Status:**
 **CONFIRMED**
+**OPEN QUESTION** — reopening a `COMPLETED` Visit is permitted by this rule and is not implemented
+(`docs/api/job-actions.md` §10)
 
 ---
 
@@ -2442,7 +2489,7 @@ Android, Angular, API
   actor and the timestamp (BR-033, BR-067).
 - Corrections are performed by an authorized user according to permissions (BR-006, BR-066).
 - A correction requires **no** reason. A reason is required only where its own rule states one
-  (`CANCELED` and `NO_SHOW` — BR-076).
+  (`CANCELED` — BR-076).
 
 **Exceptions:**
 None.
@@ -2540,18 +2587,22 @@ Android, Angular, API, Database
 
 **Expected behavior:**
 
-The initial outcome types are:
+The outcome types are:
 
 | Code                   | Meaning                                 | Follow-up                   |
 | ---------------------- | --------------------------------------- | --------------------------- |
 | `RESOLVED`             | The work was completed successfully     | None expected               |
+| `NEEDS_FOLLOW_UP`      | The work requires another field attempt | Follow-up expected          |
 | `NEEDS_PARTS`          | The work requires parts                 | Follow-up expected          |
-| `NEEDS_FOLLOWUP`       | The work requires another field attempt | Follow-up expected          |
-| `NEEDS_QUOTE_APPROVAL` | The work requires a quote/approval      | Business follow-up expected |
 | `UNABLE_TO_COMPLETE`   | The work could not be completed         | Follow-up expected          |
 
 - Outcome describes what resulted from the field attempt; Visit status describes whether the attempt has completed (BR-074). They must not be merged.
-- Follow-up expectation is derived from the outcome type; no separate `follow_up_required` boolean is modelled.
+- **The outcome is what moves the Job** (BR-058, BR-062). The completion of the Visit is one operation, and
+  its outcome decides the Job's consequence: `RESOLVED` closes the Job when no other Visit remains open,
+  and every other outcome leaves it `ACTIVE` and derives the office attention that outcome implies
+  (BR-060). No client derives or sends this consequence.
+- **Follow-up expectation is derived from the outcome code** (`RESOLVED` alone expects none); no separate
+  `follow_up_required` boolean is modelled.
 - A new field attempt is represented by a new Visit, not by editing a completed one. **Reopening** a
   `COMPLETED` Visit (BR-074) is not a new attempt: it corrects the status of the field attempt that
   already exists, and the optional reopen reason stays unmodelled. When the attempt is genuinely over
@@ -2563,6 +2614,13 @@ None.
 
 **Notes:**
 Whether additional outcome types may be added is a future product decision.
+
+**Changed decision (recorded under BR-040, 2026-09-20):** the catalogue was previously `RESOLVED`,
+`NEEDS_PARTS`, `NEEDS_FOLLOWUP`, `NEEDS_QUOTE_APPROVAL` and `UNABLE_TO_COMPLETE`. `NEEDS_FOLLOWUP` is
+renamed `NEEDS_FOLLOW_UP`, because a stored business value must not be written with a spelling that does
+not read as the two words it stands for (`BR-041`); `NEEDS_QUOTE_APPROVAL` is removed, because a quote or
+an approval is a **business** follow-up rather than a result of the field attempt, and no rule or surface
+served it. Recorded in `docs/tracker/051-job-visit-lifecycle-redesign.md`.
 
 **Status:**
 **CONFIRMED**
@@ -2628,7 +2686,7 @@ Android, Angular, API, Database
   not distinguish who may take one working destination from another.
 - Office completion uses the same requirements as technician completion: a valid completion outcome
   (BR-077, BR-078) is required, the normal transition rules, validation and scheduling eligibility run,
-  and the downstream Job state behaviour is identical (BR-058, BR-061, BR-074). Nothing about a completion
+  and the downstream Job state behaviour is identical (BR-058, BR-062, BR-074). Nothing about a completion
   changes because an office member performed it.
 - The completion's own capability is **not** bypassed: recording the outcome requires
   `VISIT_RECORD_OUTCOME` of every caller, the office included (BR-009, BR-077). Holding the office
@@ -2647,9 +2705,9 @@ Android, Angular, API, Database
 - Authorization remains the API's (BR-001, BR-007). A hidden or disabled control is never the boundary.
 
 **Exceptions:**
-`CANCELED` and `NO_SHOW` are unaffected. They remain office/dispatch actions with a structured reason, no
-capability authorizes one today, and they stay destinations of no Visit status route (BR-066, BR-076).
-This rule authorizes entering the **working** statuses, completion included — not the dispatch pair.
+`CANCELED` is unaffected. It remains an office/dispatch action with a structured reason, no capability
+authorizes one today, and it stays a destination of no Visit status route (BR-066, BR-076). This rule
+authorizes entering the **working** statuses and completing a Visit — not the dispatch action.
 
 **Notes:**
 
@@ -2685,6 +2743,16 @@ Android, Angular, API, Database
 - The request is associated with the Job.
 - The request identifies the source Visit that caused the need for additional work (BR-FV-008).
 - The request is an operational decision record; it is not itself a Visit (BR-FV-002).
+- The **Request another visit** action is offered only for a **completed** Visit whose recorded outcome
+  expects a follow-up — `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE` (`BR-078`). A
+  `RESOLVED` completion declares that no follow-up is required, so no request action is offered for it,
+  and a Visit that is not completed is not a request opportunity either (`BR-FV-008`). The capability
+  the session holds is a separate gate (`BR-006`), and the API is the authority for both the Visit shape
+  and the authorization (`BR-001`, `BR-007`).
+
+**Notes:**
+This availability follows the follow-up expectation `BR-078` already derives from the outcome code
+rather than introducing a new stored flag.
 
 **Status:**
 **CONFIRMED**
@@ -2905,7 +2973,28 @@ Android, Angular, API, Database
 - The request lifecycle uses stable status codes.
 - The minimum lifecycle is `PENDING → APPROVED | REJECTED`.
 - A request returned for clarification remains unresolved until it is later approved or rejected.
+- **A request returned for clarification is answered by its requester, and answering it returns the
+  request to `PENDING`** — the state the office reviews it in — in **one** operation that records the
+  answer. That transition exists; it is the requester's own move, never a reviewer's, and it is what
+  makes the returned request reachable again (`BR-006`, `BR-009`).
+- **The exchange is recorded on the request itself.** The office's question and the requester's answer
+  are messages of a request-scoped, append-only clarification conversation, each carrying its author and
+  the time it was recorded (`BR-067`, `BR-FV-013`). A message is never edited or removed, so what was
+  asked and what was answered stay readable after the decision that follows them.
 - If the office modifies the technician's proposed schedule before approval, the request is still considered approved once the resulting Visit is created.
+
+**Notes:**
+**Changed decision (recorded under `BR-040`, 2026-09-29):** product ownership decided that a request
+returned for clarification is **answerable**, which is option 1 of the choice
+`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.3.3 recorded as open: the office's *Clarify*
+means "we need more from you", the technician can answer it, and the answer returns the request to the
+office's review. The rule previously stated the lifecycle as `PENDING → APPROVED | REJECTED` and that a
+clarified request "remains unresolved until it is later approved or rejected" — both of which remain
+true, because the answer makes the request reviewable again rather than deciding it: `NEEDS_CLARIFICATION`
+is not terminal, and nothing here lets a requester approve, reject or reopen anything. The transition,
+the conversation's shape and its authorization are recorded in
+`docs/decisions/023-follow-up-clarification-conversation.md`, and the Open Question the options carried
+is closed by that record.
 
 **Status:**
 **CONFIRMED**
@@ -3503,3 +3592,171 @@ The goal is to maintain a small, coherent business contract rather than prematur
 > **Servora implements confirmed product behavior, not assumptions.**
 >
 > **When the business does not yet have an answer, the rule stays open.**
+
+---
+
+# 23. Ad-hoc / Unrecorded Field Work
+
+## BR-AH-001 — Ad-hoc work reports are not Visits
+
+A technician may report work they were asked to perform when no matching Servora Visit exists. The report is a pending office-review record, not a Job, not a Visit, and not a Visit status.
+
+**Status:**
+**CONFIRMED**
+
+## BR-AH-002 — The office reconciles ad-hoc work
+
+A Manager reconciles a pending ad-hoc work report by linking it to an appropriate existing Job and creating/associating a Visit, or by creating a new Job and its corresponding Visit from the report. The Technician does not decide whether a Job or Visit should formally be created.
+
+**Status:**
+**CONFIRMED**
+
+## BR-AH-003 — Reconciled ad-hoc work becomes a normal Visit
+
+Once reconciled, the created Visit uses the normal Visit model and lifecycle vocabulary. Servora must not introduce an `AD_HOC` Visit status. The technician's original report details, work window, outcome, notes, reporter, reviewer, and reconciliation links remain auditable on the report.
+
+**Status:**
+**CONFIRMED**
+
+## BR-AH-004 — Ad-hoc work reports and follow-up Visit requests are separate workflows
+
+A follow-up Visit request means an existing Job needs another future Visit. An ad-hoc work report means work was performed or initiated without a proper Visit representation in Servora. These concepts have separate tables, permissions, routes, UI surfaces, and lifecycle states.
+
+**Status:**
+**CONFIRMED**
+
+## BR-AH-005 — Ad-hoc work report lifecycle
+
+**Description:**
+An ad-hoc work report has exactly one status from a stable, backend-validated vocabulary.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+The lifecycle is:
+
+```text
+PENDING → LINKED | CONVERTED | REJECTED
+```
+
+| Code        | Meaning                                                                 |
+| ----------- | ----------------------------------------------------------------------- |
+| `PENDING`   | Submitted and awaiting office review (the actionable state).            |
+| `LINKED`    | Reconciled into an existing Job and its corresponding completed Visit.  |
+| `CONVERTED` | Reconciled into a new Job and its corresponding completed Visit.        |
+| `REJECTED`  | Voided by the office as not legitimate Servora work (`BR-AH-007`).      |
+
+- `LINKED`, `CONVERTED` and `REJECTED` are terminal and one-way. A terminal report cannot be reconciled
+  again, and no reopen/resubmission workflow exists in v1.
+- The original technician-submitted facts and the reconciliation/rejection metadata (reviewer, timestamp,
+  review note, created Job/Visit links) remain auditable on the report (`BR-AH-003`, `BR-033`).
+
+**Status:**
+**CONFIRMED**
+
+## BR-AH-006 — Historical reconciliation against a closed Job is a privileged, audited exception
+
+**Description:**
+The office may reconcile an ad-hoc report into a Job that is already `COMPLETED` or `CANCELED` as historical
+work, through a distinct privileged operation — without first manufacturing a reopen transition for a Visit
+that already happened in the real world.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Historical reconciliation is a distinct privileged domain operation, authorized server-side, available only
+  to an office member holding the ad-hoc review capability (`visits.review_ad_hoc_work`, `BR-AH-002`).
+- It inserts the historical Visit against the closed Job directly. It must **not** require the ordinary
+  reopen transition (`COMPLETED → ACTIVE`, `BR-063`) as a prerequisite, and must **not** manufacture a
+  `COMPLETED → NEW → … → COMPLETED` chain merely to record already-performed work (`BR-067`).
+- The exception is **narrow and for historical reconciliation only**. It does not weaken the invariant that
+  ordinary Visit creation and scheduling against a `COMPLETED`/`CANCELED` Job remain prohibited (`BR-062`,
+  `BR-066`). The ordinary field and scheduling routes keep refusing closed Jobs.
+- The operation is explicitly audited: it records who reconciled, when, and the link from the report to the
+  created Visit and Job (`BR-033`). The created Visit retains provenance back to the original report.
+- The created Visit carries the report's work window, outcome, summary and reporting technician as a normal
+  completed Visit (`BR-AH-003`).
+- The reconciled Visit's canonical outcome still has its normal Job-state consequence (`BR-AH-008`).
+
+**Exceptions:**
+None. Historical reconciliation is available against both `COMPLETED` and `CANCELED` Jobs. The resulting Job
+state is decided by the reconciled Visit's outcome (`BR-AH-008`): a `RESOLVED` outcome moves a `CANCELED`
+Job to `COMPLETED` (the work actually happened, so the request was not truly canceled).
+
+**Status:**
+**CONFIRMED**
+
+## BR-AH-007 — A report may be rejected as not legitimate work
+
+**Description:**
+The office may void an ad-hoc report that was not legitimate Servora work instead of reconciling it into a
+Visit.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- Rejection moves a `PENDING` report to the terminal `REJECTED` state (`BR-AH-005`).
+- Rejection records the reviewer, the timestamp, and the reason/note.
+- A rejected report is retained for audit/provenance and is never hard-deleted.
+- A rejected report cannot subsequently be linked or converted; rejection is terminal in v1.
+
+**Status:**
+**CONFIRMED**
+
+## BR-AH-008 — The reconciled Visit's outcome has its normal Job-state consequence
+
+**Description:**
+Historical reconciliation may bypass the mechanical reopen workflow, but it does not bypass the business
+consequence of the reconciled Visit's outcome. The reconciled Visit is canonical historical work.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The reconciled Visit's outcome participates in the same Job-level semantics as an equivalent normally
+  completed Visit (`BR-062`, `BR-078`). No ad-hoc-specific consequence table exists.
+- Reconciling into an open Job (`NEW`/`ACTIVE`) applies the existing canonical consequence: a `RESOLVED`
+  outcome closes the Job when no other Visit remains open, and any other outcome leaves it `ACTIVE` with the
+  derived office attention that outcome implies (`BR-060`).
+- Reconciling into a terminal Job (`COMPLETED` or `CANCELED`) evaluates the canonical outcome rather than
+  reopening merely because a Visit now exists:
+  - a `RESOLVED` (final-success) outcome leaves a `COMPLETED` Job `COMPLETED` and moves a `CANCELED` Job to
+    `COMPLETED`, because the work actually happened so the request was not truly canceled;
+  - a `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE` outcome moves the Job to the appropriate
+    open state (`ACTIVE`), because the outcome means additional work is required;
+  - a contradictory state — a Job that is terminal while its latest reconciled Visit records an outcome that
+    requires follow-up — must never be produced.
+- No new Job status is introduced for ad-hoc reconciliation (`BR-042`, `BR-058`).
+
+**Status:**
+**CONFIRMED**
+
+## BR-AH-009 — Unknown-customer/location facts are report provenance, not canonical records
+
+**Description:**
+A technician who cannot identify the canonical Customer or Property records what they know as reconciliation
+facts. These facts never create canonical records.
+
+**Applies to:**
+Android, Angular, API, Database
+
+**Expected behavior:**
+
+- The report may capture, as provenance only: a reported customer name, reported phone/contact information,
+  a reported address/location, and other minimal identifying information the office needs to reconcile.
+- Technician free text never creates a canonical Customer, Property or Job. The office performs canonical
+  reconciliation (`BR-AH-002`).
+- When a technician selects an existing Customer, Property selection is scoped to that Customer (`BR-050`,
+  `BR-094`).
+- Customer discovery uses authorized type-ahead/search rather than exposing the complete Customer list to
+  the technician (`BR-092`).
+
+**Status:**
+**CONFIRMED**

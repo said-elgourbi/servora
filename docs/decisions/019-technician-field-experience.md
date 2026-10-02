@@ -1,7 +1,18 @@
 # ADR-019 — The technician's field experience: the field read, the Visit lifecycle and its offline posture
 
+> **Amended 2026-09-20 by `docs/tracker/051-job-visit-lifecycle-redesign.md`.** D4's Job-consequence
+> table was written against the six-status Job lifecycle, and the `PENDING_REVIEW` entries in it no longer
+> describe Servora: `PENDING_REVIEW` is removed (`BR-058`) and a resolving Visit completion closes the Job
+> when no other Visit remains open (`BR-062`, `BR-078`). D4's decision itself — the backend applies one
+> consequence inside the Visit transition's transaction, and no client derives or sends it — **stands**,
+> and the table it decides is now `api/src/jobs/visit-job-consequence.ts`. D7 was settled by `BR-093` on
+> 2026-09-18 and is recorded there. The `NO_SHOW` references below record what was decided then; the status
+> no longer exists (`BR-074`), because `CANCELED` with the structured reason `BR-076` requires is what a
+> field attempt that could not be performed now is.
+
 **Status:** Accepted (product-owner decision, 2026-09-17: the recommended set below was proposed by the
-agent and accepted by product ownership in the same session, as `Project.md` §31 requires)
+agent and accepted by product ownership in the same session, as `Project.md` §31 requires) —
+**D4's Job-status vocabulary amended on 2026-09-20** (see the note above)
 
 Date: 2026-09-17
 Tracker: `docs/tracker/037-technician-field-experience.md` — Phase 1. **Every other phase of that slice

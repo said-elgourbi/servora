@@ -12,6 +12,7 @@ import {
   notInArray,
   sql,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { DatabaseService } from '../database/database.service.js';
 import { customers, jobs, visits, visitTechnicians } from '../database/schema.js';
 import { readAddressSnapshot } from '../address/address-snapshot.js';
@@ -144,7 +145,7 @@ export class ScheduleService {
   /**
    * The Visits scheduled inside the requested local day, excluding the ones that did not happen.
    *
-   * A `CANCELED` or `NO_SHOW` Visit is not work of the day, so it is absent from the day's schedule
+   * A `CANCELED` Visit is not work of the day, so it is absent from the day's schedule
    * — the same classification the manager home uses (`NOT_DAY_WORK_VISIT_STATUSES`, `BR-074`), so
    * the two screens cannot disagree about which Visits a day holds. A `COMPLETED` Visit stays: it is
    * what the day has produced so far.
@@ -219,6 +220,7 @@ export class ScheduleService {
           activeCustomer(),
           notInArray(visits.status, [...UNASSIGNED_EXCLUDED_VISIT_STATUSES]),
           notExists(unassignedCrew(scope, this.db)),
+          notExists(jobHasScheduledOpenAttempt(scope, this.db)),
         ),
       )
       .orderBy(asc(visits.scheduledStart), asc(jobs.jobNumber));
@@ -316,6 +318,24 @@ function assignedToAny(
         ),
       ),
   );
+}
+
+
+/** Whether the same Job already has a scheduled or started Visit that is still open. */
+function jobHasScheduledOpenAttempt(scope: OrganizationScope, db: DatabaseService['db']) {
+  const otherVisits = alias(visits, 'other_visits');
+  return db
+    .select({ one: sql`1` })
+    .from(otherVisits)
+    .where(
+      and(
+        eq(otherVisits.organizationId, scope.organizationId),
+        eq(otherVisits.jobId, jobs.id),
+        notInArray(otherVisits.status, ['DRAFT', ...UNASSIGNED_EXCLUDED_VISIT_STATUSES]),
+        isNotNull(otherVisits.scheduledStart),
+        isNotNull(otherVisits.scheduledEnd),
+      ),
+    );
 }
 
 /** Whether a Visit still has no technician assigned to it (`BR-068`). */

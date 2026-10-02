@@ -16,8 +16,10 @@ References: `BR-001`, `BR-005`, `BR-006`, `BR-007`, `BR-009`, `BR-014`, `BR-027`
 ## 1. What a Job audio note is
 
 An audio note is **evidence a technician recorded on a Job** (`BR-091`), of its own kind: it is not a Job
-field, not a Visit status and not a photo. It is recorded on the **Job**, so it can be recorded whether or
-not the Job has a Visit (`BR-051`), and it is **appended only** — nothing in this contract edits a
+field, not a Visit status and not a photo. It is recorded against the **Visit** the technician was working,
+exactly as a photo is: the request names that Visit and the API refuses one that names none or one that is
+not on this Job (`BR-042`, `BR-047`, `BR-080`,
+`docs/tracker/056-evidence-belongs-to-a-visit.md`). It is **appended only** — nothing in this contract edits a
 recording, and there is no edit-evidence operation in Servora at all (`BR-067`, `BR-088`). A recording is
 draft material until this API records it and immutable historical evidence from that moment. The explicit,
 audited **removal** operation (`BR-089`) appends a removal record beside it, which takes the evidence out
@@ -29,6 +31,7 @@ What the API stores per audio note:
 | ---------------------- | ------------------------------------------------------------------------------------------ |
 | `id`                   | The audio note's identifier, which is the **client operation id** the device generated.      |
 | `jobId`                | The Job the evidence belongs to.                                                           |
+| `visitId`              | The Visit the recording was made during (`BR-047`, `BR-091`). Required by every write.       |
 | `phase`                | `BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK` — the same code a photo carries (`BR-091`).      |
 | `note`                 | The technician's optional note.                                                            |
 | `objectKey`            | The object's key in the store. An **object key, never a URL** (`ADR-013` D6.4).              |
@@ -77,6 +80,7 @@ one question about one read rather than one question per kind (`ADR-018` A7).
 | ------------------- | -------- | ------------------------------------------------------------------------ |
 | `file`              | yes      | The recording. `audio/mp4`, decided from the bytes. Max 10 MiB, 1–300 s.  |
 | `clientOperationId` | yes      | UUID. The idempotency key; **also the audio note's id** (§3.2).            |
+| `visitId`           | yes      | UUID of the Visit the recording was made during (`BR-047`, `BR-091`). A Visit that is not on this Job, or in another organization, is refused `404 VISIT_NOT_FOUND`. |
 | `phase`             | yes      | `BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK`.                             |
 | `note`              | no       | At most 2000 characters. Absent or blank means no note.                   |
 | `capturedAt`        | no       | ISO-8601 UTC instant the device made the recording.                       |
@@ -94,7 +98,7 @@ Activity event and there is no separate audio read. The new entry is:
   "kind": "JOB_AUDIO_ADDED",
   "recordedAt": "2026-09-16T09:13:00.000Z",
   "actorName": "John Smith",
-  "visitSequence": null,
+  "visitSequence": 2,
   "fromStatus": null,
   "toStatus": null,
   "technicianName": null,
@@ -116,7 +120,10 @@ Activity event and there is no separate audio read. The new entry is:
 `audioNoteId` is what `GET /jobs/:id/audio-notes/:audioNoteId/content` is asked for, `body` carries the
 note, and `audioDurationSeconds` is the length the API read from the container. `audioRemovalReason` is
 `null` on every event but `JOB_AUDIO_REMOVED`, which carries no `body` (`docs/api/job-activity.md` §3.2).
-The entry is Job-level (`visitSequence: null`), matching where the recording is held.
+The entry is **Visit-level** — `visitSequence` names the Visit the recording was made during, which is what
+makes it read beside that field attempt in Job Activity (`BR-047`, `BR-080`,
+`docs/tracker/056-evidence-belongs-to-a-visit.md`). A recording made before the link existed carries no
+Visit, and that is the only case in which the entry is Job-level (`visitSequence: null`).
 
 ### 3.2 Idempotency (`BR-031`, offline standard §5)
 
@@ -215,7 +222,7 @@ Response — `201 Created`, the refreshed Job Activity projection, with the new 
   "kind": "JOB_AUDIO_REMOVED",
   "recordedAt": "2026-09-16T18:22:00.000Z",
   "actorName": "Dana Manager",
-  "visitSequence": null,
+  "visitSequence": 2,
   "body": null,
   "audioNoteId": "b41f…",
   "audioRemovalReason": "Recorded the wrong job",
@@ -234,6 +241,7 @@ Response — `201 Created`, the refreshed Job Activity projection, with the new 
 | `404`  | `JOB_NOT_FOUND`                  | The Job does not exist in the caller's organization, or its Customer has been deleted (`BR-023`). |
 | `404`  | `JOB_AUDIO_NOTE_NOT_FOUND`       | The recording does not exist in the caller's organization and Job, it has been removed, or its bytes are unavailable. |
 | `409`  | `AUDIO_NOTE_OPERATION_REUSED`    | The idempotency key was already used for a different Job.                      |
+| `409`  | `JOB_CLOSED_FOR_FIELD_WORK`      | The Job is `COMPLETED` or `CANCELED`, so its field record is final and no new evidence is recorded under it (`BR-079`). |
 | `409`  | `JOB_AUDIO_NOTE_ALREADY_REMOVED` | The recording has already been removed.                                        |
 | `503`  | `STORAGE_UNAVAILABLE`            | The object store did not store the recording. The API never reports a success it cannot back. |
 

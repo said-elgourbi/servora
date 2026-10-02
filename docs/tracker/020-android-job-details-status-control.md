@@ -1,5 +1,8 @@
 # Tracker 020 — The Job's status chip is the status control (Android)
 
+> **Superseded vocabulary, 2026-09-20.** The implemented behaviour this tracker records is described in it with the Job statuses and Visit statuses that were current then — `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW` and `NO_SHOW`. Those are retired: a Job is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED` (`BR-058`), a Visit is `DRAFT`, `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or `CANCELED` (`BR-074`), `BR-061` is **REMOVED**, and operational attention is derived (`BR-060`). The behaviour this tracker **decided** stands; only the vocabulary in its prose is historic. See `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+
+
 **Status: COMPLETE for the Android implementation; physical-device QA is the product owner's**
 
 **Refined by `docs/tracker/021-android-job-details-status-polish.md`:** the chip is still the status
@@ -7,6 +10,12 @@ control, but it now leads with a status dot under a **Job status** label, and it
 of the permitted transitions with the current status stated at its head rather than a row of status
 chips. Decision 8 below and the menu description in `docs/design/android-design-system.md` describe the
 screen as it was before that refinement.
+
+**Amended by `docs/tracker/052-android-technician-job-details-redesign.md` (2026-09-20).** The control this
+tracker built is unchanged, and it is still the **only** way the Job's status is changed. What changed is
+who is shown it: it is drawn only for a session that may actually change the Job (`JOB_UPDATE`), so the
+routine `ACTIVE` chip is no longer presented to a technician acting on an assigned Visit, and a Job that has
+stopped being open is stated by the read-only notice instead (`BR-012`, `BR-058`, `BR-062`).
 
 Date: 2026-09-14
 Predecessor: `docs/tracker/019-android-job-details-hierarchy.md`
@@ -62,6 +71,13 @@ and it touches no other screen.
    (`docs/api/job-actions.md` §3). Folding it into the chip's menu would offer an action the API refuses
    and would hide a destructive, confirming action inside a one-tap list. When the catalogue exists,
    cancelling is a separate, confirming action — not a menu entry here.
+
+   > **Superseded by `docs/tracker/051-job-visit-lifecycle-redesign.md` (2026-09-20).** `CANCELED` is now a
+   > destination the API applies and reports in `allowedStatusTransitions`, and the structured reason
+   > catalogue is still open, with the request's optional `note` as the only explanation recorded. What
+   > remains true is the reasoning: a destructive, confirming action does not belong inside a one-tap
+   > status list, so the Android status control still does not fold cancellation into the chip menu
+   > (`docs/api/job-actions.md` §3.2, §10).
 5. **Without the capability the status is still presented.** `BR-007` means the *action* is not offered;
    it does not mean the Job's status is hidden. A caller who may not move the Job sees the static chip
    the customer screens already draw, and the read they are authorized for is unaffected.

@@ -66,6 +66,7 @@ internal class JobAudioPayloads @Inject constructor(private val json: Json) {
             JobAudioOperationPayload.serializer(),
             JobAudioOperationPayload(
                 localPath = note.localPath,
+                visitId = note.visitId,
                 phase = jobAudioPhaseCode(note),
                 note = note.note,
                 capturedAt = note.capturedAt,
@@ -151,6 +152,7 @@ private fun PendingJobAudioNoteEntity.toPendingAudioNote(): PendingJobAudioNote 
     PendingJobAudioNote(
         audioNoteId = audioNoteId,
         jobId = jobId,
+        visitId = visitId,
         localPath = localPath,
         phase = evidencePhaseOrNull(phase),
         note = note,
@@ -167,6 +169,7 @@ private fun PendingJobAudioNote.toEntity(subjectId: String): PendingJobAudioNote
         audioNoteId = audioNoteId,
         subjectId = subjectId,
         jobId = jobId,
+        visitId = visitId,
         localPath = localPath,
         phase = jobAudioPhaseCode(this),
         note = note,

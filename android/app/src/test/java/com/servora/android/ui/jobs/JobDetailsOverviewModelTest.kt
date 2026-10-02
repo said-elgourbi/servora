@@ -11,12 +11,14 @@ import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
 import com.servora.android.domain.model.JobDetailsVisitSummary
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.VisitOutcome
 import com.servora.android.domain.model.VisitStatus
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,8 +40,8 @@ class JobDetailsOverviewModelTest {
         assertEquals(1042, overview.jobNumber)
         assertEquals("Furnace repair", overview.title)
         assertEquals("Blower motor is noisy.", overview.description)
-        assertEquals(JobStatus.SCHEDULED, overview.status)
-        assertEquals(listOf(JobStatus.IN_PROGRESS), overview.allowedStatusTransitions)
+        assertEquals(JobStatus.ACTIVE, overview.status)
+        assertEquals(listOf(JobStatus.COMPLETED), overview.allowedStatusTransitions)
         assertEquals("customer-1", overview.customerId)
         assertEquals("Martha Reynolds", overview.customerName)
         assertEquals("+15145550142", overview.customerContact?.phone)
@@ -47,9 +49,10 @@ class JobDetailsOverviewModelTest {
     }
 
     @Test
-    fun `presents the Customer's own phone as the primary when no contact person is flagged`() {
-        // Zero primary contacts is a legal state (`BR-095`): the Customer is then its own primary, its own
-        // number is the one the card leads with, and every contact person is one of the others.
+    fun `presents the Customer itself as the primary when no contact person is flagged`() {
+        // Zero primary contacts is a legal state (`BR-095`): the Customer is then its own primary, so its
+        // own name, phone and email are the contact the section leads with, and every contact person is one
+        // of the others.
         val contact = JobCustomerContact(
             phone = "+15145550142",
             email = "martha@example.com",
@@ -72,7 +75,11 @@ class JobDetailsOverviewModelTest {
 
         val summary = contact.contactSummary("Martha Reynolds")
 
+        assertEquals("Martha Reynolds", summary.primaryName)
         assertEquals("+15145550142", summary.primaryPhone)
+        assertEquals("martha@example.com", summary.primaryEmail)
+        // The Customer is its own primary, so the section does not name it a second time (`BR-012`).
+        assertTrue(summary.primaryIsCustomer)
         assertEquals(
             listOf(
                 JobCustomerOtherContact("John Smith", "+15551234567", "john@example.com"),
@@ -84,9 +91,10 @@ class JobDetailsOverviewModelTest {
 
     @Test
     fun `leads with the flagged contact person and lists the Customer's own line among the others`() {
-        // A flagged contact person is the effective primary (`BR-095`), so the card leads with that
-        // person's number. The Customer's own general line is then a number the card hides until it is
-        // asked for, named after the Customer because that entry is not one of the Customer's people.
+        // A flagged contact person is the effective primary (`BR-095`), so the section leads with that
+        // person's own name, number and email. The Customer's own general line is then a way of reaching the
+        // Customer that the section hides until it is asked for, named after the Customer because that
+        // entry is not one of the Customer's people.
         val contact = JobCustomerContact(
             phone = "+15145550142",
             email = "martha@example.com",
@@ -110,10 +118,14 @@ class JobDetailsOverviewModelTest {
 
         val summary = contact.contactSummary("Martha Reynolds")
 
+        assertEquals("John Smith", summary.primaryName)
         assertEquals("+15551234567", summary.primaryPhone)
+        assertEquals("john@example.com", summary.primaryEmail)
+        // A flagged contact person is the primary, not the Customer (`BR-095`).
+        assertFalse(summary.primaryIsCustomer)
         assertEquals(
             listOf(
-                JobCustomerOtherContact("Martha Reynolds", "+15145550142", null),
+                JobCustomerOtherContact("Martha Reynolds", "+15145550142", "martha@example.com"),
                 JobCustomerOtherContact("Marie Tremblay", "+15559876543", null),
             ),
             summary.others,
@@ -123,9 +135,9 @@ class JobDetailsOverviewModelTest {
     @Test
     fun `reports no primary phone when the flagged contact person has none`() {
         // `BR-095` makes a flagged contact person the primary; it does not make the Customer's own number
-        // the primary instead. A contact with no number therefore leaves the card without one rather than
-        // handing the role to a number the rule does not give it, and that person stays on the card among
-        // the others, because the API reported them (`BR-001`, `BR-042`).
+        // the primary instead. A contact with no number therefore leaves the section without one rather than
+        // handing the role to a number the rule does not give it, and that person is still the contact the
+        // section leads with — by name — because the API reported them (`BR-001`, `BR-042`).
         val contact = JobCustomerContact(
             phone = "+15145550142",
             email = null,
@@ -143,11 +155,13 @@ class JobDetailsOverviewModelTest {
 
         val summary = contact.contactSummary("Martha Reynolds")
 
+        assertEquals("John Smith", summary.primaryName)
         assertNull(summary.primaryPhone)
+        assertEquals("john@example.com", summary.primaryEmail)
+        assertFalse(summary.primaryIsCustomer)
         assertEquals(
             listOf(
                 JobCustomerOtherContact("Martha Reynolds", "+15145550142", null),
-                JobCustomerOtherContact("John Smith", null, "john@example.com"),
             ),
             summary.others,
         )
@@ -156,7 +170,7 @@ class JobDetailsOverviewModelTest {
     @Test
     fun `reports no others when there is no other way of reaching the Customer`() {
         // An individual Customer is their own primary and holds no contact person row (`BR-095`), so the
-        // card shows one number and has nothing to expand.
+        // section shows one contact and has nothing to expand.
         val contact = JobCustomerContact(
             phone = "+15145550142",
             email = null,
@@ -165,6 +179,7 @@ class JobDetailsOverviewModelTest {
 
         val summary = contact.contactSummary("Martha Reynolds")
 
+        assertEquals("Martha Reynolds", summary.primaryName)
         assertEquals("+15145550142", summary.primaryPhone)
         assertTrue(summary.others.isEmpty())
     }
@@ -196,6 +211,33 @@ class JobDetailsOverviewModelTest {
             groups.activityFor("visit-1").map { it.id },
         )
         assertEquals(listOf("visit-2-note"), groups.activityFor("visit-2").map { it.id })
+    }
+
+    @Test
+    fun `keeps administrative events out of the primary activity timeline`() {
+        val events = listOf(
+            event(id = "note", kind = JobActivityKind.VISIT_NOTE_ADDED, visitSequence = 1),
+            event(
+                id = "started",
+                kind = JobActivityKind.VISIT_STATUS_CHANGED,
+                visitSequence = 1,
+                toStatus = VisitStatus.IN_PROGRESS.name,
+            ),
+            event(id = "assigned", kind = JobActivityKind.VISIT_TECHNICIAN_ASSIGNED, visitSequence = 1),
+            event(id = "scheduled", kind = JobActivityKind.VISIT_SCHEDULED, visitSequence = 1),
+            event(
+                id = "routine-status",
+                kind = JobActivityKind.VISIT_STATUS_CHANGED,
+                visitSequence = 1,
+                toStatus = VisitStatus.SCHEDULED.name,
+            ),
+        )
+
+        assertEquals(listOf("note", "started"), events.primaryActivity().map { it.id })
+        assertEquals(
+            listOf("assigned", "scheduled", "routine-status"),
+            events.administrativeActivity().map { it.id },
+        )
     }
 
     @Test
@@ -385,6 +427,75 @@ class JobDetailsOverviewModelTest {
     }
 
     @Test
+    fun `offers initial scheduling when the API answers it and no Visit is represented`() {
+        val jobWithoutVisits = job().copy(
+            selectedVisit = null,
+            technicians = emptyList(),
+            visits = emptyList(),
+            canScheduleVisit = true,
+        )
+
+        assertEquals(JobVisitScheduleAction.INITIAL_VISIT, jobWithoutVisits.visitScheduleAction())
+        assertNull(jobWithoutVisits.copy(canScheduleVisit = false).visitScheduleAction())
+        assertNull(job().visitScheduleAction())
+    }
+
+    @Test
+    fun `does not offer another schedule action while an open Visit already exists`() {
+        val base = job()
+        val existingVisit = base.visits.first().copy(status = VisitStatus.SCHEDULED)
+        val withoutSelectedVisit = base.copy(
+            selectedVisit = null,
+            visits = listOf(existingVisit),
+            canScheduleVisit = true,
+        )
+
+        assertNull(withoutSelectedVisit.visitScheduleAction())
+    }
+
+    @Test
+    fun `identifies a Visit whose field work is under way`() {
+        assertTrue(selectedVisit(status = VisitStatus.EN_ROUTE, startingAt = "2026-09-14T13:00:00.000Z").isUnderWay())
+        assertTrue(selectedVisit(status = VisitStatus.ON_SITE, startingAt = "2026-09-14T13:00:00.000Z").isUnderWay())
+        assertTrue(selectedVisit(status = VisitStatus.IN_PROGRESS, startingAt = "2026-09-14T13:00:00.000Z").isUnderWay())
+        assertFalse(selectedVisit(status = VisitStatus.SCHEDULED, startingAt = "2026-09-14T13:00:00.000Z").isUnderWay())
+        assertFalse(selectedVisit(status = VisitStatus.COMPLETED, startingAt = "2026-09-14T13:00:00.000Z").isUnderWay())
+    }
+
+    @Test
+    fun `offers follow-up scheduling only after a completed Visit with a follow-up outcome`() {
+        val base = job()
+        val completedSelected = requireNotNull(base.selectedVisit).copy(status = VisitStatus.COMPLETED)
+        fun withOutcome(outcome: VisitOutcome?) = base.copy(
+            selectedVisit = completedSelected,
+            visits = base.visits.map { visit ->
+                if (visit.id == completedSelected.id) {
+                    visit.copy(status = VisitStatus.COMPLETED, outcome = outcome)
+                } else {
+                    visit
+                }
+            },
+            canScheduleVisit = true,
+        )
+
+        assertEquals(
+            JobVisitScheduleAction.FOLLOW_UP_VISIT,
+            withOutcome(VisitOutcome.NEEDS_FOLLOW_UP).visitScheduleAction(),
+        )
+        assertEquals(
+            JobVisitScheduleAction.FOLLOW_UP_VISIT,
+            withOutcome(VisitOutcome.NEEDS_PARTS).visitScheduleAction(),
+        )
+        assertEquals(
+            JobVisitScheduleAction.FOLLOW_UP_VISIT,
+            withOutcome(VisitOutcome.UNABLE_TO_COMPLETE).visitScheduleAction(),
+        )
+        assertNull(withOutcome(VisitOutcome.RESOLVED).visitScheduleAction())
+        assertNull(withOutcome(null).visitScheduleAction())
+        assertNull(withOutcome(VisitOutcome.NEEDS_FOLLOW_UP).copy(selectedVisit = completedSelected.copy(status = VisitStatus.IN_PROGRESS)).visitScheduleAction())
+    }
+
+    @Test
     fun `states the represented Visit by the day it is for`() {
         // The section labels the Visit the read selected (`BR-081`), and the label says when that field
         // attempt is for: a Visit two days out is not the current one (`BR-072`). The device's own zone
@@ -523,6 +634,7 @@ private fun event(
     id: String,
     kind: JobActivityKind = JobActivityKind.VISIT_NOTE_ADDED,
     visitSequence: Int? = null,
+    toStatus: String? = null,
 ) = JobActivityEvent(
     id = id,
     kind = kind,
@@ -530,7 +642,7 @@ private fun event(
     actorName = "John Smith",
     visitSequence = visitSequence,
     fromStatus = null,
-    toStatus = null,
+    toStatus = toStatus,
     technicianName = null,
     roleCode = null,
     previousRoleCode = null,
@@ -545,8 +657,8 @@ private fun job() = JobDetails(
     jobNumber = 1042,
     title = "Furnace repair",
     description = "Blower motor is noisy.",
-    status = JobStatus.SCHEDULED,
-    allowedStatusTransitions = listOf(JobStatus.IN_PROGRESS),
+    status = JobStatus.ACTIVE,
+    allowedStatusTransitions = listOf(JobStatus.COMPLETED),
     version = 7,
     customerId = "customer-1",
     customerName = "Martha Reynolds",

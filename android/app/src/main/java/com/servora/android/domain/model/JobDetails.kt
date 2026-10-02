@@ -93,6 +93,15 @@ data class JobDetailsVisit(
      */
     val reschedulable: Boolean,
     /**
+     * Whether this Visit admits a follow-up Visit request (`BR-FV-001`, `BR-078`).
+     *
+     * The action is offered only for a field attempt that is over and whose recorded outcome expects a
+     * follow-up — `COMPLETED` with `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE`
+     * (`BR-078`). A `RESOLVED` attempt expects none, so the action is not offered for it. It defaults
+     * to `false` so an answer that predates the field offers nothing (`BR-042`, `BR-007`).
+     */
+    val requestFollowUpAllowed: Boolean = false,
+    /**
      * The statuses **this caller** may move this Visit to, as the API answered it (`BR-074`, `BR-093`).
      *
      * They come from the backend, which owns the lifecycle, so the screen draws its field action from
@@ -101,8 +110,8 @@ data class JobDetailsVisit(
      * membership nor the office capability authorizes them, and `COMPLETED` is absent unless the session
      * holds `VISIT_RECORD_OUTCOME`, which a completion requires of every caller (`BR-077`, `BR-093`).
      * Whether the session holds the capability that reaches the route at all stays the client's own gate
-     * and the API decides again at the route (`BR-007`, `BR-011`). `CANCELED` and `NO_SHOW` are absent
-     * because they are dispatch actions no capability authorizes today (`BR-066`, `BR-076`).
+     * and the API decides again at the route (`BR-007`, `BR-011`). `CANCELED` is absent because
+     * cancelling is a dispatch action no capability authorizes today (`BR-066`, `BR-076`).
      */
     val allowedStatusTransitions: List<VisitStatus> = emptyList(),
     /**
@@ -116,6 +125,26 @@ data class JobDetailsVisit(
      * action whose only answer is a refused one (`BR-007`, `BR-041`).
      */
     val fieldActionable: Boolean,
+    /**
+     * Whether this caller may complete this Visit right now, as the API answered it (`BR-077`, `BR-093`).
+     *
+     * Completion is its own operation, so it has its own answer: the API reports `true` only when the
+     * caller drives the Visit, holds the capability a completion requires of every caller
+     * (`VISIT_RECORD_OUTCOME`, `BR-009`), and neither the Job nor the Visit is already finished
+     * (`BR-062`, `BR-079`). The client draws the primary completion action from it and holds no copy of
+     * the conditions (`BR-007`, `BR-041`).
+     */
+    val completionAllowed: Boolean = false,
+    /**
+     * Whether this caller may add a field update to this Visit right now (`BR-013`, `BR-027`).
+     *
+     * A technician-created update from Job Details is Visit-scoped, so the API answers whether the
+     * current Visit may take one at all: the caller must drive the Visit, and a Job that is `COMPLETED`
+     * or `CANCELED` — or a Visit that is — takes no further field record (`BR-062`, `BR-079`). It
+     * defaults to `false`, so an answer that predates the field, or a working-set row an earlier build
+     * wrote, never offers a write the API would refuse (`BR-042`, `offline-first-architecture.md` §10).
+     */
+    val addUpdateAllowed: Boolean = false,
 )
 
 /**
@@ -149,6 +178,17 @@ data class JobDetailsVisitSummary(
     val version: Int,
     /** The technicians currently assigned to **this** Visit, Lead first (`BR-068`). */
     val technicians: List<JobDetailsTechnician>,
+)
+
+/** The follow-up Visit request summary carried by Job Details. */
+data class JobDetailsFollowUpVisitRequest(
+    val id: String,
+    val jobId: String,
+    val sourceVisitId: String?,
+    val createdVisitId: String?,
+    val requestingTechnicianMembershipId: String,
+    val status: FollowUpVisitRequestStatus,
+    val version: Int,
 )
 
 /**
@@ -202,11 +242,20 @@ data class JobDetails(
     val description: String?,
     val status: JobStatus,
     /**
+     * Why this Job's field-facing actions are read-only, or `null` while it stays open (`BR-062`,
+     * `BR-079`).
+     *
+     * It is the API's own answer, so the screen hides or disables the Visit's field controls from the
+     * backend's statement rather than from a status it interpreted itself (`BR-007`, `BR-041`). A
+     * `CANCELED` Job is reported prominently to the technician, because a cancellation materially
+     * changes the work they were sent to do.
+     */
+    val readOnlyReason: JobReadOnlyReason? = null,
+    /**
      * The statuses this Job may move to (`BR-058`).
      *
      * They come from the backend, which owns the lifecycle, so the screen draws its status actions
-     * without holding a second copy of the rule (`BR-041`). `CANCELED` is absent while `BR-064`'s
-     * cancellation-reason catalogue is an open question.
+     * without holding a second copy of the rule (`BR-041`).
      */
     val allowedStatusTransitions: List<JobStatus>,
     /** The Job's version, echoed back when its status changes (`BR-086`). */
@@ -235,4 +284,15 @@ data class JobDetails(
      * carried no visits, which an answer predating the field does (`BR-042`).
      */
     val visits: List<JobDetailsVisitSummary> = emptyList(),
+    /** The newest follow-up Visit request on this Job, when the Job Details read included one. */
+    val followUpVisitRequest: JobDetailsFollowUpVisitRequest? = null,
+    /**
+     * Whether the API answered that this caller may schedule a new Visit on this Job right now
+     * (`BR-062`, `BR-071`, `BR-072`).
+     *
+     * It is the backend's own answer to the Job-level scheduling question, so the screen draws its
+     * Schedule action from it rather than holding a second copy of the rule (`BR-041`, `BR-007`). It
+     * defaults to `false` — an answer that predates the field offers no schedule action (`BR-042`).
+     */
+    val canScheduleVisit: Boolean = false,
 )

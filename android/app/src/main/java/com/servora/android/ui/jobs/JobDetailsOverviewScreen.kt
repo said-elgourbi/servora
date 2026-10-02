@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -62,31 +64,65 @@ import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobCustomerContact
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
+import com.servora.android.domain.model.JobDetailsVisitSummary
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitOutcome
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.components.ContactPrimaryBadge
+import com.servora.android.ui.components.CustomerContactLine
 import com.servora.android.ui.components.InfoCard
-import com.servora.android.ui.components.JobStatusPill
 import com.servora.android.ui.components.OfflineNotice
+import com.servora.android.ui.components.RequestStatusPill
 import com.servora.android.ui.components.SectionLabel
-import com.servora.android.ui.components.StatusDot
 import com.servora.android.ui.components.VisitStatusPill
 import com.servora.android.ui.components.addressLine
+import com.servora.android.ui.components.dialIntent
 import com.servora.android.ui.components.initials
+import com.servora.android.ui.components.mailIntent
+import com.servora.android.ui.components.startContactIntent
+import com.servora.android.ui.components.visitStatusLabel
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-/** Identifies the Job's own information section (`BR-047`, `BR-058`). */
-const val JobOverviewSectionTag = "job-details-overview"
+/**
+ * Identifies the Job's own information: its number, title and description (`BR-052`, `BR-053`).
+ *
+ * It is a heading rather than a card, because it is the page's hierarchy rather than one of its records
+ * (`BR-012`). The Job's status is deliberately not part of it: a routine `ACTIVE` status says nothing a
+ * technician can act on, so it is drawn as a control only for a session that may change it and is
+ * otherwise carried by the notice that reports a closed Job (`BR-058`, `BR-059`).
+ */
+const val JobHeaderSectionTag = "job-details-header"
+
+/** Identifies the section that presents the Job's status control, for a session that may change it. */
+const val JobStatusSectionTag = "job-details-status-section"
+
+/** Identifies the section that presents where the work is (`BR-049`, `BR-056`). */
+const val JobLocationSectionTag = "job-details-location"
+
+/** Identifies the section that presents who can be reached at the Customer (`BR-092`, `BR-095`). */
+const val JobContactsSectionTag = "job-details-contacts"
+
+/** Identifies the Customer's effective primary contact inside the Contacts section (`BR-095`). */
+const val JobDetailsContactPrimaryTag = "job-details-contact-primary"
+
+/** Identifies the section that presents the notes the office recorded (`BR-092`). */
+const val JobNotesSectionTag = "job-details-notes"
 
 /** Identifies the section that presents the Visit representing the Job (`BR-081`). */
 const val JobCurrentVisitSectionTag = "job-details-current-visit"
+
+/** Identifies the represented Visit's own card, excluding its related follow-up request. */
+const val JobDetailsVisitCardTag = "job-details-visit-card"
+
+/** Identifies the follow-up Visit request status row on Job Details. */
+const val JobDetailsFollowUpRequestTag = "job-details-follow-up-request"
 
 /**
  * Identifies the Job Activity section: the Job's one account of what happened, grouped by the Visit each
@@ -100,24 +136,21 @@ fun jobActivityVisitGroupTag(visitId: String): String = "job-details-activity-vi
 /** Identifies the expand/collapse control of one Visit's activity group. */
 fun jobActivityVisitToggleTag(visitId: String): String = "job-details-activity-visit-toggle-$visitId"
 
-/** Identifies what one expanded Visit group reveals. */
+/**
+ * Identifies what one expanded Visit group reveals: that Visit's own evidence and activity (`BR-080`).
+ *
+ * It no longer states the Visit's own facts — its date, its window, its outcome and its crew. Those are
+ * the Visit section's and the group heading's, and repeating them here made a reader open a timeline to
+ * find a second copy of what the page already said (`BR-047`, `BR-012`).
+ */
 fun jobActivityVisitBodyTag(visitId: String): String = "job-details-activity-visit-body-$visitId"
 
 /**
- * Identifies the card that heads one Visit's activity in the Job Activity section: which day the Visit
- * was for, the window it was scheduled for, and the technicians assigned to it (`BR-068`, `BR-072`).
+ * Identifies what one Visit group states under its heading: where that field attempt ended up and what it
+ * resulted in — `Completed · Needs follow-up` (`BR-074`, `BR-078`).
  */
-fun jobActivityVisitCardTag(visitId: String): String = "job-details-activity-visit-card-$visitId"
-
-/** Identifies the date one expanded Visit group states. */
-fun jobActivityVisitDateTag(visitId: String): String = "job-details-activity-visit-date-$visitId"
-
-/** Identifies the scheduled time one expanded Visit group states. */
-fun jobActivityVisitTimeTag(visitId: String): String = "job-details-activity-visit-time-$visitId"
-
-/** Identifies the outcome one expanded Visit group states (`BR-077`, `BR-078`). */
-fun jobActivityVisitOutcomeTag(visitId: String): String =
-    "job-details-activity-visit-outcome-$visitId"
+fun jobActivityVisitSummaryTag(visitId: String): String =
+    "job-details-activity-visit-summary-$visitId"
 
 /** Identifies the state shown inside a Visit that has no updates yet. */
 fun jobActivityVisitEmptyTag(visitId: String): String = "job-details-activity-visit-empty-$visitId"
@@ -194,6 +227,16 @@ fun JobDetailsOverviewScreen(
     canAddVisitNote: Boolean,
     canAddEvidencePhoto: Boolean,
     canViewTechnicians: Boolean,
+    /** Whether the session may review follow-up Visit requests (`BR-FV-004`). */
+    canReviewVisitRequests: Boolean,
+    /**
+     * Whether the session may propose a follow-up Visit on the Job (`BR-FV-001`).
+     *
+     * It is the capability the API enforces on `POST /jobs/:id/visit-requests`, drawn on its own and
+     * never inferred from the field capabilities a technician also holds (`BR-006`, `BR-011`): a company
+     * may withdraw the proposal and keep the field work.
+     */
+    canRequestFollowUpVisit: Boolean,
     canOpenCustomer: Boolean,
     onRetry: () -> Unit,
     onRetryActivity: () -> Unit,
@@ -201,11 +244,29 @@ fun JobDetailsOverviewScreen(
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
     onLoadAssignableTechnicians: () -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
-    onChangeVisitStatus: (status: VisitStatus, outcome: VisitOutcome?, summary: String?) -> Unit,
+    onChangeVisitStatus: (status: VisitStatus) -> Unit,
+    onCompleteVisit: (outcome: VisitOutcome, summary: String) -> Unit,
     onDiscardQueuedVisitAction: (operationId: String) -> Unit,
     onDiscardQueuedVisitNote: (operationId: String) -> Unit,
     onAddActivityText: (body: String) -> Unit,
+    onEditVisitNote: (noteId: String, body: String) -> Unit,
+    onRemoveVisitNote: (noteId: String, reason: String) -> Unit,
     onRescheduleVisit: (start: Instant, end: Instant) -> Unit,
+    onScheduleVisit: (start: Instant, end: Instant, assignments: List<TechnicianAssignment>) -> Unit,
+    /**
+     * Submits the technician's follow-up Visit proposal (`BR-FV-001`, `BR-FV-003`).
+     *
+     * The request states a window, a reason and whether the same technician is preferred; it decides
+     * nothing, because the office reviews it and creates the Visit (`BR-FV-002`, `BR-FV-004`).
+     */
+    onRequestFollowUpVisit: (
+        reason: String,
+        start: Instant,
+        end: Instant,
+        sameTechnicianPreferred: Boolean,
+    ) -> Unit,
+    onOpenRequest: (requestId: String) -> Unit,
+    onOpenVisit: (visitId: String) -> Unit,
     onAssignTechnicians: (assignments: List<TechnicianAssignment>) -> Unit,
     onConfirmPendingAction: () -> Unit,
     onDismissPendingAction: () -> Unit,
@@ -224,6 +285,7 @@ fun JobDetailsOverviewScreen(
     onSavePermissionResult: (Boolean) -> Unit,
     canViewEvidence: Boolean,
     canRemoveEvidence: Boolean,
+    canManageVisitNotes: Boolean,
     canAddAudio: Boolean,
     canRemoveAudioEvidence: Boolean,
     onSelectAudioPhase: (EvidencePhase) -> Unit,
@@ -246,11 +308,19 @@ fun JobDetailsOverviewScreen(
 ) {
     val details = state.details
     var showReschedule by rememberSaveable(state.jobId) { mutableStateOf(false) }
+    var showSchedule by rememberSaveable(state.jobId) { mutableStateOf(false) }
+    var showRequestFollowUp by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAssign by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showAddActivity by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var showVisitCompletion by rememberSaveable(state.jobId) { mutableStateOf(false) }
     var audioRemovalTargetId by remember { mutableStateOf<String?>(null) }
     var viewedPhotoId by rememberSaveable(state.jobId) { mutableStateOf<String?>(null) }
+    // Adding an update is a Visit-scoped field write (`tracker 051`), so it is offered only where the API
+    // allows one on this Visit **and** the session holds a capability that would perform it: the office
+    // update capability for a note, or the evidence capability a photo or a recording needs
+    // (`BR-006`, `BR-007`, `BR-027`).
+    val canAddVisitUpdate = state.canAddVisitUpdate &&
+        (canUpdateJob || canAddEvidencePhoto || canAddAudio)
 
     // Every photo the viewer pages through (`D11`), in the order this screen presents them, and the page
     // the tapped photo is on — so a swipe continues through exactly what the technician sees around the
@@ -357,15 +427,26 @@ fun JobDetailsOverviewScreen(
                     // Stating a crew means choosing from the organization's technicians, so the action
                     // needs that capability as well (`BR-007`, `BR-068`).
                     canManageTechnicians = canViewTechnicians && state.canAssign,
+                    canReviewVisitRequests = canReviewVisitRequests,
+                    // A proposal names the field attempt it grew from (`BR-FV-008`), so the action exists
+                    // only where the API reported a represented Visit that admits one — `COMPLETED` with a
+                    // follow-up outcome (`BR-078`). It is drawn from the API's own answer rather than a
+                    // client-side reading of the Visit's status or outcome (`BR-041`, `BR-042`), and it is
+                    // deliberately **not** hidden for a Job `readOnlyReason` reports as closed: the request
+                    // route accepts a proposal on a closed Job, and hiding the action would be a
+                    // client-side rule the API does not state (`BR-042`).
+                    canRequestFollowUpVisit = canRequestFollowUpVisit &&
+                        details.selectedVisit?.requestFollowUpAllowed == true,
                     // Driving the represented Visit reaches the route through either authorization
                     // `BR-093` defines: the technician's field capability for their own assigned work,
                     // or the office capability that admits an office member without crew membership
-                    // (`BR-008`, `ADR-019` D7). The completion's own capability is not asked here — the
-                    // API omits that destination for a session that does not hold it (`BR-009`,
-                    // `BR-077`).
+                    // (`BR-008`, `ADR-019` D7).
                     canChangeVisitStatus = (canUpdateAssignedVisit || canUpdateJob) &&
                         state.canChangeVisitStatus,
-                    canRecordVisitOutcome = canRecordVisitOutcome,
+                    // Completion is its own operation and asks for its own capability of every caller
+                    // (`BR-009`, `BR-077`), so it is gated on both the session's capability and the
+                    // API's answer on this Visit (`state.canCompleteVisit`).
+                    canCompleteVisit = canRecordVisitOutcome && state.canCompleteVisit,
                     canOpenCustomer = canOpenCustomer,
                     onOpenCustomer = onOpenCustomer,
                     onOpenInMaps = onOpenInMaps,
@@ -374,13 +455,25 @@ fun JobDetailsOverviewScreen(
                         onLoadAssignableTechnicians()
                     },
                     onOpenReschedule = { showReschedule = true },
+                    // Scheduling a Visit states the crew it will carry, so the technicians are read with
+                    // the form, exactly as the crew sheet reads them (`BR-068`, `BR-024`).
+                    onOpenSchedule = {
+                        showSchedule = true
+                        onLoadAssignableTechnicians()
+                    },
+                    onOpenRequestFollowUp = { showRequestFollowUp = true },
+                    onOpenSubmittedFollowUpRequest = onOpenRequest,
+                    onOpenSubmittedFollowUpVisit = onOpenVisit,
                     onChangeJobStatus = onChangeJobStatus,
-                    onChangeVisitStatus = { status -> onChangeVisitStatus(status, null, null) },
+                    onChangeVisitStatus = onChangeVisitStatus,
                     onOpenVisitCompletion = { showVisitCompletion = true },
                     onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
                     onDiscardQueuedVisitNote = onDiscardQueuedVisitNote,
                     onRetryActivity = onRetryActivity,
                     onOpenPhoto = { photoId -> viewedPhotoId = photoId },
+                    canManageVisitNotes = canManageVisitNotes,
+                    onEditVisitNote = onEditVisitNote,
+                    onRemoveVisitNote = onRemoveVisitNote,
                     photoImages = photoImages,
                     // The recordings on this Job, as the timelines draw them: what the device player is
                     // playing, what the session may remove, and the two actions a recording offers
@@ -422,13 +515,22 @@ fun JobDetailsOverviewScreen(
             }
 
             // One action adds anything to the Job's Activity: it opens the sheet that states what kind
-            // of update it is (`BR-012`, `BR-027`). It needs no represented Visit, because a photo is
-            // Job-level evidence even when the Job has no Visit yet (`BR-015`, `BR-051`), and each kind
-            // it offers is drawn on the capability the API enforces for that kind: the Job update
-            // capability for a note, and the evidence capability for a photo (`BR-006`, `BR-007`).
+            // of update it is (`BR-012`, `BR-027`). A technician-created update is **Visit-scoped** — the
+            // note carries the Visit's id and the evidence is recorded against the Visit the technician
+            // is working — so the API's own answer on whether that Visit still takes field work
+            // (`addUpdateAllowed`) is part of the gate: a Job the office canceled or completed while the
+            // technician was offline offers no Add update at all (`BR-062`, `BR-079`). Each kind is then
+            // drawn on the capability the API enforces for it: the Job update capability for a note, and
+            // the evidence capability for a photo (`BR-006`, `BR-007`).
+            // It is the page's own floating action: a technician's update is the write this page exists
+            // for, so it is offered at every scroll position rather than in a card row the reader has to
+            // reach, and it is the **only** Add update control — the Visit card draws no second one, so
+            // two entry points for one write never make the technician choose a place before choosing
+            // what they are recording (`BR-012`). It is withheld while the device holds unaccepted
+            // evidence, because the bottom of the screen belongs to that work (`BR-014`).
             if (
                 details != null &&
-                (canUpdateJob || canAddEvidencePhoto || canAddAudio) &&
+                canAddVisitUpdate &&
                 !state.holdsUnacceptedEvidence
             ) {
                 ExtendedFloatingActionButton(
@@ -562,14 +664,15 @@ fun JobDetailsOverviewScreen(
         )
     }
 
-    // The Visit's completion: the outcome `BR-077` requires is stated here, and the destination and the
-    // outcome travel to the API in one request, so no partial outcome is ever stored.
+    // The Visit's completion: the outcome `BR-077` requires is stated here, and submitting sends the
+    // completion operation itself, so the recorded outcome and the Visit's finished state are one
+    // recorded fact (`BR-077`, `BR-078`).
     if (details != null && showVisitCompletion && details.selectedVisit != null) {
         VisitCompletionSheet(
             isSubmitting = state.isSubmitting,
             onConfirm = { outcome, summary ->
                 showVisitCompletion = false
-                onChangeVisitStatus(VisitStatus.COMPLETED, outcome, summary)
+                onCompleteVisit(outcome, summary)
             },
             onDismiss = { showVisitCompletion = false },
         )
@@ -603,6 +706,43 @@ fun JobDetailsOverviewScreen(
         }
     }
 
+    if (details != null && showSchedule) {
+        // Scheduling a Visit on the Job: the third field attempt is another Visit, never a new Job
+        // (`BR-047`, `BR-051`). The sheet closes on confirm, and the screen reports what the API
+        // answered — the scheduling was applied, or why it was refused (`BR-001`, `BR-042`).
+        ScheduleVisitSheet(
+            titleRes = R.string.schedule_visit_title,
+            messageRes = R.string.schedule_visit_message,
+            confirmRes = R.string.schedule_visit_confirm,
+            initialStart = null,
+            initialEnd = null,
+            technicians = state.assignableTechnicians,
+            crewFailure = state.assignableFailure,
+            isSubmitting = state.isSubmitting,
+            onRetryCrew = onLoadAssignableTechnicians,
+            onConfirm = { start, end, assignments ->
+                showSchedule = false
+                onScheduleVisit(start, end, assignments)
+            },
+            onDismiss = { showSchedule = false },
+        )
+    }
+
+    if (details != null && showRequestFollowUp) {
+        // Proposing a follow-up Visit: the technician states what they suggest and why, and the office
+        // decides what happens to it (`BR-FV-001`, `BR-FV-003`, `BR-FV-004`). The sheet closes on
+        // confirm, and the screen reports the backend's own answer — the request was recorded, or why it
+        // was not (`BR-001`, `BR-042`).
+        RequestFollowUpVisitSheet(
+            isSubmitting = state.isSubmitting,
+            onConfirm = { reason, start, end, sameTechnicianPreferred ->
+                showRequestFollowUp = false
+                onRequestFollowUpVisit(reason, start, end, sameTechnicianPreferred)
+            },
+            onDismiss = { showRequestFollowUp = false },
+        )
+    }
+
     if (details != null && showAssign) {
         AssignTechniciansSheet(
             technicians = state.assignableTechnicians,
@@ -622,7 +762,7 @@ fun JobDetailsOverviewScreen(
 
     state.pendingConfirmation?.let { pending ->
         ScheduleConflictDialog(
-            pending = pending,
+            conflicts = pending.conflicts,
             isSubmitting = state.isSubmitting,
             onConfirm = onConfirmPendingAction,
             onDismiss = onDismissPendingAction,
@@ -722,12 +862,15 @@ private fun OverviewFailure(onRetry: () -> Unit) {
 }
 
 /**
- * The Job, presented as the Job and its Visits (`BR-047`): what the Job is, the Visit that represents
- * it, the Visits it has had, and the activity split between them (`BR-080`).
+ * The Job, presented as a technician works it (`BR-010`, `BR-012`): what the work is, where it is, who can
+ * be reached there, what the office recorded, the Visit being worked, and the Job's activity grouped by the
+ * Visit each update belongs to (`BR-047`, `BR-080`).
  *
- * The order is the hierarchy the page is built on, so the Job is stated before anything that belongs to
- * only one of its field attempts — which is what keeps a Visit's schedule, crew and events from reading
- * as the Job's.
+ * The order is the order of a technician's questions, so the page answers them without a hunt: the Job's
+ * identity, then the location, then the people, then the instructions, then the field attempt itself. A
+ * routine Job status is not among them — `ACTIVE` means only that the request is open, which a technician
+ * acting on an assigned Visit already knows — so the Job's status appears as a control for a session that
+ * may change it and as the notice that reports a closed Job otherwise (`BR-058`, `BR-059`, `BR-062`).
  */
 @Composable
 private fun JobDetailsOverviewContent(
@@ -735,13 +878,19 @@ private fun JobDetailsOverviewContent(
     state: JobDetailsUiState,
     canUpdateJob: Boolean,
     canManageTechnicians: Boolean,
+    canReviewVisitRequests: Boolean,
+    canRequestFollowUpVisit: Boolean,
     canChangeVisitStatus: Boolean,
-    canRecordVisitOutcome: Boolean,
+    canCompleteVisit: Boolean,
     canOpenCustomer: Boolean,
     onOpenCustomer: (customerId: String) -> Unit,
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
     onOpenAssign: () -> Unit,
     onOpenReschedule: () -> Unit,
+    onOpenSchedule: () -> Unit,
+    onOpenRequestFollowUp: () -> Unit,
+    onOpenSubmittedFollowUpRequest: (requestId: String) -> Unit,
+    onOpenSubmittedFollowUpVisit: (visitId: String) -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
     onChangeVisitStatus: (status: VisitStatus) -> Unit,
     onOpenVisitCompletion: () -> Unit,
@@ -749,6 +898,9 @@ private fun JobDetailsOverviewContent(
     onDiscardQueuedVisitNote: (operationId: String) -> Unit,
     onRetryActivity: () -> Unit,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     photoImages: JobPhotoImages,
     audio: JobActivityAudio,
 ) {
@@ -765,21 +917,49 @@ private fun JobDetailsOverviewContent(
     val visitGroups = remember(details, activityGroups) {
         visitActivityGroups(details.visits, details.selectedVisit?.id, activityGroups)
     }
+    val submittedFollowUpRequest = details.followUpVisitRequest?.let { request ->
+        FollowUpRequestStatusModel(
+            id = request.id,
+            sourceVisitId = request.sourceVisitId,
+            createdVisitId = request.createdVisitId,
+            status = request.status,
+        )
+    } ?: state.submittedFollowUpRequest?.takeIf { request ->
+        request.jobId == details.id && request.sourceVisitId == details.selectedVisit?.id
+    }?.let { request ->
+        FollowUpRequestStatusModel(
+            id = request.id,
+            sourceVisitId = request.sourceVisitId,
+            createdVisitId = request.createdVisitId,
+            status = request.status,
+        )
+    }
+    // The page's scroll container: the sections and the timeline are one column, so the page scrolls as
+    // a single record rather than as nested lists (`BR-012`, `BR-080`).
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .testTag(JobDetailsContentTag)
             .padding(horizontal = OverviewPageGutter, vertical = OverviewPageGutter),
         verticalArrangement = Arrangement.spacedBy(OverviewSectionSpacing),
     ) {
-        JobOverviewSection(
+        JobHeaderSection(
             overview = overview,
-            canChangeStatus = canUpdateJob && state.canAct,
-            onChangeStatus = onChangeJobStatus,
-            canOpenCustomer = canOpenCustomer,
-            onOpenCustomer = onOpenCustomer,
-            onOpenInMaps = onOpenInMaps,
+            statusControl = if (canUpdateJob && overview.allowedStatusTransitions.isNotEmpty()) {
+                {
+                    CompactJobStatusControl(
+                        status = overview.status,
+                        jobNumber = overview.jobNumber,
+                        allowedTransitions = overview.allowedStatusTransitions,
+                        enabled = state.canAct,
+                        onChangeStatus = onChangeJobStatus,
+                    )
+                }
+            } else {
+                null
+            },
         )
         if (state.detailsSource == ReadSource.WORKING_SET) {
             // Offline, the Job on screen is the last one the backend reported rather than a current
@@ -790,6 +970,21 @@ private fun JobDetailsOverviewContent(
                 tag = JobDetailsLastReportedTag,
             )
         }
+        // A closed Job is stated before the work it holds, because it changes what the technician is
+        // looking at: nothing further may be recorded, and every field control below is gone
+        // (`BR-062`, `BR-079`). Cancellation is drawn prominently — the technician may be on their way
+        // to, or standing at, a Job the office has already canceled (`BR-012`).
+        details.readOnlyReason?.let { reason ->
+            JobReadOnlyNotice(reason = reason)
+        }
+        JobLocationSection(address = overview.address, onOpenInMaps = onOpenInMaps)
+        JobContactsSection(
+            customerName = overview.customerName,
+            contact = overview.customerContact,
+            canOpenCustomer = canOpenCustomer,
+            onOpenCustomer = { onOpenCustomer(overview.customerId) },
+        )
+        JobNotesSection(contact = overview.customerContact)
         CurrentVisitSection(
             details = details,
             // A reschedule edits the represented Visit, so the action exists only when there is one
@@ -797,13 +992,21 @@ private fun JobDetailsOverviewContent(
             showReschedule = canUpdateJob && details.selectedVisit != null,
             canReschedule = canUpdateJob && state.canReschedule,
             canChangeVisitStatus = canChangeVisitStatus,
-            canRecordVisitOutcome = canRecordVisitOutcome,
+            canCompleteVisit = canCompleteVisit,
             actionEnabled = state.canAct,
             canManageTechnicians = canManageTechnicians,
+            scheduleAction = details.visitScheduleAction(),
+            canRequestFollowUp = canRequestFollowUpVisit && submittedFollowUpRequest == null,
+            submittedFollowUpRequest = submittedFollowUpRequest,
+            canReviewFollowUpRequest = canReviewVisitRequests,
             onChangeVisitStatus = onChangeVisitStatus,
             onOpenVisitCompletion = onOpenVisitCompletion,
             onReschedule = onOpenReschedule,
+            onSchedule = onOpenSchedule,
             onManageCrew = onOpenAssign,
+            onRequestFollowUp = onOpenRequestFollowUp,
+            onOpenSubmittedFollowUpRequest = onOpenSubmittedFollowUpRequest,
+            onOpenSubmittedFollowUpVisit = onOpenSubmittedFollowUpVisit,
             queuedAction = state.queuedVisitAction,
             queuedNotes = state.queuedVisitNotes,
             onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
@@ -816,6 +1019,9 @@ private fun JobDetailsOverviewContent(
             jobId = state.jobId,
             onRetry = onRetryActivity,
             onOpenPhoto = onOpenPhoto,
+            canManageVisitNotes = canManageVisitNotes,
+            onEditVisitNote = onEditVisitNote,
+            onRemoveVisitNote = onRemoveVisitNote,
             photoImages = photoImages,
             audio = audio,
         )
@@ -835,112 +1041,300 @@ private fun JobDetailsOverviewContent(
 }
 
 /**
- * The Job's own information (`BR-047`, `BR-058`).
+ * The Job's own information: its number, its title and what it is for (`BR-052`, `BR-053`).
  *
- * Everything in this card belongs to the Job: its number, its title and description, the lifecycle
- * status it is in, the Customer it is for and the address it preserves (`BR-048`, `BR-052`, `BR-056`).
- * It is labelled as the Job's because the Visit's own schedule and status are separate state machines
- * (`BR-059`) and neither may be read as the other.
+ * It is a heading and not a card: the Job's identity is the page's hierarchy, and putting it on a bordered
+ * surface among the record cards made it one row of metadata rather than the answer to "what work am I
+ * here to do" (`BR-012`). Nothing a Visit supplies is here, because the two are separate state machines
+ * and separate schedules (`BR-059`).
  */
 @Composable
-private fun JobOverviewSection(
+private fun JobHeaderSection(
     overview: JobOverview,
-    canChangeStatus: Boolean,
+    statusControl: (@Composable () -> Unit)? = null,
+) {
+    Column(
+        modifier = Modifier.testTag(JobHeaderSectionTag),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.job_details_job_number_format, overview.jobNumber),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = overview.title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        overview.description
+            ?.takeIf { description -> description.isNotBlank() }
+            ?.let { description ->
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        statusControl?.let { control ->
+            Box(
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .testTag(JobStatusSectionTag),
+            ) {
+                control()
+            }
+        }
+    }
+}
+
+/**
+ * The Job's status, drawn only where a session may change it (`BR-058`, `BR-006`).
+ *
+ * The chip that presents the status **is** the control that moves it, so the state a user wants to change
+ * is the thing they tap and no separate action is drawn beside it
+ * (`docs/tracker/020-android-job-details-status-control.md`). A session that may not act on the Job is
+ * shown no routine status: `ACTIVE` states only that the request is open, which a technician acting on an
+ * assigned Visit already knows, and a Job that has *stopped* being open is reported by the notice above
+ * instead (`BR-012`, `BR-062`).
+ */
+@Composable
+private fun CompactJobStatusControl(
+    status: JobStatus,
+    jobNumber: Int,
+    allowedTransitions: List<JobStatus>,
+    enabled: Boolean,
     onChangeStatus: (JobStatus) -> Unit,
-    canOpenCustomer: Boolean,
-    onOpenCustomer: (customerId: String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = stringResource(R.string.job_details_job_status_label),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        JobStatusAction(
+            currentStatus = status,
+            jobNumber = jobNumber,
+            allowedTransitions = allowedTransitions,
+            enabled = enabled,
+            onSelect = onChangeStatus,
+        )
+    }
+}
+
+/**
+ * Where the work is (`BR-049`, `BR-056`).
+ *
+ * The address is the Job's preserved snapshot, so it belongs to the Job and not to a Visit, and the row
+ * opens it in the device's map application. It is its own section because it is the second question a
+ * technician asks, and it was previously one row among the Job's metadata (`BR-012`).
+ */
+@Composable
+private fun JobLocationSection(
+    address: CustomerJobAddress?,
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
 ) {
     Column(
-        modifier = Modifier.testTag(JobOverviewSectionTag),
+        modifier = Modifier.testTag(JobLocationSectionTag),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        SectionLabel(label = stringResource(R.string.job_details_overview_label), count = null)
+        SectionLabel(label = stringResource(R.string.job_details_location_label), count = null)
         InfoCard {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = stringResource(
-                        R.string.job_details_job_number_format,
-                        overview.jobNumber,
-                    ),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = overview.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                )
-                overview.description
-                    ?.takeIf { description -> description.isNotBlank() }
-                    ?.let { description ->
-                        Text(
-                            text = description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            // The Job's status is the Job's: it is presented inside the Job's own section, and when the
-            // session may move the Job the status chip **is** the control that moves it, so the state
-            // the user wants to change is the thing they tap (`BR-058`,
-            // `docs/tracker/020-android-job-details-status-control.md`).
-            OverviewRow(
-                label = stringResource(R.string.job_details_job_status_label),
-                trailing = {
-                    if (canChangeStatus && overview.allowedStatusTransitions.isNotEmpty()) {
-                        JobStatusAction(
-                            currentStatus = overview.status,
-                            jobNumber = overview.jobNumber,
-                            allowedTransitions = overview.allowedStatusTransitions,
-                            enabled = canChangeStatus,
-                            onSelect = onChangeStatus,
-                        )
-                    } else {
-                        // Presented, not controlled: the Job's status is still the Job's status, so it
-                        // wears the same dot the control's chip does and does not act (`BR-006`,
-                        // `BR-007`).
-                        JobStatusPill(status = overview.status, leading = { StatusDot() })
-                    }
-                },
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            OverviewRow(
-                label = stringResource(R.string.job_details_customer_label),
-                value = overview.customerName,
-                modifier = Modifier.testTag(JobDetailsCustomerTag),
-                // The customer the Job belongs to is a customer of this organization, so the row opens
-                // that customer — for a session whose read the API accepts. A technician holds no
-                // `customers.view`, so the office destination would answer `403`; they read the contact
-                // details in place instead (`BR-011`, `BR-092`).
-                onClick = if (canOpenCustomer) {
-                    { onOpenCustomer(overview.customerId) }
-                } else {
-                    null
-                },
-            )
-            // The Customer's own contact details, when the API included them (`BR-092`). The screen
-            // draws exactly what it was given: a session with no customer capability receives no block
-            // and is therefore shown nothing, because whether it may read the Customer is the API's
-            // answer and never the client's (`BR-001`, `BR-007`).
-            overview.customerContact?.let { contact ->
-                OverviewCustomerContactRows(contact, customerName = overview.customerName)
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            // The address is the Job's preserved snapshot (`BR-056`), so it belongs to the Job and not to
-            // a Visit. A Job with no address has nothing to navigate to, so the row is only tappable — and
-            // only marked as opening a map — when there is a location to open.
-            val addressText = overview.address
+            // A Job with no address has nothing to navigate to, so the row is only tappable — and only
+            // marked as opening a map — when there is a location to open.
+            val addressText = address
                 ?.let { snapshot -> addressLine(snapshot) }
                 ?.takeIf { line -> line.isNotBlank() }
-            val navigableAddress = overview.address?.takeIf { addressText != null }
+            val navigableAddress = address?.takeIf { addressText != null }
             OverviewRow(
                 label = stringResource(R.string.job_details_address_label),
                 value = addressText ?: stringResource(R.string.job_details_no_address),
                 modifier = Modifier.testTag(JobDetailsAddressTag),
                 trailing = navigableAddress?.let { { OverviewMapAffordance() } },
                 onClick = navigableAddress?.let { location -> { onOpenInMaps(location) } },
+            )
+        }
+    }
+}
+
+/**
+ * Who can be reached at the Customer, and how (`BR-092`, `BR-095`).
+ *
+ * A Customer may have several contact persons and none is required, so the section leads with **one**
+ * contact — the effective primary (`BR-095`) — with the phone and email that person recorded, each of
+ * which opens the device's dialer or mail client (`ADR-022` D6). Every other way of reaching the Customer
+ * sits behind a disclosure that starts closed, so the number a technician came for is not buried under the
+ * Customer's whole contact book (`BR-012`).
+ *
+ * Nothing is chosen here: which contact is the primary is the API's `isPrimary` answer, and a Customer
+ * whose contact persons are all secondary is presented as its own primary rather than having one of them
+ * promoted to the phone the technician dials (`BR-095`, `BR-041`). A session the API did not admit to the
+ * Customer receives no block and is therefore shown nothing, because whether it may read the Customer is
+ * the API's answer and never the client's (`BR-001`, `BR-007`).
+ */
+@Composable
+private fun JobContactsSection(
+    customerName: String,
+    contact: JobCustomerContact?,
+    canOpenCustomer: Boolean,
+    onOpenCustomer: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.testTag(JobContactsSectionTag),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SectionLabel(label = stringResource(R.string.job_details_contacts_label), count = null)
+        InfoCard {
+            OverviewRow(
+                label = stringResource(R.string.job_details_customer_label),
+                value = customerName,
+                modifier = Modifier.testTag(JobDetailsCustomerTag),
+                // The Customer the Job belongs to is a customer of this organization, so the row opens
+                // that customer — for a session whose read the API accepts. A technician holds no
+                // `customers.view`, so the office destination would answer `403`; they read the contact
+                // details in place instead (`BR-011`, `BR-092`).
+                onClick = if (canOpenCustomer) onOpenCustomer else null,
+            )
+            contact?.let { details ->
+                val summary = details.contactSummary(customerName)
+                // A Customer that is its own primary and has nothing recorded under it says nothing the
+                // row above has not already said, so the block is drawn only when it adds something: a
+                // contact person who *is* the primary, a phone, an email, or someone else to reach
+                // (`BR-012`, `BR-095`).
+                val statesSomething =
+                    !summary.primaryIsCustomer ||
+                        summary.primaryPhone != null ||
+                        summary.primaryEmail != null ||
+                        summary.others.isNotEmpty()
+                if (statesSomething) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    JobContactsPrimary(summary = summary)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The Customer's effective primary contact, and every other way of reaching the Customer (`BR-095`).
+ *
+ * [summary] is the one contact the section leads with, with the values that person recorded, and the
+ * disclosure under it is the rest. The disclosure is the same foldable heading the Job's other groups use,
+ * so a second way of presenting one exists nowhere (`docs/design/android-design-system.md`).
+ */
+@Composable
+private fun JobContactsPrimary(summary: JobCustomerContactSummary) {
+    val context = LocalContext.current
+    val phone = summary.primaryPhone?.takeIf { value -> value.isNotBlank() }
+    val email = summary.primaryEmail?.takeIf { value -> value.isNotBlank() }
+    Column(
+        modifier = Modifier.fillMaxWidth().testTag(JobDetailsContactPrimaryTag),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        // The flagged contact person is named, because the section has to say *who* the technician is
+        // about to speak to. When the Customer is its own primary it is not named again: the row above
+        // already states the Customer's name, and one card does not state one value twice (`BR-012`).
+        if (!summary.primaryIsCustomer) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    modifier = Modifier.weight(1f),
+                    text = summary.primaryName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // The badge marks the effective primary and nothing else (`BR-095`).
+                ContactPrimaryBadge(Modifier.testTag(JobDetailsCustomerPrimaryBadgeTag))
+            }
+        }
+        // A value the office never recorded is left out rather than drawn as an empty line (`BR-012`),
+        // and each value that is recorded opens the application that reaches that person (`ADR-022` D6).
+        // When the Customer is its own primary the marker rides the first value it recorded, because that
+        // line is where the primary is then read from (`BR-095`).
+        phone?.let { number ->
+            OverviewContactLine(
+                value = number,
+                glyph = R.drawable.ic_phone,
+                onClick = { context.startContactIntent(dialIntent(number)) },
+                trailing = if (summary.primaryIsCustomer) {
+                    { ContactPrimaryBadge(Modifier.testTag(JobDetailsCustomerPrimaryBadgeTag)) }
+                } else {
+                    null
+                },
+            )
+        }
+        email?.let { address ->
+            OverviewContactLine(
+                value = address,
+                glyph = R.drawable.ic_mail,
+                onClick = { context.startContactIntent(mailIntent(address)) },
+                trailing = if (summary.primaryIsCustomer && phone == null) {
+                    { ContactPrimaryBadge(Modifier.testTag(JobDetailsCustomerPrimaryBadgeTag)) }
+                } else {
+                    null
+                },
+            )
+        }
+        if (summary.others.isNotEmpty()) {
+            OverviewOtherContacts(others = summary.others)
+        }
+    }
+}
+
+/**
+ * One contact value that reaches the person it belongs to, with an optional trailing marker.
+ *
+ * The value is the shared [CustomerContactLine] the other Servora screens draw, so the app reaches a person
+ * the same way everywhere (`ADR-022` D6); the marker is separate from the line because only the effective
+ * primary carries one (`BR-095`).
+ */
+@Composable
+private fun OverviewContactLine(
+    value: String,
+    glyph: Int,
+    onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        CustomerContactLine(text = value, glyph = glyph, onClick = onClick)
+        trailing?.invoke()
+    }
+}
+
+/**
+ * The notes the office recorded for this Customer (`BR-092`).
+ *
+ * They are their own section rather than a row of the Contacts block, because a note is what a technician
+ * needs to know before working — an access instruction, a parking restriction, a time the Customer must not
+ * be disturbed — and burying it among the Customer's metadata is how an instruction is missed
+ * (`BR-012`). It is the notes field the field read already returns; no second notes domain is invented
+ * (`BR-042`).
+ */
+@Composable
+private fun JobNotesSection(contact: JobCustomerContact?) {
+    val notes = contact?.notes?.takeIf { value -> value.isNotBlank() } ?: return
+    Column(
+        modifier = Modifier.testTag(JobNotesSectionTag),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SectionLabel(
+            label = stringResource(R.string.job_details_customer_notes_label),
+            count = null,
+        )
+        InfoCard {
+            Text(
+                text = notes,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.testTag(JobDetailsCustomerNotesTag),
             )
         }
     }
@@ -965,27 +1359,43 @@ private fun CurrentVisitSection(
     showReschedule: Boolean,
     canReschedule: Boolean,
     canChangeVisitStatus: Boolean,
-    canRecordVisitOutcome: Boolean,
+    canCompleteVisit: Boolean,
     actionEnabled: Boolean,
     canManageTechnicians: Boolean,
+    scheduleAction: JobVisitScheduleAction?,
+    /**
+     * Whether the session may propose a follow-up Visit on this field attempt (`BR-FV-001`).
+     *
+     * It is the capability gate only: what the request carries and when the office decides about it are
+     * `BR-FV-003` and `BR-FV-004`, and the API authorizes the write whatever this screen draws
+     * (`BR-007`).
+     */
+    canRequestFollowUp: Boolean,
+    submittedFollowUpRequest: FollowUpRequestStatusModel?,
+    canReviewFollowUpRequest: Boolean,
     onChangeVisitStatus: (VisitStatus) -> Unit,
     onOpenVisitCompletion: () -> Unit,
     onReschedule: () -> Unit,
+    onSchedule: () -> Unit,
     onManageCrew: () -> Unit,
+    onRequestFollowUp: () -> Unit,
+    onOpenSubmittedFollowUpRequest: (requestId: String) -> Unit,
+    onOpenSubmittedFollowUpVisit: (visitId: String) -> Unit,
     queuedAction: QueuedVisitFieldAction?,
     queuedNotes: List<QueuedVisitNote>,
     onDiscardQueuedVisitAction: (operationId: String) -> Unit,
     onDiscardQueuedVisitNote: (operationId: String) -> Unit,
 ) {
     val visit = details.selectedVisit
-    // The destinations the Visit's own lifecycle offers, minus the completion when this session does not
-    // hold the capability the API asks for on it (`BR-009`, `BR-077`). Filtering by a **capability** is
-    // the client's own gate; filtering by an inferred Visit state is deliberately not done, so every
-    // destination the API reports is offered and its refusal is presented (`BR-007`, `BR-041`).
-    val destinations = visit
-        ?.allowedStatusTransitions
-        ?.filter { destination -> destination != VisitStatus.COMPLETED || canRecordVisitOutcome }
-        .orEmpty()
+    // The working states the Visit may be driven to, as the API reported them (`BR-074`). The list is
+    // already narrowed to what this caller may execute, so it is the whole answer: no lifecycle rule is
+    // re-implemented here (`BR-041`, `BR-093`). A Job the office has closed (`BR-062`, `BR-079`) offers
+    // no destination at all.
+    val destinations = if (details.readOnlyReason == null) {
+        visit?.allowedStatusTransitions.orEmpty()
+    } else {
+        emptyList()
+    }
     val canDriveVisit = canChangeVisitStatus && destinations.isNotEmpty()
     Column(
         modifier = Modifier.testTag(JobCurrentVisitSectionTag),
@@ -999,7 +1409,7 @@ private fun CurrentVisitSection(
             label = stringResource(representedVisitLabel(representedVisitPeriod(visit, Instant.now()))),
             count = null,
         )
-        InfoCard {
+        InfoCard(modifier = Modifier.testTag(JobDetailsVisitCardTag)) {
             if (visit == null) {
                 Text(
                     text = stringResource(R.string.job_details_no_selected_visit_detail),
@@ -1011,24 +1421,47 @@ private fun CurrentVisitSection(
                     label = stringResource(R.string.job_details_visit_date_label),
                     value = overviewScheduleText(visit.scheduledStart),
                     modifier = Modifier.testTag(JobDetailsScheduleTag),
+                    // Presented, not controlled, when this caller may not drive the Visit: an action
+                    // nobody may perform is not one to offer (`BR-006`, `BR-007`).
                     trailing = {
-                        if (canDriveVisit) {
-                            // The Visit's status chip **is** the control that moves it, so the state the
-                            // technician wants to change is the thing they tap (`BR-074`).
-                            VisitStatusAction(
-                                status = visit.status,
-                                allowedTransitions = destinations,
-                                enabled = actionEnabled,
-                                onSelect = onChangeVisitStatus,
-                                onComplete = onOpenVisitCompletion,
-                            )
-                        } else {
-                            // Presented, not controlled: an action nobody may perform is not one to offer
-                            // (`BR-006`, `BR-007`).
+                        if (!canDriveVisit) {
                             VisitStatusPill(status = visit.status)
                         }
                     },
                 )
+                if (canDriveVisit) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = stringResource(R.string.job_visit_status_label),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // The four technician working states are the control, and the state the Visit is
+                        // in is the selected chip: the technician taps where they are, and every one of
+                        // the four is a destination of its own (`BR-074`, `BR-075`).
+                        VisitWorkingStatusSelector(
+                            status = visit.status,
+                            allowedTransitions = destinations,
+                            enabled = actionEnabled,
+                            onSelect = onChangeVisitStatus,
+                        )
+                    }
+                }
+                if (canCompleteVisit) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    // Completing the field attempt is the Visit's own business action: it states the
+                    // outcome `BR-077` requires, which is why completion is deliberately not one of the
+                    // states above. Adding an update is the page's floating action instead, so it is not
+                    // drawn a second time here — one write keeps one entry point (`BR-012`).
+                    VisitCompleteAction(
+                        enabled = actionEnabled,
+                        onClick = onOpenVisitCompletion,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(JobDetailsVisitFieldActionsTag),
+                    )
+                }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1043,11 +1476,15 @@ private fun CurrentVisitSection(
                     details.technicians.forEach { technician -> OverviewTechnicianRow(technician) }
                 }
             }
-            if (showReschedule || canManageTechnicians) {
+            if (showReschedule || canManageTechnicians || scheduleAction != null || canRequestFollowUp) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        // A session holding every capability these actions are drawn on may have more of
+                        // them than a phone is wide, so the row scrolls rather than clipping the last
+                        // control (`BR-011`, `Project.md` §11).
+                        .horizontalScroll(rememberScrollState())
                         .testTag(JobDetailsVisitActionsTag),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1071,8 +1508,50 @@ private fun CurrentVisitSection(
                             onClick = onManageCrew,
                         )
                     }
+                    // Scheduling a new Visit is not offered merely because one already exists: active
+                    // Visits keep actions focused on their own schedule and crew, while a completed Visit
+                    // with a follow-up outcome gets an explicit follow-up scheduling action.
+                    scheduleAction?.let { action ->
+                        JobContextualAction(
+                            text = stringResource(
+                                when (action) {
+                                    JobVisitScheduleAction.INITIAL_VISIT -> R.string.job_action_schedule_visit
+                                    JobVisitScheduleAction.FOLLOW_UP_VISIT ->
+                                        R.string.job_action_schedule_follow_up_visit
+                                },
+                            ),
+                            // A property-less Job has no service location to put on the Visit, so the
+                            // API would refuse the schedule write. Keep the initial scheduling affordance
+                            // visible for no-Visit Jobs, but do not let the client submit an impossible
+                            // schedule (`BR-072`, `BR-056`).
+                            enabled = actionEnabled && details.address != null,
+                            testTag = JobDetailsScheduleVisitActionTag,
+                            onClick = onSchedule,
+                        )
+                    }
+                    // A field attempt that needs more work is proposed by its technician and decided by
+                    // the office (`BR-FV-001`, `BR-FV-004`): the action states a request, so it is drawn
+                    // on its own capability and never on the office scheduling one (`BR-006`, `BR-011`).
+                    if (canRequestFollowUp) {
+                        JobContextualAction(
+                            text = stringResource(R.string.job_action_request_follow_up),
+                            enabled = actionEnabled,
+                            testTag = JobDetailsRequestFollowUpActionTag,
+                            onClick = onRequestFollowUp,
+                        )
+                    }
                 }
             }
+        }
+        submittedFollowUpRequest?.let { request ->
+            FollowUpRequestCard(
+                request = request,
+                sourceVisit = details.visits.firstOrNull { it.id == request.sourceVisitId },
+                resultingVisit = details.visits.firstOrNull { it.id == request.createdVisitId },
+                canReview = canReviewFollowUpRequest,
+                onOpen = { onOpenSubmittedFollowUpRequest(request.id) },
+                onOpenResultingVisit = onOpenSubmittedFollowUpVisit,
+            )
         }
         // What the queue is still holding sits directly under the Visit it will move, so the technician
         // sees their own unfinished work beside the record it changes rather than only in the activity the
@@ -1086,19 +1565,107 @@ private fun CurrentVisitSection(
     }
 }
 
+private data class FollowUpRequestStatusModel(
+    val id: String,
+    val sourceVisitId: String?,
+    val createdVisitId: String?,
+    val status: FollowUpVisitRequestStatus,
+)
+
+/** A follow-up proposal, kept separate from the completed Visit that produced it. */
+@Composable
+private fun FollowUpRequestCard(
+    request: FollowUpRequestStatusModel,
+    sourceVisit: JobDetailsVisitSummary?,
+    resultingVisit: JobDetailsVisitSummary?,
+    canReview: Boolean,
+    onOpen: () -> Unit,
+    onOpenResultingVisit: (visitId: String) -> Unit,
+) {
+    InfoCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .testTag(JobDetailsFollowUpRequestTag),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.job_follow_up_request_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            RequestStatusPill(status = request.status)
+        }
+        Text(
+            text = sourceVisit?.let { visit ->
+                stringResource(
+                    R.string.job_follow_up_request_source,
+                    overviewScheduleText(visit.scheduledStart),
+                )
+            } ?: stringResource(R.string.job_follow_up_request_source_generic),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (request.status == FollowUpVisitRequestStatus.APPROVED) {
+            if (resultingVisit == null) {
+                Text(
+                    text = stringResource(R.string.job_follow_up_request_awaiting_schedule),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    text = stringResource(
+                        R.string.job_follow_up_request_scheduled_for,
+                        overviewScheduleText(resultingVisit.scheduledStart),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { onOpenResultingVisit(resultingVisit.id) },
+                )
+            }
+        }
+        Text(
+            text = stringResource(
+                when {
+                    canReview && request.status.isAwaitingManagerReview() ->
+                        R.string.job_follow_up_request_review
+                    canReview -> R.string.job_follow_up_request_view
+                    else -> R.string.job_follow_up_request_open
+                },
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+private fun FollowUpVisitRequestStatus.isAwaitingManagerReview(): Boolean =
+    this == FollowUpVisitRequestStatus.PENDING ||
+        this == FollowUpVisitRequestStatus.NEEDS_CLARIFICATION
+
+
 /**
  * The Job's activity, grouped by the Visit each update belongs to (`BR-080`).
  *
  * Job Activity is one read spanning the Job and every Visit, and a reader's first question about an entry
  * is which field attempt it happened on. The section answers that before the entry is read: one foldable
- * group per Visit — newest first, with the Visit the page represents opened by default — each stating that
- * Visit's date, its schedule and its crew above its own entries, and a group of its own for the events
- * that belong to the Job and to no Visit (`BR-047`, `BR-059`, `BR-081`).
+ * group per Visit — newest first, with the Visit the page represents opened by default — each headed
+ * `Visit N · date` and stating where that attempt ended up and what it resulted in, and a group of its own
+ * for the events that belong to the Job and to no Visit (`BR-047`, `BR-059`, `BR-081`).
  *
  * The groups are not cards themselves: the page is an operational one, so a group is a heading with a
- * timeline under it (`BR-012`). What the group reveals is headed by one bordered card stating the Visit's
- * own facts — the day, the scheduled window, the outcome it holds and the assigned crew — and that
- * Visit's entries follow it as the one timeline they are (`BR-068`, `BR-072`, `BR-077`, `BR-080`).
+ * timeline under it (`BR-012`). What a group reveals is that Visit's own evidence and its own entries —
+ * never a second statement of the Visit's schedule, its crew or its outcome, which the Visit section and
+ * the heading already state (`BR-047`, `BR-072`, `BR-077`).
  *
  * The read's own states are reported once, for the section as a whole — loading, and a failure with its
  * retry. Emptiness is reported where it is true: a Visit whose group has no update says so, and the Job's
@@ -1112,6 +1679,9 @@ private fun JobActivitySection(
     jobId: String,
     onRetry: () -> Unit,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     photoImages: JobPhotoImages,
     audio: JobActivityAudio,
 ) {
@@ -1121,7 +1691,7 @@ private fun JobActivitySection(
     ) {
         SectionLabel(
             label = stringResource(R.string.job_activity_label),
-            count = state.activity?.size?.takeIf { count -> count > 0 },
+            count = primaryActivityCount(state.activity).takeIf { count -> count > 0 },
         )
         if (state.activitySource == ReadSource.WORKING_SET && state.activity != null) {
             // The entries these groups draw are the last the backend reported: the section says so rather
@@ -1142,6 +1712,9 @@ private fun JobActivitySection(
                             jobId = jobId,
                             photoImages = photoImages,
                             onOpenPhoto = onOpenPhoto,
+                            canManageVisitNotes = canManageVisitNotes,
+                            onEditVisitNote = onEditVisitNote,
+                            onRemoveVisitNote = onRemoveVisitNote,
                             audio = audio,
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -1152,6 +1725,9 @@ private fun JobActivitySection(
                     jobId = jobId,
                     photoImages = photoImages,
                     onOpenPhoto = onOpenPhoto,
+                    canManageVisitNotes = canManageVisitNotes,
+                    onEditVisitNote = onEditVisitNote,
+                    onRemoveVisitNote = onRemoveVisitNote,
                     audio = audio,
                 )
             }
@@ -1163,10 +1739,13 @@ private fun JobActivitySection(
  * One Visit's group inside the Job Activity section: its updates, under a heading that says which Visit
  * they belong to (`BR-047`, `BR-080`).
  *
- * The heading states what a reader scans a field attempt for — which Visit it is and when it was for, what
- * its status is, and who is on its crew — on lines that wrap with an ellipsis rather than pressing against
- * the status and the chevron, and the whole heading is the control so it keeps the platform's minimum
- * touch target. Opening it never reflows the heading it was opened from (`BR-012`).
+ * The heading states what a reader scans a field attempt for — which Visit it is, when it was for, where
+ * it ended up and what it resulted in (`Completed · Needs follow-up`) — on lines that wrap with an
+ * ellipsis rather than pressing against the chevron, and the whole heading is the control so it keeps the
+ * platform's minimum touch target. Opening it never reflows the heading it was opened from (`BR-012`).
+ * The heading does not repeat the Visit's card: the crew, the scheduled window and the outcome's own card
+ * were a second statement of what the Visit section already says, and what a group reveals is that Visit's
+ * account and its evidence (`BR-080`).
  *
  * The Visit the page represents opens by default, whatever its position, because it is the Visit the page's
  * own section presents (`BR-081`); every other Visit's group starts folded. The folded state is
@@ -1183,6 +1762,9 @@ private fun VisitActivityGroupRow(
     jobId: String,
     photoImages: JobPhotoImages,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     audio: JobActivityAudio,
 ) {
     val visit = group.visit
@@ -1225,9 +1807,9 @@ private fun VisitActivityGroupRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                // The title and the crew wrap rather than pushing against the status and the chevron: a
-                // long date, a long name or a longer translation shortens with an ellipsis instead of
-                // overlapping the controls beside it (`BR-028`).
+                // The title and the summary wrap rather than pressing against the chevron: a long date or
+                // a longer translation shortens with an ellipsis instead of overlapping the control
+                // beside it (`BR-028`).
                 Text(
                     text = title,
                     style = MaterialTheme.typography.bodyMedium,
@@ -1235,16 +1817,19 @@ private fun VisitActivityGroupRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // Where the field attempt ended up and what it resulted in, in the field's own words —
+                // `Completed · Needs follow-up` — so a folded group answers what happened without being
+                // opened and without a second status badge beside a status already written out
+                // (`BR-074`, `BR-078`, `BR-012`).
                 Text(
-                    text = overviewCrewSummary(visit.technicians),
+                    text = visitActivitySummary(visit),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag(jobActivityVisitSummaryTag(visit.id)),
                 )
             }
-            Spacer(Modifier.width(8.dp))
-            VisitStatusPill(status = visit.status)
             Spacer(Modifier.width(8.dp))
             // The chevron says the group opens, and it turns a quarter turn while it is open — the
             // disclosure the customer detail and the photo gallery already use
@@ -1264,6 +1849,9 @@ private fun VisitActivityGroupRow(
                 jobId = jobId,
                 photoImages = photoImages,
                 onOpenPhoto = onOpenPhoto,
+                canManageVisitNotes = canManageVisitNotes,
+                onEditVisitNote = onEditVisitNote,
+                onRemoveVisitNote = onRemoveVisitNote,
                 audio = audio,
             )
         }
@@ -1271,23 +1859,17 @@ private fun VisitActivityGroupRow(
 }
 
 /**
- * What one expanded Visit group reveals: what the Visit was, and what happened on it (`BR-072`, `BR-080`).
+ * What one expanded Visit group reveals: what happened on that Visit (`BR-080`).
  *
- * The summary states the field attempt in full — its date, its scheduled start and end, what it
- * resulted in when it holds an outcome, and the technicians assigned to it — in the bordered card that
- * heads this Visit's part of the Job Activity section, and the timeline under that card is that Visit's
- * own entries, in the order the backend reported them. Nothing here belongs to another Visit or to the
- * Job, and the Visit's notes are read where the API recorded them, in its own activity (`BR-077`,
- * `BR-078`).
+ * It is the Visit's own evidence and its own entries, in the order the backend reported them, and nothing
+ * else: the day the group was for is its heading, its status and its outcome are its summary line, and the
+ * schedule, the crew and the outcome card belong to the Visit section. Repeating them here made a reader
+ * open a timeline to find a second copy of what the page already said (`BR-047`, `BR-012`).
  *
- * The outcome is read from the **Visit** and not from the timeline below it: a Visit that was reopened
- * after completion holds no current outcome while the outcome it recorded stays in its history, so the
- * two are different answers and only the API's own field can give the first one (`BR-079`, `BR-001`).
- *
- * The crew is named as **assigned**, because that is what the read reports: Servora models who is
- * assigned to a field attempt (`BR-068`) and does not record who attended one (time tracking is undefined,
- * `BR-034`). A reader is therefore never told a technician was there when all the backend knows is that
- * they were booked, and a Visit nobody has written anything on is not presented as one nobody attended.
+ * The evidence the backend accepted is read as a compact collection above the account of what happened, and
+ * a photo also stays in the entry that recorded it, so a reader can browse the evidence or follow when it
+ * was captured (`BR-015`, `BR-080`). A Visit no one has written anything on says so rather than reading as
+ * a Visit the page left out (`BR-042`).
  */
 @Composable
 private fun VisitActivityGroupBody(
@@ -1295,9 +1877,14 @@ private fun VisitActivityGroupBody(
     jobId: String,
     photoImages: JobPhotoImages,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     audio: JobActivityAudio,
 ) {
     val visit = group.visit
+    val primary = group.activity.primaryActivity()
+    val administrative = group.activity.administrativeActivity()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1305,54 +1892,10 @@ private fun VisitActivityGroupBody(
             .testTag(jobActivityVisitBodyTag(visit.id)),
         verticalArrangement = Arrangement.spacedBy(OverviewNestedSpacing),
     ) {
-        // The Visit's own facts head this Visit's part of the Job Activity section, in the bordered card the
-        // page states facts in: which day it was for, the window it was scheduled for, what it resulted in
-        // when it holds an outcome, and who was assigned to it (`BR-068`, `BR-072`, `BR-077`). The card is
-        // what the entries below it belong to, so a reader arriving at a timeline is told whose timeline it
-        // is before reading it (`BR-047`, `BR-080`).
-        InfoCard(modifier = Modifier.testTag(jobActivityVisitCardTag(visit.id))) {
-            OverviewRow(
-                label = stringResource(R.string.job_details_visit_date_label),
-                value = overviewDateText(visit.scheduledStart),
-                modifier = Modifier.testTag(jobActivityVisitDateTag(visit.id)),
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            OverviewRow(
-                label = stringResource(R.string.job_details_visit_time_label),
-                value = overviewTimeRangeText(visit.scheduledStart, visit.scheduledEnd),
-                modifier = Modifier.testTag(jobActivityVisitTimeTag(visit.id)),
-            )
-            // What the field attempt resulted in, when it holds a current outcome (`BR-077`,
-            // `BR-078`). It is the Visit's **own** outcome the API reported, so a Visit that was
-            // reopened after completion states none until it is completed again, and a Visit that has
-            // never been completed states none at all — neither is filled in from the activity the
-            // entry was recorded in (`BR-079`, `BR-001`, `BR-042`).
-            visit.outcome?.let { outcome ->
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                OverviewRow(
-                    label = stringResource(R.string.job_details_visit_outcome_label),
-                    value = stringResource(visitOutcomeLabel(outcome)),
-                    modifier = Modifier.testTag(jobActivityVisitOutcomeTag(visit.id)),
-                )
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = stringResource(R.string.job_details_assigned_technicians_label),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (visit.technicians.isEmpty()) {
-                    OverviewUnassignedCrew()
-                } else {
-                    visit.technicians.forEach { technician -> OverviewTechnicianRow(technician) }
-                }
-            }
-        }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel(
                 label = stringResource(R.string.job_details_visit_activity_label),
-                count = group.activity.size.takeIf { count -> count > 0 },
+                count = primary.size.takeIf { count -> count > 0 },
             )
             if (group.activity.isEmpty()) {
                 Text(
@@ -1362,11 +1905,42 @@ private fun VisitActivityGroupBody(
                     modifier = Modifier.testTag(jobActivityVisitEmptyTag(visit.id)),
                 )
             } else {
-                ActivityTimeline(
-                    events = group.activity,
+                val photos = jobActivityPhotos(primary)
+                if (photos.isNotEmpty()) {
+                    JobPhotoGallerySection(
+                        photos = photos,
+                        jobId = jobId,
+                        photoImages = photoImages,
+                        onOpenPhoto = onOpenPhoto,
+                    )
+                }
+                if (primary.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.job_details_visit_activity_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag(jobActivityVisitEmptyTag(visit.id)),
+                    )
+                } else {
+                    ActivityTimeline(
+                        events = primary,
+                        jobId = jobId,
+                        photoImages = photoImages,
+                        onOpenPhoto = onOpenPhoto,
+                        canManageVisitNotes = canManageVisitNotes,
+                        onEditVisitNote = onEditVisitNote,
+                        onRemoveVisitNote = onRemoveVisitNote,
+                        audio = audio,
+                    )
+                }
+                AdministrativeActivityGroup(
+                    events = administrative,
                     jobId = jobId,
                     photoImages = photoImages,
                     onOpenPhoto = onOpenPhoto,
+                    canManageVisitNotes = canManageVisitNotes,
+                    onEditVisitNote = onEditVisitNote,
+                    onRemoveVisitNote = onRemoveVisitNote,
                     audio = audio,
                 )
             }
@@ -1378,14 +1952,15 @@ private fun VisitActivityGroupBody(
  * The updates that belong to the Job itself and to no Visit (`BR-080`).
  *
  * It is the Job's own part of the one account: its status changes, its location and customer changes, and
- * the evidence recorded against the Job, which is where a photo is recorded (`BR-015`, `BR-051`). Every
- * Visit's own events sit in that Visit's group instead, so this group is never read as the account of a
- * field attempt, and a field attempt's entries are never read as the Job's.
+ * the evidence recorded against the Job. Every Visit's own events sit in that Visit's group instead, so this
+ * group is never read as the account of a field attempt, and a field attempt's entries are never read as
+ * the Job's.
  *
- * The group is folded like a Visit's, and it starts open: it is where the Job's evidence is read from, and
- * hiding a Job's photos behind a tap by default would cost the reader the thing the section exists for
- * (`BR-015`, `BR-012`). A Job with no job-wide event says so rather than reading as a Job nothing happened
- * to (`BR-042`).
+ * It starts **folded**, because it holds office-level history rather than the technician's own field work:
+ * a technician's updates are Visit-scoped (`tracker 051`), so what is here is what the office did to the
+ * Job. It stays one tap away rather than being removed, because it is where the Job's own evidence is read
+ * from (`BR-015`, `BR-012`). A Job with no job-wide event says so once it is opened rather than reading as
+ * a Job nothing happened to (`BR-042`).
  */
 @Composable
 private fun GeneralJobUpdatesGroup(
@@ -1393,9 +1968,12 @@ private fun GeneralJobUpdatesGroup(
     jobId: String,
     photoImages: JobPhotoImages,
     onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
     audio: JobActivityAudio,
 ) {
-    var expanded by rememberSaveable { mutableStateOf(true) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
     val toggleLabel = stringResource(
         if (expanded) {
             R.string.job_activity_general_collapse_label
@@ -1455,7 +2033,9 @@ private fun GeneralJobUpdatesGroup(
                     // The photos the backend accepted, read as a collection above the account of what
                     // happened (`BR-080`). Photos still held by this device are the tray's, because the
                     // backend has not accepted them yet (`BR-001`).
-                    val photos = jobActivityPhotos(events)
+                    val primary = events.primaryActivity()
+                    val administrative = events.administrativeActivity()
+                    val photos = jobActivityPhotos(primary)
                     if (photos.isNotEmpty()) {
                         JobPhotoGallerySection(
                             photos = photos,
@@ -1464,11 +2044,33 @@ private fun GeneralJobUpdatesGroup(
                             onOpenPhoto = onOpenPhoto,
                         )
                     }
-                    ActivityTimeline(
-                        events = events,
+                    if (primary.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.job_details_job_updates_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag(JobActivityGeneralEmptyTag),
+                        )
+                    } else {
+                        ActivityTimeline(
+                            events = primary,
+                            jobId = jobId,
+                            photoImages = photoImages,
+                            onOpenPhoto = onOpenPhoto,
+                            canManageVisitNotes = canManageVisitNotes,
+                            onEditVisitNote = onEditVisitNote,
+                            onRemoveVisitNote = onRemoveVisitNote,
+                            audio = audio,
+                        )
+                    }
+                    AdministrativeActivityGroup(
+                        events = administrative,
                         jobId = jobId,
                         photoImages = photoImages,
                         onOpenPhoto = onOpenPhoto,
+                        canManageVisitNotes = canManageVisitNotes,
+                        onEditVisitNote = onEditVisitNote,
+                        onRemoveVisitNote = onRemoveVisitNote,
                         audio = audio,
                     )
                 }
@@ -1477,54 +2079,71 @@ private fun GeneralJobUpdatesGroup(
     }
 }
 
-/**
- * The Customer's own contact details and its contact persons on the Job's card (`BR-092`, `BR-095`).
- *
- * A row is drawn per detail the Customer actually has. A field the office never recorded is not drawn as
- * a line announcing its absence: the card is what a technician reads before knocking on the door, and
- * three rows of missing data would push the work they came for down the screen (`BR-012`). Only the
- * fields `BR-092` names can appear here — the phone, the email and the notes — plus the contact persons
- * the same read returns (`BR-095`).
- *
- * The card presents **one** phone: the effective primary contact's number, flagged with the **Primary**
- * badge. Every other way of reaching the Customer — the other contact persons, and the Customer's own
- * general line when it is not the primary — sits behind a disclosure that starts closed, so the number
- * the technician came for is the one on screen (`BR-095`, `BR-012`).
- */
 @Composable
-private fun OverviewCustomerContactRows(contact: JobCustomerContact, customerName: String) {
-    val summary = contact.contactSummary(customerName)
-    summary.primaryPhone?.let { phone ->
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        OverviewRow(
-            label = stringResource(R.string.job_details_customer_phone_label),
-            value = phone,
-            modifier = Modifier.testTag(JobDetailsCustomerPhoneTag),
-            // The badge marks the effective primary contact (`BR-095`). The row is drawn only when that
-            // contact has a number, so the row and the marker appear together or not at all.
-            trailing = {
-                ContactPrimaryBadge(Modifier.testTag(JobDetailsCustomerPrimaryBadgeTag))
-            },
-        )
-    }
-    contact.email?.let { email ->
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        OverviewRow(
-            label = stringResource(R.string.job_details_customer_email_label),
-            value = email,
-            modifier = Modifier.testTag(JobDetailsCustomerEmailTag),
-        )
-    }
-    contact.notes?.let { notes ->
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        OverviewRow(
-            label = stringResource(R.string.job_details_customer_notes_label),
-            value = notes,
-            modifier = Modifier.testTag(JobDetailsCustomerNotesTag),
-        )
-    }
-    if (summary.others.isNotEmpty()) {
-        OverviewOtherContacts(others = summary.others)
+private fun AdministrativeActivityGroup(
+    events: List<JobActivityEvent>,
+    jobId: String,
+    photoImages: JobPhotoImages,
+    onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
+    audio: JobActivityAudio,
+) {
+    if (events.isEmpty()) return
+
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val toggleLabel = stringResource(
+        if (expanded) {
+            R.string.job_activity_admin_collapse_label
+        } else {
+            R.string.job_activity_admin_expand_label
+        },
+    )
+    val stateLabel = stringResource(
+        if (expanded) R.string.job_activity_group_expanded else R.string.job_activity_group_collapsed,
+    )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .clickable(onClickLabel = toggleLabel) { expanded = !expanded }
+                .semantics { stateDescription = stateLabel }
+                .heightIn(min = OverviewActivityHeaderMinHeight)
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.job_activity_admin_label, events.size),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                painter = painterResource(R.drawable.ic_chevron_right),
+                contentDescription = toggleLabel,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(OverviewChevronSize)
+                    .rotate(if (expanded) 90f else 0f),
+            )
+        }
+        if (expanded) {
+            ActivityTimeline(
+                events = events,
+                jobId = jobId,
+                photoImages = photoImages,
+                onOpenPhoto = onOpenPhoto,
+                canManageVisitNotes = canManageVisitNotes,
+                onEditVisitNote = onEditVisitNote,
+                onRemoveVisitNote = onRemoveVisitNote,
+                audio = audio,
+            )
+        }
     }
 }
 
@@ -1533,9 +2152,9 @@ private fun OverviewCustomerContactRows(contact: JobCustomerContact, customerNam
  *
  * The heading is the control, as the Job Activity groups and the manager home's sections are: it states
  * what it holds and how many of them there are, it says whether it is open, and its content is the one
- * thing it hides (`docs/design/android-design-system.md`). The rows are not links: tap-to-call and
- * tap-to-email on the Job card is a design-system decision that is still open (`ADR-021`), so nothing
- * here pretends to dial.
+ * thing it hides (`docs/design/android-design-system.md`). It starts **closed**, so the contact the
+ * technician came for is the one on screen and the rest are one tap away rather than competing with it
+ * (`BR-012`).
  */
 @Composable
 private fun OverviewOtherContacts(others: List<JobCustomerOtherContact>) {
@@ -1595,10 +2214,13 @@ private fun OverviewOtherContacts(others: List<JobCustomerOtherContact>) {
 
 /**
  * One other way of reaching the Customer (`BR-095`): who it belongs to, and the values the office
- * recorded. A value that is not recorded is left out rather than drawn as an empty line (`BR-012`).
+ * recorded. A value that is not recorded is left out rather than drawn as an empty line (`BR-012`), and a
+ * recorded one opens the application that reaches that person — the same `tel:`/`mailto:` affordances the
+ * customer screens use, so the app dials and composes the same way everywhere (`ADR-022` D6).
  */
 @Composable
 private fun OverviewOtherContactRow(contact: JobCustomerOtherContact, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     Column(
         modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -1611,22 +2233,18 @@ private fun OverviewOtherContactRow(contact: JobCustomerOtherContact, modifier: 
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        contact.phone?.let { phone ->
-            Text(
+        contact.phone?.takeIf { it.isNotBlank() }?.let { phone ->
+            CustomerContactLine(
                 text = phone,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                glyph = R.drawable.ic_phone,
+                onClick = { context.startContactIntent(dialIntent(phone)) },
             )
         }
-        contact.email?.let { email ->
-            Text(
+        contact.email?.takeIf { it.isNotBlank() }?.let { email ->
+            CustomerContactLine(
                 text = email,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                glyph = R.drawable.ic_mail,
+                onClick = { context.startContactIntent(mailIntent(email)) },
             )
         }
     }
@@ -1851,11 +2469,10 @@ private fun overviewScheduleText(scheduledStart: String?): String {
 /**
  * A Visit's date in the device's language and time zone, without a time.
  *
- * It is the date a Visit's activity group is headed and summarised with: a group is scanned for which
- * field attempt it is and when it was for, and the scheduled times belong to the summary under it
- * (`BR-072`). A Visit that has not been scheduled says so rather than showing an invented date (`BR-051`),
- * and a value this build cannot read is reported as unavailable rather than as a fabricated one
- * (`BR-042`).
+ * It is the date a Visit's activity group is headed with: a group is scanned for which field attempt it is
+ * and when it was for (`BR-052`, `BR-072`). A Visit that has not been scheduled says so rather than showing
+ * an invented date (`BR-051`), and a value this build cannot read is reported as unavailable rather than as
+ * a fabricated one (`BR-042`).
  */
 @Composable
 private fun overviewDateText(scheduledStart: String?): String {
@@ -1873,47 +2490,21 @@ private fun overviewDateText(scheduledStart: String?): String {
 }
 
 /**
- * A Visit's scheduled window in the device's language and time zone (`BR-072`).
+ * What a Visit's activity group states under its heading: where the field attempt ended up, and what it
+ * resulted in (`BR-074`, `BR-078`).
  *
- * The Visit's internal schedule is authoritative for dispatch and conflict detection, so it is what the
- * summary states. The best representation the read allows is used rather than an invented one: a Visit
- * with no schedule says so, an end this build cannot read is left out instead of being guessed, and only
- * a start this build cannot read at all is reported as unavailable (`BR-042`).
+ * The status is the Visit's own state and the outcome is the Visit's own recorded outcome, so the two read
+ * as one line — `Completed · Needs follow-up` — and a Visit that holds no outcome states its status alone,
+ * because a Visit reopened after completion holds none until it is completed again (`BR-079`, `BR-042`).
+ * The words come from the shared status and outcome labels, so the group, the Visit's badge and the
+ * completion sheet name one code the same way (`BR-041`).
  */
 @Composable
-private fun overviewTimeRangeText(scheduledStart: String?, scheduledEnd: String?): String {
-    val start = visitStart(scheduledStart)
-        ?: return stringResource(
-            if (scheduledStart == null) {
-                R.string.job_details_not_scheduled
-            } else {
-                R.string.job_details_time_unknown
-            },
-        )
-    val formatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(deviceLocale())
-    val zone = ZoneId.systemDefault()
-    val startText = start.atZone(zone).format(formatter)
-    // A Visit whose end this build cannot read still states the start it has: a window with one end
-    // stated is more use in the field than a window reported as unknown (`BR-012`, `BR-042`).
-    val endText = visitStart(scheduledEnd)?.atZone(zone)?.format(formatter) ?: return startText
-    return stringResource(R.string.job_details_visit_time_range, startText, endText)
-}
-
-/**
- * The crew a folded Visit row states, in the order the API reported it — Lead first (`BR-068`).
- *
- * A member the office has no profile for is named as unavailable rather than left out, because the
- * technician really is assigned to the work (`BR-020`), and a Visit nobody is assigned to says so.
- */
-@Composable
-private fun overviewCrewSummary(technicians: List<JobDetailsTechnician>): String {
-    if (technicians.isEmpty()) {
-        return stringResource(R.string.customers_job_unassigned)
-    }
-    val unavailable = stringResource(R.string.job_details_technician_name_unknown)
-    return technicians.joinToString(", ") { technician ->
-        technician.name?.takeIf { name -> name.isNotBlank() } ?: unavailable
-    }
+private fun visitActivitySummary(visit: JobDetailsVisitSummary): String {
+    val status = stringResource(visitStatusLabel(visit.status))
+    val outcome = visit.outcome?.let { outcome -> stringResource(visitOutcomeLabel(outcome)) }
+        ?: return status
+    return stringResource(R.string.job_activity_visit_summary_format, status, outcome)
 }
 
 

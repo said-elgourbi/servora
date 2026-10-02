@@ -5,7 +5,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
-  CUSTOMER_PERMISSIONS,
+  SCHEDULE_PERMISSIONS,
   VISIT_PERMISSIONS,
   type PermissionCode,
 } from '../src/auth/permissions.js';
@@ -150,7 +150,7 @@ describe('schedule endpoint (e2e)', () => {
 
   /** An office session: the capability the schedule read is guarded by. */
   async function signInManager() {
-    return signInFor([CUSTOMER_PERMISSIONS.VIEW]);
+    return signInFor([SCHEDULE_PERMISSIONS.VIEW_ORG]);
   }
 
   /** A field session: the technician capability, which does not open the schedule. */
@@ -471,11 +471,6 @@ describe('schedule endpoint (e2e)', () => {
       status: 'CANCELED',
       scheduledStart: new Date('2020-01-15T12:00:00.000Z'),
     });
-    const noShow = await newFixtureVisit({
-      title: 'No show',
-      status: 'NO_SHOW',
-      scheduledStart: new Date('2020-01-15T13:00:00.000Z'),
-    });
 
     const response = await request(app.getHttpServer())
       .get(`/schedule?date=${PAST_DATE}&timeZone=UTC`)
@@ -487,7 +482,6 @@ describe('schedule endpoint (e2e)', () => {
     );
     expect(ids).toContain(completed.visit.id);
     expect(ids).not.toContain(canceled.visit.id);
-    expect(ids).not.toContain(noShow.visit.id);
   });
 
   it('narrows the day to the technician the filter names', async () => {
@@ -664,6 +658,47 @@ describe('schedule endpoint (e2e)', () => {
     ).toContain(waiting.visit.id);
   });
 
+
+  it('does not show a stale draft Visit as unassigned after the Job has a scheduled Visit', async () => {
+    const session = await signInManager();
+    const lead = await newTechnicianMember('Mike Johnson');
+    const customer = await newCustomer('Scheduled Customer');
+    const job = await newJob({
+      customerId: customer.id,
+      title: 'Boiler replacement',
+      propertyAddress: null,
+    });
+    const draft = await newVisit({
+      jobId: job.id,
+      status: 'DRAFT',
+      scheduledStart: null,
+      scheduledEnd: null,
+      location: null,
+    });
+    const scheduled = await newVisit({
+      jobId: job.id,
+      status: 'SCHEDULED',
+      scheduledStart: new Date('2020-01-15T09:00:00.000Z'),
+      scheduledEnd: new Date('2020-01-15T10:00:00.000Z'),
+      location: { addressLine1: '1 Visit Way' },
+    });
+    await assign(scheduled.id, lead.id, 'LEAD');
+
+    const response = await request(app.getHttpServer())
+      .get(`/schedule?date=${PAST_DATE}&timeZone=UTC`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    expect(
+      response.body.unassigned.items.map(
+        (row: { visitId: string }) => row.visitId,
+      ),
+    ).not.toContain(draft.id);
+    expect(
+      response.body.visits.map((row: { visitId: string }) => row.visitId),
+    ).toContain(scheduled.id);
+  });
+
   it('falls back to the Job\u2019s preserved address when the Visit has none', async () => {
     const session = await signInManager();
     // An attempt under way whose Visit carries no location of its own, for a Job that does.
@@ -763,7 +798,7 @@ describe('schedule endpoint (e2e)', () => {
     // Holding both capabilities must still open the office schedule: the capability set decides
     // what a session may read, never a role name (`BR-006`, `BR-007`).
     const session = await signInFor([
-      CUSTOMER_PERMISSIONS.VIEW,
+      SCHEDULE_PERMISSIONS.VIEW_ORG,
       VISIT_PERMISSIONS.VIEW_ASSIGNED,
     ]);
 

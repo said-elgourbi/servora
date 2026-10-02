@@ -44,6 +44,9 @@ class JobAudioUploadHandlerTest {
 
         assertEquals(ReplayOutcome.Applied, outcome)
         assertEquals("audio-1", api.lastClientOperationId)
+        // A recording is made on the Visit it was recorded during (`BR-047`, `BR-091`); the API refuses an
+        // upload that names none.
+        assertEquals(VISIT_ID, api.lastVisitId)
         assertEquals("AFTER_WORK", api.lastPhase)
         assertEquals(note.capturedAt, api.lastCapturedAt)
         assertEquals("Compressor is noisy", api.lastNote)
@@ -101,6 +104,28 @@ class JobAudioUploadHandlerTest {
         val outcome = handler().replay(queuedRow(note))
 
         assertEquals(ReplayOutcome.Rejected(OutboxFailureReason.NOT_AUTHORIZED), outcome)
+        assertEquals(setOf(note.localPath), files.storedPaths)
+        assertEquals(note.audioNoteId, pending.find(note.audioNoteId)?.audioNoteId)
+    }
+
+    @Test
+    fun `reads the API's code to tell a closed Job from a stale version`() = runTest {
+        // A recording captured under a Job the office closed while the technician was offline is the
+        // same `409` a version conflict is, so the API's stable code decides how it is reported
+        // (`BR-041`, `BR-079`).
+        val note = pendingNote()
+        pending.record(note)
+        files.writeBytes(note.localPath, FakeJobAudioFiles.M4A_BYTES)
+
+        api.addJobAudioNoteAnswer = { throw httpError(409, "JOB_CLOSED_FOR_FIELD_WORK") }
+        val closed = handler().replay(queuedRow(note))
+
+        api.addJobAudioNoteAnswer = { throw httpError(409, "VERSION_CONFLICT") }
+        val stale = handler().replay(queuedRow(note))
+
+        assertEquals(ReplayOutcome.Rejected(OutboxFailureReason.JOB_CLOSED), closed)
+        assertEquals(ReplayOutcome.Rejected(OutboxFailureReason.STALE), stale)
+        // Nothing the technician recorded is discarded by either refusal (`BR-032`).
         assertEquals(setOf(note.localPath), files.storedPaths)
         assertEquals(note.audioNoteId, pending.find(note.audioNoteId)?.audioNoteId)
     }
@@ -176,6 +201,7 @@ class JobAudioUploadHandlerTest {
     ) = PendingJobAudioNote(
         audioNoteId = "audio-1",
         jobId = JOB_ID,
+        visitId = VISIT_ID,
         localPath = "app-private/job-audio/user-1/audio-1.$JOB_AUDIO_FILE_EXTENSION",
         phase = phase,
         note = "Compressor is noisy",
@@ -210,15 +236,29 @@ class JobAudioUploadHandlerTest {
         payloads = payloads,
         pending = pending,
         files = files,
+        json = Json,
     )
 
     private companion object {
         const val JOB_ID = "job-1"
 
+        /** The Visit the recording is made on (`BR-047`, `BR-091`). */
+        const val VISIT_ID = "visit-1"
+
         /** A response the API refused with, as Retrofit reports it (`dev.md` §7). */
         fun httpError(code: Int): HttpException =
             HttpException(
                 Response.error<Any>(code, "{}".toResponseBody("application/json".toMediaType())),
+            )
+
+        /** A refusal that carries the API's stable code, which is what a `409` is classified by. */
+        fun httpError(code: Int, errorCode: String): HttpException =
+            HttpException(
+                Response.error<Any>(
+                    code,
+                    """{"statusCode":$code,"code":"$errorCode","message":"refused"}"""
+                        .toResponseBody("application/json".toMediaType()),
+                ),
             )
     }
 }

@@ -53,6 +53,13 @@ internal const val JOB_AUDIO_FILE_NAME = "audio.m4a"
 @Serializable
 data class JobAudioOperationPayload(
     @SerialName("localPath") val localPath: String,
+    /**
+     * The Visit the recording was made during (`BR-047`, `BR-071`).
+     *
+     * Nullable only so a payload written by an earlier build still decodes; the handler refuses an
+     * upload that carries none (`BR-042`), and every payload this build writes has it.
+     */
+    @SerialName("visitId") val visitId: String? = null,
     @SerialName("phase") val phase: String?,
     @SerialName("note") val note: String? = null,
     @SerialName("capturedAt") val capturedAt: String,

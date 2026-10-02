@@ -112,17 +112,27 @@ coordinates several loosely related reads to build it.
 | `day`                 | The half-open window `[start, end)` the day was resolved for, and the zone it was resolved in.                                                                                                                                                                                                           |
 | `viewer.displayName`  | The signed-in member's name for the greeting. `null` when the member has no profile yet, so the client greets without a name rather than inventing one (`BR-020`).                                                                                                                                        |
 | `nextVisit`           | The one Visit to do next, or `null` when no assigned Visit is left to do. Chosen by the **API**, not the client: work already started (`EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `BR-074`) comes first, then the nearest by scheduled start. It may be tomorrow's work when nothing remains today.             |
-| `visits`              | Today's assigned Visits, **chronologically** (scheduled start, then Job number). A `CANCELED` or `NO_SHOW` Visit is excluded because the attempt did not happen; a `COMPLETED` Visit stays, because it is what the day has produced so far.                                                              |
-| `upcoming`            | A **preview** of the assigned Visits whose scheduled start is at or after `day.end`: their status is not `CANCELED`, `NO_SHOW` or `COMPLETED`. Capped at five.                                                                                                                                            |
+| `visits`              | Today's assigned Visits, **chronologically** (scheduled start, then Job number). A `CANCELED` Visit is excluded because the attempt did not happen; a `COMPLETED` Visit stays, because it is what the day has produced so far.                                                                          |
+| `upcoming`            | A **preview** of the assigned Visits whose scheduled start is at or after `day.end`: their status is not `CANCELED` or `COMPLETED`. Capped at five.                                                                                                                                                       |
 | `upcomingTotal`       | How many assigned Visits are after today, so a capped preview never under-reports the caller's workload. It is the manager home's `attention.total` shape, applied to the same problem.                                                                                                                  |
-| `attention.total`     | Every condition on the caller's own work, including any beyond `items` (capped at 20).                                                                                                                                                                                                                    |
-| `attention.items`     | `kind` is a code, never display text (`BR-028`, `BR-041`). `VISIT_OVERDUE` is the only kind today: an assigned Visit still `SCHEDULED` after its window ended. It is not restricted to the requested day, because an attempt that never happened yesterday is still work the technician has to resolve. |
+| `attention.total`     | How many conditions the section holds, including any beyond `items` (capped at 20). It counts the same set `items` holds, so the heading and the list can never disagree.                                                                                                                                |
+| `attention.items`     | `kind` is a code, never display text (`BR-028`, `BR-041`). `VISIT_OVERDUE` is the only kind today: an assigned Visit still `SCHEDULED` after its window ended. It is not restricted to the requested day, because an attempt that never happened yesterday is still work the technician has to resolve — but it never repeats what the screen already states, and it is ordered by urgency (below). |
 | `visits[].address`    | The Visit's own preserved location, falling back to the Job's preserved address; `null` when neither exists (`BR-056`, `BR-057`).                                                                                                                                                                        |
 | `visits[].technicians`| The current assignments, Lead first (`BR-068`); empty when the Visit has none. `name` is `null` when the member has no profile yet.                                                                                                                                                                       |
 | `visits[].overdue`    | The derived overdue condition, decided by the API from the server clock, so a client presents it without comparing schedules against its own clock (`BR-001`).                                                                                                                                           |
 
 Nothing here is a business state of its own: `nextVisit`, the day's membership, the preview and the
 overdue condition are all derived from authoritative records (`BR-060`, `BR-072`, `BR-074`).
+
+**What the attention section states and how it is ordered.** The technician's screen answers one
+question (`BR-012`), so a Visit is described once. A Visit this read already presents — as
+`nextVisit`, whose own card carries the derived overdue condition, or as a row of today's `visits`,
+whose own row carries it — is therefore **not** repeated in `attention`. The section holds the caller's
+late work the screen says nowhere else: an attempt from an earlier day that neither leads the screen
+nor falls inside today's list. That is why the section can be absent while the caller still has
+something overdue — the day on screen is already saying it (`BR-041`). Its items are ordered by
+urgency, the Visit that has been overdue longest first (then the Job number), which is the order the
+manager home applies within the same condition, so one Visit is never presented in two orders.
 
 ### 3.4 What the read never includes
 

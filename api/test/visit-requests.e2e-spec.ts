@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
   CUSTOMER_PERMISSIONS,
+  JOB_PERMISSIONS,
   VISIT_PERMISSIONS,
   type PermissionCode,
 } from '../src/auth/permissions.js';
@@ -274,7 +275,7 @@ describe('visit requests and scheduling (e2e)', () => {
   }
 
   it('lets a technician submit and read only their own follow-up requests', async () => {
-    const { job } = await newJob();
+    const { job, customer, property } = await newJob();
     const requester = await signInFor([VISIT_PERMISSIONS.REQUEST_FOLLOW_UP]);
     const otherRequester = await signInFor([
       VISIT_PERMISSIONS.REQUEST_FOLLOW_UP,
@@ -288,6 +289,18 @@ describe('visit requests and scheduling (e2e)', () => {
     expect(created.body).toMatchObject({
       jobId: job.id,
       sourceVisitId: null,
+      jobNumber: job.jobNumber,
+      jobTitle: job.title,
+      customerName: customer.displayName,
+      address: {
+        addressLine1: property.addressLine1,
+        city: property.city,
+        province: property.province,
+        postalCode: property.postalCode,
+      },
+      sourceVisitScheduledStart: null,
+      sourceVisitStatus: null,
+      sourceVisitOutcomeCode: null,
       requestingTechnicianMembershipId: requester.membershipId,
       reason: 'The site needs a second field visit.',
       sameTechnicianPreferred: true,
@@ -306,6 +319,17 @@ describe('visit requests and scheduling (e2e)', () => {
     expect(ownList.body.map((row: { id: string }) => row.id)).toContain(
       created.body.id,
     );
+
+    expect(
+      ownList.body.find((row: { id: string }) => row.id === created.body.id),
+    ).toMatchObject({
+      jobNumber: job.jobNumber,
+      jobTitle: job.title,
+      customerName: customer.displayName,
+      address: {
+        addressLine1: property.addressLine1,
+      },
+    });
 
     const otherList = await request(app.getHttpServer())
       .get('/jobs/visit-requests')
@@ -425,6 +449,84 @@ describe('visit requests and scheduling (e2e)', () => {
       .expect(409);
   });
 
+  it('refuses to schedule a Visit on a closed Job', async () => {
+    const { job } = await newJob('COMPLETED');
+    const creator = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
+    const technician = await newTechnician('Closed', 'Job');
+
+    const response = await request(app.getHttpServer())
+      .post(`/jobs/${job.id}/visits`)
+      .set('Authorization', `Bearer ${creator.accessToken}`)
+      .send({
+        scheduledStart: '2026-10-14T14:00:00.000Z',
+        scheduledEnd: '2026-10-14T15:00:00.000Z',
+        technicians: [{ membershipId: technician.id, roleCode: 'LEAD' }],
+      })
+      .expect(409);
+
+    expect(response.body).toMatchObject({ code: 'JOB_CLOSED_FOR_FIELD_WORK' });
+  });
+
+  it('refuses to schedule a Visit on a Job without a Property', async () => {
+    const customer = await newCustomer('Property-less Customer');
+    jobNumberSequence += 1;
+    const [job] = await database.db
+      .insert(jobs)
+      .values({
+        organizationId,
+        jobNumber: jobNumberSequence,
+        customerId: customer.id,
+        propertyId: null,
+        propertyAddressSnapshot: null,
+        title: 'Property-less Job',
+        status: 'NEW',
+      })
+      .returning();
+    const creator = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
+    const technician = await newTechnician('No', 'Property');
+
+    const response = await request(app.getHttpServer())
+      .post(`/jobs/${job.id}/visits`)
+      .set('Authorization', `Bearer ${creator.accessToken}`)
+      .send({
+        scheduledStart: '2026-10-14T14:00:00.000Z',
+        scheduledEnd: '2026-10-14T15:00:00.000Z',
+        technicians: [{ membershipId: technician.id, roleCode: 'LEAD' }],
+      })
+      .expect(409);
+
+    expect(response.body).toMatchObject({
+      code: 'VISIT_SCHEDULING_CONDITION_NOT_MET',
+      details: { reason: 'PROPERTY' },
+    });
+  });
+
+  it('schedules a Visit again once a closed Job is reopened', async () => {
+    const { job } = await newJob('COMPLETED');
+    const office = await signInFor([JOB_PERMISSIONS.UPDATE]);
+
+    // Reopening returns the Job to `ACTIVE` (`BR-063`), which is the only way a closed Job accepts a
+    // new field attempt again.
+    await request(app.getHttpServer())
+      .patch(`/jobs/${job.id}/status`)
+      .set('Authorization', `Bearer ${office.accessToken}`)
+      .send({ status: 'ACTIVE', note: 'Reopened for a return visit.' })
+      .expect(200);
+
+    const creator = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
+    const technician = await newTechnician('Reopened', 'Job');
+
+    await request(app.getHttpServer())
+      .post(`/jobs/${job.id}/visits`)
+      .set('Authorization', `Bearer ${creator.accessToken}`)
+      .send({
+        scheduledStart: '2026-10-14T14:00:00.000Z',
+        scheduledEnd: '2026-10-14T15:00:00.000Z',
+        technicians: [{ membershipId: technician.id, roleCode: 'LEAD' }],
+      })
+      .expect(201);
+  });
+
   it('approves a request into one scheduled Visit and makes approval retry idempotent', async () => {
     const { job } = await newJob();
     const requester = await signInFor([VISIT_PERMISSIONS.REQUEST_FOLLOW_UP]);
@@ -490,7 +592,7 @@ describe('visit requests and scheduling (e2e)', () => {
 
   it('reports schedule conflicts before approving and records the confirmed conflicts once approved', async () => {
     const { job, property } = await newJob();
-    const other = await newJob('SCHEDULED');
+    const other = await newJob('ACTIVE');
     const requester = await signInFor([VISIT_PERMISSIONS.REQUEST_FOLLOW_UP]);
     const reviewer = await signInFor(REVIEW_AND_CREATE);
     const technician = await newTechnician('Luc', 'Conflict');
@@ -584,7 +686,7 @@ describe('visit requests and scheduling (e2e)', () => {
       .from(jobs)
       .where(eq(jobs.id, job.id))
       .limit(1);
-    expect(storedJob.status).toBe('SCHEDULED');
+    expect(storedJob.status).toBe('ACTIVE');
 
     const [storedVisit] = await database.db
       .select()
@@ -626,7 +728,7 @@ describe('visit requests and scheduling (e2e)', () => {
       .limit(1);
     expect(statusHistory).toMatchObject({
       fromStatus: 'NEW',
-      toStatus: 'SCHEDULED',
+      toStatus: 'ACTIVE',
       actorMembershipId: scheduler.membershipId,
     });
   });
@@ -663,5 +765,148 @@ describe('visit requests and scheduling (e2e)', () => {
         technicians: [{ membershipId: scheduler.membershipId, roleCode: 'LEAD' }],
       })
       .expect(404);
+  });
+
+  it('records a clarification conversation and lets the requester answer it back into review', async () => {
+    const { job } = await newJob();
+    const requester = await signInFor([VISIT_PERMISSIONS.REQUEST_FOLLOW_UP]);
+    const otherRequester = await signInFor([VISIT_PERMISSIONS.REQUEST_FOLLOW_UP]);
+    const reviewer = await signInFor(REVIEW_AND_CREATE);
+    const created = await submitFollowUpRequest({
+      token: requester.accessToken,
+      jobId: job.id,
+    }).expect(201);
+
+    const clarified = await request(app.getHttpServer())
+      .post(`/jobs/${job.id}/visit-requests/${created.body.id}/clarification`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({
+        expectedStatus: 'PENDING',
+        expectedVersion: 1,
+        note: 'Which part number?',
+      })
+      .expect(200);
+
+    // The question the office asked is part of the request's own conversation, not only of its note.
+    expect(clarified.body.messages).toEqual([
+      expect.objectContaining({
+        authorMembershipId: reviewer.membershipId,
+        authorKind: 'OFFICE',
+        body: 'Which part number?',
+      }),
+    ]);
+
+    const reply = (token: string, body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .post(`/jobs/${job.id}/visit-requests/${created.body.id}/reply`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+
+    // Only the requester answers their own request. Another member's answer is refused as not found,
+    // so an id never becomes a way to reach someone else's request (`BR-007`, `BR-009`).
+    await reply(otherRequester.accessToken, {
+      body: 'Not mine to answer.',
+      expectedStatus: 'NEEDS_CLARIFICATION',
+      expectedVersion: 2,
+    }).expect(404);
+
+    // A reviewer holds no request capability and is refused at the route (`BR-006`).
+    await reply(reviewer.accessToken, {
+      body: 'The office does not answer itself.',
+      expectedStatus: 'NEEDS_CLARIFICATION',
+      expectedVersion: 2,
+    }).expect(403);
+
+    // An answer states the state it answers, and a stale one is refused rather than applied (`BR-032`).
+    const stale = await reply(requester.accessToken, {
+      body: 'PN-4471.',
+      expectedStatus: 'NEEDS_CLARIFICATION',
+      expectedVersion: 1,
+    }).expect(409);
+    expect(stale.body).toMatchObject({
+      code: 'FOLLOW_UP_VISIT_REQUEST_CONFLICT',
+      details: { currentStatus: 'NEEDS_CLARIFICATION', currentVersion: 2 },
+    });
+
+    // An answer that says nothing is not an answer.
+    const blank = await reply(requester.accessToken, {
+      body: '   ',
+      expectedStatus: 'NEEDS_CLARIFICATION',
+      expectedVersion: 2,
+    }).expect(400);
+    expect(blank.body).toMatchObject({ code: 'VALIDATION_FAILED' });
+
+    const answer = await reply(requester.accessToken, {
+      body: 'PN-4471.',
+      expectedStatus: 'NEEDS_CLARIFICATION',
+      expectedVersion: 2,
+    }).expect(200);
+
+    // One operation: the answer joined the conversation and the request is the office's to decide again.
+    expect(answer.body).toMatchObject({
+      status: 'PENDING',
+      reviewNote: 'Which part number?',
+      reviewerMembershipId: reviewer.membershipId,
+      version: 3,
+    });
+    expect(
+      answer.body.messages.map((message: { authorKind: string; body: string }) => [
+        message.authorKind,
+        message.body,
+      ]),
+    ).toEqual([
+      ['OFFICE', 'Which part number?'],
+      ['REQUESTER', 'PN-4471.'],
+    ]);
+
+    // The office reads the same conversation on its review read, and the request is reviewable again.
+    const reviewerList = await request(app.getHttpServer())
+      .get('/jobs/visit-requests')
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .expect(200);
+    const fromReviewer = reviewerList.body.find(
+      (row: { id: string }) => row.id === created.body.id,
+    );
+    expect(fromReviewer.status).toBe('PENDING');
+    expect(
+      fromReviewer.messages.map((message: { body: string }) => message.body),
+    ).toEqual(['Which part number?', 'PN-4471.']);
+
+    // A request that is already the office's to decide is not awaiting an answer (`BR-FV-012`).
+    const notAwaitingReply = await reply(requester.accessToken, {
+      body: 'Again.',
+      expectedStatus: 'PENDING',
+      expectedVersion: 3,
+    }).expect(409);
+    expect(notAwaitingReply.body).toMatchObject({
+      code: 'FOLLOW_UP_VISIT_REQUEST_NOT_AWAITING_REPLY',
+      details: { status: 'PENDING' },
+    });
+
+    // The answer put the request back in front of the office: it can now be approved into a Visit
+    // (`BR-FV-005`), which is what "awaiting review" has to mean for the exchange to be worth anything.
+    await request(app.getHttpServer())
+      .post(`/jobs/${job.id}/visit-requests/${created.body.id}/approval`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({
+        expectedStatus: 'PENDING',
+        expectedVersion: 3,
+        technicians: [{ membershipId: requester.membershipId, roleCode: 'LEAD' }],
+      })
+      .expect(201);
+
+    // The conversation is append-only, and a refused answer was never recorded: the two messages of the
+    // exchange are still the whole thread after the decision that followed them (`BR-067`, `BR-FV-013`).
+    const ownList = await request(app.getHttpServer())
+      .get('/jobs/visit-requests')
+      .set('Authorization', `Bearer ${requester.accessToken}`)
+      .expect(200);
+    const fromRequester = ownList.body.find(
+      (row: { id: string }) => row.id === created.body.id,
+    );
+    expect(fromRequester).toMatchObject({ status: 'APPROVED', version: 4 });
+    expect(
+      fromRequester.messages.map((message: { body: string }) => message.body),
+    ).toEqual(['Which part number?', 'PN-4471.']);
   });
 });

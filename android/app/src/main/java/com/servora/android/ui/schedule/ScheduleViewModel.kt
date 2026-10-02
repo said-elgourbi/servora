@@ -2,6 +2,10 @@ package com.servora.android.ui.schedule
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.servora.android.data.jobs.AssignableTechniciansResult
+import com.servora.android.data.jobs.JobActionFailure
+import com.servora.android.data.jobs.JobActionResult
+import com.servora.android.data.jobs.JobDetailsRepository
 import com.servora.android.data.schedule.ScheduleRepository
 import com.servora.android.data.schedule.ScheduleResult
 import com.servora.android.data.schedule.VisitRequestReviewResult
@@ -9,8 +13,10 @@ import com.servora.android.data.schedule.VisitRequestsRepository
 import com.servora.android.data.schedule.VisitRequestsResult
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.ScheduleTechnician
+import com.servora.android.domain.model.TechnicianAssignment
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,11 +40,27 @@ import kotlinx.coroutines.launch
  * screen shows what is known and refreshes behind it (`BR-013`). It is not written to disk: the
  * manager schedule is a read over the operation's own work, and the working set
  * (`docs/architecture/offline-first-architecture.md` §2) is the technician's.
+ *
+ * Reviewing a follow-up request is what the screen **writes**: a request is clarified, rejected, or
+ * approved into a scheduled Visit (`BR-FV-004`, `BR-FV-005`). Each decision states its own record — a
+ * clarification says what is still needed and a rejection says why it was refused (`BR-FV-013`) — and
+ * the review routes answer with what the backend now holds. A decision that changed the requests
+ * replaces the request the lane was holding, so what the manager sees is the backend's own state rather
+ * than a patched copy (`BR-001`).
  */
 @HiltViewModel
 class ScheduleViewModel @Inject constructor(
     private val repository: ScheduleRepository,
     private val visitRequestsRepository: VisitRequestsRepository,
+    /**
+     * The approval's own route (`BR-FV-005`).
+     *
+     * Approving a request creates a scheduled Visit on a Job, which is a Job/Visit management action and
+     * answers with the Job as it now stands — so it goes through the repository that already owns Visit
+     * scheduling and `BR-070`'s conflict answers rather than through a second implementation of them
+     * (`BR-041`).
+     */
+    private val jobDetailsRepository: JobDetailsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScheduleUiState())
@@ -76,6 +98,12 @@ class ScheduleViewModel @Inject constructor(
     /** Re-runs the read after a failure the screen reported. */
     fun retry() {
         read()
+        readRequests()
+    }
+
+    /** Reads requests for a manager request-details destination opened outside Schedule. */
+    fun openRequests(timeZoneId: String) {
+        _uiState.update { it.copy(timeZoneId = timeZoneId) }
         readRequests()
     }
 
@@ -125,14 +153,226 @@ class ScheduleViewModel @Inject constructor(
         _uiState.update { it.copy(lane = lane) }
     }
 
-    /** Asks the manager-review route to move a pending request back for clarification. */
-    fun askForClarification(request: FollowUpVisitRequest) {
-        review(request) { visitRequestsRepository.askForClarification(it) }
+    /**
+     * Returns a pending request for clarification, recording [note] as what is still needed
+     * (`BR-FV-004`, `BR-FV-013`).
+     *
+     * The request stays in the lane: the API keeps a `NEEDS_CLARIFICATION` request reviewable and
+     * `BR-FV-012` keeps it unresolved until it is approved or rejected, so clarifying a request is not a
+     * decision that closes it.
+     */
+    fun askForClarification(request: FollowUpVisitRequest, note: String) {
+        review(request) { visitRequestsRepository.askForClarification(it, note) }
     }
 
-    /** Rejects a pending follow-up request. */
-    fun rejectRequest(request: FollowUpVisitRequest) {
-        review(request) { visitRequestsRepository.reject(it) }
+    /**
+     * Rejects a follow-up request, recording [note] as why it was refused (`BR-FV-004`, `BR-FV-013`).
+     *
+     * A rejection closes the request without creating a Visit, so the note is the only record of the
+     * reason and the confirmation the screen takes it in requires one.
+     */
+    fun rejectRequest(request: FollowUpVisitRequest, note: String) {
+        review(request) { visitRequestsRepository.reject(it, note) }
+    }
+
+    /**
+     * Opens the approval form for [request] and reads the technicians it composes a crew from
+     * (`BR-FV-004`, `BR-FV-005`, `BR-024`).
+     *
+     * The request is not decided here: the manager states the schedule and the crew the Visit will
+     * carry, and [approveRequest] sends that decision.
+     */
+    fun beginApproval(request: FollowUpVisitRequest) {
+        _uiState.update {
+            it.copy(
+                schedulingRequestId = request.id,
+                approvalFailure = null,
+                pendingApproval = null,
+            )
+        }
+        loadAssignableTechnicians()
+    }
+
+    /** Closes the approval form, forgetting the decision it was holding (`BR-070`, `BR-067`). */
+    fun dismissApproval() {
+        _uiState.update {
+            it.copy(
+                schedulingRequestId = null,
+                pendingApproval = null,
+                approvalFailure = null,
+            )
+        }
+    }
+
+    /** Reads the organization's technicians, for the approval form to offer (`BR-024`). */
+    fun loadAssignableTechnicians() {
+        _uiState.update { it.copy(assignableTechnicians = null, assignableFailure = null) }
+        viewModelScope.launch {
+            when (val result = jobDetailsRepository.loadAssignableTechnicians()) {
+                is AssignableTechniciansResult.Success ->
+                    _uiState.update {
+                        it.copy(
+                            assignableTechnicians = result.technicians,
+                            assignableFailure = null,
+                        )
+                    }
+
+                is AssignableTechniciansResult.Failure ->
+                    _uiState.update {
+                        it.copy(
+                            assignableTechnicians = null,
+                            assignableFailure = result.reason,
+                        )
+                    }
+            }
+        }
+    }
+
+    /**
+     * Approves [request], scheduling the Visit it asks for with the window and crew the reviewer stated
+     * (`BR-FV-005`, `BR-FV-010`).
+     *
+     * The reviewer's decision is what is sent, so an approval can differ from the technician's proposal
+     * (`BR-FV-003`); the request is named by its own status and version, so a request that moved on is
+     * refused rather than decided about (`BR-086`). A submission already in flight is not sent twice
+     * (`BR-031`).
+     */
+    fun approveRequest(
+        request: FollowUpVisitRequest,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+    ) {
+        if (_uiState.value.isApproving) {
+            return
+        }
+        submitApproval(
+            request = request,
+            scheduledStart = scheduledStart,
+            scheduledEnd = scheduledEnd,
+            assignments = assignments,
+            confirmed = false,
+        )
+    }
+
+    /** Resends the approval the API refused until its conflicts are accepted (`BR-070`). */
+    fun confirmApproval() {
+        val pending = _uiState.value.pendingApproval ?: return
+        val request = _uiState.value.reviewableRequests.firstOrNull { it.id == pending.requestId }
+        if (request == null) {
+            // The request is no longer one the screen holds for review, so there is nothing to approve:
+            // the form closes and the requests are read again (`BR-001`, `BR-FV-012`).
+            dismissApproval()
+            readRequests()
+            return
+        }
+        submitApproval(
+            request = request,
+            scheduledStart = pending.scheduledStart,
+            scheduledEnd = pending.scheduledEnd,
+            assignments = pending.assignments,
+            confirmed = true,
+        )
+    }
+
+    /** Leaves the conflicts unaccepted: nothing was applied, so nothing is sent (`BR-070`). */
+    fun dismissApprovalConflicts() {
+        _uiState.update { it.copy(pendingApproval = null) }
+    }
+
+    /** Acknowledges the approval the screen has reported, so it is not reported twice (`BR-FV-013`). */
+    fun acknowledgeApproval() {
+        _uiState.update { it.copy(approvedRequestId = null, approvalFailure = null) }
+    }
+
+    /** Acknowledges the review the screen has reported, so it is not reported twice (`BR-FV-013`). */
+    fun acknowledgeReview() {
+        _uiState.update {
+            it.copy(reviewedRequestStatus = null, reviewFailureReason = null)
+        }
+    }
+
+    /** Sends one approval and reports what the backend answered. */
+    private fun submitApproval(
+        request: FollowUpVisitRequest,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        confirmed: Boolean,
+    ) {
+        _uiState.update {
+            it.copy(
+                approvingRequestId = request.id,
+                schedulingRequestId = request.id,
+                approvalFailure = null,
+                pendingApproval = null,
+            )
+        }
+        viewModelScope.launch {
+            val result = jobDetailsRepository.approveVisitRequest(
+                jobId = request.jobId,
+                requestId = request.id,
+                scheduledStart = scheduledStart,
+                scheduledEnd = scheduledEnd,
+                assignments = assignments,
+                expectedStatus = request.status,
+                expectedVersion = request.version,
+                confirmConflicts = confirmed,
+            )
+            _uiState.update { current ->
+                when (result) {
+                    is JobActionResult.Success ->
+                        current.copy(
+                            approvingRequestId = null,
+                            schedulingRequestId = null,
+                            pendingApproval = null,
+                            approvalFailure = null,
+                            approvedRequestId = request.id,
+                        )
+
+                    is JobActionResult.Conflicts ->
+                        current.copy(
+                            approvingRequestId = null,
+                            // The form stays open in front of the conflicts: accepting them resends the
+                            // same decision rather than asking for it again (`BR-070`, `BR-067`).
+                            pendingApproval = PendingVisitRequestApproval(
+                                requestId = request.id,
+                                scheduledStart = scheduledStart,
+                                scheduledEnd = scheduledEnd,
+                                assignments = assignments,
+                                conflicts = result.conflicts,
+                            ),
+                        )
+
+                    is JobActionResult.Failure ->
+                        current.copy(
+                            approvingRequestId = null,
+                            schedulingRequestId = null,
+                            pendingApproval = null,
+                            approvalFailure = result.reason,
+                        )
+
+                    is JobActionResult.Queued ->
+                        // The approval is online-only — its route takes no client-generated idempotency
+                        // key and no conflict policy is decided for it
+                        // (`offline-first-architecture.md` §13.2) — so an answer this build cannot place
+                        // is reported rather than presented (`BR-042`).
+                        current.copy(
+                            approvingRequestId = null,
+                            schedulingRequestId = null,
+                            pendingApproval = null,
+                            approvalFailure = JobActionFailure.UNEXPECTED,
+                        )
+                }
+            }
+            if (result is JobActionResult.Success) {
+                // The approval created one Visit on one Job (`BR-FV-005`), so the request is no longer
+                // pending and the day now holds the Visit it created: both are read again rather than
+                // patched from the reply (`BR-001`, `BR-042`).
+                readRequests()
+                read()
+            }
+        }
     }
 
     /**
@@ -201,18 +441,27 @@ class ScheduleViewModel @Inject constructor(
     }
 
     private fun readRequests() {
+        _uiState.update { it.copy(isReadingRequests = true, requestReadFailureReason = null) }
         viewModelScope.launch {
             when (val result = visitRequestsRepository.loadRequests()) {
                 is VisitRequestsResult.Success ->
                     _uiState.update {
                         it.copy(
                             visitRequests = result.requests,
-                            requestFailureReason = null,
+                            isReadingRequests = false,
+                            hasReadRequests = true,
+                            requestReadFailureReason = null,
                         )
                     }
 
                 is VisitRequestsResult.Failure ->
-                    _uiState.update { it.copy(requestFailureReason = result.reason) }
+                    _uiState.update {
+                        it.copy(
+                            isReadingRequests = false,
+                            hasReadRequests = true,
+                            requestReadFailureReason = result.reason,
+                        )
+                    }
             }
         }
     }
@@ -225,7 +474,11 @@ class ScheduleViewModel @Inject constructor(
             return
         }
         _uiState.update {
-            it.copy(reviewingRequestId = request.id, requestFailureReason = null)
+            it.copy(
+                reviewingRequestId = request.id,
+                reviewedRequestStatus = null,
+                reviewFailureReason = null,
+            )
         }
         viewModelScope.launch {
             when (val result = action(request)) {
@@ -233,7 +486,10 @@ class ScheduleViewModel @Inject constructor(
                     _uiState.update { current ->
                         current.copy(
                             reviewingRequestId = null,
-                            requestFailureReason = null,
+                            reviewFailureReason = null,
+                            // The decision the API applied is what is reported, and the request it
+                            // answered with is the one the lane now holds (`BR-001`, `BR-FV-013`).
+                            reviewedRequestStatus = result.request.status,
                             visitRequests = current.visitRequests.map { existing ->
                                 if (existing.id == result.request.id) result.request else existing
                             },
@@ -244,7 +500,10 @@ class ScheduleViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             reviewingRequestId = null,
-                            requestFailureReason = result.reason,
+                            // Nothing was applied, so nothing is presented as decided: the request the
+                            // API still holds is the one the lane keeps showing (`BR-001`, `BR-067`).
+                            reviewedRequestStatus = null,
+                            reviewFailureReason = result.reason,
                         )
                     }
             }

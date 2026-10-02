@@ -352,7 +352,7 @@ describe('CustomersService (e2e)', () => {
       jobNumber: 1,
       customerId: open.id,
       title: 'Open job',
-      status: 'IN_PROGRESS',
+      status: 'ACTIVE',
     });
     await database.db.insert(jobs).values({
       organizationId: organization.id,

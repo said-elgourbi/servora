@@ -11,6 +11,7 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -27,9 +28,11 @@ import retrofit2.HttpException
  *   connection is uploaded with exactly what the technician captured; the file is deleted only once
  *   the API has answered that it holds the photo (`§9`, `BR-014`).
  *
- * A refusal is reported as what it is: no longer authorized (`403`), the Job is gone (`404`), or the
- * request is invalid (`400`/`413`/`422`). The queued row and the local file are kept in every one of
- * those cases, so nothing the technician captured is discarded by a client decision (`BR-032`).
+ * A refusal is reported as what it is: no longer authorized (`403`), the Job is gone (`404`), the request
+ * is invalid (`400`/`413`/`422`), or the Job has been **closed** under the technician (`409
+ * JOB_CLOSED_FOR_FIELD_WORK`, which is read from the API's stable code rather than assumed from the
+ * status — `BR-079`). The queued row and the local file are kept in every one of those cases, so nothing
+ * the technician captured is discarded by a client decision (`BR-032`).
  */
 @Singleton
 internal class JobPhotoUploadHandler @Inject constructor(
@@ -38,6 +41,7 @@ internal class JobPhotoUploadHandler @Inject constructor(
     private val payloads: JobPhotoPayloads,
     private val pending: PendingJobPhotoStore,
     private val files: JobPhotoFiles,
+    private val json: Json,
 ) : OfflineOperationHandler {
 
     override val operationTypes: Set<String> = JobPhotoOperations.ALL
@@ -46,6 +50,12 @@ internal class JobPhotoUploadHandler @Inject constructor(
         val payload = payloads.decode(operation.payload)
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.UNEXPECTED)
         val phase = evidencePhaseOrNull(payload.phase)
+            ?: return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
+        // Evidence belongs to the Visit it was recorded on (`BR-047`, `BR-080`), and the API refuses an
+        // upload that names none. A payload with no Visit is one an earlier build wrote: it is refused
+        // rather than uploaded with an invented attribution, and the row and the bytes stay on the device
+        // until the technician explicitly discards them (`BR-014`, `BR-032`, `BR-042`).
+        val visitId = payload.visitId?.takeIf { it.isNotBlank() }
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
         val bytes = files.readBytes(payload.localPath)
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.NOT_FOUND)
@@ -57,6 +67,7 @@ internal class JobPhotoUploadHandler @Inject constructor(
             accessToken = accessToken,
             jobId = operation.targetId,
             photoId = operation.operationId,
+            visitId = visitId,
             phase = phase.name,
             payload = payload,
             bytes = bytes,
@@ -77,6 +88,7 @@ internal class JobPhotoUploadHandler @Inject constructor(
         accessToken: String,
         jobId: String,
         photoId: String,
+        visitId: String,
         phase: String,
         payload: JobPhotoOperationPayload,
         bytes: ByteArray,
@@ -86,6 +98,7 @@ internal class JobPhotoUploadHandler @Inject constructor(
                 authorization = "Bearer $accessToken",
                 jobId = jobId,
                 clientOperationId = photoId.toRequestBody(TEXT_PART.toMediaType()),
+                visitId = visitId.toRequestBody(TEXT_PART.toMediaType()),
                 phase = phase.toRequestBody(TEXT_PART.toMediaType()),
                 note = payload.note
                     ?.takeIf { it.isNotBlank() }
@@ -102,13 +115,15 @@ internal class JobPhotoUploadHandler @Inject constructor(
             if (failure.code() == HTTP_UNAUTHORIZED) {
                 when (val renewal = sessionAuthenticator.renew(accessToken)) {
                     is SessionRenewal.Renewed ->
-                        send(renewal.accessToken, jobId, photoId, phase, payload, bytes)
+                        send(renewal.accessToken, jobId, photoId, visitId, phase, payload, bytes)
 
                     SessionRenewal.Rejected -> PhotoUploadAttempt.Unauthenticated
                     SessionRenewal.Unavailable -> PhotoUploadAttempt.Undelivered
                 }
             } else {
-                PhotoUploadAttempt.Refused(uploadFailureReason(failure.code()))
+                PhotoUploadAttempt.Refused(
+                    uploadFailureReason(failure.code(), failure.apiErrorCode(json)),
+                )
             }
         } catch (failure: IOException) {
             PhotoUploadAttempt.Undelivered

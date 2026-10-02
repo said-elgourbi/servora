@@ -1,5 +1,7 @@
 # Tracker 037 — The technician's field experience (Android) and the Visit lifecycle behind it
 
+> **Superseded vocabulary, 2026-09-20.** The implemented behaviour this tracker records is described in it with the Job statuses and Visit statuses that were current then — `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW` and `NO_SHOW`. Those are retired: a Job is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED` (`BR-058`), a Visit is `DRAFT`, `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or `CANCELED` (`BR-074`), `BR-061` is **REMOVED**, and operational attention is derived (`BR-060`). The behaviour this tracker **decided** stands; only the vocabulary in its prose is historic. See `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+
 **Status: IN PROGRESS — Phases 1, 2a, 2b, 3, 4, 5, 5a and 5c have landed: `ADR-019` (accepted by product
 ownership 2026-09-17), the API field read, `GET /home/technician` with the Android technician home, the
 Visit field lifecycle, (Phase 5, 2026-09-17) the field action on the Android Job Details screen — the

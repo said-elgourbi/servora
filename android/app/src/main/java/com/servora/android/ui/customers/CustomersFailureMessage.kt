@@ -54,6 +54,10 @@ internal fun OutboxFailureReason.messageRes(): Int =
         OutboxFailureReason.UNAUTHENTICATED -> R.string.property_error_unauthenticated
         OutboxFailureReason.NOT_AUTHORIZED -> R.string.property_error_forbidden
         OutboxFailureReason.STALE -> R.string.property_error_conflict
+        // A closed Job is a refusal, not a conflict the user can resolve by retrying: the same
+        // explanation a queued field action gives it is reused so one refusal is never described two
+        // ways (`BR-028`, `BR-041`).
+        OutboxFailureReason.JOB_CLOSED -> R.string.job_visit_pending_job_closed
         OutboxFailureReason.INVALID -> R.string.property_error_validation
         OutboxFailureReason.NOT_FOUND -> R.string.property_error_not_found
         OutboxFailureReason.SERVER -> R.string.property_error_server

@@ -1,5 +1,6 @@
 package com.servora.android.data.jobs
 
+import com.servora.android.data.schedule.FollowUpVisitRequestDto
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
@@ -12,6 +13,7 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Path
+import retrofit2.http.Query
 import retrofit2.http.Streaming
 
 /**
@@ -44,6 +46,7 @@ interface JobDetailsApi {
     suspend fun jobDetails(
         @Header("Authorization") authorization: String,
         @Path("jobId") jobId: String,
+        @Query("visitId") visitId: String? = null,
     ): JobDetailsDto
 
     /** `GET /jobs/{jobId}/activity` — the Job's chronological activity, newest first (`BR-080`). */
@@ -80,16 +83,78 @@ interface JobDetailsApi {
     ): JobDetailsDto
 
     /**
-     * `PATCH /jobs/{jobId}/visits/{visitId}/status` — the Visit's field lifecycle (`BR-074`, `BR-093`).
+     * `POST /jobs/{jobId}/visits` — schedules one further Visit on the Job (`BR-071`, `BR-072`).
+     *
+     * A Visit is one field attempt, so adding one is how a Job's additional work is represented; the
+     * route creates the Visit as `SCHEDULED` with the crew it is given and records its schedule and
+     * assignment history. `visits.create_schedule` authorizes it and the API enforces it, whatever this
+     * client draws (`BR-007`). `BR-070` conflicts are refused on the first attempt and carried in the
+     * answer, exactly as the reschedule route's are: the same request resent with `confirmConflicts`
+     * applies it, because a conflict is a warning rather than a prohibition in v1.
+     *
+     * The answer is the same projection `GET /jobs/{jobId}` returns, so the screen shows the Job the
+     * backend holds rather than a locally patched copy (`BR-001`).
+     */
+    @POST("jobs/{jobId}/visits")
+    suspend fun createVisit(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Body request: CreateVisitRequestDto,
+    ): JobDetailsDto
+
+    /**
+     * `POST /jobs/{jobId}/visit-requests/{requestId}/approval` — approves a pending follow-up request
+     * into a scheduled Visit (`BR-FV-005`).
+     *
+     * Approval is the office's decision (`BR-FV-004`), so the reviewer states the schedule and the crew
+     * the Visit will actually carry — which may differ from what the technician proposed (`BR-FV-003`,
+     * `BR-FV-010`) — and the API creates exactly one Visit, records `createdVisitId` on the request and
+     * answers it as `APPROVED` in one transaction. A retry of an already-approved request returns the
+     * Visit already created rather than creating another (`docs/api/visit-requests.md`).
+     *
+     * The route requires `visits.review_requests` **and** `visits.create_schedule`; both are enforced by
+     * the API (`BR-007`).
+     */
+    @POST("jobs/{jobId}/visit-requests/{requestId}/approval")
+    suspend fun approveVisitRequest(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("requestId") requestId: String,
+        @Body request: ApproveVisitRequestRequestDto,
+    ): JobDetailsDto
+
+    /**
+     * `POST /jobs/{jobId}/visit-requests` — submits a follow-up Visit request on the Job
+     * (`BR-FV-001`, `BR-FV-003`).
+     *
+     * A request is **not** a Visit: it is an operational decision record waiting for the office
+     * (`BR-FV-002`), so nothing is scheduled by it and the technician's proposed window is
+     * informational until an authorized user approves it (`BR-FV-005`, `BR-FV-010`). The technician
+     * may complete the current Visit whether or not the request is still pending (`BR-FV-006`).
+     *
+     * The answer is the request itself, not the Job, because a request changes no Job and creates no
+     * Visit (`BR-FV-002`); the request's own status is what a client presents. `visits.request_follow_up`
+     * authorizes it and the API enforces that whatever this client draws (`BR-007`).
+     */
+    @POST("jobs/{jobId}/visit-requests")
+    suspend fun submitVisitRequest(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Body request: SubmitVisitRequestRequestDto,
+    ): FollowUpVisitRequestDto
+
+    /**
+     * `PATCH /jobs/{jobId}/visits/{visitId}/status` — the Visit's working states (`BR-074`, `BR-093`).
      *
      * Two authorizations reach it (`BR-093`): `VISIT_UPDATE_ASSIGNED_STATUS`, which scopes the caller to
      * their own current crew, and the office's `JOB_UPDATE`, which admits an office member to any Visit
-     * of the organization **without** crew membership — that is how a manager completes a Visit from Job
-     * Details. The completion's own capability is required of every caller, so the API asks for
-     * `VISIT_RECORD_OUTCOME` again when the destination is `COMPLETED` (`BR-009`, `BR-066`, `BR-077`,
-     * `ADR-019` D1–D3, D7). A completion carries the outcome `BR-077` requires in the same body, and the
-     * answer is the Job as it now stands, so the screen presents the backend's state including the
-     * Visit's new status.
+     * of the organization **without** crew membership. Every working destination is one operation, in
+     * either direction, and the answer is the Job as it now stands, so the screen presents the backend's
+     * state including the Visit's new status.
+     *
+     * Finishing the Visit is not one of its destinations: `COMPLETED` is reached only through
+     * [completeVisit], which is where `BR-077`'s outcome is recorded and where its own capability is
+     * asked for (`BR-009`, `BR-077`, `BR-093`).
      */
     @PATCH("jobs/{jobId}/visits/{visitId}/status")
     suspend fun changeVisitStatus(
@@ -99,6 +164,24 @@ interface JobDetailsApi {
         @Body request: ChangeVisitStatusRequestDto,
     ): JobDetailsDto
 
+    /**
+     * `POST /jobs/{jobId}/visits/{visitId}/completion` — finishes the Visit with its outcome
+     * (`BR-077`, `BR-078`, `BR-093`).
+     *
+     * The Visit status route's two authorizations admit the caller (`BR-093`), and
+     * `VISIT_RECORD_OUTCOME` is required of **every** caller because the request records the outcome —
+     * the office included (`BR-009`). The outcome and its summary travel here rather than on the status
+     * route, so a completed Visit always carries the record of what resulted from the attempt, and the
+     * answer is the Job as it now stands.
+     */
+    @POST("jobs/{jobId}/visits/{visitId}/completion")
+    suspend fun completeVisit(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("visitId") visitId: String,
+        @Body request: CompleteVisitRequestDto,
+    ): JobDetailsDto
+
     /** `POST /jobs/{jobId}/visits/{visitId}/notes` — adds a text Activity update. */
     @POST("jobs/{jobId}/visits/{visitId}/notes")
     suspend fun addVisitNote(
@@ -106,6 +189,24 @@ interface JobDetailsApi {
         @Path("jobId") jobId: String,
         @Path("visitId") visitId: String,
         @Body request: AddVisitNoteRequestDto,
+    ): JobActivityDto
+
+    /** `PATCH /jobs/{jobId}/visits/notes/{noteId}` — corrects one text Activity update. */
+    @PATCH("jobs/{jobId}/visits/notes/{noteId}")
+    suspend fun editVisitNote(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("noteId") noteId: String,
+        @Body request: EditVisitNoteRequestDto,
+    ): JobActivityDto
+
+    /** `POST /jobs/{jobId}/visits/notes/{noteId}/removal` — removes one note from ordinary activity. */
+    @POST("jobs/{jobId}/visits/notes/{noteId}/removal")
+    suspend fun removeVisitNote(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Path("noteId") noteId: String,
+        @Body request: RemoveVisitNoteRequestDto,
     ): JobActivityDto
 
     /** `GET /technicians` — the organization's technicians, for choosing a crew (`BR-024`). */
@@ -121,7 +222,8 @@ interface JobDetailsApi {
      * request body, and the parts are `RequestBody`s rather than scalars so the client controls
      * exactly what each text part contains. `clientOperationId` is the queued operation's id, sent
      * unchanged on every retry, which is what makes a replayed upload store the evidence once
-     * (`BR-031`).
+     * (`BR-031`). `visitId` names the field attempt the photo was recorded on — a photo belongs to a
+     * Visit (`BR-047`, `BR-080`), and the API refuses an upload that names none.
      */
     @Multipart
     @POST("jobs/{jobId}/photos")
@@ -129,6 +231,7 @@ interface JobDetailsApi {
         @Header("Authorization") authorization: String,
         @Path("jobId") jobId: String,
         @Part("clientOperationId") clientOperationId: RequestBody,
+        @Part("visitId") visitId: RequestBody,
         @Part("phase") phase: RequestBody,
         @Part("note") note: RequestBody?,
         @Part("capturedAt") capturedAt: RequestBody?,
@@ -143,6 +246,7 @@ interface JobDetailsApi {
      * they are never base64-encoded into a request body, and `clientOperationId` is the queued
      * operation's id, sent unchanged on every retry, which is what makes a replayed upload record the
      * evidence once (`BR-031`). No length is sent: the API reads it from the container (`ADR-018` A3).
+     * `visitId` names the field attempt the recording was made on (`BR-091`).
      */
     @Multipart
     @POST("jobs/{jobId}/audio-notes")
@@ -150,6 +254,7 @@ interface JobDetailsApi {
         @Header("Authorization") authorization: String,
         @Path("jobId") jobId: String,
         @Part("clientOperationId") clientOperationId: RequestBody,
+        @Part("visitId") visitId: RequestBody,
         @Part("phase") phase: RequestBody,
         @Part("note") note: RequestBody?,
         @Part("capturedAt") capturedAt: RequestBody?,

@@ -33,6 +33,10 @@ import { hasVisitStarted } from './home-visit-conditions.js';
  * | --------------- | -------------------------------------------------------------------------------- |
  * | `VISIT_OVERDUE` | An assigned Visit still `SCHEDULED` after its window ended (`BR-072`, `BR-074`). |
  *
+ * A kind is reported for a Visit the screen does not already state: a Visit the read offers as
+ * `nextVisit`, or a row of today's `visits`, presents its own derived condition where it is presented,
+ * so it is not repeated in this section (`BR-012`, `BR-041`, `selectAttentionVisits`).
+ *
  * The code is the one the manager home already reports for the same condition, so one Visit cannot
  * be described with two vocabularies (`BR-041`). The kinds the section *could* also carry —
  * evidence waiting to be synchronized, a pending follow-up request — are deliberately absent: the
@@ -262,6 +266,54 @@ function toTechnicianHomeVisitDto(
 export function compareChronologically(
   left: TechnicianHomeVisit,
   right: TechnicianHomeVisit,
+): number {
+  const bySchedule =
+    left.scheduledStart.getTime() - right.scheduledStart.getTime();
+  if (bySchedule !== 0) {
+    return bySchedule;
+  }
+  return left.jobNumber - right.jobNumber;
+}
+
+/**
+ * The Visits the attention section states (`BR-012`, `BR-041`).
+ *
+ * The technician's screen answers one question — *what do I need to do next?* — and a Visit that is
+ * already on it must not be described twice. The Visit to do next presents the derived overdue
+ * condition on its own card, and a row of today's own list presents it on its own row, so both are
+ * left out of the section. What remains is the caller's late work that the screen states nowhere
+ * else: an attempt from an earlier day that neither leads the screen nor falls inside today's list.
+ * That is the work the section exists for, and it is why the section can be absent while the caller
+ * still has something overdue — the day on screen is already saying so.
+ *
+ * Ids decide membership, so a Visit is recognized as the same attempt whatever the read presents it
+ * as, and the count this rule produces (`attentionTotal`) is the count of the items it returns
+ * (`BR-001`).
+ */
+export function selectAttentionVisits(
+  overdue: readonly TechnicianHomeVisit[],
+  nextVisit: TechnicianHomeVisit | null,
+  today: readonly TechnicianHomeVisit[],
+): TechnicianHomeVisit[] {
+  const alreadyStated = new Set(today.map((visit) => visit.visitId));
+  if (nextVisit !== null) {
+    alreadyStated.add(nextVisit.visitId);
+  }
+  return overdue.filter((visit) => !alreadyStated.has(visit.visitId));
+}
+
+/**
+ * The order the attention section presents its items in: the Visit that has been overdue longest
+ * first, with the Job number breaking a tie between two attempts that were due at the same instant.
+ *
+ * Urgency orders this section rather than the manager home's operational scan, because every item it
+ * carries asks the same thing of the technician — how long has this been waiting — and the one that
+ * has waited longest is the one to resolve first (`BR-012`). It is the order the manager home applies
+ * within the same condition, so one Visit is never presented in two orders on two screens (`BR-041`).
+ */
+export function compareAttentionItems(
+  left: TechnicianAttentionItem,
+  right: TechnicianAttentionItem,
 ): number {
   const bySchedule =
     left.scheduledStart.getTime() - right.scheduledStart.getTime();

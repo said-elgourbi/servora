@@ -692,7 +692,7 @@ export const jobs = pgTable(
     check('jobs_title_not_blank_check', sql`btrim(${table.title}) <> ''`),
     check(
       'jobs_status_check',
-      sql`${table.status} in ('NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED')`,
+      sql`${table.status} in ('NEW', 'ACTIVE', 'COMPLETED', 'CANCELED')`,
     ),
     check(
       'jobs_property_snapshot_check',
@@ -798,15 +798,15 @@ export const jobStatusHistory = pgTable(
   (table) => [
     check(
       'job_status_history_from_status_check',
-      sql`${table.fromStatus} is null or ${table.fromStatus} in ('NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED')`,
+      sql`${table.fromStatus} is null or ${table.fromStatus} in ('NEW', 'ACTIVE', 'COMPLETED', 'CANCELED')`,
     ),
     check(
       'job_status_history_to_status_check',
-      sql`${table.toStatus} in ('NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED', 'CANCELED')`,
+      sql`${table.toStatus} in ('NEW', 'ACTIVE', 'COMPLETED', 'CANCELED')`,
     ),
     check(
       'job_status_history_status_changed_check',
-      sql`${table.fromStatus} is distinct from ${table.toStatus}`,
+      sql`${table.fromStatus} is distinct from ${table.toStatus} or ${table.note} like '%Lifecycle migration collapsed obsolete Job statuses;%'`,
     ),
     index('job_status_history_organization_job_recorded_idx').on(
       table.organizationId,
@@ -893,6 +893,22 @@ export const jobPhotos = pgTable(
     jobId: uuid('job_id')
       .notNull()
       .references(() => jobs.id, { onDelete: 'cascade' }),
+    /**
+     * The Visit the photo was recorded during (`BR-047`, `BR-071`).
+     *
+     * A photo is field work, so it belongs to the field attempt it was recorded on: the technician
+     * captures it while working a Visit, and the Activity projection reports that Visit's sequence
+     * beside the entry so it is read with that Visit's account (`BR-080`, `docs/api/job-photos.md`).
+     * Every write path therefore requires a Visit (`job-photo.dto.ts`), and the API refuses an upload
+     * that names none.
+     *
+     * It stays nullable **only** for rows written before the link existed: those photos were recorded
+     * on the Job and no rule attributes them to a Visit retroactively — choosing one would be
+     * inventing business data (`BR-042`, `BR-088`). No write path can leave it null.
+     */
+    visitId: uuid('visit_id').references(() => visits.id, {
+      onDelete: 'cascade',
+    }),
     uploaderMembershipId: uuid('uploader_membership_id')
       .notNull()
       .references(() => organizationMembers.id),
@@ -1003,6 +1019,17 @@ export const jobAudioNotes = pgTable(
     jobId: uuid('job_id')
       .notNull()
       .references(() => jobs.id, { onDelete: 'cascade' }),
+    /**
+     * The Visit the recording was made during (`BR-047`, `BR-071`, `BR-091`).
+     *
+     * Exactly the photo kind's link, for the same reasons: a recording is field evidence, its
+     * Activity entry is read with the Visit it was recorded on (`BR-080`), and the upload route
+     * requires one (`job-audio.dto.ts`). It stays nullable only for recordings written before the
+     * link existed, and no write path can leave it null.
+     */
+    visitId: uuid('visit_id').references(() => visits.id, {
+      onDelete: 'cascade',
+    }),
     uploaderMembershipId: uuid('uploader_membership_id')
       .notNull()
       .references(() => organizationMembers.id),
@@ -1116,7 +1143,7 @@ export const visits = pgTable(
   (table) => [
     check(
       'visits_status_check',
-      sql`${table.status} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED', 'NO_SHOW')`,
+      sql`${table.status} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED')`,
     ),
     check(
       'visits_schedule_pair_check',
@@ -1144,7 +1171,7 @@ export const visits = pgTable(
     ),
     check(
       'visits_outcome_code_check',
-      sql`${table.outcomeCode} is null or ${table.outcomeCode} in ('RESOLVED', 'NEEDS_PARTS', 'NEEDS_FOLLOWUP', 'NEEDS_QUOTE_APPROVAL', 'UNABLE_TO_COMPLETE')`,
+      sql`${table.outcomeCode} is null or ${table.outcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE')`,
     ),
     check(
       'visits_outcome_recorded_pair_check',
@@ -1191,7 +1218,9 @@ export const followUpVisitRequests = pgTable(
     )
       .notNull()
       .references(() => organizationMembers.id),
-    proposedStart: timestamp('proposed_start', { withTimezone: true }).notNull(),
+    proposedStart: timestamp('proposed_start', {
+      withTimezone: true,
+    }).notNull(),
     proposedEnd: timestamp('proposed_end', { withTimezone: true }).notNull(),
     reason: text('reason').notNull(),
     sameTechnicianPreferred: boolean('same_technician_preferred')
@@ -1249,6 +1278,147 @@ export const followUpVisitRequests = pgTable(
     uniqueIndex('follow_up_visit_requests_created_visit_unique')
       .on(table.organizationId, table.createdVisitId)
       .where(sql`${table.createdVisitId} is not null`),
+  ],
+);
+
+// ----------------------------------------------------- ad-hoc work reports
+
+export const adHocWorkReports = pgTable(
+  'ad_hoc_work_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    reportingTechnicianMembershipId: uuid('reporting_technician_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    customerId: uuid('customer_id').references(() => customers.id),
+    propertyId: uuid('property_id').references(() => properties.id),
+    knownJobId: uuid('known_job_id').references(() => jobs.id, {
+      onDelete: 'set null',
+    }),
+    workStartedAt: timestamp('work_started_at', {
+      withTimezone: true,
+    }).notNull(),
+    workEndedAt: timestamp('work_ended_at', { withTimezone: true }).notNull(),
+    outcomeCode: varchar('outcome_code', { length: 30 }).notNull(),
+    summary: text('summary').notNull(),
+    notes: text('notes'),
+    reportedCustomerName: text('reported_customer_name'),
+    reportedCustomerPhone: text('reported_customer_phone'),
+    reportedCustomerAddress: text('reported_customer_address'),
+    status: varchar('status', { length: 20 }).notNull().default('PENDING'),
+    reviewerMembershipId: uuid('reviewer_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewNote: text('review_note'),
+    createdJobId: uuid('created_job_id').references(() => jobs.id, {
+      onDelete: 'set null',
+    }),
+    createdVisitId: uuid('created_visit_id').references(() => visits.id, {
+      onDelete: 'set null',
+    }),
+    clientOperationId: uuid('client_operation_id'),
+    version: integer('version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      'ad_hoc_work_reports_status_check',
+      sql`${table.status} in ('PENDING', 'LINKED', 'CONVERTED', 'REJECTED')`,
+    ),
+    check(
+      'ad_hoc_work_reports_work_order_check',
+      sql`${table.workEndedAt} > ${table.workStartedAt}`,
+    ),
+    check(
+      'ad_hoc_work_reports_outcome_code_check',
+      sql`${table.outcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE')`,
+    ),
+    check(
+      'ad_hoc_work_reports_summary_check',
+      sql`length(btrim(${table.summary})) > 0`,
+    ),
+    check(
+      'ad_hoc_work_reports_review_pair_check',
+      sql`(${table.reviewerMembershipId} is null) = (${table.reviewedAt} is null)`,
+    ),
+    check(
+      'ad_hoc_work_reports_created_visit_status_check',
+      sql`${table.createdVisitId} is null or ${table.status} in ('LINKED', 'CONVERTED')`,
+    ),
+    check(
+      'ad_hoc_work_reports_created_job_status_check',
+      sql`${table.createdJobId} is null or ${table.status} = 'CONVERTED'`,
+    ),
+    check('ad_hoc_work_reports_version_check', sql`${table.version} > 0`),
+    index('ad_hoc_work_reports_organization_status_idx').on(
+      table.organizationId,
+      table.status,
+      table.createdAt,
+    ),
+    index('ad_hoc_work_reports_reporter_idx').on(
+      table.organizationId,
+      table.reportingTechnicianMembershipId,
+      table.createdAt,
+    ),
+    index('ad_hoc_work_reports_known_job_idx').on(
+      table.organizationId,
+      table.knownJobId,
+    ),
+    uniqueIndex('ad_hoc_work_reports_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
+    uniqueIndex('ad_hoc_work_reports_created_visit_unique')
+      .on(table.organizationId, table.createdVisitId)
+      .where(sql`${table.createdVisitId} is not null`),
+  ],
+);
+
+/**
+ * One message in a follow-up Visit request's clarification conversation (`BR-FV-012`).
+ *
+ * The conversation is **request-scoped and append-only**: the office's question and the requester's
+ * answer are both records, so the timeline of a return-for-clarification survives the next decision
+ * instead of being overwritten by it (`BR-067`, `BR-FV-013`). There is no update path and no delete
+ * path, exactly as a Visit note has none (`BR-088`).
+ *
+ * `author_membership_id` is the member who wrote the message, and `recorded_at` is the authoritative
+ * server time. The side a message belongs to is derived from the request's own requester rather than
+ * stored, so no parallel vocabulary is introduced for it (`BR-041`, `BR-042`).
+ */
+export const followUpVisitRequestMessages = pgTable(
+  'follow_up_visit_request_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    requestId: uuid('request_id')
+      .notNull()
+      .references(() => followUpVisitRequests.id, { onDelete: 'cascade' }),
+    authorMembershipId: uuid('author_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    body: text('body').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'follow_up_visit_request_messages_body_check',
+      sql`length(btrim(${table.body})) > 0`,
+    ),
+    index('follow_up_visit_request_messages_request_idx').on(
+      table.organizationId,
+      table.requestId,
+      table.recordedAt,
+    ),
   ],
 );
 
@@ -1345,11 +1515,11 @@ export const visitStatusHistory = pgTable(
   (table) => [
     check(
       'visit_status_history_from_status_check',
-      sql`${table.fromStatus} is null or ${table.fromStatus} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED', 'NO_SHOW')`,
+      sql`${table.fromStatus} is null or ${table.fromStatus} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED')`,
     ),
     check(
       'visit_status_history_to_status_check',
-      sql`${table.toStatus} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED', 'NO_SHOW')`,
+      sql`${table.toStatus} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED')`,
     ),
     check(
       'visit_status_history_status_changed_check',
@@ -1601,11 +1771,11 @@ export const visitOutcomeHistory = pgTable(
   (table) => [
     check(
       'visit_outcome_history_outcome_code_check',
-      sql`${table.outcomeCode} in ('RESOLVED', 'NEEDS_PARTS', 'NEEDS_FOLLOWUP', 'NEEDS_QUOTE_APPROVAL', 'UNABLE_TO_COMPLETE')`,
+      sql`${table.outcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE')`,
     ),
     check(
       'visit_outcome_history_previous_outcome_code_check',
-      sql`${table.previousOutcomeCode} is null or ${table.previousOutcomeCode} in ('RESOLVED', 'NEEDS_PARTS', 'NEEDS_FOLLOWUP', 'NEEDS_QUOTE_APPROVAL', 'UNABLE_TO_COMPLETE')`,
+      sql`${table.previousOutcomeCode} is null or ${table.previousOutcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE')`,
     ),
     check(
       'visit_outcome_history_previous_pair_check',
@@ -1636,14 +1806,36 @@ export const visitNotes = pgTable(
       .notNull()
       .references(() => organizationMembers.id),
     body: text('body').notNull(),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    editedByMembershipId: uuid('edited_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedByMembershipId: uuid('removed_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    removalReason: text('removal_reason'),
     recordedAt: timestamp('recorded_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
     capturedAt: timestamp('captured_at', { withTimezone: true }),
     clientOperationId: uuid('client_operation_id'),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (table) => [
+    check(
+      'visit_notes_edit_pair_check',
+      sql`(${table.editedAt} is null) = (${table.editedByMembershipId} is null)`,
+    ),
+    check(
+      'visit_notes_removed_pair_check',
+      sql`(${table.removedAt} is null) = (${table.removedByMembershipId} is null) and (${table.removedAt} is null) = (${table.removalReason} is null)`,
+    ),
+    check(
+      'visit_notes_removal_reason_check',
+      sql`${table.removalReason} is null or length(btrim(${table.removalReason})) > 0`,
+    ),
     index('visit_notes_organization_visit_recorded_idx').on(
       table.organizationId,
       table.visitId,

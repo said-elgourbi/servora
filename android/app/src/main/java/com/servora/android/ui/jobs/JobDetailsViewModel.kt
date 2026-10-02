@@ -24,7 +24,9 @@ import com.servora.android.data.jobs.JobPhotoRecordResult
 import com.servora.android.data.jobs.JobPhotoRefusal
 import com.servora.android.data.jobs.JobPhotoSession
 import com.servora.android.data.jobs.ActivityWriteResult
+import com.servora.android.data.jobs.VisitCompletion
 import com.servora.android.data.jobs.VisitNote
+import com.servora.android.data.jobs.VisitRequestSubmitResult
 import com.servora.android.data.jobs.VisitStatusChange
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CapturedJobPhoto
@@ -119,6 +121,7 @@ class JobDetailsViewModel @Inject constructor(
     val photoImages: JobPhotoImages get() = jobPhotoImages
 
     private var readInFlight = false
+    private var representedVisitId: String? = null
     private var actionInFlight = false
     private var photoInFlight = false
     /** Whether a photo is being saved or shared right now, so one export runs at a time. */
@@ -164,6 +167,19 @@ class JobDetailsViewModel @Inject constructor(
         // action as waiting stops doing so at the same moment (`§7`, `BR-001`).
         viewModelScope.launch {
             repository.appliedOperations.collect {
+                val jobId = _uiState.value.jobId
+                if (jobId.isNotEmpty()) {
+                    reloadAfterSync(jobId)
+                }
+            }
+        }
+        // A replay the backend **refused** is the case the technician has to see: nothing was applied,
+        // and the Job may have been canceled or completed elsewhere while their work waited. The screen
+        // re-reads the Job for the same reason an applied action does, so it reports the state the
+        // backend actually holds rather than continuing to describe the action as saved on this device
+        // (`BR-014`, `BR-032`, §6, §7).
+        viewModelScope.launch {
+            repository.refusedOperations.collect {
                 val jobId = _uiState.value.jobId
                 if (jobId.isNotEmpty()) {
                     reloadAfterSync(jobId)
@@ -227,16 +243,18 @@ class JobDetailsViewModel @Inject constructor(
      * start a second read of the same Job (`BR-001`). A Job the read failed for is read again, because
      * the user is asking to see it.
      */
-    fun start(jobId: String) {
+    fun start(jobId: String, representedVisitId: String? = null) {
         if (readInFlight) {
             return
         }
         val current = _uiState.value
-        val settled = current.jobId == jobId && current.details != null
+        val settled = current.jobId == jobId &&
+            this.representedVisitId == representedVisitId &&
+            current.details != null
         if (settled) {
             return
         }
-        read(jobId)
+        read(jobId, representedVisitId = representedVisitId)
     }
 
     /** Re-runs the read after a failure the screen reported. */
@@ -246,7 +264,7 @@ class JobDetailsViewModel @Inject constructor(
         }
         val current = _uiState.value
         if (current.jobId.isNotEmpty()) {
-            read(current.jobId)
+            read(current.jobId, representedVisitId = representedVisitId)
         }
     }
 
@@ -322,19 +340,47 @@ class JobDetailsViewModel @Inject constructor(
     }
 
     /**
-     * Moves the represented Visit through its field lifecycle (`BR-074`), recording the outcome
-     * `BR-077` requires when it is a completion.
+     * Schedules one further Visit on the Job (`BR-071`, `BR-072`).
      *
-     * [confirmConflicts] is true only when the technician has been shown the `BR-070` conflicts the
-     * API reported and accepted them. The request carries a fresh idempotency key and the device
-     * instant, so it is applied at most once and can be queued rather than lost when the API cannot be
-     * reached (`BR-031`, `BR-014`).
+     * It states the schedule and the whole crew, with exactly one Lead, and asks the API to create the
+     * Visit — addition to the Job's work is represented by another Visit, never by a new Job
+     * (`BR-047`, `BR-051`). The Visit does not exist until the API answers, so this action belongs to
+     * the Job rather than to a represented Visit: a Job whose field attempt is over can still be given
+     * the next one.
+     *
+     * A destination that runs `BR-070`'s availability check is refused first and resent with the
+     * conflicts accepted by [confirmPendingAction], so nothing here decides about a conflict nobody was
+     * shown.
      */
-    fun changeVisitStatus(
-        status: VisitStatus,
-        outcome: VisitOutcome? = null,
-        outcomeSummary: String? = null,
+    fun scheduleVisit(
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
     ) {
+        val details = _uiState.value.details ?: return
+        submit(
+            JobActionRequest.CreateVisit(
+                jobId = details.id,
+                scheduledStart = scheduledStart,
+                scheduledEnd = scheduledEnd,
+                assignments = assignments,
+            ),
+        )
+    }
+
+    /**
+     * Moves the represented Visit to [status], one of the working states it may be driven between
+     * (`BR-074`).
+     *
+     * It carries a fresh idempotency key and the device instant, so it is applied at most once and can
+     * be queued rather than lost when the API cannot be reached (`BR-031`, `BR-014`). A destination
+     * that runs `BR-070`'s availability check is refused first and resent with the conflicts confirmed
+     * by [confirmPendingAction], so nothing here decides about a conflict nobody was shown.
+     *
+     * Finishing the Visit is not one of these directions: it is the completion operation below, which
+     * records the outcome `BR-077` requires of every completion.
+     */
+    fun changeVisitStatus(status: VisitStatus) {
         val details = _uiState.value.details ?: return
         val visit = details.selectedVisit ?: return
         submit(
@@ -342,13 +388,135 @@ class JobDetailsViewModel @Inject constructor(
                 jobId = details.id,
                 visitId = visit.id,
                 status = status,
-                outcome = outcome,
-                outcomeSummary = outcomeSummary,
                 visitVersion = visit.version,
                 operationId = UUID.randomUUID().toString(),
                 capturedAt = clock.instant(),
             ),
         )
+    }
+
+    /**
+     * Completes the represented Visit, recording [outcome] with [summary] (`BR-077`, `BR-078`).
+     *
+     * It is the explicit completion operation rather than a status transition: the outcome and the
+     * state change are one request, so no completed Visit can exist without the record of what resulted
+     * from the attempt. It carries the same idempotency key, device instant and version the working
+     * transitions do, so a completion the API cannot be reached for is queued rather than lost
+     * (`BR-014`, `ADR-019` D5).
+     */
+    fun completeVisit(outcome: VisitOutcome, summary: String) {
+        val details = _uiState.value.details ?: return
+        val visit = details.selectedVisit ?: return
+        val text = summary.trim()
+        if (text.isEmpty()) {
+            // `BR-077` requires the summary with the outcome, and the API refuses a completion without
+            // one. Nothing is sent and nothing is queued: the sheet says what is missing instead of
+            // letting the technician believe a completion was submitted (`BR-042`).
+            _uiState.update { current ->
+                current.copy(
+                    actionFailure = JobActionFailure.VALIDATION,
+                    actionQueued = false,
+                )
+            }
+            return
+        }
+        submit(
+            JobActionRequest.Completion(
+                jobId = details.id,
+                visitId = visit.id,
+                outcome = outcome,
+                outcomeSummary = text,
+                visitVersion = visit.version,
+                operationId = UUID.randomUUID().toString(),
+                capturedAt = clock.instant(),
+            ),
+        )
+    }
+
+    /**
+     * Submits a follow-up Visit request for the represented Visit (`BR-FV-001`, `BR-FV-003`).
+     *
+     * The technician states what they propose — a window, why another field attempt is needed and
+     * whether they would like to carry it out — and nothing is decided by it: a request is not a Visit
+     * and schedules nothing (`BR-FV-002`), so the office reviews it and creates the Visit
+     * (`BR-FV-004`, `BR-FV-005`).
+     *
+     * A request with no reason, or with an end that is not after its start, is not sent: the route
+     * requires both, so the screen states what is missing instead of asking a question whose answer is
+     * already known (`BR-042`). The sheet refuses to submit it in the same way, and this is the guard
+     * behind that.
+     *
+     * The write is **online-only**: the route takes no client-generated idempotency key and no conflict
+     * policy is decided for it, so a request the API cannot be reached for is reported as not sent
+     * rather than queued (`BR-013`, `BR-032`, `offline-first-architecture.md` §13.2). The Job is not
+     * read again afterwards, because a request moves no Job state (`BR-FV-002`).
+     */
+    fun requestFollowUpVisit(
+        reason: String,
+        proposedStart: Instant,
+        proposedEnd: Instant,
+        sameTechnicianPreferred: Boolean,
+    ) {
+        val details = _uiState.value.details ?: return
+        val visit = details.selectedVisit ?: return
+        val text = reason.trim()
+        if (text.isEmpty() || !proposedEnd.isAfter(proposedStart)) {
+            _uiState.update { current ->
+                current.copy(
+                    completedAction = null,
+                    actionQueued = false,
+                    actionFailure = JobActionFailure.VALIDATION,
+                )
+            }
+            return
+        }
+        if (actionInFlight) {
+            return
+        }
+        actionInFlight = true
+        _uiState.update { current ->
+            current.copy(
+                isSubmitting = true,
+                completedAction = null,
+                actionQueued = false,
+                actionFailure = null,
+                pendingConfirmation = null,
+            )
+        }
+        viewModelScope.launch {
+            val result = repository.requestFollowUpVisit(
+                jobId = details.id,
+                sourceVisitId = visit.id,
+                proposedStart = proposedStart,
+                proposedEnd = proposedEnd,
+                reason = text,
+                sameTechnicianPreferred = sameTechnicianPreferred,
+            )
+            actionInFlight = false
+            _uiState.update { current ->
+                if (current.jobId != details.id) {
+                    current
+                } else {
+                    when (result) {
+                        is VisitRequestSubmitResult.Success ->
+                            current.copy(
+                                isSubmitting = false,
+                                completedAction = JobActionKind.FOLLOW_UP_REQUEST,
+                                actionQueued = false,
+                                actionFailure = null,
+                                submittedFollowUpRequest = result.request,
+                            )
+
+                        is VisitRequestSubmitResult.Failure ->
+                            current.copy(
+                                isSubmitting = false,
+                                actionFailure = result.reason,
+                                actionQueued = false,
+                            )
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -473,6 +641,84 @@ class JobDetailsViewModel @Inject constructor(
         }
     }
 
+    /** Corrects one posted Visit note. */
+    fun editVisitNote(noteId: String, body: String) {
+        val text = body.trim()
+        val jobId = _uiState.value.jobId
+        if (text.isEmpty() || noteId.isBlank() || jobId.isBlank() || actionInFlight) {
+            return
+        }
+        runVisitNoteWrite(
+            kind = JobActionKind.ACTIVITY_TEXT_EDIT,
+            call = { repository.editVisitNote(jobId, noteId, text) },
+        )
+    }
+
+    /** Soft-deletes one posted Visit note from ordinary activity. */
+    fun removeVisitNote(noteId: String, reason: String) {
+        val text = reason.trim()
+        val jobId = _uiState.value.jobId
+        if (text.isEmpty() || noteId.isBlank() || jobId.isBlank() || actionInFlight) {
+            return
+        }
+        runVisitNoteWrite(
+            kind = JobActionKind.ACTIVITY_TEXT_REMOVE,
+            call = { repository.removeVisitNote(jobId, noteId, text) },
+        )
+    }
+
+    private fun runVisitNoteWrite(
+        kind: JobActionKind,
+        call: suspend () -> ActivityWriteResult,
+    ) {
+        val jobId = _uiState.value.jobId
+        actionInFlight = true
+        _uiState.update { current ->
+            current.copy(
+                isSubmitting = true,
+                completedAction = null,
+                actionQueued = false,
+                actionFailure = null,
+            )
+        }
+        viewModelScope.launch {
+            val result = call()
+            actionInFlight = false
+            _uiState.update { current ->
+                if (current.jobId != jobId) {
+                    current
+                } else {
+                    when (result) {
+                        is ActivityWriteResult.Success ->
+                            current.copy(
+                                isSubmitting = false,
+                                activity = result.events,
+                                activitySource = ReadSource.BACKEND,
+                                activityFailure = null,
+                                completedAction = kind,
+                                actionQueued = false,
+                                actionFailure = null,
+                            )
+
+                        ActivityWriteResult.Queued ->
+                            current.copy(
+                                isSubmitting = false,
+                                actionFailure = JobActionFailure.UNEXPECTED,
+                                actionQueued = false,
+                            )
+
+                        is ActivityWriteResult.Failure ->
+                            current.copy(
+                                isSubmitting = false,
+                                actionFailure = result.reason,
+                                actionQueued = false,
+                            )
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Resends the action the API refused until its conflicts are accepted (`BR-070`).
      *
@@ -482,6 +728,21 @@ class JobDetailsViewModel @Inject constructor(
     fun confirmPendingAction() {
         val pending = _uiState.value.pendingConfirmation ?: return
         val details = _uiState.value.details ?: return
+        // Scheduling a Visit belongs to the Job and to no Visit — the Visit it creates does not exist
+        // until the API creates it — so it is handled before the represented Visit is required (`BR-051`,
+        // `BR-071`).
+        if (pending is PendingJobAction.CreateVisit) {
+            submit(
+                JobActionRequest.CreateVisit(
+                    jobId = details.id,
+                    scheduledStart = pending.scheduledStart,
+                    scheduledEnd = pending.scheduledEnd,
+                    assignments = pending.assignments,
+                ),
+                confirmed = true,
+            )
+            return
+        }
         val visit = details.selectedVisit ?: return
         when (pending) {
             is PendingJobAction.Reschedule ->
@@ -515,8 +776,6 @@ class JobDetailsViewModel @Inject constructor(
                         jobId = details.id,
                         visitId = visit.id,
                         status = pending.status,
-                        outcome = pending.outcome,
-                        outcomeSummary = pending.outcomeSummary,
                         visitVersion = visit.version,
                         operationId = pending.operationId,
                         capturedAt = pending.capturedAt,
@@ -692,6 +951,17 @@ class JobDetailsViewModel @Inject constructor(
      */
     fun photoCaptured(capture: CapturedJobPhoto) {
         val details = _uiState.value.details ?: return
+        val visitId = details.selectedVisit?.id
+        if (visitId == null) {
+            // The camera came back after the screen stopped representing the Visit the photo would
+            // belong to (`BR-047`, `BR-081`): nothing is recorded, and the bytes the camera wrote are
+            // released rather than left as a file no row references (`BR-042`, `BR-014`).
+            viewModelScope.launch { photos.abandonCapture(capture) }
+            _uiState.update {
+                it.copy(photoFailure = JobPhotoFailure.NO_VISIT, photoFailureItem = null)
+            }
+            return
+        }
         if (photoInFlight) {
             return
         }
@@ -700,6 +970,7 @@ class JobDetailsViewModel @Inject constructor(
             val recorded = photos.recordCapture(
                 capture = capture,
                 jobId = details.id,
+                visitId = visitId,
                 phase = _uiState.value.photoPhase,
                 capturedAt = clock.instant(),
             )
@@ -771,11 +1042,20 @@ class JobDetailsViewModel @Inject constructor(
             // photo is being taken is not started on top of it (`BR-042`).
             return
         }
+        val visitId = details.selectedVisit?.id
+        if (visitId == null) {
+            // A picked photo is evidence of the Visit the screen represents (`BR-047`, `BR-081`), so a
+            // pick with no represented Visit records nothing and says why (`BR-042`).
+            _uiState.update {
+                it.copy(photoFailure = JobPhotoFailure.NO_VISIT, photoFailureItem = null)
+            }
+            return
+        }
         val total = uris.size
         pickedPhotos = ArrayDeque(
             uris.mapIndexed { index, uri -> PickedPhoto(uri, PhotoItemPosition(index + 1, total)) },
         )
-        takeNextPickedPhoto(details.id)
+        takeNextPickedPhoto(details.id, visitId)
     }
 
     /** Reports a device that could not open its own photo picker, so no photo could be chosen. */
@@ -802,7 +1082,7 @@ class JobDetailsViewModel @Inject constructor(
      * It is reached only when no other photo work is in flight: a pick starts one only when it is not
      * (`photosPicked`), and a review ends only after the pass that opened it has finished.
      */
-    private fun takeNextPickedPhoto(jobId: String) {
+    private fun takeNextPickedPhoto(jobId: String, visitId: String) {
         photoInFlight = true
         viewModelScope.launch {
             while (true) {
@@ -818,6 +1098,7 @@ class JobDetailsViewModel @Inject constructor(
                     // (`BR-027`).
                     photos.recordPickedPhoto(
                         jobId = jobId,
+                        visitId = visitId,
                         source = source,
                         phase = _uiState.value.photoPhase,
                     )
@@ -847,9 +1128,21 @@ class JobDetailsViewModel @Inject constructor(
     /** Moves a pick on to its next photo once the technician is done with the one under review. */
     private fun continuePickedPhotos() {
         val jobId = _uiState.value.jobId
-        if (jobId.isNotEmpty() && pickedPhotos.isNotEmpty()) {
-            takeNextPickedPhoto(jobId)
+        if (jobId.isEmpty() || pickedPhotos.isEmpty()) {
+            return
         }
+        val visitId = _uiState.value.details?.selectedVisit?.id
+        if (visitId == null) {
+            // The screen stopped representing the Visit the remaining items belong to (`BR-047`,
+            // `BR-081`): the pick ends here and says why, rather than recording evidence nothing can
+            // attribute (`BR-042`).
+            pickedPhotos.clear()
+            _uiState.update {
+                it.copy(photoFailure = JobPhotoFailure.NO_VISIT, photoFailureItem = null)
+            }
+            return
+        }
+        takeNextPickedPhoto(jobId, visitId)
     }
 
     /**
@@ -1325,6 +1618,15 @@ class JobDetailsViewModel @Inject constructor(
         if (audioInFlight) {
             return
         }
+        val visitId = _uiState.value.details?.selectedVisit?.id
+        if (visitId == null) {
+            // A recording finished after the screen stopped representing the Visit it would belong to
+            // (`BR-047`, `BR-081`): nothing is recorded, the recorder is released and its file goes with
+            // it (`BR-042`, `BR-014`).
+            audio.abandonRecording(capture)
+            _uiState.update { it.copy(audioRecording = null, audioFailure = JobAudioFailure.NO_VISIT) }
+            return
+        }
         audioInFlight = true
         val jobId = _uiState.value.jobId
         val phase = _uiState.value.audioPhase
@@ -1334,7 +1636,7 @@ class JobDetailsViewModel @Inject constructor(
         // live while the draft is being written (`BR-042`).
         _uiState.update { it.copy(audioRecording = null) }
         viewModelScope.launch {
-            val recorded = audio.stopRecording(jobId, capture, phase, durationSeconds)
+            val recorded = audio.stopRecording(jobId, visitId, capture, phase, durationSeconds)
             audioInFlight = false
             _uiState.update { current ->
                 current.copy(
@@ -1685,7 +1987,12 @@ class JobDetailsViewModel @Inject constructor(
         }
     }
 
-    private fun read(jobId: String, keepContent: Boolean = false) {
+    private fun read(
+        jobId: String,
+        representedVisitId: String? = this.representedVisitId,
+        keepContent: Boolean = false,
+    ) {
+        this.representedVisitId = representedVisitId
         readInFlight = true
         if (keepContent) {
             // A re-read after a replay the backend accepted replaces the Job **in place**: the content
@@ -1699,7 +2006,7 @@ class JobDetailsViewModel @Inject constructor(
             skippedPhotos.clear()
         }
         viewModelScope.launch {
-            val result = repository.loadJobDetails(jobId)
+            val result = repository.loadJobDetails(jobId, representedVisitId)
             // The field work the queue is still holding is read with the Job, so what is presented as
             // waiting is the real queue rather than a second copy of it (`BR-041`, §7).
             val queuedAction = repository.queuedVisitAction(jobId)
@@ -1762,7 +2069,7 @@ class JobDetailsViewModel @Inject constructor(
         if (readInFlight) {
             return
         }
-        read(jobId, keepContent = true)
+        read(jobId, representedVisitId = representedVisitId, keepContent = true)
     }
 
     /** Reads the Job's chronological activity after the Job itself was read (`BR-080`). */
@@ -1818,6 +2125,7 @@ private fun JobAudioRefusal.toAudioFailure(): JobAudioFailure =
         JobAudioRefusal.NOT_RECORDED -> JobAudioFailure.RECORDING_FAILED
         JobAudioRefusal.NO_BYTES -> JobAudioFailure.RECORDING_EMPTY
         JobAudioRefusal.NOT_STORED -> JobAudioFailure.RECORDING_NOT_SAVED
+        JobAudioRefusal.NO_VISIT -> JobAudioFailure.NO_VISIT
     }
 
 /**
@@ -1858,17 +2166,17 @@ private fun JobActionFailure.toAudioRemovalFailure(): JobAudioFailure =
         JobActionFailure.PHOTO_ALREADY_REMOVED,
         JobActionFailure.VALIDATION,
         JobActionFailure.JOB_TRANSITION_NOT_ALLOWED,
-        JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET,
         JobActionFailure.JOB_COMPLETION_BLOCKED,
-        JobActionFailure.JOB_CANCELLATION_UNAVAILABLE,
         JobActionFailure.VISIT_NOT_RESCHEDULABLE,
         JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE,
         // The Visit field lifecycle's own codes cannot be returned by the audio removal route either,
-        // for the same reason (`BR-042`).
+        // for the same reason (`BR-042`), and neither can the follow-up request's approval answers.
         JobActionFailure.VISIT_TRANSITION_NOT_ALLOWED,
         JobActionFailure.VISIT_SCHEDULING_CONDITION_NOT_MET,
         JobActionFailure.JOB_CLOSED_FOR_FIELD_WORK,
         JobActionFailure.VISIT_OPERATION_REUSED,
+        JobActionFailure.VISIT_REQUEST_CHANGED,
+        JobActionFailure.VISIT_REQUEST_NOT_REVIEWABLE,
         JobActionFailure.SERVER,
         JobActionFailure.UNEXPECTED,
         -> JobAudioFailure.REMOVAL_FAILED
@@ -1892,6 +2200,7 @@ private fun JobPhotoRefusal.toPhotoFailure(): JobPhotoFailure =
         JobPhotoRefusal.TYPE_NOT_ACCEPTED -> JobPhotoFailure.PHOTO_TYPE_NOT_ACCEPTED
         JobPhotoRefusal.TOO_LARGE -> JobPhotoFailure.PHOTO_TOO_LARGE
         JobPhotoRefusal.NOT_STORED -> JobPhotoFailure.PHOTO_NOT_SAVED
+        JobPhotoRefusal.NO_VISIT -> JobPhotoFailure.NO_VISIT
     }
 
 /**
@@ -1922,17 +2231,17 @@ private fun JobActionFailure.toRemovalFailure(): JobPhotoFailure =
         // without inventing a meaning for a code this operation cannot produce (`BR-042`).
         JobActionFailure.AUDIO_NOTE_ALREADY_REMOVED,
         JobActionFailure.JOB_TRANSITION_NOT_ALLOWED,
-        JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET,
         JobActionFailure.JOB_COMPLETION_BLOCKED,
-        JobActionFailure.JOB_CANCELLATION_UNAVAILABLE,
         JobActionFailure.VISIT_NOT_RESCHEDULABLE,
         JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE,
         // The Visit field lifecycle's own codes cannot be returned by the photo removal route either,
-        // for the same reason (`BR-042`).
+        // for the same reason (`BR-042`), and neither can the follow-up request's approval answers.
         JobActionFailure.VISIT_TRANSITION_NOT_ALLOWED,
         JobActionFailure.VISIT_SCHEDULING_CONDITION_NOT_MET,
         JobActionFailure.JOB_CLOSED_FOR_FIELD_WORK,
         JobActionFailure.VISIT_OPERATION_REUSED,
+        JobActionFailure.VISIT_REQUEST_CHANGED,
+        JobActionFailure.VISIT_REQUEST_NOT_REVIEWABLE,
         -> JobPhotoFailure.REMOVAL_FAILED
     }
 
@@ -2026,6 +2335,36 @@ private sealed interface JobActionRequest {
             PendingJobAction.Reschedule(scheduledStart, scheduledEnd, conflicts)
     }
 
+    /**
+     * One Visit being scheduled on the Job (`BR-071`, `BR-072`).
+     *
+     * It names no Visit, because the Visit does not exist until the API creates it; the schedule and the
+     * crew are what the user stated, and confirming the conflicts resends exactly that (`BR-070`).
+     */
+    data class CreateVisit(
+        override val jobId: String,
+        val scheduledStart: Instant,
+        val scheduledEnd: Instant,
+        val assignments: List<TechnicianAssignment>,
+    ) : JobActionRequest {
+        override val kind: JobActionKind = JobActionKind.CREATE_VISIT
+
+        override suspend fun send(
+            repository: JobDetailsRepository,
+            confirmed: Boolean,
+        ): JobActionResult =
+            repository.createVisit(
+                jobId = jobId,
+                scheduledStart = scheduledStart,
+                scheduledEnd = scheduledEnd,
+                assignments = assignments,
+                confirmConflicts = confirmed,
+            )
+
+        override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction =
+            PendingJobAction.CreateVisit(scheduledStart, scheduledEnd, assignments, conflicts)
+    }
+
     data class Assignment(
         override val jobId: String,
         val visitId: String,
@@ -2051,7 +2390,7 @@ private sealed interface JobActionRequest {
     }
 
     /**
-     * One Visit status transition, with the outcome a completion carries (`BR-074`, `BR-077`).
+     * One Visit working-status transition (`BR-074`, `BR-075`).
      *
      * The identity, the device instant and the version are held here rather than regenerated on a
      * confirmed resend, because the resend is the **same** business operation: it carries the same
@@ -2061,8 +2400,6 @@ private sealed interface JobActionRequest {
         override val jobId: String,
         val visitId: String,
         val status: VisitStatus,
-        val outcome: VisitOutcome?,
-        val outcomeSummary: String?,
         val visitVersion: Int,
         val operationId: String,
         val capturedAt: Instant,
@@ -2078,8 +2415,6 @@ private sealed interface JobActionRequest {
                     jobId = jobId,
                     visitId = visitId,
                     status = status,
-                    outcome = outcome,
-                    outcomeSummary = outcomeSummary,
                     confirmConflicts = confirmed,
                     operationId = operationId,
                     capturedAt = capturedAt,
@@ -2090,11 +2425,49 @@ private sealed interface JobActionRequest {
         override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction =
             PendingJobAction.VisitTransition(
                 status = status,
-                outcome = outcome,
-                outcomeSummary = outcomeSummary,
                 operationId = operationId,
                 capturedAt = capturedAt,
                 conflicts = conflicts,
             )
+    }
+
+    /**
+     * One Visit completion with the outcome it records (`BR-077`, `BR-078`).
+     *
+     * It has no confirmed resend, because a completion carries no schedule and so raises no `BR-070`
+     * conflict: the API's answer to a completion is applied or refused, never held for a decision.
+     */
+    data class Completion(
+        override val jobId: String,
+        val visitId: String,
+        val outcome: VisitOutcome,
+        val outcomeSummary: String,
+        val visitVersion: Int,
+        val operationId: String,
+        val capturedAt: Instant,
+    ) : JobActionRequest {
+        override val kind: JobActionKind = JobActionKind.VISIT_COMPLETION
+
+        override suspend fun send(
+            repository: JobDetailsRepository,
+            confirmed: Boolean,
+        ): JobActionResult =
+            repository.completeVisit(
+                VisitCompletion(
+                    jobId = jobId,
+                    visitId = visitId,
+                    outcome = outcome,
+                    outcomeSummary = outcomeSummary,
+                    operationId = operationId,
+                    capturedAt = capturedAt,
+                    expectedVersion = visitVersion,
+                ),
+            )
+
+        override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction? =
+            // A completion moves no schedule, so the API cannot report a technician's time as
+            // conflicting for it (`BR-070`). Reporting one would be presenting an answer this build
+            // cannot place, so the screen refuses it rather than guessing (`BR-042`).
+            null
     }
 }

@@ -117,6 +117,12 @@ Initial supported languages are **English** and **French**. Development rules li
 > the offline posture) and its contracts in `docs/api/job-actions.md` and
 > `docs/api/technician-home.md`.
 >
+> **The technician home's Needs-attention section states only what the screen does not already state** —
+> the late work the Up-next card and today's own rows are not already carrying, most overdue first, drawn
+> above the preview of the days after today — and the action-oriented redesign of that home is proposed
+> and awaiting a product decision, in
+> `docs/tracker/058-technician-home-classification-and-redesign.md`.
+>
 > The **Manager Schedule** — the week strip and the selected day's agenda, the technician filter and
 > the work that still has no crew — is `docs/tracker/038-android-manager-schedule.md`, served by a new
 > `GET /schedule` read contracted in `docs/api/schedule.md` and decided in
@@ -174,25 +180,106 @@ Initial supported languages are **English** and **French**. Development rules li
 > crew comes from that Visit's own crew list, which is **assignment** and is labelled as such (`BR-068`;
 > Servora records no attendance, `BR-034`).
 >
-> **The represented Visit is stated by when it is for, and its activity is headed by its own card** — the
-> section is labelled `Current visit` only while that field attempt is under way or its window is running,
-> and otherwise `Today's visit`, `Tomorrow's visit`, an `Upcoming visit` or a `Previous visit`; and an
-> expanded group's content is headed by one bordered card stating that Visit's date, scheduled window and
-> assigned crew — is `docs/tracker/046-android-job-details-visit-period-and-card.md`. The period is read
-> from the Visit's own schedule and field status plus the device's clock, and it re-selects nothing: which
-> Visit represents the Job stays the API's answer (`BR-081`).
+> **The represented Visit is stated by when it is for** — the section is labelled `Current visit` only while
+> that field attempt is under way or its window is running, and otherwise `Today's visit`, `Tomorrow's
+> visit`, an `Upcoming visit` or a `Previous visit` — is
+> `docs/tracker/046-android-job-details-visit-period-and-card.md`. The period is read from the Visit's own
+> schedule and field status plus the device's clock, and it re-selects nothing: which Visit represents the
+> Job stays the API's answer (`BR-081`).
 >
 > **That card also states what the field attempt resulted in** — one **Outcome** row between the scheduled
 > window and the crew, drawn only when the Visit holds one — is
 > `docs/tracker/048-android-job-activity-visit-outcome.md`. It is the Visit's **current** outcome, so
 > `GET /jobs/:id` gained one additive field (`visits[].outcomeCode`): a Visit that was reopened after
 > completion holds none (`BR-079`), which is exactly why the row is read from the Visit and not derived from
-> the timeline, where the outcome it recorded stays as history (`BR-001`).
+> the timeline, where the outcome recorded stays as history (`BR-001`). **The Visit facts card this bullet and
+> the one above describe was removed by `docs/tracker/052-android-technician-job-details-redesign.md`**: the
+> date and the outcome are the group heading's summary, and the schedule and crew belong to the Visit section,
+> so the group reveals that Visit's own activity and evidence and nothing already on screen.
+>
+> **The page is the technician's seven questions** — what the work is (a heading, not a card), where it is,
+> who can be reached there, what the office recorded, the Visit being worked with its four working states and
+> its two field actions, and the Job's activity grouped by Visit — is
+> `docs/tracker/052-android-technician-job-details-redesign.md`. A routine `ACTIVE` Job status is no longer
+> drawn: it is the control that changes it for a session that may (the Manager's own path,
+> `docs/tracker/020-android-job-details-status-control.md`) and is otherwise carried by the notice that
+> reports a canceled or completed Job (`BR-058`, `BR-062`). The customer's contact persons are one
+> **Contacts** section leading with the effective primary contact and its own tappable phone and email
+> (`BR-095`, `ADR-022` D6), the address is its own **Location** section, the office's notes are their own
+> section rather than a row of the contact metadata (`BR-092`), the Visit's `Add update` sits with the Visit
+> and the floating action is drawn only while that one has scrolled away (`BR-012`), the Visit activity
+> group is headed `Visit N · date` over `Completed · Needs follow-up`, the office's own **General job
+> updates** group starts folded, and a Visit status event reads as field language — `Work started`,
+> `Arrived on site` — instead of `Updated visit status to IN_PROGRESS` (`BR-080`).
 >
 > **Two temporary one-tap sign-in buttons for local device QA** — Manager and Technician, present only in a
 > debug build because the release source set carries no accounts — is
 > `docs/tracker/049-android-dev-sign-in-buttons.md`. Development tooling rather than product behaviour: each
 > button submits the seeded account's real credentials through the ordinary sign-in path.
+>
+> **The home asks the backend for the day again when the bottom-navigation area is entered again**, which is
+> the fix for the defect physical-device QA reported (2026-09-20): a technician moved a Visit's status on the
+> Job, returned to the home, and the old status stayed on screen until they signed out and back in. The read
+> was issued only when the selected tab changed, so leaving a drill-down never asked for the day; it is now
+> asked for on both events, from one `readHome` the session's own capability resolves (`BR-001`, `BR-013`) —
+> `docs/tracker/055-android-home-refresh-on-return.md`.
+>
+> **Evidence belongs to the Visit it was recorded on** (`docs/tracker/056-evidence-belongs-to-a-visit.md`).
+> Product ownership reported that a text note landed in the right Visit's group of Job Activity while photos
+> and recordings landed in **General job updates**, and asked for both to be linked to Visits only. They were
+> recorded on the Job (`visit_id` did not exist), which is what put them in the Job-level group; now
+> `POST /jobs/:id/photos` and `POST /jobs/:id/audio-notes` require a `visitId` that belongs to the Job,
+> `job_photos.visit_id` / `job_audio_notes.visit_id` are written (`0017_evidence_visit_link.sql`), the
+> Activity projection reports those events with their Visit (`BR-080`), and the Android client keeps the
+> Visit with the draft through the outbox so an offline capture uploads against the field attempt it was
+> taken on. Evidence recorded before the change keeps no Visit — attributing it retroactively would be
+> inventing business data (`BR-042`, `BR-088`).
+>
+> **The manager's two Visit-scheduling writes exist on Android** — **Schedule a visit** on Job Details
+> (`POST /jobs/:id/visits`) and **Approve & schedule** on a pending request in the Schedule screen's
+> Requests lane (`POST /jobs/:id/visit-requests/:requestId/approval`) — and they share one form, because
+> both state the same window and crew (`BR-068`, `BR-072`). The form asks for one visit date with a start
+> and an end time, because a visit starts and ends on the same day. A crew without exactly one Lead and an
+> end time that is not after the start time cannot be submitted, `BR-070`'s conflicts are shown and require
+> explicit confirmation before the same request is resent confirmed, and a successful approval re-reads
+> both the requests and the day (`BR-001`, `BR-FV-005`). Both writes are online-only: neither route takes a
+> idempotency key, so neither is queued (`offline-first-architecture.md` §13.2) —
+> `docs/tracker/050-visit-follow-up-requests.md`.
+>
+> **The technician's half of that workflow exists too** — **Request another visit** on Job Details
+> (`POST /jobs/:id/visit-requests`, `visits.request_follow_up`). A request is the technician's own proposal
+> rather than a consequence of an outcome (`BR-FV-001`, `BR-FV-003`): the form states the window they
+> suggest, why another attempt is needed and whether they would like to carry it out, and it asks for no
+> crew because the office states who performs the Visit when it approves one (`BR-FV-004`). The action is
+> offered only for a **completed** Visit whose outcome expects a follow-up — `NEEDS_FOLLOW_UP`,
+> `NEEDS_PARTS` or `UNABLE_TO_COMPLETE` — never for a `RESOLVED` one (`BR-078`, `BR-FV-001`). Until this
+> landed, a `NEEDS_FOLLOW_UP` completion reached the office only as derived attention on Manager Home
+> (`FOLLOW_UP_NEEDS_SCHEDULING`, `BR-078`) and the Schedule screen's Requests lane stayed empty, because
+> nothing wrote a request. It is online-only for the same reason the approval is, and nothing is drawn as a
+> confirmed appointment before the office approves it (`BR-FV-002`, `BR-FV-010`).
+>
+> **The Visit workflow has an open QA issue list** (`docs/tracker/057-qa-issue-list-visit-workflow.md`):
+> five issues product ownership found in one physical-device pass of that journey — a completed Visit
+> still reading `Scheduled` when a screen is returned to, the request window not offered where the
+> technician chooses *Follow up required*, the sheets' Save/Cancel sitting under the keyboard, the
+> Schedule screen's **Requests** and **Unassigned** lanes not following the selected date, and the
+> manager's review card carrying neither the previous Visit nor the client while *Clarify* leaves nothing
+> behind. The list records what the code shows for each, which of them are defects and which need a
+> product decision, and what has been done so far: item 1's stale-answer causes are fixed — the Schedule
+> destination is now read again when it is returned to (the gap 055 left, which only covered Home), and the
+> field home now says when the day on screen could not be refreshed, exactly as the manager home already
+> does — and the rest are recorded rather than guessed (`BR-042`). Item 3 has landed too: a sheet's body
+> scrolls while its own decisions stay outside that scroll, because Material 3's sheet already lifts above
+> the keyboard and what was missing was the pin, not an inset — the rule is now written into the Android
+> design system, so every later sheet is checked against it.
+
+> **Item 5's remaining half has landed too** (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.11):
+> a request the office returns for clarification is now **answered by its requester**, and the answer is
+> the one transition `NEEDS_CLARIFICATION → PENDING` — taken in a single operation that appends the answer
+> to the request's own **append-only conversation** and puts the request back in front of the office. The
+> office's question and the technician's answer are both stored, one row per message, because the request's
+> mutable `review_note` cannot hold an exchange. Decision: `BR-FV-012`'s `BR-040` change record and
+> `docs/decisions/023-follow-up-clarification-conversation.md` (D1–D8).
 
 ## Layout
 

@@ -21,7 +21,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +58,9 @@ const val TechnicianHomeRetryTag = "technician-home-retry"
 /** Identifies the notice that the day on screen is the last the server reported. */
 const val TechnicianHomeLastReportedTag = "technician-home-last-reported"
 
+/** Identifies the notice that the day on screen could not be refreshed. */
+const val TechnicianHomeUnrefreshedTag = "technician-home-unrefreshed"
+
 /** Identifies the next-Visit card, with the action that opens the Job it is for. */
 const val TechnicianHomeNextVisitTag = "technician-home-next"
 
@@ -69,8 +74,8 @@ fun technicianHomeVisitTag(visitId: String): String = "technician-home-visit-$vi
 fun technicianHomeOpenJobTag(jobId: String): String = "technician-home-open-$jobId"
 
 /**
- * The technician's own day: the Visit to do next, what today holds, what comes after, and what on
- * the caller's own work needs attention (`BR-010`, `BR-012`; `ADR-019` D6).
+ * The technician's own day: the Visit to do next, what today holds, what on the caller's own work
+ * needs attention, and what comes after (`BR-010`, `BR-012`; `ADR-019` D6).
  *
  * The screen decides nothing about the work. Which Visit is next, which Visits are today's, which
  * are overdue and which day "today" is all arrive as the backend's answer, because they depend on the
@@ -83,7 +88,7 @@ fun technicianHomeOpenJobTag(jobId: String): String = "technician-home-open-$job
 @Composable
 fun TechnicianHomeScreen(
     state: TechnicianHomeUiState,
-    onOpenJob: (jobId: String) -> Unit,
+    onOpenJob: (jobId: String, visitId: String?) -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -94,6 +99,7 @@ fun TechnicianHomeScreen(
                 home = home,
                 showsRefreshingIndicator = state.showsRefreshingIndicator,
                 showsLastReportedNotice = state.showsLastReportedNotice,
+                showsUnrefreshedNotice = state.showsUnrefreshedNotice,
                 showsNothingAssigned = state.showsNothingAssigned,
                 onOpenJob = onOpenJob,
                 onRetry = onRetry,
@@ -159,20 +165,24 @@ private fun TechnicianHomeFailure(onRetry: () -> Unit, modifier: Modifier = Modi
 }
 
 /**
- * The populated day, in the order the technician needs it: what to do next, what today holds, what
- * comes after, and what on their own work needs attention (`BR-012`).
+ * The populated day, in the order the technician needs it: what to do next, what today holds, what on
+ * their own work still needs attention, and what comes after (`BR-012`).
  *
  * Only the attention section is conditional in the way the product design asked for: it appears when
  * there is something to act on and is absent when there is not, rather than showing an empty
- * "nothing needs you" card that would compete with the next Visit.
+ * "nothing needs you" card that would compete with the next Visit. It is drawn before the preview of
+ * the days after today, because a late attempt is work to resolve rather than work to look forward
+ * to, and it never repeats a Visit the screen already states — the Visit to do next, and today's own
+ * rows, carry their own condition (the API's answer, `BR-001`, `BR-041`).
  */
 @Composable
 private fun TechnicianHomeContent(
     home: TechnicianHome,
     showsRefreshingIndicator: Boolean,
     showsLastReportedNotice: Boolean,
+    showsUnrefreshedNotice: Boolean,
     showsNothingAssigned: Boolean,
-    onOpenJob: (jobId: String) -> Unit,
+    onOpenJob: (jobId: String, visitId: String?) -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -188,6 +198,13 @@ private fun TechnicianHomeContent(
                     message = stringResource(R.string.offline_last_reported),
                     tag = TechnicianHomeLastReportedTag,
                 )
+            }
+        } else if (showsUnrefreshedNotice) {
+            // The read was answered by the backend and then failed, so the day on screen is the one
+            // that was known: saying so is what keeps stale work from looking current (`BR-013`,
+            // `BR-014`). The technician keeps reading it and can ask again.
+            item(key = "unrefreshed") {
+                UnrefreshedNotice(onRetry = onRetry)
             }
         } else if (showsRefreshingIndicator) {
             // The technician keeps reading the known day while it is refreshed (`BR-013`).
@@ -216,18 +233,6 @@ private fun TechnicianHomeContent(
             }
         }
 
-        if (home.upcomingTotal > 0) {
-            item(key = "upcoming-header") {
-                SectionLabel(
-                    label = stringResource(R.string.technician_home_upcoming_title),
-                    count = home.upcomingTotal,
-                )
-            }
-            items(home.upcoming, key = { visit -> "upcoming-${visit.visitId}" }) { visit ->
-                VisitRow(visit = visit, onOpenJob = onOpenJob)
-            }
-        }
-
         if (home.attentionTotal > 0) {
             item(key = "attention-header") {
                 SectionLabel(
@@ -237,6 +242,18 @@ private fun TechnicianHomeContent(
             }
             items(home.attention, key = { item -> "attention-${item.visitId}" }) { item ->
                 AttentionCard(item = item, onOpenJob = onOpenJob)
+            }
+        }
+
+        if (home.upcomingTotal > 0) {
+            item(key = "upcoming-header") {
+                SectionLabel(
+                    label = stringResource(R.string.technician_home_upcoming_title),
+                    count = home.upcomingTotal,
+                )
+            }
+            items(home.upcoming, key = { visit -> "upcoming-${visit.visitId}" }) { visit ->
+                VisitRow(visit = visit, onOpenJob = onOpenJob)
             }
         }
     }
@@ -262,6 +279,41 @@ private fun TechnicianHomeRefreshing() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * What the screen says when the backend reported this day but the day could not be read again.
+ *
+ * It never blocks the content: the technician keeps working from what is known, and knows this is not
+ * the newest answer (`BR-013`, `BR-014`). It is the manager home's own notice, presented the same way
+ * so one situation is described once (`BR-010`, `BR-041`).
+ */
+@Composable
+private fun UnrefreshedNotice(onRetry: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag(TechnicianHomeUnrefreshedTag),
+        color = MaterialTheme.colorScheme.secondary,
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                modifier = Modifier.weight(1f),
+                text = stringResource(R.string.home_unrefreshed_notice),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondary,
+            )
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier.testTag(TechnicianHomeRetryTag),
+            ) {
+                Text(stringResource(R.string.home_retry))
+            }
+        }
     }
 }
 
@@ -310,7 +362,7 @@ private fun TodayEmptyCard() {
 @Composable
 private fun NextVisitCard(
     visit: TechnicianHomeVisit,
-    onOpenJob: (jobId: String) -> Unit,
+    onOpenJob: (jobId: String, visitId: String?) -> Unit,
 ) {
     Column(modifier = Modifier.testTag(TechnicianHomeNextVisitTag)) {
         SectionLabel(label = stringResource(R.string.technician_home_next_title), count = null)
@@ -321,22 +373,18 @@ private fun NextVisitCard(
             shape = MaterialTheme.shapes.large,
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = formatScheduledTime(visit.scheduledStart, deviceLocale())
-                            ?: stringResource(R.string.home_schedule_time_unknown),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    HomeVisitStatusPill(
-                        status = visit.visitStatus,
-                        isOverdue = visit.isOverdue,
-                    )
-                }
+                HomeVisitStatusPill(
+                    status = visit.visitStatus,
+                    isOverdue = visit.isOverdue,
+                    modifier = Modifier.align(Alignment.Start),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = formatScheduledDateTime(visit.scheduledStart, deviceLocale())
+                        ?: stringResource(R.string.home_schedule_time_unknown),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = visit.jobTitle,
@@ -371,7 +419,7 @@ private fun NextVisitCard(
                 }
                 Spacer(Modifier.height(16.dp))
                 Button(
-                    onClick = { onOpenJob(visit.jobId) },
+                    onClick = { onOpenJob(visit.jobId, visit.visitId) },
                     modifier = Modifier
                         .testTag(technicianHomeOpenJobTag(visit.jobId))
                         .fillMaxWidth(),
@@ -394,34 +442,30 @@ private fun NextVisitCard(
 @Composable
 private fun VisitRow(
     visit: TechnicianHomeVisit,
-    onOpenJob: (jobId: String) -> Unit,
+    onOpenJob: (jobId: String, visitId: String?) -> Unit,
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(technicianHomeVisitTag(visit.visitId))
-            .clickable { onOpenJob(visit.jobId) },
+            .clickable { onOpenJob(visit.jobId, visit.visitId) },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shape = MaterialTheme.shapes.large,
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = formatScheduledTime(visit.scheduledStart, deviceLocale())
-                        ?: stringResource(R.string.home_schedule_time_unknown),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.weight(1f))
-                HomeVisitStatusPill(
-                    status = visit.visitStatus,
-                    isOverdue = visit.isOverdue,
-                )
-            }
+            HomeVisitStatusPill(
+                status = visit.visitStatus,
+                isOverdue = visit.isOverdue,
+                modifier = Modifier.align(Alignment.Start),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = formatScheduledDateTime(visit.scheduledStart, deviceLocale())
+                    ?: stringResource(R.string.home_schedule_time_unknown),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
             Spacer(Modifier.height(6.dp))
             Text(
                 text = visit.jobTitle,
@@ -463,6 +507,10 @@ private fun VisitRow(
 /**
  * One condition on the caller's own work (`BR-072`, `BR-074`).
  *
+ * What the section holds is the backend's answer (`BR-001`): the late work the screen says nowhere
+ * else, so a Visit the day already states — the one to do next, or one of today's rows — is presented
+ * there rather than repeated here (`BR-012`, `BR-041`).
+ *
  * The whole card opens the Job it is about, which is where the technician can act on it — including
  * resolving a Visit that never happened (`BR-012`). The kind is the backend's own code, named in
  * plain business language here (`BR-041`).
@@ -470,13 +518,13 @@ private fun VisitRow(
 @Composable
 private fun AttentionCard(
     item: TechnicianAttentionItem,
-    onOpenJob: (jobId: String) -> Unit,
+    onOpenJob: (jobId: String, visitId: String?) -> Unit,
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(technicianHomeVisitTag(item.visitId))
-            .clickable { onOpenJob(item.jobId) },
+            .clickable { onOpenJob(item.jobId, item.visitId) },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shape = MaterialTheme.shapes.large,

@@ -7,20 +7,25 @@ import com.servora.android.data.offline.ReadSource
 import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
+import com.servora.android.data.schedule.toRequest
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.AssignmentRole
 import com.servora.android.domain.model.CustomerJobAddress
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobContactPerson
+import com.servora.android.domain.model.JobReadOnlyReason
 import com.servora.android.domain.model.JobCustomerContact
 import com.servora.android.domain.model.JobDetails
+import com.servora.android.domain.model.JobDetailsFollowUpVisitRequest
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
 import com.servora.android.domain.model.JobDetailsVisitSummary
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitStatus
+import com.servora.android.domain.model.jobReadOnlyReasonOrNull
 import com.servora.android.domain.model.visitOutcomeOrNull
 import java.io.IOException
 import java.time.Instant
@@ -60,6 +65,9 @@ interface JobDetailsRepository {
      */
     suspend fun loadJobDetails(jobId: String): JobDetailsResult
 
+    suspend fun loadJobDetails(jobId: String, representedVisitId: String?): JobDetailsResult =
+        loadJobDetails(jobId)
+
     /**
      * Returns the Job's chronological activity, newest first, or why it could not be read.
      *
@@ -78,6 +86,20 @@ interface JobDetailsRepository {
      * the same way whichever capability admitted the caller (`docs/api/job-actions.md` §2).
      */
     suspend fun addVisitNoteRequest(note: VisitNote): ActivityWriteResult
+
+    /** Corrects one Visit note and returns the refreshed activity. */
+    suspend fun editVisitNote(
+        jobId: String,
+        noteId: String,
+        body: String,
+    ): ActivityWriteResult
+
+    /** Soft-deletes one Visit note from ordinary activity and returns the refreshed activity. */
+    suspend fun removeVisitNote(
+        jobId: String,
+        noteId: String,
+        reason: String,
+    ): ActivityWriteResult
 
     /**
      * Takes one photo out of ordinary use, recording [reason], and returns the refreshed activity
@@ -155,6 +177,78 @@ interface JobDetailsRepository {
     suspend fun loadAssignableTechnicians(): AssignableTechniciansResult
 
     /**
+     * Schedules one further Visit on the Job (`BR-071`, `BR-072`).
+     *
+     * The caller states the schedule and the whole crew, with exactly one `LEAD`, because that is what
+     * a Visit that becomes `SCHEDULED` carries (`BR-068`, `BR-072`). The API owns the Visit's identity,
+     * its `SCHEDULED` status, its schedule and assignment history and the Job consequence that follows
+     * (`BR-067`), so nothing here decides any of them.
+     *
+     * [confirmConflicts] is `true` only when the user has been shown the `BR-070` conflicts the API
+     * reported for the same scheduling attempt and accepted them.
+     *
+     * The write is **online-only**: the route carries no client-generated idempotency key and no
+     * conflict policy is decided for it, so it is never queued on the device
+     * (`offline-first-architecture.md` §5, §13.2).
+     */
+    suspend fun createVisit(
+        jobId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        confirmConflicts: Boolean,
+    ): JobActionResult
+
+    /**
+     * Approves a pending follow-up Visit request into a scheduled Visit (`BR-FV-004`, `BR-FV-005`).
+     *
+     * The reviewer states the schedule and the crew the Visit will carry, which is how the office's
+     * decision can differ from the technician's proposal (`BR-FV-003`, `BR-FV-010`).
+     * [expectedStatus] and [expectedVersion] are the request as the reviewer read it, so a request that
+     * moved on is refused rather than decided about (`BR-086`).
+     *
+     * Like [createVisit] it is **online-only**, and it answers with the Job so the caller presents what
+     * the backend now holds (`BR-001`).
+     */
+    suspend fun approveVisitRequest(
+        jobId: String,
+        requestId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        expectedStatus: FollowUpVisitRequestStatus,
+        expectedVersion: Int,
+        confirmConflicts: Boolean,
+    ): JobActionResult
+
+    /**
+     * Submits a follow-up Visit request for the Job (`BR-FV-001`, `BR-FV-003`, `BR-FV-008`).
+     *
+     * A technician assigned to a Visit of the Job states that more on-site work is required, with the
+     * window they would propose, why it is needed and whether they would like to perform it themselves.
+     * That is a **proposal**, not a decision: it schedules nothing and creates no Visit
+     * (`BR-FV-002`), and the office decides what happens to it (`BR-FV-004`, `BR-FV-005`). Whether the
+     * caller may submit at all is `visits.request_follow_up` (`BR-006`, `BR-009`), enforced by the API
+     * whatever this client draws (`BR-007`).
+     *
+     * [sourceVisitId] is the field attempt the request grew from (`BR-FV-008`). The request's own
+     * status comes back and is what a client presents (`BR-FV-012`); no Job is re-read, because the
+     * request moves no Job state (`BR-FV-002`).
+     *
+     * The write is **online-only**: the route takes no client-generated idempotency key and no conflict
+     * policy is decided for it, so it is never queued on the device
+     * (`offline-first-architecture.md` §5, §13.2, `BR-013`, `BR-032`).
+     */
+    suspend fun requestFollowUpVisit(
+        jobId: String,
+        sourceVisitId: String,
+        proposedStart: Instant,
+        proposedEnd: Instant,
+        reason: String,
+        sameTechnicianPreferred: Boolean,
+    ): VisitRequestSubmitResult
+
+    /**
      * Emits after a replay the backend accepted, so a screen showing that work re-reads it
      * (`offline-first-architecture.md` §7).
      *
@@ -164,8 +258,20 @@ interface JobDetailsRepository {
     val appliedOperations: Flow<Unit>
 
     /**
-     * Moves the represented Visit to [action]'s destination (`BR-074`, `BR-075`), recording the
-     * outcome `BR-077` requires when it is a completion.
+     * Emits after a replay the backend **refused**, so a screen showing that work stops presenting it
+     * as waiting and reports the state the backend actually holds (`§6`, §7).
+     *
+     * This is the case the technician has to see: a queued transition, completion or note refused
+     * because the Job was canceled or completed elsewhere, the Visit moved on, or the crew no longer
+     * includes them. `BR-014` requires that refusal to stay visible with the API's own reason, and a
+     * screen that kept showing "saved on this device" would be stating something the backend has
+     * already answered (`BR-001`, `BR-032`). It carries no payload for the same reason
+     * [appliedOperations] does not: the screen re-reads the Job.
+     */
+    val refusedOperations: Flow<Unit>
+
+    /**
+     * Moves the represented Visit to [action]'s working destination (`BR-074`, `BR-075`).
      *
      * The action is sent against the API; when the API cannot be reached it is **queued on the device**
      * and reported as [JobActionResult.Queued], because a Visit transition is offline-capable
@@ -173,6 +279,17 @@ interface JobDetailsRepository {
      * answered, and its answer is the one the technician has to act on (`BR-032`).
      */
     suspend fun changeVisitStatus(action: VisitStatusChange): JobActionResult
+
+    /**
+     * Completes the represented Visit, recording the outcome [action] states (`BR-077`, `BR-078`).
+     *
+     * It is the API's own completion operation (`POST /jobs/:jobId/visits/:visitId/completion`), not a
+     * destination of [changeVisitStatus]: finishing a Visit records an outcome and asks for the
+     * capability that authorizes recording one (`BR-009`, `BR-093`). Like a working transition it is
+     * **offline-capable** — the API takes the idempotency key and the version the technician saw, so a
+     * completion the API cannot be reached for is queued rather than lost (`BR-014`, `ADR-019` D5).
+     */
+    suspend fun completeVisit(action: VisitCompletion): JobActionResult
 
     /** The status transition waiting for the backend on this Job, or `null` when none is (§7). */
     suspend fun queuedVisitAction(jobId: String): QueuedVisitFieldAction?
@@ -228,6 +345,12 @@ class DefaultJobDetailsRepository @Inject constructor(
 
     override val appliedOperations: Flow<Unit> = engine.applied
 
+    /**
+     * The engine's "something was refused" answer, so a queued action the backend would not apply stops
+     * being presented as waiting and the Job is shown as the backend actually holds it (`§6`, §7).
+     */
+    override val refusedOperations: Flow<Unit> = engine.refused
+
     override suspend fun createJob(request: CreateJobRequest): JobCreateResult {
         val accessToken = sessionAuthenticator.accessToken()
             ?: return JobCreateResult.Failure(JobCreateFailure.UNAUTHENTICATED)
@@ -277,7 +400,10 @@ class DefaultJobDetailsRepository @Inject constructor(
                 JobCreateResult.Failure(JobCreateFailure.NETWORK)
         }
 
-    override suspend fun loadJobDetails(jobId: String): JobDetailsResult {
+    override suspend fun loadJobDetails(jobId: String): JobDetailsResult =
+        loadJobDetails(jobId, representedVisitId = null)
+
+    override suspend fun loadJobDetails(jobId: String, representedVisitId: String?): JobDetailsResult {
         // The working set is scoped to the subject of the session that produced it, so a read whose
         // subject cannot be read is refused rather than answered without local state (§10).
         val subjectId = subject.current()
@@ -285,7 +411,12 @@ class DefaultJobDetailsRepository @Inject constructor(
         val accessToken = sessionAuthenticator.accessToken()
             ?: return JobDetailsResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
 
-        return when (val read = read(accessToken, allowRenewal = true, jobId = jobId)) {
+        return when (val read = read(
+            accessToken = accessToken,
+            allowRenewal = true,
+            jobId = jobId,
+            representedVisitId = representedVisitId,
+        )) {
             is JobRead.Answered -> {
                 // A successful read replaces the local copy rather than being merged into it (§10).
                 evidence.rememberJob(subjectId, jobId, read.job)
@@ -342,11 +473,6 @@ class DefaultJobDetailsRepository @Inject constructor(
 
         val request = ChangeVisitStatusRequestDto(
             status = action.status.name,
-            outcomeCode = action.outcome?.name,
-            // The technician's summary is sent as written but without the surrounding whitespace a
-            // text field collects, and an empty one is absent rather than blank: the API requires the
-            // summary with a completion, so a blank one is a completion it would refuse (`BR-077`).
-            outcomeSummary = action.outcomeSummary?.trim()?.takeIf { it.isNotEmpty() },
             // The key and the device instant are the ones the action was made with, so the queued
             // replay carries exactly them and is applied at most once (`BR-031`, §5).
             clientOperationId = action.operationId,
@@ -370,6 +496,41 @@ class DefaultJobDetailsRepository @Inject constructor(
         return result
     }
 
+    override suspend fun completeVisit(action: VisitCompletion): JobActionResult {
+        val subjectId = subject.current()
+            ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        // The technician's summary is sent as written but without the surrounding whitespace a text
+        // field collects. It is never omitted: `BR-077` requires it with the outcome, and the API
+        // refuses a completion without it.
+        val summary = action.outcomeSummary.trim()
+        if (summary.isEmpty()) {
+            return JobActionResult.Failure(JobActionFailure.VALIDATION)
+        }
+        val request = CompleteVisitRequestDto(
+            outcomeCode = action.outcome.name,
+            outcomeSummary = summary,
+            clientOperationId = action.operationId,
+            capturedAt = action.capturedAt.toString(),
+            expectedVersion = action.expectedVersion,
+        )
+        val result = perform(
+            accessToken = accessToken,
+            allowRenewal = true,
+            call = { token ->
+                api.completeVisit("Bearer $token", action.jobId, action.visitId, request)
+            },
+        )
+        // The same posture as a working transition: a completion that never reached the backend is
+        // queued rather than lost, and a refusal is the backend's own answer (`BR-014`, `ADR-019` D5).
+        if (result is JobActionResult.Failure && result.reason == JobActionFailure.NETWORK) {
+            return queueCompletion(subjectId, action)
+        }
+        return result
+    }
+
     /** Queues the transition and reports the provisional outcome the screen presents (`§4`, §7). */
     private suspend fun queueChangeStatus(
         subjectId: String,
@@ -380,6 +541,25 @@ class DefaultJobDetailsRepository @Inject constructor(
         }
         // Nothing has been applied, so the action is never presented as done: the screen keeps the last
         // state the backend reported and shows the action that is waiting (`BR-001`, §7).
+        return JobActionResult.Queued(evidence.reportedJob(subjectId, action.jobId)?.toJobDetails())
+    }
+
+    /** Queues the completion, with the outcome `BR-077` requires, and reports it as waiting. */
+    private suspend fun queueCompletion(
+        subjectId: String,
+        action: VisitCompletion,
+    ): JobActionResult {
+        if (!visitFieldActions.queueCompletion(subjectId, action)) {
+            // A completion with no summary is not an operation the API would accept, so it is reported
+            // as the invalid request it is rather than as work that is waiting (`BR-077`, §5).
+            return JobActionResult.Failure(
+                if (action.outcomeSummary.isBlank()) {
+                    JobActionFailure.VALIDATION
+                } else {
+                    JobActionFailure.NETWORK
+                },
+            )
+        }
         return JobActionResult.Queued(evidence.reportedJob(subjectId, action.jobId)?.toJobDetails())
     }
 
@@ -434,6 +614,50 @@ class DefaultJobDetailsRepository @Inject constructor(
             return ActivityWriteResult.Queued
         }
         return result
+    }
+
+    override suspend fun editVisitNote(
+        jobId: String,
+        noteId: String,
+        body: String,
+    ): ActivityWriteResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return ActivityWriteResult.Failure(JobActionFailure.UNAUTHENTICATED)
+        val text = body.trim()
+        if (text.isEmpty()) {
+            return ActivityWriteResult.Failure(JobActionFailure.VALIDATION)
+        }
+        val request = EditVisitNoteRequestDto(body = text)
+        return performActivityWrite(
+            accessToken = accessToken,
+            jobId = jobId,
+            allowRenewal = true,
+            call = { token ->
+                api.editVisitNote("Bearer $token", jobId, noteId, request)
+            },
+        )
+    }
+
+    override suspend fun removeVisitNote(
+        jobId: String,
+        noteId: String,
+        reason: String,
+    ): ActivityWriteResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return ActivityWriteResult.Failure(JobActionFailure.UNAUTHENTICATED)
+        val text = reason.trim()
+        if (text.isEmpty()) {
+            return ActivityWriteResult.Failure(JobActionFailure.VALIDATION)
+        }
+        val request = RemoveVisitNoteRequestDto(reason = text)
+        return performActivityWrite(
+            accessToken = accessToken,
+            jobId = jobId,
+            allowRenewal = true,
+            call = { token ->
+                api.removeVisitNote("Bearer $token", jobId, noteId, request)
+            },
+        )
     }
 
     override suspend fun removeJobPhoto(
@@ -534,12 +758,7 @@ class DefaultJobDetailsRepository @Inject constructor(
             ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
 
         val request = AssignVisitTechniciansRequestDto(
-            technicians = assignments.map { assignment ->
-                TechnicianAssignmentRequestDto(
-                    membershipId = assignment.membershipId,
-                    roleCode = assignment.role.toRoleCode(),
-                )
-            },
+            technicians = assignments.toRequestedTechnicians(),
             confirmConflicts = confirmConflicts,
             expectedVersion = expectedVersion,
         )
@@ -559,6 +778,138 @@ class DefaultJobDetailsRepository @Inject constructor(
             )
         return readTechnicians(accessToken, allowRenewal = true)
     }
+
+    override suspend fun createVisit(
+        jobId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        confirmConflicts: Boolean,
+    ): JobActionResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        val request = CreateVisitRequestDto(
+            scheduledStart = scheduledStart.toString(),
+            scheduledEnd = scheduledEnd.toString(),
+            technicians = assignments.toRequestedTechnicians(),
+            confirmConflicts = confirmConflicts,
+        )
+        return perform(
+            accessToken = accessToken,
+            allowRenewal = true,
+            call = { token -> api.createVisit("Bearer $token", jobId, request) },
+        )
+    }
+
+    override suspend fun approveVisitRequest(
+        jobId: String,
+        requestId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        expectedStatus: FollowUpVisitRequestStatus,
+        expectedVersion: Int,
+        confirmConflicts: Boolean,
+    ): JobActionResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        val request = ApproveVisitRequestRequestDto(
+            scheduledStart = scheduledStart.toString(),
+            scheduledEnd = scheduledEnd.toString(),
+            technicians = assignments.toRequestedTechnicians(),
+            expectedStatus = expectedStatus.name,
+            expectedVersion = expectedVersion,
+            confirmConflicts = confirmConflicts,
+        )
+        return perform(
+            accessToken = accessToken,
+            allowRenewal = true,
+            call = { token ->
+                api.approveVisitRequest("Bearer $token", jobId, requestId, request)
+            },
+        )
+    }
+
+    override suspend fun requestFollowUpVisit(
+        jobId: String,
+        sourceVisitId: String,
+        proposedStart: Instant,
+        proposedEnd: Instant,
+        reason: String,
+        sameTechnicianPreferred: Boolean,
+    ): VisitRequestSubmitResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return VisitRequestSubmitResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        val request = SubmitVisitRequestRequestDto(
+            sourceVisitId = sourceVisitId,
+            proposedStart = proposedStart.toString(),
+            proposedEnd = proposedEnd.toString(),
+            reason = reason,
+            sameTechnicianPreferred = sameTechnicianPreferred,
+        )
+        return submitRequest(
+            accessToken = accessToken,
+            allowRenewal = true,
+            jobId = jobId,
+            request = request,
+        )
+    }
+
+    /**
+     * Sends a follow-up Visit request, renewing the session once when the backend rejects the token.
+     *
+     * The answer is the request, so an answer this build cannot read is reported as one it cannot
+     * interpret rather than as a request that was recorded (`BR-042`): a technician must never be told
+     * the office has a request the backend never stored.
+     */
+    private suspend fun submitRequest(
+        accessToken: String,
+        allowRenewal: Boolean,
+        jobId: String,
+        request: SubmitVisitRequestRequestDto,
+    ): VisitRequestSubmitResult =
+        try {
+            val submitted = api.submitVisitRequest("Bearer $accessToken", jobId, request).toRequest()
+            if (submitted == null) {
+                VisitRequestSubmitResult.Failure(JobActionFailure.UNEXPECTED)
+            } else {
+                VisitRequestSubmitResult.Success(submitted)
+            }
+        } catch (failure: HttpException) {
+            if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+                renewAndRetryRequest(accessToken, jobId, request)
+            } else {
+                VisitRequestSubmitResult.Failure(failure.toActionFailure(json))
+            }
+        } catch (failure: IOException) {
+            VisitRequestSubmitResult.Failure(JobActionFailure.NETWORK)
+        } catch (failure: SerializationException) {
+            VisitRequestSubmitResult.Failure(JobActionFailure.UNEXPECTED)
+        }
+
+    private suspend fun renewAndRetryRequest(
+        rejectedToken: String,
+        jobId: String,
+        request: SubmitVisitRequestRequestDto,
+    ): VisitRequestSubmitResult =
+        when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
+            is SessionRenewal.Renewed ->
+                submitRequest(
+                    accessToken = renewal.accessToken,
+                    allowRenewal = false,
+                    jobId = jobId,
+                    request = request,
+                )
+
+            SessionRenewal.Rejected ->
+                VisitRequestSubmitResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+            SessionRenewal.Unavailable ->
+                VisitRequestSubmitResult.Failure(JobActionFailure.NETWORK)
+        }
 
     /** Runs one action, renewing the session once when the backend rejects the token. */
     private suspend fun perform(
@@ -700,11 +1051,13 @@ class DefaultJobDetailsRepository @Inject constructor(
         accessToken: String,
         allowRenewal: Boolean,
         jobId: String,
+        representedVisitId: String?,
     ): JobRead =
         try {
             val job = api.jobDetails(
                 authorization = "Bearer $accessToken",
                 jobId = jobId,
+                visitId = representedVisitId,
             )
             val details = job.toJobDetails()
             if (details == null) {
@@ -716,7 +1069,7 @@ class DefaultJobDetailsRepository @Inject constructor(
             }
         } catch (failure: HttpException) {
             if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
-                renewAndRetry(accessToken, jobId)
+                renewAndRetry(accessToken, jobId, representedVisitId)
             } else {
                 JobRead.Failed(failure.toFailureReason())
             }
@@ -730,10 +1083,16 @@ class DefaultJobDetailsRepository @Inject constructor(
     private suspend fun renewAndRetry(
         rejectedToken: String,
         jobId: String,
+        representedVisitId: String?,
     ): JobRead =
         when (val renewal = sessionAuthenticator.renew(rejectedToken)) {
             is SessionRenewal.Renewed ->
-                read(renewal.accessToken, allowRenewal = false, jobId = jobId)
+                read(
+                    renewal.accessToken,
+                    allowRenewal = false,
+                    jobId = jobId,
+                    representedVisitId = representedVisitId,
+                )
 
             SessionRenewal.Rejected ->
                 JobRead.Failed(CustomersFailureReason.UNAUTHENTICATED)
@@ -826,8 +1185,6 @@ private const val HTTP_SERVER_ERROR = 500
 private const val CODE_NOT_FOUND = "JOB_NOT_FOUND"
 private const val CODE_VISIT_NOT_FOUND = "VISIT_NOT_FOUND"
 private const val CODE_TRANSITION_NOT_ALLOWED = "JOB_STATUS_TRANSITION_NOT_ALLOWED"
-private const val CODE_CANCELLATION_UNAVAILABLE = "JOB_CANCELLATION_UNAVAILABLE"
-private const val CODE_REVIEW_CONDITION_NOT_MET = "JOB_REVIEW_CONDITION_NOT_MET"
 private const val CODE_COMPLETION_BLOCKED = "JOB_COMPLETION_BLOCKED"
 private const val CODE_VISIT_NOT_RESCHEDULABLE = "VISIT_NOT_RESCHEDULABLE"
 private const val CODE_TECHNICIANS_NOT_ASSIGNABLE = "TECHNICIANS_NOT_ASSIGNABLE"
@@ -835,6 +1192,16 @@ private const val CODE_PHOTO_ALREADY_REMOVED = "JOB_PHOTO_ALREADY_REMOVED"
 private const val CODE_AUDIO_NOTE_ALREADY_REMOVED = "JOB_AUDIO_NOTE_ALREADY_REMOVED"
 private const val CODE_SCHEDULE_CONFLICT = "SCHEDULE_CONFLICT"
 private const val CODE_VERSION_CONFLICT = "VERSION_CONFLICT"
+
+/**
+ * The two answers the follow-up-request approval route gives about the request itself
+ * (`docs/api/visit-requests.md`).
+ *
+ * They are the request's own state rather than a bad payload, so the reviewer is told which of the two
+ * happened: the request they were shown moved on, or it is no longer open for review at all.
+ */
+private const val CODE_VISIT_REQUEST_CONFLICT = "FOLLOW_UP_VISIT_REQUEST_CONFLICT"
+private const val CODE_VISIT_REQUEST_NOT_REVIEWABLE = "FOLLOW_UP_VISIT_REQUEST_NOT_REVIEWABLE"
 
 /*
  * The Visit field lifecycle's own stable codes (`docs/api/job-actions.md` §7).
@@ -844,7 +1211,6 @@ private const val CODE_VERSION_CONFLICT = "VERSION_CONFLICT"
  */
 private const val CODE_VISIT_TRANSITION_NOT_ALLOWED = "VISIT_STATUS_TRANSITION_NOT_ALLOWED"
 private const val CODE_VISIT_SCHEDULING_CONDITION_NOT_MET = "VISIT_SCHEDULING_CONDITION_NOT_MET"
-private const val CODE_JOB_CLOSED_FOR_FIELD_WORK = "JOB_CLOSED_FOR_FIELD_WORK"
 private const val CODE_VISIT_OPERATION_REUSED = "VISIT_OPERATION_REUSED"
 
 /**
@@ -922,6 +1288,20 @@ private fun HttpException.errorEnvelope(json: Json): ApiErrorDto? =
     }.getOrNull()
 
 /**
+ * The failure a refused answer means for an action whose answer is not the Job.
+ *
+ * It reports the same classification [toActionOutcome] applies, so the vocabulary a screen presents has
+ * one definition rather than two (`BR-041`). A conflict is not a failure — and the route a request is
+ * submitted on has none — so an answer this build cannot place is reported as one it cannot interpret
+ * (`BR-042`).
+ */
+private fun HttpException.toActionFailure(json: Json): JobActionFailure =
+    when (val outcome = toActionOutcome(json)) {
+        is JobActionResult.Failure -> outcome.reason
+        else -> JobActionFailure.UNEXPECTED
+    }
+
+/**
  * Classifies a refused action.
  *
  * `BR-070` conflicts are not a failure: they are the question the user has to answer, so they are
@@ -944,8 +1324,6 @@ private fun HttpException.toActionFailure(errorCode: String? = null): JobActionF
     when (errorCode) {
         CODE_NOT_FOUND, CODE_VISIT_NOT_FOUND -> JobActionFailure.NOT_FOUND
         CODE_TRANSITION_NOT_ALLOWED -> JobActionFailure.JOB_TRANSITION_NOT_ALLOWED
-        CODE_CANCELLATION_UNAVAILABLE -> JobActionFailure.JOB_CANCELLATION_UNAVAILABLE
-        CODE_REVIEW_CONDITION_NOT_MET -> JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET
         CODE_COMPLETION_BLOCKED -> JobActionFailure.JOB_COMPLETION_BLOCKED
         CODE_VISIT_NOT_RESCHEDULABLE -> JobActionFailure.VISIT_NOT_RESCHEDULABLE
         CODE_TECHNICIANS_NOT_ASSIGNABLE -> JobActionFailure.TECHNICIANS_NOT_ASSIGNABLE
@@ -959,6 +1337,11 @@ private fun HttpException.toActionFailure(errorCode: String? = null): JobActionF
         CODE_VISIT_OPERATION_REUSED -> JobActionFailure.VISIT_OPERATION_REUSED
         CODE_VERSION_CONFLICT, CODE_SCHEDULE_CONFLICT ->
             JobActionFailure.VERSION_CONFLICT
+        // The follow-up request's own two answers (`BR-FV-012`): an approval is a decision about the
+        // request the reviewer read, so a request that moved on or is already decided is reported as
+        // what it is rather than as a generic conflict (`BR-041`).
+        CODE_VISIT_REQUEST_CONFLICT -> JobActionFailure.VISIT_REQUEST_CHANGED
+        CODE_VISIT_REQUEST_NOT_REVIEWABLE -> JobActionFailure.VISIT_REQUEST_NOT_REVIEWABLE
 
         else ->
             when (code()) {
@@ -991,12 +1374,21 @@ private fun JobDetailsDto.toJobDetails(): JobDetails? {
     // the whole read rather than being dropped, exactly as the represented Visit does: a screen that
     // presented a Job's history with a Visit silently missing would report the Job wrongly (`BR-042`).
     val jobVisits = visits.map { summary -> summary.toVisitSummary() ?: return null }
+    val mappedFollowUpVisitRequest = followUpVisitRequest?.toRequestSummary()
+    if (followUpVisitRequest != null && mappedFollowUpVisitRequest == null) {
+        return null
+    }
     return JobDetails(
         id = id,
         jobNumber = jobNumber,
         title = title,
         description = description,
         status = jobStatus,
+        // The API's own answer on whether this Job's field record is final (`BR-062`, `BR-079`). A code
+        // this build cannot name is read as no reason rather than as a made-up one: the Job is still
+        // presentable, and the Visit's own answers gate every field control beside it (`BR-041`,
+        // `BR-042`).
+        readOnlyReason = jobReadOnlyReasonOrNull(readOnlyReason),
         // A transition code this build does not know is left out rather than failing the whole read:
         // the Job itself is still presentable, and an action the screen cannot name is one it must
         // not draw (`BR-041`, `BR-042`).
@@ -1014,6 +1406,8 @@ private fun JobDetailsDto.toJobDetails(): JobDetails? {
         selectedVisit = visit,
         technicians = assigned,
         visits = jobVisits,
+        followUpVisitRequest = mappedFollowUpVisitRequest,
+        canScheduleVisit = canScheduleVisit,
     )
 }
 
@@ -1041,6 +1435,20 @@ private fun JobDetailsVisitSummaryDto.toVisitSummary(): JobDetailsVisitSummary? 
         scheduledEnd = scheduledEnd,
         version = version,
         technicians = crew,
+    )
+}
+
+private fun JobDetailsFollowUpVisitRequestDto.toRequestSummary(): JobDetailsFollowUpVisitRequest? {
+    val requestStatus = FollowUpVisitRequestStatus.entries.firstOrNull { it.name == status }
+        ?: return null
+    return JobDetailsFollowUpVisitRequest(
+        id = id,
+        jobId = jobId,
+        sourceVisitId = sourceVisitId,
+        createdVisitId = createdVisitId,
+        requestingTechnicianMembershipId = requestingTechnicianMembershipId,
+        status = requestStatus,
+        version = version,
     )
 }
 
@@ -1080,6 +1488,7 @@ private fun JobDetailsVisitDto.toVisit(): JobDetailsVisit? {
         scheduledEnd = scheduledEnd,
         version = version,
         reschedulable = reschedulable,
+        requestFollowUpAllowed = requestFollowUpAllowed,
         // A destination this build does not know is left out rather than failing the whole read: the
         // Visit is still presentable, and a destination the screen cannot name is one it must not
         // offer (`BR-041`, `BR-042`).
@@ -1088,8 +1497,12 @@ private fun JobDetailsVisitDto.toVisit(): JobDetailsVisit? {
         },
         // The API's answer to the other half of the question — whether the caller is authorized to drive
         // this Visit, through their own crew membership or through the office capability that needs no
-        // crew at all (`ADR-019` D3, D7; `BR-093`) — is carried through as the API reported it.
+        // crew at all (`ADR-019` D3, D7; `BR-093`) — is carried through as the API reported it, together
+        // with its two narrower answers: whether a completion is that caller's to perform
+        // (`BR-077`, `BR-093`) and whether the Visit still takes a field update (`BR-062`, `BR-079`).
         fieldActionable = fieldActionable,
+        completionAllowed = completionAllowed,
+        addUpdateAllowed = addUpdateAllowed,
     )
 }
 
@@ -1132,6 +1545,9 @@ private fun JobActivityEventDto.toJobActivityEvent(): JobActivityEvent? {
         outcomeCode = outcomeCode,
         outcomeSummary = outcomeSummary,
         body = body,
+        noteEditedAt = noteEditedAt,
+        noteRemovedAt = noteRemovedAt,
+        noteRemovalReason = noteRemovalReason,
         photoId = photoId,
         photoPhase = photoPhase,
         photoRemovalReason = photoRemovalReason,

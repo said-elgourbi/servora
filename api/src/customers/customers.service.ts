@@ -125,12 +125,7 @@ export class ContactVersionConflictError extends Error {
  * This is the Job lifecycle's non-terminal set (`BR-058`): every status except `COMPLETED` and
  * `CANCELED`. It defines a derived filter condition and is not a new Job status (`BR-042`).
  */
-const OPEN_JOB_STATUSES = [
-  'NEW',
-  'SCHEDULED',
-  'IN_PROGRESS',
-  'PENDING_REVIEW',
-] as const;
+const OPEN_JOB_STATUSES = ['NEW', 'ACTIVE'] as const;
 
 /**
  * The Property lifecycle state the customer-detail Property projection shows (`BR-081`, `BR-082`).

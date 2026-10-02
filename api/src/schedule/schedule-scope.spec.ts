@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CUSTOMER_PERMISSIONS, VISIT_PERMISSIONS } from '../auth/permissions.js';
+import { SCHEDULE_PERMISSIONS, VISIT_PERMISSIONS } from '../auth/permissions.js';
 import type { PermissionCode } from '../auth/permissions.js';
 import {
   resolveScheduleScope,
@@ -20,7 +20,7 @@ describe('resolveScheduleScope', () => {
     expect(
       resolveScheduleScope({
         membershipId: 'member-1',
-        permissions: [CUSTOMER_PERMISSIONS.VIEW],
+        permissions: [SCHEDULE_PERMISSIONS.VIEW_ORG],
       }),
     ).toEqual({ kind: 'ORGANIZATION', membershipId: 'member-1' });
   });
@@ -53,7 +53,7 @@ describe('resolveScheduleScope', () => {
         membershipId: 'member-3',
         permissions: [
           VISIT_PERMISSIONS.VIEW_ASSIGNED,
-          CUSTOMER_PERMISSIONS.VIEW,
+          SCHEDULE_PERMISSIONS.VIEW_ORG,
         ],
       }).kind,
     ).toBe('ORGANIZATION');

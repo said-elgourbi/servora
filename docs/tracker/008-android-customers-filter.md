@@ -1,5 +1,7 @@
 # Tracker 008 — Android Customers filter
 
+> **Superseded vocabulary, 2026-09-20.** The implemented behaviour this tracker records is described in it with the Job statuses and Visit statuses that were current then — `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW` and `NO_SHOW`. Those are retired: a Job is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED` (`BR-058`), a Visit is `DRAFT`, `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or `CANCELED` (`BR-074`), `BR-061` is **REMOVED**, and operational attention is derived (`BR-060`). The behaviour this tracker **decided** stands; only the vocabulary in its prose is historic. See `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+
 **Status: COMPLETE** (backend-filtered customer list; Android filter sheet)
 
 Date: 2026-09-12

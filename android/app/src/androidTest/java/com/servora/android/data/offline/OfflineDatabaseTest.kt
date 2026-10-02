@@ -319,6 +319,7 @@ class OfflineDatabaseTest {
     ): PendingJobAudioNote = PendingJobAudioNote(
         audioNoteId = audioNoteId,
         jobId = jobId,
+        visitId = VISIT_ID,
         localPath = "app-private/job-audio/$SUBJECT/$audioNoteId.m4a",
         phase = phase,
         note = null,
@@ -346,6 +347,7 @@ class OfflineDatabaseTest {
     ): PendingJobPhoto = PendingJobPhoto(
         photoId = photoId,
         jobId = jobId,
+        visitId = VISIT_ID,
         localPath = "app-private/job-photos/$SUBJECT/$photoId.jpg",
         phase = phase,
         note = null,
@@ -412,6 +414,9 @@ class OfflineDatabaseTest {
 
     private companion object {
         const val SUBJECT = "user-1"
+
+        /** The Visit the pending evidence in this file was recorded on (`BR-047`, `BR-080`). */
+        const val VISIT_ID = "visit-1"
         const val TYPE = WorkingSetEntityTypes.PROPERTY_DETAIL
     }
 }

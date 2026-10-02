@@ -51,6 +51,13 @@ import com.servora.android.ui.jobs.JobDetailsOverviewScreen
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.jobs.rememberJobPhotoCapture
 import com.servora.android.ui.jobs.rememberJobPhotoPicker
+// The technician's own requests are read by the technician schedule's ViewModel, which is where their
+// own read lives (`BR-009`, `BR-FV-001`); the request details destination shows one of them.
+import com.servora.android.ui.schedule.FollowUpRequestDetailsScreen
+import com.servora.android.ui.schedule.ManagerFollowUpRequestDetailsScreen
+import com.servora.android.ui.schedule.ScheduleViewModel
+import com.servora.android.ui.schedule.TechnicianScheduleViewModel
+import java.time.ZoneId
 
 /**
  * Every destination the signed-in application can be at.
@@ -70,6 +77,10 @@ object ServoraRoutes {
 
     const val JOB_ID = "jobId"
 
+    const val REQUEST_ID = "requestId"
+
+    const val VISIT_ID = "visitId"
+
     const val CUSTOMER_DETAIL = "customer/detail/{customerId}"
     const val CUSTOMER_EDIT = "customer/edit/{customerId}"
     const val CUSTOMER_JOBS = "customer/jobs/{customerId}"
@@ -79,7 +90,7 @@ object ServoraRoutes {
     const val CUSTOMER_EDIT_CONTACT = "customer/contacts/edit/{customerId}/{contactId}"
     const val PROPERTY_DETAIL = "customer/properties/detail/{customerId}/{propertyId}"
     const val PROPERTY_EDIT = "customer/properties/edit/{customerId}/{propertyId}"
-    const val JOB_DETAIL = "job/detail/{jobId}"
+    const val JOB_DETAIL = "job/detail/{jobId}?$VISIT_ID={$VISIT_ID}"
 
     /**
      * Create Job, with the Customer as an **optional** argument.
@@ -90,6 +101,16 @@ object ServoraRoutes {
      * uses — so the route is one screen, not two.
      */
     const val JOB_CREATE = "job/create?$CUSTOMER_ID={$CUSTOMER_ID}"
+
+    /**
+     * One of the technician's own follow-up Visit requests, read in full
+     * (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.12).
+     *
+     * A request is a proposal about another field attempt rather than the work itself (`BR-FV-002`), so
+     * touching its row in My Schedule's Requests view opens the request, and the Job it was raised on is
+     * one action away from there (`BR-066`).
+     */
+    const val REQUEST_DETAIL = "request/detail/{$REQUEST_ID}"
 
     fun customerDetail(customerId: String): String = "customer/detail/${Uri.encode(customerId)}"
 
@@ -112,7 +133,15 @@ object ServoraRoutes {
     fun propertyEdit(customerId: String, propertyId: String): String =
         "customer/properties/edit/${Uri.encode(customerId)}/${Uri.encode(propertyId)}"
 
-    fun jobDetail(jobId: String): String = "job/detail/${Uri.encode(jobId)}"
+    fun jobDetail(jobId: String, visitId: String? = null): String =
+        if (visitId == null) {
+            "job/detail/${Uri.encode(jobId)}"
+        } else {
+            "job/detail/${Uri.encode(jobId)}?${ServoraRoutes.VISIT_ID}=${Uri.encode(visitId)}"
+        }
+
+    /** One of the technician's own follow-up Visit requests, read in full (`BR-FV-002`, `BR-012`). */
+    fun requestDetail(requestId: String): String = "request/detail/${Uri.encode(requestId)}"
 
     /**
      * Create Job, optionally for [customerId].
@@ -128,6 +157,10 @@ object ServoraRoutes {
         }
 }
 
+@Composable
+private fun rememberRequestTimeZoneId(): String =
+    androidx.compose.runtime.remember { ZoneId.systemDefault().id }
+
 private fun NavBackStackEntry.customerId(): String =
     arguments?.getString(ServoraRoutes.CUSTOMER_ID).orEmpty()
 
@@ -139,6 +172,12 @@ private fun NavBackStackEntry.contactId(): String =
 
 private fun NavBackStackEntry.jobId(): String =
     arguments?.getString(ServoraRoutes.JOB_ID).orEmpty()
+
+private fun NavBackStackEntry.requestId(): String =
+    arguments?.getString(ServoraRoutes.REQUEST_ID).orEmpty()
+
+private fun NavBackStackEntry.visitId(): String? =
+    arguments?.getString(ServoraRoutes.VISIT_ID)
 
 private fun customerIdArgument() =
     listOf(navArgument(ServoraRoutes.CUSTOMER_ID) { type = NavType.StringType })
@@ -159,7 +198,17 @@ private fun optionalCustomerIdArgument() = listOf(
 )
 
 private fun jobIdArgument() =
-    listOf(navArgument(ServoraRoutes.JOB_ID) { type = NavType.StringType })
+    listOf(
+        navArgument(ServoraRoutes.JOB_ID) { type = NavType.StringType },
+        navArgument(ServoraRoutes.VISIT_ID) {
+            type = NavType.StringType
+            nullable = true
+            defaultValue = null
+        },
+    )
+
+private fun requestIdArgument() =
+    listOf(navArgument(ServoraRoutes.REQUEST_ID) { type = NavType.StringType })
 
 private fun propertyArguments() = listOf(
     navArgument(ServoraRoutes.CUSTOMER_ID) { type = NavType.StringType },
@@ -199,6 +248,14 @@ fun ServoraNavHost(
     removeContactViewModel: RemoveContactViewModel,
     jobDetailsViewModel: JobDetailsViewModel,
     createJobViewModel: CreateJobViewModel,
+    /** The manager's organization-wide request read and review actions. */
+    scheduleViewModel: ScheduleViewModel,
+    /**
+     * The technician's own read of their own requests, which the request details destination shows one
+     * of (`BR-009`, `BR-FV-001`). It is the same ViewModel My Schedule's Requests view is driven by, so
+     * a request is read once and both surfaces show the backend's own answer (`BR-001`).
+     */
+    technicianScheduleViewModel: TechnicianScheduleViewModel,
     permissions: CustomerPermissionsUiState,
     /**
      * Resolves the display name of the customer a destination belongs to, or `null` while it is not
@@ -272,6 +329,9 @@ fun ServoraNavHost(
                     navController.push(
                         ServoraRoutes.propertyDetail(customerId, propertyId),
                     )
+                },
+                onOpenJob = { jobId ->
+                    navController.push(ServoraRoutes.jobDetail(jobId))
                 },
             )
         }
@@ -451,15 +511,19 @@ fun ServoraNavHost(
                 state = state.customerDetail?.takeIf { it.customerId == customerId }
                     ?: CustomerDetailUiState(customerId, isLoading = true),
                 onRetry = customersViewModel::retryCustomerDetail,
+                onOpenJob = { jobId ->
+                    navController.push(ServoraRoutes.jobDetail(jobId))
+                },
             )
         }
 
         composable(ServoraRoutes.JOB_DETAIL, jobIdArgument()) { entry ->
             val jobId = entry.jobId()
+            val visitId = entry.visitId()
             // Reaching this screen directly, such as from a restored back stack, must still read the
             // Job it shows. The Job and its crew are the backend's, so the destination asks for them
             // and holds nothing of its own (`BR-001`).
-            LaunchedEffect(jobId) { jobDetailsViewModel.start(jobId) }
+            LaunchedEffect(jobId, visitId) { jobDetailsViewModel.start(jobId, visitId) }
             val state by jobDetailsViewModel.uiState.collectAsState()
             // The player's moving answer is collected **without** being read here: it is passed down as a
             // state, so this destination, the screen and the timeline are not recomposed ten times a second
@@ -502,6 +566,11 @@ fun ServoraNavHost(
                 canUpdateAssignedVisit = permissions.canUpdateAssignedVisit,
                 canRecordVisitOutcome = permissions.canRecordVisitOutcome,
                 canAddVisitNote = permissions.canAddVisitNote,
+                canReviewVisitRequests = permissions.canReviewVisitRequests,
+                // Proposing a follow-up Visit is the field capability the technician holds by default
+                // (`BR-FV-001`, `BR-009`), drawn on its own code and never on the office scheduling one
+                // (`BR-006`, `BR-011`).
+                canRequestFollowUpVisit = permissions.canRequestFollowUpVisit,
                 onRetry = jobDetailsViewModel::retry,
                 onRetryActivity = jobDetailsViewModel::retryActivity,
                 // The customer the Job belongs to is one this organization owns, so the row opens the
@@ -514,13 +583,24 @@ fun ServoraNavHost(
                 onOpenInMaps = { address -> openAddressInMaps(context, address) },
                 onLoadAssignableTechnicians = jobDetailsViewModel::loadAssignableTechnicians,
                 onChangeJobStatus = { status -> jobDetailsViewModel.changeJobStatus(status) },
-                onChangeVisitStatus = { status, outcome, summary ->
-                    jobDetailsViewModel.changeVisitStatus(status, outcome, summary)
+                onChangeVisitStatus = { status -> jobDetailsViewModel.changeVisitStatus(status) },
+                onCompleteVisit = { outcome, summary ->
+                    jobDetailsViewModel.completeVisit(outcome, summary)
                 },
                 onDiscardQueuedVisitAction = jobDetailsViewModel::discardQueuedVisitAction,
                 onDiscardQueuedVisitNote = jobDetailsViewModel::discardQueuedVisitNote,
                 onAddActivityText = jobDetailsViewModel::addActivityText,
+                onEditVisitNote = jobDetailsViewModel::editVisitNote,
+                onRemoveVisitNote = jobDetailsViewModel::removeVisitNote,
                 onRescheduleVisit = jobDetailsViewModel::rescheduleVisit,
+                onScheduleVisit = jobDetailsViewModel::scheduleVisit,
+                onRequestFollowUpVisit = jobDetailsViewModel::requestFollowUpVisit,
+                onOpenRequest = { requestId ->
+                    navController.push(ServoraRoutes.requestDetail(requestId))
+                },
+                onOpenVisit = { visitId ->
+                    navController.push(ServoraRoutes.jobDetail(jobId, visitId))
+                },
                 onAssignTechnicians = jobDetailsViewModel::assignVisitTechnicians,
                 onConfirmPendingAction = jobDetailsViewModel::confirmPendingAction,
                 onDismissPendingAction = jobDetailsViewModel::dismissPendingAction,
@@ -536,17 +616,14 @@ fun ServoraNavHost(
                 onSharePhoto = jobDetailsViewModel::sharePhoto,
                 onRemoveEvidencePhoto = jobDetailsViewModel::removeEvidencePhoto,
                 onSavePermissionResult = jobDetailsViewModel::onSavePermissionResult,
-                // Reading evidence is its own capability, so the viewer's save and share actions are
-                // drawn only for a session that may read the photo back (`BR-006`, `BR-011`), while
-                // removing recorded evidence is a Manager-level capability of its own (`BR-089`).
+                // Reading evidence is its own capability, so save/share actions are drawn only for a
+                // session that may read the photo back. Removal is offered to managers and to evidence
+                // authors; the API enforces the own-evidence boundary for technicians.
                 canViewEvidence = permissions.canViewEvidence,
-                canRemoveEvidence = permissions.canRemoveEvidence,
-                // Recording an audio note is its own capability, so the *Add audio* kind is offered only
-                // to a session the API would accept a recording from (`BR-006`, `BR-007`).
+                canRemoveEvidence = permissions.canRemoveEvidence || permissions.canAddEvidencePhoto,
+                canManageVisitNotes = permissions.canUpdateJob || permissions.canAddVisitNote,
                 canAddAudio = permissions.canAddEvidenceAudio,
-                // Removing an accepted recording is the audio kind's own Manager-level capability, never
-                // inferred from the photo one (`BR-089`, `ADR-018` A7).
-                canRemoveAudioEvidence = permissions.canRemoveAudioEvidence,
+                canRemoveAudioEvidence = permissions.canRemoveAudioEvidence || permissions.canAddEvidenceAudio,
                 onSelectAudioPhase = jobDetailsViewModel::selectAudioPhase,
                 onStartAudioRecording = jobDetailsViewModel::startAudioRecording,
                 onStopAudioRecording = jobDetailsViewModel::stopAudioRecording,
@@ -564,6 +641,53 @@ fun ServoraNavHost(
                 photoImages = jobDetailsViewModel.photoImages,
                 audioProgress = audioProgress,
             )
+        }
+
+        // The same destination presents the request to either side of its workflow. A reviewer reads the
+        // organization's requests and receives review actions; a technician reads only requests they raised.
+        composable(ServoraRoutes.REQUEST_DETAIL, requestIdArgument()) { entry ->
+            val requestId = entry.requestId()
+            if (permissions.canReviewVisitRequests) {
+                val timeZoneId = rememberRequestTimeZoneId()
+                LaunchedEffect(requestId) { scheduleViewModel.openRequests(timeZoneId) }
+                val state by scheduleViewModel.uiState.collectAsState()
+                // A decision changes the compact status card underneath this destination. Refresh the Job
+                // while details are still open so Back reveals the backend's current answer.
+                LaunchedEffect(state.reviewedRequestStatus, state.approvedRequestId) {
+                    if (state.reviewedRequestStatus != null || state.approvedRequestId != null) {
+                        jobDetailsViewModel.retry()
+                    }
+                }
+                ManagerFollowUpRequestDetailsScreen(
+                    state = state,
+                    requestId = requestId,
+                    canApprove = permissions.canScheduleVisit,
+                    onClarifyRequest = scheduleViewModel::askForClarification,
+                    onRejectRequest = scheduleViewModel::rejectRequest,
+                    onStartApproval = scheduleViewModel::beginApproval,
+                    onDismissApproval = scheduleViewModel::dismissApproval,
+                    onApproveRequest = { request, start, end, assignments ->
+                        scheduleViewModel.approveRequest(request, start, end, assignments)
+                    },
+                    onConfirmApproval = scheduleViewModel::confirmApproval,
+                    onDismissApprovalConflicts = scheduleViewModel::dismissApprovalConflicts,
+                    onAcknowledgeApproval = scheduleViewModel::acknowledgeApproval,
+                    onAcknowledgeReview = scheduleViewModel::acknowledgeReview,
+                    onOpenJob = { jobId -> navController.push(ServoraRoutes.jobDetail(jobId)) },
+                    onRetry = { scheduleViewModel.openRequests(timeZoneId) },
+                )
+            } else {
+                LaunchedEffect(requestId) { technicianScheduleViewModel.openOwnRequests() }
+                val state by technicianScheduleViewModel.uiState.collectAsState()
+                FollowUpRequestDetailsScreen(
+                    state = state,
+                    requestId = requestId,
+                    onAnswerRequest = technicianScheduleViewModel::replyToRequest,
+                    onAcknowledgeReply = technicianScheduleViewModel::acknowledgeReply,
+                    onOpenJob = { jobId -> navController.push(ServoraRoutes.jobDetail(jobId)) },
+                    onRetry = technicianScheduleViewModel::retry,
+                )
+            }
         }
 
         composable(ServoraRoutes.CUSTOMER_EDIT, customerIdArgument()) { entry ->
@@ -743,6 +867,13 @@ fun servoraTopBarState(
 
         ServoraRoutes.JOB_CREATE -> pushedScreenTopBar(
             title = stringResource(R.string.job_create_title),
+            navController = navController,
+        )
+
+        // A request is read in its own destination (`BR-FV-002`), and the header names it as the
+        // technician's own request rather than as the Job it is about (`BR-041`).
+        ServoraRoutes.REQUEST_DETAIL -> pushedScreenTopBar(
+            title = stringResource(R.string.technician_request_detail_title),
             navController = navController,
         )
 

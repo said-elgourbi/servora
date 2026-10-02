@@ -99,6 +99,12 @@ data class JobActivityEvent(
     val outcomeSummary: String?,
     /** The note's text (`VISIT_NOTE_ADDED`), or a photo's optional note (`JOB_PHOTO_ADDED`). */
     val body: String?,
+    /** When a Visit note was edited (`VISIT_NOTE_ADDED`), or `null`. */
+    val noteEditedAt: String? = null,
+    /** When a Visit note was removed (`VISIT_NOTE_ADDED` in audit reads), or `null`. */
+    val noteRemovedAt: String? = null,
+    /** Why a Visit note was removed (`VISIT_NOTE_ADDED` in audit reads), or `null`. */
+    val noteRemovalReason: String? = null,
     /**
      * The photo's identifier (`JOB_PHOTO_ADDED`), which is the value the bytes are asked for with.
      *

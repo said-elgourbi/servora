@@ -20,7 +20,7 @@ import {
   visits,
   visitTechnicians,
 } from '../database/schema.js';
-import { HISTORICAL_VISIT_STATUSES } from '../jobs/job.types.js';
+import { TERMINAL_VISIT_STATUSES } from '../jobs/job.types.js';
 import type { JobStatus, VisitStatus } from '../jobs/job.types.js';
 import { readAssignedTechnicians } from '../jobs/visit-assignment.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
@@ -33,7 +33,9 @@ import { readViewerDisplayName } from './home-viewer.js';
 import {
   TECHNICIAN_HOME_ATTENTION_LIMIT,
   TECHNICIAN_HOME_UPCOMING_LIMIT,
+  compareAttentionItems,
   compareChronologically,
+  selectAttentionVisits,
   selectNextVisit,
 } from './technician-home.dto.js';
 import type {
@@ -125,18 +127,27 @@ export class TechnicianHomeService {
     const upcoming = open.filter(
       (visit) => visit.scheduledStart.getTime() >= day.end.getTime(),
     );
-    const overdue = open.filter((visit) => visit.overdue);
+    const nextVisit = selectNextVisit(open);
+    // The section states the caller's late work that the screen does not already state, so the Visit
+    // the read offers as the next one — and a row of today's own list — is presented where it already
+    // is rather than a second time here (`BR-012`, `BR-041`). What it holds is ordered by urgency: the
+    // attempt that has been overdue longest first.
+    const attention = selectAttentionVisits(
+      open.filter((visit) => visit.overdue),
+      nextVisit,
+      visits,
+    )
+      .map(toAttentionItem)
+      .sort(compareAttentionItems);
 
     return {
       viewerDisplayName,
-      nextVisit: selectNextVisit(open),
+      nextVisit,
       visits,
       upcoming: upcoming.slice(0, TECHNICIAN_HOME_UPCOMING_LIMIT),
       upcomingTotal: upcoming.length,
-      attention: overdue
-        .slice(0, TECHNICIAN_HOME_ATTENTION_LIMIT)
-        .map(toAttentionItem),
-      attentionTotal: overdue.length,
+      attention: attention.slice(0, TECHNICIAN_HOME_ATTENTION_LIMIT),
+      attentionTotal: attention.length,
     };
   }
 
@@ -144,7 +155,7 @@ export class TechnicianHomeService {
    * The caller's own Visits scheduled inside the requested local day, excluding the ones that did
    * not happen.
    *
-   * A `CANCELED` or `NO_SHOW` Visit is not work of the day, so it is excluded — the same set the
+   * A `CANCELED` Visit is not work of the day, so it is excluded — the same set the
    * manager home excludes, defined once (`BR-074`, `home-visit-conditions.ts`). A `COMPLETED` Visit
    * stays: it is what the day has produced so far, and the technician's own record of it belongs on
    * their day.
@@ -194,7 +205,7 @@ export class TechnicianHomeService {
       .where(
         and(
           ...this.assignedVisitConditions(scope, membershipId),
-          notInArray(visits.status, [...HISTORICAL_VISIT_STATUSES]),
+          notInArray(visits.status, [...TERMINAL_VISIT_STATUSES]),
           isNotNull(visits.scheduledStart),
           isNotNull(visits.scheduledEnd),
         ),

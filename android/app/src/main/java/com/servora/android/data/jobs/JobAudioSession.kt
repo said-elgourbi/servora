@@ -79,6 +79,7 @@ class JobAudioSession @Inject constructor(
      */
     suspend fun stopRecording(
         jobId: String,
+        visitId: String,
         capture: CapturedJobAudioNote,
         phase: EvidencePhase?,
         durationSeconds: Int,
@@ -98,6 +99,7 @@ class JobAudioSession @Inject constructor(
         val recorded = PendingJobAudioNote(
             audioNoteId = capture.audioNoteId,
             jobId = jobId,
+            visitId = visitId,
             localPath = capture.localPath,
             phase = phase,
             // The technician's note is written when they attach the take, from the sheet that reviewed

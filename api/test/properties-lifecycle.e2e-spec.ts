@@ -578,7 +578,7 @@ describe('property lifecycle (e2e)', () => {
 
   it("does not rewrite a Job's preserved address snapshot when the Property is edited", async () => {
     const property = await newProperty();
-    const job = await newJob(property.id, 'SCHEDULED');
+    const job = await newJob(property.id, 'ACTIVE');
     const token = await accessTokenFor([PROPERTY_PERMISSIONS.EDIT]);
 
     await request(app.getHttpServer())
@@ -738,7 +738,7 @@ describe('property lifecycle (e2e)', () => {
 
   it('reports the open work the archive warning needs, and archiving leaves it untouched', async () => {
     const property = await newProperty();
-    const jobScheduled = await newJob(property.id, 'SCHEDULED');
+    const jobScheduled = await newJob(property.id, 'ACTIVE');
     await newVisit(jobScheduled.id, property.id, 'SCHEDULED');
     const jobDone = await newJob(property.id, 'COMPLETED');
     await newVisit(jobDone.id, property.id, 'COMPLETED');
@@ -779,7 +779,7 @@ describe('property lifecycle (e2e)', () => {
       .from(jobs)
       .where(eq(jobs.id, jobScheduled.id));
     expect(jobAfter).toMatchObject({
-      status: 'SCHEDULED',
+      status: 'ACTIVE',
       propertyId: property.id,
       version: 1,
     });
@@ -800,7 +800,7 @@ describe('property lifecycle (e2e)', () => {
 
   it('blocks new work at an archived Property while leaving existing work changeable', async () => {
     const property = await newProperty();
-    const job = await newJob(property.id, 'SCHEDULED');
+    const job = await newJob(property.id, 'ACTIVE');
     const visit = await newVisit(job.id, property.id, 'SCHEDULED');
     const admin = await accessTokenFor([
       PROPERTY_PERMISSIONS.VIEW,
@@ -1090,7 +1090,7 @@ describe('property lifecycle (e2e)', () => {
 
   it('refuses deletion for Job and Visit references and never deletes them by cascade', async () => {
     const property = await newProperty();
-    const job = await newJob(property.id, 'SCHEDULED');
+    const job = await newJob(property.id, 'ACTIVE');
     const visit = await newVisit(job.id, property.id, 'SCHEDULED');
     const token = await accessTokenFor([PROPERTY_PERMISSIONS.DELETE]);
     const url = `/customers/${customerId}/properties/${property.id}`;

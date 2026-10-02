@@ -1,8 +1,11 @@
 package com.servora.android.ui.schedule
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,11 +27,22 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +50,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,8 +70,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
 import com.servora.android.domain.model.FollowUpVisitRequest
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.ScheduleTechnician
 import com.servora.android.domain.model.ScheduleVisit
+import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.ui.components.RequestStatusPill
+import com.servora.android.ui.components.StatusDot
 import com.servora.android.ui.home.HomePageGutter
 import com.servora.android.ui.home.HomeVisitStatusPill
 import com.servora.android.ui.home.deviceLocale
@@ -64,9 +83,15 @@ import com.servora.android.ui.home.formatScheduledRange
 import com.servora.android.ui.home.formattedAddressLine
 import com.servora.android.ui.home.statusColor
 import com.servora.android.ui.home.techniciansSummary
+import com.servora.android.ui.jobs.ScheduleConflictDialog
+import com.servora.android.ui.jobs.ScheduleVisitSheet
+import com.servora.android.ui.jobs.jobActionFailureMessage
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import java.util.Locale
 import kotlinx.coroutines.delay
 
 /*
@@ -109,6 +134,32 @@ const val ScheduleEmptyRequestsTag = "schedule-empty-requests"
 fun scheduleRequestTag(requestId: String): String = "schedule-request-$requestId"
 fun scheduleClarifyRequestTag(requestId: String): String = "schedule-request-clarify-$requestId"
 fun scheduleRejectRequestTag(requestId: String): String = "schedule-request-reject-$requestId"
+fun scheduleRescheduleRequestTag(requestId: String): String = "schedule-request-reschedule-$requestId"
+
+/**
+ * Identifies the line that says a request has been returned for clarification, and is therefore still
+ * awaiting a decision (`BR-FV-012`).
+ */
+fun scheduleRequestClarifiedTag(requestId: String): String =
+    "schedule-request-clarified-$requestId"
+
+/**
+ * Identifies the clarification conversation the office reads on a request (`BR-FV-012`).
+ */
+fun scheduleRequestConversationTag(requestId: String): String =
+    "schedule-request-conversation-$requestId"
+
+/**
+ * Identifies the action that approves a pending request by scheduling the Visit it asks for
+ * (`BR-FV-005`).
+ */
+fun scheduleApproveRequestTag(requestId: String): String = "schedule-request-approve-$requestId"
+
+/**
+ * Identifies what the Requests lane reports about a decision it just took: an approval that created a
+ * Visit, a clarification, a rejection, or why one of them was refused (`BR-FV-013`).
+ */
+const val ScheduleRequestsMessageTag = "schedule-requests-message"
 
 /** Identifies the cue that separates the day's past from the work still to come. */
 const val ScheduleNowCueTag = "schedule-now-cue"
@@ -133,6 +184,13 @@ fun scheduleOpenJobTag(jobId: String): String = "schedule-open-$jobId"
 private val ScheduleStatusDotSize = 6.dp
 private val ScheduleItemSpacing = 8.dp
 private val ScheduleLineIconSize = 16.dp
+
+/*
+ * The marker that leads the line saying a request has been returned for clarification: the same size as
+ * a Visit card's status dot, because it says the same kind of thing about the record it is on.
+ */
+private val ScheduleRequestStatusDotSize = ScheduleStatusDotSize
+private val ScheduleRequestStatusDotGap = 6.dp
 private val ScheduleRailWidth = 12.dp
 private val ScheduleRailGap = 6.dp
 private val ScheduleRailLineWidth = 2.dp
@@ -165,22 +223,49 @@ private val ScheduleHeaderCollapseThreshold = 16.dp
  *
  * The agenda's scroll position lives here because two things read it: the list itself, and the top
  * section's week strip, which collapses once the day's work has the screen (`BR-012`).
+ *
+ * Deciding a follow-up request is what the screen **writes** (`BR-FV-004`, `BR-FV-005`): an approval
+ * opens the same form the Job Details screen schedules with, and a clarification or a rejection opens a
+ * confirmation that states the decision's own record (`BR-FV-013`). What the API answers is reported
+ * here — the decision it applied, or why it applied none (`BR-001`, `BR-042`).
  */
 @Composable
 fun ScheduleScreen(
     state: ScheduleUiState,
+    /**
+     * Whether the session may approve a request into a Visit (`BR-FV-004`, `BR-FV-005`).
+     *
+     * It is both capabilities the approval route asks for — reviewing a request and scheduling a Visit —
+     * so a session holding only one of them is offered no approval the API would refuse (`BR-007`,
+     * `BR-011`).
+     */
+    canApproveVisitRequests: Boolean,
     onSelectDate: (LocalDate) -> Unit,
     onShowWeek: (LocalDate) -> Unit,
     onSelectLane: (ScheduleLane) -> Unit,
     onApplyTechnicians: (List<ScheduleTechnician>) -> Unit,
-    onOpenJob: (String) -> Unit,
-    onClarifyRequest: (FollowUpVisitRequest) -> Unit,
-    onRejectRequest: (FollowUpVisitRequest) -> Unit,
+    onOpenJob: (String, String?) -> Unit,
+    onOpenRequest: (String) -> Unit,
+    onClarifyRequest: (FollowUpVisitRequest, String) -> Unit,
+    onRejectRequest: (FollowUpVisitRequest, String) -> Unit,
+    onStartApproval: (FollowUpVisitRequest) -> Unit,
+    onDismissApproval: () -> Unit,
+    onApproveRequest: (
+        request: FollowUpVisitRequest,
+        start: Instant,
+        end: Instant,
+        assignments: List<TechnicianAssignment>,
+    ) -> Unit,
+    onConfirmApproval: () -> Unit,
+    onDismissApprovalConflicts: () -> Unit,
+    onAcknowledgeApproval: () -> Unit,
+    onAcknowledgeReview: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val zone = remember(state.timeZoneId) { zoneOf(state.timeZoneId) }
     val today = remember(zone) { LocalDate.now(zone) }
+    val scheduleState = remember(state) { state.copy(lane = ScheduleLane.SCHEDULE) }
     val agendaState = rememberLazyListState()
     val density = LocalDensity.current
     val collapseThreshold = with(density) { ScheduleHeaderCollapseThreshold.roundToPx() }
@@ -193,39 +278,555 @@ fun ScheduleScreen(
     // Another day starts at the top of its own agenda, which also brings the week strip back: the
     // manager who moved to a date is looking at that date, not at the scroll position of the day
     // before it (`BR-041`).
-    LaunchedEffect(state.selectedDate) {
+    LaunchedEffect(scheduleState.selectedDate) {
         if (agendaState.firstVisibleItemIndex != 0 || agendaState.firstVisibleItemScrollOffset != 0) {
             agendaState.scrollToItem(0)
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        val selectedDate = state.selectedDate
-        if (selectedDate != null) {
-            ScheduleTopSection(
-                state = state,
-                selectedDate = selectedDate,
-                today = today,
-                collapsed = collapsed,
-                onSelectDate = onSelectDate,
-                onShowWeek = onShowWeek,
-                onSelectLane = onSelectLane,
-                onApplyTechnicians = onApplyTechnicians,
-            )
+    // The decision the office is taking, for as long as its confirmation is open. It is a screen fact
+    // like the approval form's target, so a decision is never taken from a copy of a list that has
+    // moved on: the dialog is drawn from the request it names (`BR-001`, `BR-FV-013`).
+    var reviewTarget by remember { mutableStateOf<RequestReviewTarget?>(null) }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            val selectedDate = scheduleState.selectedDate
+            if (selectedDate != null) {
+                ScheduleTopSection(
+                    state = scheduleState,
+                    selectedDate = selectedDate,
+                    today = today,
+                    collapsed = collapsed,
+                    onSelectDate = onSelectDate,
+                    onShowWeek = onShowWeek,
+                    onSelectLane = onSelectLane,
+                    onApplyTechnicians = onApplyTechnicians,
+                    showLaneSelector = false,
+                )
+            }
+
+            when {
+                scheduleState.showsInitialLoading -> ScheduleLoading()
+                scheduleState.showsFailure -> ScheduleFailure(onRetry = onRetry)
+                else -> ScheduleAgenda(
+                    state = scheduleState,
+                    today = today,
+                    listState = agendaState,
+                    zone = zone,
+                    canApproveRequests = canApproveVisitRequests,
+                    onOpenJob = onOpenJob,
+                    onOpenRequest = onOpenRequest,
+                    // Reviewing a request is a decision with its own record, so tapping the action opens
+                    // the confirmation that states it rather than sending the decision immediately
+                    // (`BR-FV-013`, `BR-067`).
+                    onReviewRequest = { request, decision ->
+                        reviewTarget = RequestReviewTarget(request, decision)
+                    },
+                    onStartApproval = onStartApproval,
+                )
+            }
         }
 
-        when {
-            state.showsInitialLoading -> ScheduleLoading()
-            state.showsFailure -> ScheduleFailure(onRetry = onRetry)
-            else -> ScheduleAgenda(
+        // What the last decision did is reported and released, exactly as the Job Details screen reports
+        // its own actions (`BR-001`, `BR-FV-013`). A review now states its outcome too: a rejection used
+        // to close the row in silence, and a decision the API refused said nothing at all — the screen
+        // recorded the reason and drew none of it.
+        val approvedMessage = stringResource(R.string.schedule_request_approved)
+        val approvalFailureMessage = state.approvalFailure?.let { failure ->
+            stringResource(jobActionFailureMessage(failure))
+        }
+        val reviewMessage = when (state.reviewedRequestStatus) {
+            FollowUpVisitRequestStatus.NEEDS_CLARIFICATION ->
+                stringResource(R.string.schedule_request_returned)
+
+            FollowUpVisitRequestStatus.REJECTED -> stringResource(R.string.schedule_request_rejected)
+            else -> null
+        }
+        val reviewFailureMessage = state.reviewFailureReason?.let {
+            stringResource(R.string.schedule_request_decision_failed)
+        }
+        val snackbarHostState = remember { SnackbarHostState() }
+        LaunchedEffect(
+            state.approvedRequestId,
+            state.approvalFailure,
+            state.reviewedRequestStatus,
+            state.reviewFailureReason,
+        ) {
+            val failureMessage = approvalFailureMessage ?: reviewFailureMessage
+            val message = when {
+                state.approvedRequestId != null -> approvedMessage
+                failureMessage != null -> failureMessage
+                reviewMessage != null -> reviewMessage
+                else -> null
+            } ?: return@LaunchedEffect
+            try {
+                snackbarHostState.showSnackbar(
+                    message = message,
+                    duration = if (failureMessage != null) {
+                        SnackbarDuration.Long
+                    } else {
+                        SnackbarDuration.Short
+                    },
+                )
+            } finally {
+                onAcknowledgeApproval()
+                onAcknowledgeReview()
+            }
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(HomePageGutter)
+                .testTag(ScheduleRequestsMessageTag),
+        )
+    }
+
+    // The approval form for the request the manager decided to schedule: the same form the Job Details
+    // screen schedules a Visit with, because both state the same three things (`BR-072`). It stays open
+    // while the conflicts are decided, so accepting them resends the decision it holds (`BR-070`).
+    state.schedulingRequest?.let { request ->
+        ScheduleVisitSheet(
+            titleRes = R.string.schedule_request_approve_title,
+            messageRes = R.string.schedule_request_approve_message,
+            confirmRes = R.string.schedule_request_approve_confirm,
+            // The technician's proposal is what the form opens on, as the suggestion it is: the office
+            // decides the schedule that actually applies (`BR-FV-003`, `BR-FV-004`, `BR-FV-010`).
+            initialStart = instantOf(request.proposedStart),
+            initialEnd = instantOf(request.proposedEnd),
+            technicians = state.assignableTechnicians,
+            crewFailure = state.assignableFailure,
+            isSubmitting = state.isApproving,
+            onRetryCrew = { onStartApproval(request) },
+            onConfirm = { start, end, assignments ->
+                onApproveRequest(request, start, end, assignments)
+            },
+            onDismiss = onDismissApproval,
+        )
+    }
+
+    state.pendingApproval?.let { pending ->
+        ScheduleConflictDialog(
+            conflicts = pending.conflicts,
+            isSubmitting = state.isApproving,
+            onConfirm = onConfirmApproval,
+            onDismiss = onDismissApprovalConflicts,
+        )
+    }
+
+    // The two decisions that are not an approval are taken in a confirmation that states them, and the
+    // text it holds is the decision's own record (`BR-FV-013`): what a clarification still needs, or why
+    // a request was refused. It is drawn from the request it names, so a decision is never taken about a
+    // copy of a request the list has moved past (`BR-001`, `BR-067`).
+    reviewTarget?.let { target ->
+        RequestReviewDialog(
+            request = target.request,
+            decision = target.decision,
+            isSending = state.reviewingRequestId == target.request.id,
+            onConfirm = { note ->
+                reviewTarget = null
+                when (target.decision) {
+                    RequestReviewDecision.CLARIFY -> onClarifyRequest(target.request, note)
+                    RequestReviewDecision.REJECT -> onRejectRequest(target.request, note)
+                }
+            },
+            onDismiss = { reviewTarget = null },
+        )
+    }
+}
+
+
+@Composable
+fun ManagerWorkScreen(
+    state: ScheduleUiState,
+    canApproveVisitRequests: Boolean,
+    onOpenJob: (String, String?) -> Unit,
+    onOpenRequest: (String) -> Unit,
+    onClarifyRequest: (FollowUpVisitRequest, String) -> Unit,
+    onRejectRequest: (FollowUpVisitRequest, String) -> Unit,
+    onStartApproval: (FollowUpVisitRequest) -> Unit,
+    onDismissApproval: () -> Unit,
+    onApproveRequest: (
+        request: FollowUpVisitRequest,
+        start: Instant,
+        end: Instant,
+        assignments: List<TechnicianAssignment>,
+    ) -> Unit,
+    onConfirmApproval: () -> Unit,
+    onDismissApprovalConflicts: () -> Unit,
+    onAcknowledgeApproval: () -> Unit,
+    onAcknowledgeReview: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val zone = remember(state.timeZoneId) { zoneOf(state.timeZoneId) }
+    var selected by rememberSaveable { mutableStateOf(WorkTab.ALL_JOBS.name) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf(WorkJobFilter.ALL.name) }
+    var reviewTarget by remember { mutableStateOf<RequestReviewTarget?>(null) }
+    val listState = rememberLazyListState()
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            WorkTabs(
+                selected = WorkTab.valueOf(selected),
                 state = state,
-                today = today,
-                listState = agendaState,
-                zone = zone,
-                onOpenJob = onOpenJob,
-                onClarifyRequest = onClarifyRequest,
-                onRejectRequest = onRejectRequest,
+                onSelect = { tab -> selected = tab.name },
             )
+            when {
+                state.showsInitialLoading -> ScheduleLoading()
+                state.showsFailure -> ScheduleFailure(onRetry = onRetry)
+                else -> when (WorkTab.valueOf(selected)) {
+                    WorkTab.ALL_JOBS -> WorkAllJobs(
+                        state = state,
+                        zone = zone,
+                        query = query,
+                        filter = WorkJobFilter.valueOf(filter),
+                        listState = listState,
+                        onQueryChange = { query = it },
+                        onFilterChange = { filter = it.name },
+                        onOpenJob = onOpenJob,
+                    )
+
+                    WorkTab.UNASSIGNED -> WorkUnassignedJobs(
+                        state = state,
+                        zone = zone,
+                        listState = listState,
+                        onOpenJob = onOpenJob,
+                    )
+
+                    WorkTab.REQUESTS -> WorkVisitRequests(
+                        state = state,
+                        zone = zone,
+                        listState = listState,
+                        canApproveVisitRequests = canApproveVisitRequests,
+                        onOpenRequest = onOpenRequest,
+                        onReviewRequest = { request, decision ->
+                            reviewTarget = RequestReviewTarget(request, decision)
+                        },
+                        onStartApproval = onStartApproval,
+                    )
+                }
+            }
+        }
+
+        val approvedMessage = stringResource(R.string.schedule_request_approved)
+        val approvalFailureMessage = state.approvalFailure?.let { failure ->
+            stringResource(jobActionFailureMessage(failure))
+        }
+        val reviewMessage = when (state.reviewedRequestStatus) {
+            FollowUpVisitRequestStatus.NEEDS_CLARIFICATION ->
+                stringResource(R.string.schedule_request_returned)
+
+            FollowUpVisitRequestStatus.REJECTED -> stringResource(R.string.schedule_request_rejected)
+            else -> null
+        }
+        val reviewFailureMessage = state.reviewFailureReason?.let {
+            stringResource(R.string.schedule_request_decision_failed)
+        }
+        val snackbarHostState = remember { SnackbarHostState() }
+        LaunchedEffect(
+            state.approvedRequestId,
+            state.approvalFailure,
+            state.reviewedRequestStatus,
+            state.reviewFailureReason,
+        ) {
+            val failureMessage = approvalFailureMessage ?: reviewFailureMessage
+            val message = when {
+                state.approvedRequestId != null -> approvedMessage
+                failureMessage != null -> failureMessage
+                reviewMessage != null -> reviewMessage
+                else -> null
+            } ?: return@LaunchedEffect
+            try {
+                snackbarHostState.showSnackbar(
+                    message = message,
+                    duration = if (failureMessage != null) SnackbarDuration.Long else SnackbarDuration.Short,
+                )
+            } finally {
+                onAcknowledgeApproval()
+                onAcknowledgeReview()
+            }
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(HomePageGutter)
+                .testTag(ScheduleRequestsMessageTag),
+        )
+    }
+
+    state.schedulingRequest?.let { request ->
+        ScheduleVisitSheet(
+            titleRes = R.string.schedule_request_approve_title,
+            messageRes = R.string.schedule_request_approve_message,
+            confirmRes = R.string.schedule_request_approve_confirm,
+            initialStart = instantOf(request.proposedStart),
+            initialEnd = instantOf(request.proposedEnd),
+            technicians = state.assignableTechnicians,
+            crewFailure = state.assignableFailure,
+            isSubmitting = state.isApproving,
+            onRetryCrew = { onStartApproval(request) },
+            onConfirm = { start, end, assignments -> onApproveRequest(request, start, end, assignments) },
+            onDismiss = onDismissApproval,
+        )
+    }
+
+    state.pendingApproval?.let { pending ->
+        ScheduleConflictDialog(
+            conflicts = pending.conflicts,
+            isSubmitting = state.isApproving,
+            onConfirm = onConfirmApproval,
+            onDismiss = onDismissApprovalConflicts,
+        )
+    }
+
+    reviewTarget?.let { target ->
+        RequestReviewDialog(
+            request = target.request,
+            decision = target.decision,
+            isSending = state.reviewingRequestId == target.request.id,
+            onConfirm = { note ->
+                reviewTarget = null
+                when (target.decision) {
+                    RequestReviewDecision.CLARIFY -> onClarifyRequest(target.request, note)
+                    RequestReviewDecision.REJECT -> onRejectRequest(target.request, note)
+                }
+            },
+            onDismiss = { reviewTarget = null },
+        )
+    }
+}
+
+@Composable
+private fun WorkTabs(
+    selected: WorkTab,
+    state: ScheduleUiState,
+    onSelect: (WorkTab) -> Unit,
+) {
+    TabRow(selectedTabIndex = selected.ordinal) {
+        WorkTab.entries.forEach { tab ->
+            Tab(
+                selected = selected == tab,
+                onClick = { onSelect(tab) },
+                text = {
+                    Text(
+                        text = when (tab) {
+                            WorkTab.ALL_JOBS -> stringResource(R.string.work_tab_all_visits)
+                            WorkTab.UNASSIGNED -> stringResource(
+                                R.string.work_tab_unassigned_jobs_count,
+                                state.unassignedCount,
+                            )
+                            WorkTab.REQUESTS -> stringResource(
+                                R.string.work_tab_visit_requests_count,
+                                state.reviewableRequestCount,
+                            )
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun WorkAllJobs(
+    state: ScheduleUiState,
+    zone: ZoneId,
+    query: String,
+    filter: WorkJobFilter,
+    listState: LazyListState,
+    onQueryChange: (String) -> Unit,
+    onFilterChange: (WorkJobFilter) -> Unit,
+    onOpenJob: (String, String?) -> Unit,
+) {
+    val schedule = state.schedule ?: return
+    val visits = filterWorkVisits(
+        scheduled = schedule.visits,
+        unassigned = schedule.unassigned,
+        query = query,
+        filter = filter,
+    )
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize().testTag(ScheduleContentTag),
+        contentPadding = PaddingValues(HomePageGutter),
+        verticalArrangement = Arrangement.spacedBy(ScheduleItemSpacing),
+    ) {
+        item(key = "work-search") {
+            WorkSearchAndFilters(
+                query = query,
+                filter = filter,
+                onQueryChange = onQueryChange,
+                onFilterChange = onFilterChange,
+            )
+        }
+        if (state.showsRefreshingIndicator) {
+            item(key = "refreshing") { ScheduleRefreshing() }
+        }
+        if (visits.isEmpty()) {
+            item(key = "empty") {
+                WorkEmptyCard(
+                    title = stringResource(R.string.work_empty_jobs_title),
+                    detail = stringResource(R.string.work_empty_jobs_detail),
+                )
+            }
+        } else {
+            itemsIndexed(items = visits, key = { _, visit -> visit.visitId }) { _, visit ->
+                ScheduleVisitCard(visit = visit, zone = zone, showDate = true, onOpenJob = onOpenJob)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkSearchAndFilters(
+    query: String,
+    filter: WorkJobFilter,
+    onQueryChange: (String) -> Unit,
+    onFilterChange: (WorkJobFilter) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(R.drawable.ic_search),
+                    contentDescription = null,
+                    modifier = Modifier.size(ScheduleLineIconSize),
+                )
+            },
+            placeholder = { Text(stringResource(R.string.work_search_placeholder)) },
+        )
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            WorkJobFilter.entries.forEach { option ->
+                val selected = option == filter
+                OutlinedButton(onClick = { onFilterChange(option) }) {
+                    Text(
+                        text = when (option) {
+                            WorkJobFilter.ALL -> stringResource(R.string.work_filter_all)
+                            WorkJobFilter.SCHEDULED -> stringResource(R.string.work_filter_scheduled)
+                            WorkJobFilter.UNASSIGNED -> stringResource(R.string.work_filter_unassigned)
+                            WorkJobFilter.OVERDUE -> stringResource(R.string.work_filter_overdue)
+                        },
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkUnassignedJobs(
+    state: ScheduleUiState,
+    zone: ZoneId,
+    listState: LazyListState,
+    onOpenJob: (String, String?) -> Unit,
+) {
+    val schedule = state.schedule ?: return
+    val unassigned = schedule.unassigned.filter { visit -> visit.technicians.isEmpty() }
+    val hiddenUnassignedCount = (state.unassignedCount - schedule.unassigned.size).coerceAtLeast(0)
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize().testTag(ScheduleContentTag),
+        contentPadding = PaddingValues(HomePageGutter),
+        verticalArrangement = Arrangement.spacedBy(ScheduleItemSpacing),
+    ) {
+        if (state.showsRefreshingIndicator) {
+            item(key = "refreshing") { ScheduleRefreshing() }
+        }
+        if (unassigned.isEmpty()) {
+            item(key = "empty") { ScheduleEmptyCard(lane = ScheduleLane.UNASSIGNED, tag = ScheduleEmptyUnassignedTag) }
+        } else {
+            itemsIndexed(items = unassigned, key = { _, visit -> visit.visitId }) { _, visit ->
+                ScheduleVisitCard(visit = visit, zone = zone, showDate = true, onOpenJob = onOpenJob)
+            }
+        }
+        if (hiddenUnassignedCount > 0) {
+            item(key = "more") {
+                Text(
+                    text = pluralStringResource(
+                        R.plurals.schedule_unassigned_more,
+                        hiddenUnassignedCount,
+                        hiddenUnassignedCount,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkVisitRequests(
+    state: ScheduleUiState,
+    zone: ZoneId,
+    listState: LazyListState,
+    canApproveVisitRequests: Boolean,
+    onOpenRequest: (String) -> Unit,
+    onReviewRequest: (FollowUpVisitRequest, RequestReviewDecision) -> Unit,
+    onStartApproval: (FollowUpVisitRequest) -> Unit,
+) {
+    val schedule = state.schedule ?: return
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize().testTag(ScheduleContentTag),
+        contentPadding = PaddingValues(HomePageGutter),
+        verticalArrangement = Arrangement.spacedBy(ScheduleItemSpacing),
+    ) {
+        if (state.showsRefreshingIndicator || state.isReadingRequests) {
+            item(key = "refreshing") { ScheduleRefreshing() }
+        }
+        val requests = state.reviewableRequests
+        if (requests.isEmpty()) {
+            item(key = "empty") { ScheduleEmptyCard(lane = ScheduleLane.REQUESTS, tag = ScheduleEmptyRequestsTag) }
+        } else {
+            itemsIndexed(items = requests, key = { _, request -> request.id }) { _, request ->
+                ScheduleRequestCard(
+                    request = request,
+                    reviewing = state.reviewingRequestId == request.id,
+                    canApprove = canApproveVisitRequests && !state.isApproving,
+                    zone = zone,
+                    requesterName = request.preferredRequesterName(schedule.technicians),
+                    onOpen = { onOpenRequest(request.id) },
+                    onClarify = { onReviewRequest(request, RequestReviewDecision.CLARIFY) },
+                    onReject = { onReviewRequest(request, RequestReviewDecision.REJECT) },
+                    onApprove = { onStartApproval(request) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkEmptyCard(title: String, detail: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text(text = detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -295,9 +896,12 @@ private fun ScheduleAgenda(
     today: LocalDate,
     listState: LazyListState,
     zone: ZoneId,
-    onOpenJob: (String) -> Unit,
-    onClarifyRequest: (FollowUpVisitRequest) -> Unit,
-    onRejectRequest: (FollowUpVisitRequest) -> Unit,
+    /** Whether the session may approve a request into a Visit (`BR-FV-005`). */
+    canApproveRequests: Boolean,
+    onOpenJob: (String, String?) -> Unit,
+    onOpenRequest: (String) -> Unit,
+    onReviewRequest: (FollowUpVisitRequest, RequestReviewDecision) -> Unit,
+    onStartApproval: (FollowUpVisitRequest) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val schedule = state.schedule ?: return
@@ -337,7 +941,7 @@ private fun ScheduleAgenda(
         }
 
         if (state.lane == ScheduleLane.REQUESTS) {
-            val requests = state.pendingRequests
+            val requests = state.reviewableRequests
             if (requests.isEmpty()) {
                 item(key = "empty") { ScheduleEmptyCard(lane = state.lane, tag = emptyTag) }
             } else {
@@ -345,9 +949,16 @@ private fun ScheduleAgenda(
                     ScheduleRequestCard(
                         request = request,
                         reviewing = state.reviewingRequestId == request.id,
-                        onOpenJob = onOpenJob,
-                        onClarify = { onClarifyRequest(request) },
-                        onReject = { onRejectRequest(request) },
+                        // Approving creates a Visit, so it is offered only to a session the API would
+                        // admit to the route, and it is not offered twice while one is in flight
+                        // (`BR-007`, `BR-011`, `BR-031`).
+                        canApprove = canApproveRequests && !state.isApproving,
+                        zone = zone,
+                        requesterName = request.preferredRequesterName(schedule.technicians),
+                        onOpen = { onOpenRequest(request.id) },
+                        onClarify = { onReviewRequest(request, RequestReviewDecision.CLARIFY) },
+                        onReject = { onReviewRequest(request, RequestReviewDecision.REJECT) },
+                        onApprove = { onStartApproval(request) },
                     )
                 }
             }
@@ -360,6 +971,7 @@ private fun ScheduleAgenda(
                 when (row) {
                     is ScheduleAgendaRow.Visit -> ScheduleVisitRow(
                         visit = row.visit,
+                        zone = zone,
                         first = first,
                         last = last,
                         onOpenJob = onOpenJob,
@@ -499,34 +1111,104 @@ private fun ScheduleEmptyCard(lane: ScheduleLane, tag: String) {
     }
 }
 
-/** One pending follow-up request awaiting manager review. */
+private fun FollowUpVisitRequest.preferredRequesterName(
+    technicians: List<ScheduleTechnician>,
+): String? = technicians
+    .firstOrNull { technician -> technician.membershipId == requestingTechnicianMembershipId }
+    ?.name
+    ?.takeIf { name -> name.isNotBlank() }
+
+
+/**
+ * One follow-up request awaiting an office decision.
+ *
+ * The card carries what the office decides with: when the technician proposes the attempt, why they say
+ * another one is needed, and whether they would like to carry it out. A request the office has already
+ * returned for clarification says so, because it is still in the lane: `BR-FV-012` keeps it unresolved
+ * "until it is later approved or rejected", so it is a request with a decision still to make rather than
+ * a closed one, and a card that looked like a fresh proposal would hide that the office already asked
+ * its question.
+ */
 @Composable
 private fun ScheduleRequestCard(
     request: FollowUpVisitRequest,
     reviewing: Boolean,
-    onOpenJob: (String) -> Unit,
+    canApprove: Boolean,
+    zone: ZoneId,
+    requesterName: String?,
+    onOpen: () -> Unit,
     onClarify: () -> Unit,
     onReject: () -> Unit,
+    onApprove: () -> Unit,
 ) {
     val locale = deviceLocale()
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onOpen)
             .testTag(scheduleRequestTag(request.id)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shape = MaterialTheme.shapes.large,
     ) {
         Column(modifier = Modifier.padding(ScheduleCardPadding)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RequestStatusPill(status = request.status)
+            }
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = formatScheduledRange(request.proposedStart, request.proposedEnd, locale)
+                text = formatRequestWindow(
+                    request.proposedStart,
+                    request.proposedEnd,
+                    zone,
+                    locale,
+                )
                     ?: stringResource(R.string.job_details_not_scheduled),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    R.string.schedule_request_job_context,
+                    request.jobNumber,
+                    request.jobTitle,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (request.customerName.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.schedule_request_customer_context, request.customerName),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            request.sourceVisitScheduledStart?.let { sourceStart ->
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = stringResource(
+                        R.string.schedule_request_previous_visit,
+                        formatScheduledRange(sourceStart, null, locale) ?: sourceStart,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = request.reason,
                 style = MaterialTheme.typography.bodyLarge,
@@ -538,32 +1220,113 @@ private fun ScheduleRequestCard(
                 Spacer(Modifier.height(4.dp))
                 IconLine(
                     iconRes = R.drawable.ic_users,
-                    text = stringResource(R.string.schedule_request_same_technician),
+                    text = requesterName?.let { name ->
+                        stringResource(R.string.schedule_request_preferred_technician, name)
+                    } ?: stringResource(R.string.schedule_request_preferred_technician_unknown),
+                )
+            }
+            // A request the office returned for clarification is not a closed one (`BR-FV-012`), and the
+            // card says which of the two reviewable states it is in so the office never decides about one
+            // believing it is the other (`BR-041`).
+            if (request.status == FollowUpVisitRequestStatus.NEEDS_CLARIFICATION) {
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(
+                        color = MaterialTheme.colorScheme.tertiary,
+                        size = ScheduleRequestStatusDotSize,
+                    )
+                    Spacer(Modifier.width(ScheduleRequestStatusDotGap))
+                    Text(
+                        text = stringResource(R.string.schedule_request_needs_clarification),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.testTag(scheduleRequestClarifiedTag(request.id)),
+                    )
+                }
+            }
+            // What the office asked and what the technician answered, in the order it happened
+            // (`BR-FV-012`). The office reads the same thread the technician reads, because the answer is
+            // what its next decision is about (`BR-FV-013`): a question it asked and an answer it has not
+            // read would leave it deciding on the same information it already had.
+            if (request.showsConversation) {
+                Spacer(Modifier.height(8.dp))
+                FollowUpRequestConversationSection(
+                    messages = request.messages,
+                    readerIsRequester = false,
+                    zone = zone,
+                    locale = locale,
+                    tag = scheduleRequestConversationTag(request.id),
                 )
             }
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
+            RequestReviewActions(
+                request = request,
+                reviewing = reviewing,
+                canApprove = canApprove,
+                onClarify = onClarify,
+                onReject = onReject,
+                onApprove = onApprove,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RequestReviewActions(
+    request: FollowUpVisitRequest,
+    reviewing: Boolean,
+    canApprove: Boolean,
+    onClarify: () -> Unit,
+    onReject: () -> Unit,
+    onApprove: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            IconButton(
+                enabled = !reviewing,
+                onClick = { expanded = true },
             ) {
-                TextButton(onClick = { onOpenJob(request.jobId) }) {
-                    Text(stringResource(R.string.schedule_request_open_job))
+                Icon(
+                    painter = painterResource(R.drawable.ic_more_vert),
+                    contentDescription = stringResource(R.string.schedule_request_more_actions),
+                )
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                if (request.status == FollowUpVisitRequestStatus.PENDING) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.schedule_request_clarify)) },
+                        enabled = !reviewing,
+                        modifier = Modifier.testTag(scheduleClarifyRequestTag(request.id)),
+                        onClick = {
+                            expanded = false
+                            onClarify()
+                        },
+                    )
                 }
-                TextButton(
-                    modifier = Modifier.testTag(scheduleClarifyRequestTag(request.id)),
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.schedule_request_reject)) },
                     enabled = !reviewing,
-                    onClick = onClarify,
-                ) {
-                    Text(stringResource(R.string.schedule_request_clarify))
-                }
-                TextButton(
                     modifier = Modifier.testTag(scheduleRejectRequestTag(request.id)),
-                    enabled = !reviewing,
-                    onClick = onReject,
-                ) {
-                    Text(stringResource(R.string.schedule_request_reject))
-                }
+                    onClick = {
+                        expanded = false
+                        onReject()
+                    },
+                )
+            }
+        }
+        if (canApprove) {
+            FilledTonalButton(
+                modifier = Modifier.testTag(scheduleApproveRequestTag(request.id)),
+                enabled = !reviewing,
+                onClick = onApprove,
+            ) {
+                Text(stringResource(R.string.schedule_request_schedule))
             }
         }
     }
@@ -584,9 +1347,10 @@ private fun ScheduleRequestCard(
 @Composable
 private fun ScheduleVisitRow(
     visit: ScheduleVisit,
+    zone: ZoneId,
     first: Boolean,
     last: Boolean,
-    onOpenJob: (String) -> Unit,
+    onOpenJob: (String, String?) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -601,7 +1365,7 @@ private fun ScheduleVisitRow(
             modifier = Modifier.width(ScheduleRailWidth),
         )
         Spacer(Modifier.width(ScheduleRailGap))
-        ScheduleVisitCard(visit = visit, onOpenJob = onOpenJob)
+        ScheduleVisitCard(visit = visit, zone = zone, onOpenJob = onOpenJob)
     }
 }
 
@@ -609,7 +1373,9 @@ private fun ScheduleVisitRow(
 @Composable
 private fun ScheduleVisitCard(
     visit: ScheduleVisit,
-    onOpenJob: (String) -> Unit,
+    zone: ZoneId,
+    showDate: Boolean = false,
+    onOpenJob: (String, String?) -> Unit,
 ) {
     val locale = deviceLocale()
     val propertyName = visit.address?.propertyName?.takeIf { it.isNotBlank() }
@@ -617,7 +1383,7 @@ private fun ScheduleVisitCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(scheduleVisitTag(visit.visitId))
-            .clickable { onOpenJob(visit.jobId) },
+            .clickable { onOpenJob(visit.jobId, visit.visitId) },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shape = MaterialTheme.shapes.large,
@@ -629,7 +1395,11 @@ private fun ScheduleVisitCard(
             ) {
                 Text(
                     text = visit.scheduledStart?.let { start ->
-                        formatScheduledRange(start, visit.scheduledEnd, locale)
+                        if (showDate) {
+                            formatWorkScheduledRange(start, visit.scheduledEnd, zone, locale)
+                        } else {
+                            formatScheduledRange(start, visit.scheduledEnd, locale)
+                        }
                     } ?: stringResource(R.string.job_details_not_scheduled),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
@@ -789,6 +1559,19 @@ private fun ScheduleTimelineRail(
     }
 }
 
+private fun formatWorkScheduledRange(start: String, end: String?, zone: ZoneId, locale: Locale): String? {
+    val date = formatScheduledDate(start, zone, locale) ?: return formatScheduledRange(start, end, locale)
+    val time = formatScheduledRange(start, end, locale) ?: return date
+    return "$date · $time"
+}
+
+private fun formatScheduledDate(value: String, zone: ZoneId, locale: Locale): String? =
+    try {
+        val pattern = DateFormat.getBestDateTimePattern(locale, "MMMEd")
+        Instant.parse(value).atZone(zone).format(DateTimeFormatter.ofPattern(pattern, locale))
+    } catch (_: DateTimeParseException) {
+        null
+    }
 
 /**
  * Who is going to be there (`BR-068`).

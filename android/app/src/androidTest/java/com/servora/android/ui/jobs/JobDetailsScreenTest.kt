@@ -8,14 +8,18 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -51,6 +55,7 @@ import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobCustomerContact
 import com.servora.android.domain.model.JobDetails
+import com.servora.android.domain.model.JobReadOnlyReason
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
 import com.servora.android.domain.model.EvidencePhase
@@ -117,7 +122,7 @@ class JobDetailsScreenTest {
         // Two state machines, so both are presented rather than one standing in for the other
         // (`BR-058`, `BR-059`, `BR-074`).
         composeTestRule
-            .onNodeWithText(string(R.string.customers_job_status_scheduled))
+            .onNodeWithText(string(R.string.customers_job_status_active))
             .assertIsDisplayed()
         composeTestRule
             .onNodeWithText(string(R.string.visit_status_en_route))
@@ -267,6 +272,95 @@ class JobDetailsScreenTest {
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Before work").assertIsDisplayed()
         composeTestRule.onNodeWithText("After work").assertIsDisplayed()
+    }
+
+    /**
+     * The panel's two decisions are the sheet's foot, not part of the panel's body (`BR-012`).
+     *
+     * The note is typed into, so the keyboard shortens the sheet and the body scrolls: an action inside that
+     * scrolling region leaves the screen with the body, and the technician has to dismiss the keyboard to
+     * reach **Discard** or **Add** — the defect reported in
+     * `docs/tracker/057-qa-issue-list-visit-workflow.md` §3. The keyboard cannot be shown or hidden from an
+     * instrumentation test, so what is asserted is where each part sits
+     * (`docs/design/android-design-system.md`, "Keyboard (IME) inset"): the note is inside the region that
+     * shrinks, and the two decisions are not.
+     */
+    @Test
+    fun keepsThePhotoReviewDecisionsOutOfThePanelsScrollingBody() {
+        render(
+            details = job(),
+            state = JobDetailsUiState(
+                jobId = JOB_ID,
+                details = job(),
+                capturedPhoto = pendingPhoto(),
+                photoPhase = EvidencePhase.DURING_WORK,
+            ),
+        )
+
+        composeTestRule
+            .onAllNodes(hasTestTag(JobPhotoReviewNoteTag) and hasAnyAncestor(hasScrollAction()))
+            .assertCountEquals(1)
+        composeTestRule
+            .onAllNodes(hasTestTag(JobPhotoReviewDiscardTag) and hasNoScrollableAncestor())
+            .assertCountEquals(1)
+        composeTestRule
+            .onAllNodes(hasTestTag(JobPhotoReviewConfirmTag) and hasNoScrollableAncestor())
+            .assertCountEquals(1)
+    }
+
+    /** The same contract for the sheet a Visit is completed in (`BR-077`, `BR-078`). */
+    @Test
+    fun keepsTheVisitCompletionDecisionsOutOfTheSheetsScrollingBody() {
+        render(
+            details = job().copy(
+                selectedVisit = visit().copy(
+                    status = VisitStatus.IN_PROGRESS,
+                    allowedStatusTransitions = listOf(VisitStatus.ON_SITE),
+                    completionAllowed = true,
+                ),
+            ),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).performClick()
+
+        composeTestRule
+            .onAllNodes(
+                hasTestTag(JobDetailsVisitOutcomeSummaryTag) and hasAnyAncestor(hasScrollAction()),
+            )
+            .assertCountEquals(1)
+        composeTestRule
+            .onAllNodes(
+                hasTestTag(JobDetailsVisitCompleteConfirmTag) and hasNoScrollableAncestor(),
+            )
+            .assertCountEquals(1)
+    }
+
+    /**
+     * And for the note kind of the update sheet, whose **Save update** / **Cancel** is the pair the report
+     * names (`BR-027`).
+     */
+    @Test
+    fun keepsTheUpdateSheetsSaveAndCancelOutOfItsScrollingBody() {
+        render(
+            details = job(),
+            state = JobDetailsUiState(jobId = JOB_ID, details = job(), activity = emptyList()),
+            canUpdateJob = true,
+            canAddEvidencePhoto = true,
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).performClick()
+
+        composeTestRule
+            .onAllNodes(hasTestTag(JobUpdateNoteTag) and hasAnyAncestor(hasScrollAction()))
+            .assertCountEquals(1)
+        composeTestRule
+            .onAllNodes(hasTestTag(JobUpdateSaveTag) and hasNoScrollableAncestor())
+            .assertCountEquals(1)
+        composeTestRule
+            .onAllNodes(hasTestTag(JobUpdateCancelTag) and hasNoScrollableAncestor())
+            .assertCountEquals(1)
     }
 
     @Test
@@ -1151,7 +1245,8 @@ class JobDetailsScreenTest {
         onOpenInMaps: (CustomerJobAddress) -> Unit = {},
         onLoadAssignableTechnicians: () -> Unit = {},
         onChangeJobStatus: (JobStatus) -> Unit = {},
-        onChangeVisitStatus: (VisitStatus, VisitOutcome?, String?) -> Unit = { _, _, _ -> },
+        onChangeVisitStatus: (VisitStatus) -> Unit = {},
+        onCompleteVisit: (VisitOutcome, String) -> Unit = { _, _ -> },
         onDiscardQueuedVisitAction: (String) -> Unit = {},
         onDiscardQueuedVisitNote: (String) -> Unit = {},
         onAddActivityText: (String) -> Unit = {},
@@ -1209,6 +1304,7 @@ class JobDetailsScreenTest {
                     onLoadAssignableTechnicians = onLoadAssignableTechnicians,
                     onChangeJobStatus = onChangeJobStatus,
                     onChangeVisitStatus = onChangeVisitStatus,
+                    onCompleteVisit = onCompleteVisit,
                     onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
                     onDiscardQueuedVisitNote = onDiscardQueuedVisitNote,
                     onAddActivityText = onAddActivityText,
@@ -1260,7 +1356,7 @@ class JobDetailsScreenTest {
         // action — it simply does not act.
         composeTestRule.onNodeWithTag(JobDetailsStatusActionTag).assertDoesNotExist()
         composeTestRule
-            .onNodeWithText(string(R.string.customers_job_status_scheduled))
+            .onNodeWithText(string(R.string.customers_job_status_active))
             .assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobDetailsRescheduleActionTag).assertDoesNotExist()
         composeTestRule.onNodeWithTag(JobDetailsManageTechniciansActionTag).assertDoesNotExist()
@@ -1291,7 +1387,7 @@ class JobDetailsScreenTest {
         // is offered neither (`BR-051`, `BR-068`).
         composeTestRule.onNodeWithTag(JobDetailsRescheduleActionTag).assertDoesNotExist()
         composeTestRule.onNodeWithTag(JobDetailsManageTechniciansActionTag).assertDoesNotExist()
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusSelectorTag).assertDoesNotExist()
     }
 
     @Test
@@ -1301,36 +1397,45 @@ class JobDetailsScreenTest {
         // The Visit's field lifecycle is the technician's own capability (`BR-009`, `BR-066`), so a
         // session without it is shown the Visit's status and nothing that moves it (`BR-006`,
         // `BR-007`). The status is still presented: the read is not an action.
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusSelectorTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).assertDoesNotExist()
         composeTestRule
             .onNodeWithText(string(R.string.visit_status_en_route))
             .assertIsDisplayed()
     }
 
     @Test
-    fun offersExactlyTheVisitsDestinationsToASessionThatMayDriveIt() {
+    fun offersExactlyTheVisitsWorkingStatesToASessionThatMayDriveIt() {
         render(
             details = job(),
             canUpdateAssignedVisit = true,
             canRecordVisitOutcome = true,
         )
 
-        // The Visit's own status chip **is** the control (`BR-074`), and its menu is the destinations
-        // the backend reported — no lifecycle rule is re-implemented here (`BR-022`, `BR-041`).
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).performClick()
-
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusCurrentTag).assertIsDisplayed()
+        // The four working states are displayed directly and the Visit's own state is the selected chip
+        // (`BR-074`, `BR-075`): the technician taps where they are, and every destination of its own is a
+        // chip the API reported (`BR-022`, `BR-041`).
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusSelectorTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.EN_ROUTE.name))
+            .assertIsSelected()
         composeTestRule
             .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.ON_SITE.name))
-            .assertIsDisplayed()
+            .assertIsEnabled()
         composeTestRule
             .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.SCHEDULED.name))
-            .assertIsDisplayed()
-        // A destination the API does not report is not offered (`BR-041`).
+            .assertIsEnabled()
+        // A state the API did not report for this Visit is shown as the Visit's state but is not a
+        // destination, so it cannot be tapped (`BR-074`).
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.IN_PROGRESS.name))
+            .assertIsNotEnabled()
+        // Completion is not a state of this selector at all: it is the explicit completion operation
+        // (`BR-077`), drawn as its own action.
         composeTestRule
             .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.COMPLETED.name))
             .assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).assertIsDisplayed()
     }
 
     @Test
@@ -1347,50 +1452,100 @@ class JobDetailsScreenTest {
         // even though this session holds none of the field capabilities — and the API's own answer
         // (`selectedVisit.fieldActionable`) is what carries the office caller. A session holding neither
         // authorization is offered nothing, as the test above asserts.
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusSelectorTag).assertIsDisplayed()
     }
 
     @Test
     fun reportsTheDestinationTheTechnicianChose() {
-        val chosen = mutableListOf<VisitStatus?>()
+        val chosen = mutableListOf<VisitStatus>()
         render(
             details = job().copy(selectedVisit = visit().copy(status = VisitStatus.ON_SITE)),
             canUpdateAssignedVisit = true,
             canRecordVisitOutcome = true,
-            onChangeVisitStatus = { status, _, _ -> chosen += status },
+            onChangeVisitStatus = { status -> chosen += status },
         )
 
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).performClick()
+        // The technician taps the state they are moving to, and one tap is one operation: there is no
+        // menu to open and no next step to advance through (`BR-074`, `BR-067`).
         composeTestRule
             .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.IN_PROGRESS.name))
             .performClick()
 
-        // The transition is one explicit action, reported as the destination the API offered.
         assertEquals(listOf(VisitStatus.IN_PROGRESS), chosen)
     }
 
     @Test
-    fun asksForTheOutcomeBeforeCompletingTheVisit() {
-        val completions = mutableListOf<Pair<VisitOutcome?, String?>>()
+    fun movesAVisitBackwardsInOneOperationWhenTheApiOffersIt() {
+        val chosen = mutableListOf<VisitStatus>()
         render(
             details = job().copy(
                 selectedVisit = visit().copy(
                     status = VisitStatus.IN_PROGRESS,
-                    allowedStatusTransitions = listOf(VisitStatus.COMPLETED),
+                    allowedStatusTransitions = listOf(
+                        VisitStatus.SCHEDULED,
+                        VisitStatus.EN_ROUTE,
+                        VisitStatus.ON_SITE,
+                    ),
                 ),
             ),
             canUpdateAssignedVisit = true,
             canRecordVisitOutcome = true,
-            onChangeVisitStatus = { _, outcome, summary -> completions += outcome to summary },
+            onChangeVisitStatus = { status -> chosen += status },
         )
 
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).performClick()
+        // `BR-074` permits any working state in either direction, so a backward move is offered like any
+        // other destination and is one operation (`BR-075`).
         composeTestRule
-            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.COMPLETED.name))
+            .onNodeWithTag(jobDetailsVisitStatusOptionTag(VisitStatus.ON_SITE.name))
             .performClick()
 
-        // `BR-077` requires the outcome type **and** a summary, so the sheet asks for both and will not
-        // send a completion that omits either.
+        assertEquals(listOf(VisitStatus.ON_SITE), chosen)
+    }
+
+    @Test
+    fun opensTheCompletionSheetFromTheVisitsOwnAction() {
+        render(
+            details = job().copy(
+                selectedVisit = visit().copy(
+                    status = VisitStatus.IN_PROGRESS,
+                    allowedStatusTransitions = listOf(
+                        VisitStatus.SCHEDULED,
+                        VisitStatus.EN_ROUTE,
+                        VisitStatus.ON_SITE,
+                    ),
+                    completionAllowed = true,
+                ),
+            ),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+        )
+
+        // Completion is its own action rather than a state: tapping it states the outcome `BR-077`
+        // requires before anything is sent.
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).performClick()
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompletionSheetTag).assertIsDisplayed()
+    }
+
+    @Test
+    fun asksForTheOutcomeBeforeCompletingTheVisit() {
+        val completions = mutableListOf<Pair<VisitOutcome, String>>()
+        render(
+            details = job().copy(
+                selectedVisit = visit().copy(
+                    status = VisitStatus.IN_PROGRESS,
+                    allowedStatusTransitions = listOf(VisitStatus.ON_SITE),
+                    completionAllowed = true,
+                ),
+            ),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+            onCompleteVisit = { outcome, summary -> completions += outcome to summary },
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).performClick()
+
+        // `BR-077` requires the outcome **and** the summary with a completion, so the sheet asks for
+        // both and will not send a completion that omits either.
         composeTestRule.onNodeWithTag(JobDetailsVisitCompletionSheetTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobDetailsVisitCompleteConfirmTag).assertIsNotEnabled()
 
@@ -1408,23 +1563,140 @@ class JobDetailsScreenTest {
     }
 
     @Test
+    fun asksForAReasonWhenTheVisitCouldNotBeCompleted() {
+        val completions = mutableListOf<Pair<VisitOutcome, String>>()
+        render(
+            details = job().copy(
+                selectedVisit = visit().copy(
+                    status = VisitStatus.ON_SITE,
+                    allowedStatusTransitions = listOf(VisitStatus.SCHEDULED),
+                    completionAllowed = true,
+                ),
+            ),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+            onCompleteVisit = { outcome, summary -> completions += outcome to summary },
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).performClick()
+        composeTestRule
+            .onNodeWithTag(jobDetailsVisitOutcomeOptionTag(VisitOutcome.UNABLE_TO_COMPLETE.name))
+            .performClick()
+
+        // The API requires the text as the **reason** for this outcome, so the sheet asks for a reason
+        // rather than for a summary of work that did not happen (`BR-078`).
+        composeTestRule
+            .onNodeWithText(string(R.string.job_visit_complete_reason_label))
+            .assertIsDisplayed()
+
+        composeTestRule
+            .onNodeWithTag(JobDetailsVisitOutcomeSummaryTag)
+            .performTextInput("The unit is in a locked room and nobody was on site.")
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteConfirmTag).performClick()
+
+        assertEquals(
+            listOf(
+                VisitOutcome.UNABLE_TO_COMPLETE to
+                    "The unit is in a locked room and nobody was on site.",
+            ),
+            completions,
+        )
+    }
+
+    @Test
     fun withholdsCompletionFromASessionThatMayNotRecordAnOutcome() {
         render(
             details = job().copy(
                 selectedVisit = visit().copy(
                     status = VisitStatus.IN_PROGRESS,
-                    allowedStatusTransitions = listOf(VisitStatus.COMPLETED),
+                    allowedStatusTransitions = listOf(VisitStatus.ON_SITE),
+                    completionAllowed = false,
                 ),
             ),
             canUpdateAssignedVisit = true,
             canRecordVisitOutcome = false,
         )
 
-        // The API asks for the outcome capability again on the completing destination (`BR-009`,
-        // `BR-077`), so a session without it is offered no completion rather than one the API would
-        // refuse.
-        composeTestRule.onNodeWithTag(JobDetailsVisitStatusActionTag).assertDoesNotExist()
+        // The API asks for the outcome capability on the completion itself (`BR-009`, `BR-077`), so a
+        // session without it is offered no completion rather than one the API would refuse. The working
+        // states remain theirs to drive.
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusSelectorTag).assertIsDisplayed()
     }
+
+    @Test
+    fun withholdsEveryFieldActionFromACanceledJob() {
+        render(
+            details = job().copy(
+                status = JobStatus.CANCELED,
+                readOnlyReason = JobReadOnlyReason.JOB_CANCELED,
+                allowedStatusTransitions = listOf(JobStatus.NEW),
+                selectedVisit = visit().copy(
+                    status = VisitStatus.EN_ROUTE,
+                    allowedStatusTransitions = listOf(VisitStatus.ON_SITE),
+                ),
+            ),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+            canAddEvidencePhoto = true,
+        )
+
+        // The API refuses every field write under a closed Job (`BR-062`, `BR-079`), so the screen draws
+        // no control whose only answer is that refusal — and it says why, because a cancellation
+        // materially changes the work the technician was sent to do (`BR-012`).
+        composeTestRule.onNodeWithTag(JobDetailsReadOnlyNoticeTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.job_details_job_canceled_title))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusSelectorTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertDoesNotExist()
+        // The Visit is still readable: the read is not an action, and history stays visible.
+        composeTestRule
+            .onNodeWithText(string(R.string.visit_status_en_route))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun withholdsEveryFieldActionFromACompletedJob() {
+        render(
+            details = job().copy(
+                status = JobStatus.COMPLETED,
+                readOnlyReason = JobReadOnlyReason.JOB_COMPLETED,
+                allowedStatusTransitions = listOf(JobStatus.NEW),
+                selectedVisit = visit().copy(
+                    status = VisitStatus.COMPLETED,
+                    allowedStatusTransitions = emptyList(),
+                    completionAllowed = false,
+                    addUpdateAllowed = false,
+                ),
+            ),
+            canUpdateAssignedVisit = true,
+            canRecordVisitOutcome = true,
+            canAddEvidencePhoto = true,
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsReadOnlyNoticeTag).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.job_details_job_completed_title))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobDetailsVisitStatusSelectorTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsVisitCompleteActionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun withholdsAddUpdateWhenTheApiSaysTheVisitTakesNoFieldWork() {
+        render(
+            details = job().copy(selectedVisit = visit().copy(addUpdateAllowed = false)),
+            canAddEvidencePhoto = true,
+        )
+
+        // The Add update action is Visit-scoped, so the API's own answer on whether that Visit still
+        // takes field work decides whether it exists at all (`BR-062`, `BR-079`).
+        composeTestRule.onNodeWithTag(JobDetailsAddActivityTag).assertDoesNotExist()
+    }
+
 
     @Test
     fun showsWhatTheQueueIsStillHolding() {
@@ -1467,22 +1739,21 @@ class JobDetailsScreenTest {
 
     @Test
     fun offersEveryDestinationTheBackendReportedAndNothingElse() {
-        render(details = pendingReviewJob(), canUpdateJob = true)
+        render(details = closingJob(), canUpdateJob = true)
 
         // The status the user would change *is* the control: the chip the header presents wears the
         // Job's current status, and it is the thing that is tapped.
         composeTestRule.onNodeWithTag(JobDetailsStatusActionTag).assertIsDisplayed()
         composeTestRule
-            .onNodeWithText(string(R.string.customers_job_status_pending_review))
+            .onNodeWithText(string(R.string.customers_job_status_active))
             .assertIsDisplayed()
 
         composeTestRule.onNodeWithTag(JobDetailsStatusActionTag).performClick()
         // The menu offers exactly what the backend reported — a Job may be moved to any destination it
-        // permits, forwards or backwards — and nothing else: the client holds no second copy of the
-        // lifecycle, cancellation is absent while its reason catalogue is open, and `NEW` is reached
-        // by reopening a terminal Job rather than from an open one (`BR-041`, `BR-058`, `BR-064`).
-        composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("SCHEDULED")).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("IN_PROGRESS")).assertIsDisplayed()
+        // permits — and nothing else: the client holds no second copy of the lifecycle, and `NEW` is
+        // reached by reopening a terminal Job rather than from an open one (`BR-041`, `BR-058`).
+        composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("COMPLETED")).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("CANCELED")).assertIsDisplayed()
         composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("COMPLETED")).assertIsDisplayed()
         composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("CANCELED")).assertDoesNotExist()
         composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("NEW")).assertDoesNotExist()
@@ -1492,17 +1763,17 @@ class JobDetailsScreenTest {
     fun sendsAnOrdinaryDestinationInTheOneRequestItChose() {
         val selected = mutableListOf<JobStatus>()
         render(
-            details = pendingReviewJob(),
+            details = closingJob(),
             canUpdateJob = true,
             onChangeJobStatus = { status -> selected += status },
         )
 
         composeTestRule.onNodeWithTag(JobDetailsStatusActionTag).performClick()
-        composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("IN_PROGRESS")).performClick()
+        composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("CANCELED")).performClick()
 
         // Every destination is one business operation: the client sends the status the user chose and
         // never walks the lifecycle with a series of requests (`BR-058`, `BR-067`).
-        assertEquals(listOf(JobStatus.IN_PROGRESS), selected)
+        assertEquals(listOf(JobStatus.CANCELED), selected)
         composeTestRule.onNodeWithTag(JobDetailsStatusConfirmDialogTag).assertDoesNotExist()
     }
 
@@ -1510,7 +1781,7 @@ class JobDetailsScreenTest {
     fun confirmsClosingAJobBeforeTheOneRequestIsSent() {
         val selected = mutableListOf<JobStatus>()
         render(
-            details = pendingReviewJob(),
+            details = closingJob(),
             canUpdateJob = true,
             onChangeJobStatus = { status -> selected += status },
         )
@@ -1536,7 +1807,7 @@ class JobDetailsScreenTest {
     fun sendsNothingWhenClosingIsDismissed() {
         val selected = mutableListOf<JobStatus>()
         render(
-            details = pendingReviewJob(),
+            details = closingJob(),
             canUpdateJob = true,
             onChangeJobStatus = { status -> selected += status },
         )
@@ -1591,7 +1862,7 @@ class JobDetailsScreenTest {
 
     @Test
     fun statesTheStatusTheJobIsInWhenTheControlOpens() {
-        render(details = pendingReviewJob(), canUpdateJob = true)
+        render(details = closingJob(), canUpdateJob = true)
 
         composeTestRule.onNodeWithTag(JobDetailsStatusActionTag).performClick()
 
@@ -1601,19 +1872,25 @@ class JobDetailsScreenTest {
         composeTestRule.onNodeWithTag(JobDetailsStatusCurrentTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(jobDetailsStatusOptionTag("COMPLETED")).assertIsDisplayed()
         composeTestRule
-            .onNodeWithTag(jobDetailsStatusOptionTag("PENDING_REVIEW"))
+            .onNodeWithTag(jobDetailsStatusOptionTag("NEW"))
             .assertDoesNotExist()
     }
 
     @Test
     fun labelsTheVisitsDateAndKeepsTheVisitsStatusOnTheCardsOwnBadge() {
-        // The Visit is `SCHEDULED` while the Job is `PENDING_REVIEW`: the card states the Visit's date
+        // The Visit is `SCHEDULED` while the Job is `COMPLETED`: the card states the Visit's date
         // under a date label, so the Visit's status is stated once — by the card's own badge (`BR-074`).
         render(
             details = job().copy(
-                status = JobStatus.PENDING_REVIEW,
+                status = JobStatus.COMPLETED,
+                readOnlyReason = JobReadOnlyReason.JOB_COMPLETED,
                 allowedStatusTransitions = emptyList(),
-                selectedVisit = visit().copy(status = VisitStatus.SCHEDULED),
+                selectedVisit = visit().copy(
+                    status = VisitStatus.SCHEDULED,
+                    allowedStatusTransitions = emptyList(),
+                    completionAllowed = false,
+                    addUpdateAllowed = false,
+                ),
             ),
         )
 
@@ -1625,7 +1902,7 @@ class JobDetailsScreenTest {
             .assertCountEquals(1)
         // The Job's status is stated separately, under its own label (`BR-058`, `BR-059`).
         composeTestRule
-            .onAllNodesWithText(string(R.string.customers_job_status_pending_review))
+            .onAllNodesWithText(string(R.string.customers_job_status_completed))
             .assertCountEquals(1)
     }
 
@@ -1828,7 +2105,7 @@ class JobDetailsScreenTest {
             state = JobDetailsUiState(
                 jobId = JOB_ID,
                 details = job(),
-                actionFailure = JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET,
+                actionFailure = JobActionFailure.JOB_COMPLETION_BLOCKED,
             ),
             onDismissActionMessage = { released = true },
         )
@@ -1838,7 +2115,7 @@ class JobDetailsScreenTest {
         // Job on screen shows no change, because the change did not happen (`BR-001`).
         composeTestRule.onNodeWithTag(JobDetailsActionMessageTag).assertIsDisplayed()
         composeTestRule
-            .onNodeWithText(string(R.string.job_action_error_review_condition))
+            .onNodeWithText(string(R.string.job_action_error_completion_blocked))
             .assertIsDisplayed()
 
         composeTestRule.onNodeWithText(string(R.string.job_action_dismiss)).performClick()
@@ -2002,7 +2279,7 @@ class JobDetailsScreenTest {
                         id = "event-1",
                         kind = JobActivityKind.JOB_STATUS_CHANGED,
                         visitSequence = null,
-                        toStatus = "SCHEDULED",
+                        toStatus = "ACTIVE",
                         body = null,
                     ),
                 ),
@@ -2015,7 +2292,7 @@ class JobDetailsScreenTest {
             .onNodeWithText(
                 string(
                     R.string.job_activity_job_status_changed,
-                    string(R.string.customers_job_status_scheduled),
+                    string(R.string.customers_job_status_active),
                 ),
             )
             .assertIsDisplayed()
@@ -2298,14 +2575,13 @@ private fun job() = JobDetails(
     jobNumber = 1042,
     title = "Furnace repair",
     description = "Customer reports the furnace is not producing heat.",
-    status = JobStatus.SCHEDULED,
+    status = JobStatus.ACTIVE,
     // The destinations the API reports for a scheduled Job (`BR-058`): any other open status, or the
     // Job may be closed directly. It is the server's answer, so the fixture states it rather than
     // deriving it (`BR-041`).
     allowedStatusTransitions = listOf(
-        JobStatus.IN_PROGRESS,
-        JobStatus.PENDING_REVIEW,
         JobStatus.COMPLETED,
+        JobStatus.CANCELED,
     ),
     version = 7,
     customerId = "customer-1",
@@ -2355,16 +2631,14 @@ private fun jobWithCustomerContact(
 ) = job().copy(customerContactDetails = contact)
 
 /**
- * A Job awaiting review, with the destinations the API reports for that status (`BR-058`): every other
- * open status, and a direct close. `PENDING_REVIEW` is not one of them, because standing still is not a
- * transition, and `NEW` is not either, because `NEW` is reached by reopening a terminal Job.
+ * An open Job, with the destinations the API reports for `ACTIVE` (`BR-058`): the Job may be closed or
+ * canceled, and `NEW` is not among them, because `NEW` is reached by reopening a terminal Job.
  */
-private fun pendingReviewJob() = job().copy(
-    status = JobStatus.PENDING_REVIEW,
+private fun closingJob() = job().copy(
+    status = JobStatus.ACTIVE,
     allowedStatusTransitions = listOf(
-        JobStatus.SCHEDULED,
-        JobStatus.IN_PROGRESS,
         JobStatus.COMPLETED,
+        JobStatus.CANCELED,
     ),
 )
 
@@ -2385,8 +2659,12 @@ private fun visit() = JobDetailsVisit(
     allowedStatusTransitions = listOf(VisitStatus.ON_SITE, VisitStatus.SCHEDULED),
     // The API's own answer to the half of the question no client can decide (`BR-093`): this caller is
     // authorized to drive the Visit — their membership is on its crew, or they hold the office
-    // capability that admits them without one (`ADR-019` D3, D7).
+    // capability that admits them without one (`ADR-019` D3, D7). The two narrower answers are the
+    // API's too: the completion is this caller's to perform (`BR-077`) and the Visit still takes field
+    // work (`BR-079`).
     fieldActionable = true,
+    completionAllowed = true,
+    addUpdateAllowed = true,
 )
 
 /** One `JOB_PHOTO_ADDED` entry: the Job's photo as the Activity reports it (`BR-080`, `BR-015`). */
@@ -2463,6 +2741,7 @@ private fun pendingPhoto(
 ) = PendingJobPhoto(
     photoId = photoId,
     jobId = "job-1",
+    visitId = "visit-1",
     localPath = "app-private/job-photos/user-1/$photoId.jpg",
     phase = phase,
     note = note,
@@ -2531,5 +2810,21 @@ private class RecordingJobPhotoImages(private val context: Context) : JobPhotoIm
     }
 
     private fun request(): ImageRequest = ImageRequest.Builder(context).data(photo).build()
+}
+
+/**
+ * Whether a node sits outside every scrolling region.
+ *
+ * A field is typed into inside a sheet's body, which shrinks and scrolls while the keyboard is up, and the
+ * sheet's decisions are its own foot — drawn under that body rather than inside it, so the keyboard cannot
+ * carry them off the screen (`docs/design/android-design-system.md`, "Keyboard (IME) inset";
+ * `docs/tracker/057-qa-issue-list-visit-workflow.md` §3). The keyboard itself cannot be shown or hidden from
+ * an instrumentation test, so the contract is asserted in this structural form.
+ */
+private fun hasNoScrollableAncestor(): SemanticsMatcher {
+    val insideAScrollingRegion = hasAnyAncestor(hasScrollAction())
+    return SemanticsMatcher("has no scrollable ancestor") { node ->
+        !insideAScrollingRegion.matches(node)
+    }
 }
 

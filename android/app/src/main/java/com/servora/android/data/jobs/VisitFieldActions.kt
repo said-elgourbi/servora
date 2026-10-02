@@ -4,6 +4,7 @@ import com.servora.android.data.offline.OfflineSync
 import com.servora.android.data.offline.OutboxOperation
 import com.servora.android.data.offline.OutboxOperationState
 import com.servora.android.data.offline.OutboxStore
+import com.servora.android.domain.model.VisitStatus
 import java.time.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -56,10 +57,6 @@ class VisitFieldActions @Inject constructor(
                     VisitFieldOperationPayload(
                         visitId = action.visitId,
                         status = action.status.name,
-                        outcomeCode = action.outcome?.name,
-                        // Trimmed exactly as the direct attempt trims it, so the queued replay sends the
-                        // value the first attempt would have (`BR-031`).
-                        outcomeSummary = action.outcomeSummary?.trim()?.takeIf { it.isNotEmpty() },
                     ),
                 ),
                 capturedAt = action.capturedAt.toString(),
@@ -71,6 +68,48 @@ class VisitFieldActions @Inject constructor(
                 state = OutboxOperationState.PENDING,
             ),
         )
+
+    /**
+     * Queues a completion the API could not be reached for (`BR-077`, `BR-014`, §4).
+     *
+     * The same row a working transition writes, with the outcome the completion records: the device's
+     * operation is one either way — the Visit reaches the state the technician chose — and the replay
+     * picks the API route the record's destination belongs to. The summary is trimmed exactly as the
+     * direct attempt sends it, so the queued replay transmits the value the first attempt would have
+     * (`BR-031`), and the outcome's own code is kept as the stable value it is (`BR-041`, `BR-078`).
+     */
+    suspend fun queueCompletion(subjectId: String, action: VisitCompletion): Boolean {
+        val summary = action.outcomeSummary.trim()
+        if (summary.isEmpty()) {
+            // Nothing to record: `BR-077` requires the summary with the outcome, so a completion
+            // without one is not an operation the API would accept.
+            return false
+        }
+        return record(
+            OutboxOperation(
+                operationId = action.operationId,
+                operationType = VisitFieldOperationTypes.CHANGE_STATUS,
+                targetId = action.jobId,
+                subjectId = subjectId,
+                payload = json.encodeToString(
+                    VisitFieldOperationPayload.serializer(),
+                    VisitFieldOperationPayload(
+                        visitId = action.visitId,
+                        status = VisitStatus.COMPLETED.name,
+                        outcomeCode = action.outcome.name,
+                        outcomeSummary = summary,
+                    ),
+                ),
+                capturedAt = action.capturedAt.toString(),
+                recordedAt = clock.millis(),
+                expectedVersion = action.expectedVersion,
+                attemptCount = 0,
+                lastAttemptAt = null,
+                lastFailure = null,
+                state = OutboxOperationState.PENDING,
+            ),
+        )
+    }
 
     /**
      * Queues a note the API could not be reached for (`BR-013`, §4).

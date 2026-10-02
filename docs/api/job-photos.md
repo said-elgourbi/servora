@@ -14,8 +14,10 @@ References: `BR-001`, `BR-006`, `BR-007`, `BR-009`, `BR-012`, `BR-014`, `BR-015`
 ## 1. What a Job photo is
 
 A photo is **evidence a technician attached to a Job** (`BR-015`, `BR-027`), not a Job field and not a
-Visit status. It is recorded on the **Job**, so it can be captured whether or not the Job has a Visit
-(`BR-051`), and it is **appended only**: nothing in this contract edits a photo, and there is no
+Visit status. It is recorded against the **Visit** the technician was working, because evidence is field
+work: the request names that Visit and the API refuses one that names none or one that is not on this Job
+(`BR-042`, `BR-047`, `BR-080`, `docs/tracker/056-evidence-belongs-to-a-visit.md`). It is **appended only**:
+nothing in this contract edits a photo, and there is no
 edit-evidence operation in Servora at all (`BR-067`, `BR-088`). A photo is draft material until this API
 records it and immutable historical evidence from that moment. From 2026-09-16 an explicit, audited
 **remove** operation exists (`BR-089`, tracker 029 Phase 6b): it appends a removal record beside the
@@ -28,6 +30,7 @@ What the API stores per photo:
 | ---------------------- | --------------------------------------------------------------------------------------- |
 | `id`                   | The photo's identifier, which is the **client operation id** the device generated.       |
 | `jobId`                | The Job the evidence belongs to.                                                        |
+| `visitId`              | The Visit the photo was recorded during (`BR-047`, `BR-080`). Required by every write.   |
 | `phase`                | `BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK` — the stable code the technician chose.     |
 | `note`                 | The technician's optional note.                                                          |
 | `objectKey`            | The object's key in the store. An **object key, never a URL** (`ADR-013` D6.4).          |
@@ -82,6 +85,7 @@ capability only.
 | ------------------- | -------- | --------------------------------------------------------------------- |
 | `file`              | yes      | The photo. JPEG, PNG or WebP, decided from the bytes. Max 15 MiB.      |
 | `clientOperationId` | yes      | UUID. The idempotency key; **also the photo's id** (§3.2).             |
+| `visitId`           | yes      | UUID of the Visit the photo was recorded during (`BR-047`). A Visit that is not on this Job, or in another organization, is refused `404 VISIT_NOT_FOUND`. |
 | `phase`             | yes      | `BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK`.                          |
 | `note`              | no       | At most 2000 characters. Absent or blank means no note.                |
 | `capturedAt`        | no       | ISO-8601 UTC instant the device captured the photo.                    |
@@ -97,7 +101,7 @@ event and there is no separate photo read. The new entry is:
   "kind": "JOB_PHOTO_ADDED",
   "recordedAt": "2026-09-15T13:05:00.000Z",
   "actorName": "John Smith",
-  "visitSequence": null,
+  "visitSequence": 2,
   "fromStatus": null,
   "toStatus": null,
   "technicianName": null,
@@ -114,8 +118,10 @@ event and there is no separate photo read. The new entry is:
 
 `photoId` is what `GET /jobs/:id/photos/:photoId/content` is asked for, and `body` carries the note.
 `photoRemovalReason` is `null` on every event but `JOB_PHOTO_REMOVED`, which carries no `body`
-(`docs/api/job-activity.md` §3.2). The entry is Job-level (`visitSequence: null`), matching where the
-photo is recorded.
+(`docs/api/job-activity.md` §3.2). The entry is **Visit-level** (`visitSequence` names the Visit the photo
+was recorded during), which is what makes it read beside that field attempt in Job Activity (`BR-047`,
+`BR-080`, `docs/tracker/056-evidence-belongs-to-a-visit.md`). A photo recorded before the link existed
+carries no Visit, and that is the only case in which the entry is Job-level (`visitSequence: null`).
 
 ### 3.2 Idempotency (`BR-031`, offline standard §5)
 
@@ -214,7 +220,7 @@ Response — `201 Created`: the refreshed Job Activity projection, like §3.1. T
   "kind": "JOB_PHOTO_REMOVED",
   "recordedAt": "2026-09-16T18:22:00.000Z",
   "actorName": "Dana Manager",
-  "visitSequence": null,
+  "visitSequence": 2,
   "fromStatus": null,
   "toStatus": null,
   "technicianName": null,
@@ -239,6 +245,7 @@ Response — `201 Created`: the refreshed Job Activity projection, like §3.1. T
 | `404`  | `JOB_NOT_FOUND`            | The Job is not in the caller's organization (or its Customer was deleted).    |
 | `404`  | `JOB_PHOTO_NOT_FOUND`      | The photo is not in that organization and Job, its bytes are unavailable, or it has been removed (§4.1). |
 | `409`  | `PHOTO_OPERATION_REUSED`   | The idempotency key was already used for another Job.                         |
+| `409`  | `JOB_CLOSED_FOR_FIELD_WORK` | The Job is `COMPLETED` or `CANCELED`, so its field record is final and no new evidence is recorded under it (`BR-079`). |
 | `409`  | `JOB_PHOTO_ALREADY_REMOVED` | The photo has already been taken out of ordinary use (§4.2).                 |
 | `413`  | —                          | The upload exceeded the multipart limit.                                      |
 | `503`  | `STORAGE_UNAVAILABLE`      | The object store did not store the photo. **Nothing was recorded.**           |
@@ -291,9 +298,14 @@ Recorded rather than guessed (`BR-042`).
    `docs/tracker/035-android-audio-evidence.md`, `ADR-018`): `evidence.audio.add` and the audio kind's own
    `evidence.audio.remove` are created, the three routes exist, and generic file attachments remain out of
    scope in v1.
-5. **Whether evidence may be attached to a Visit rather than the Job.** This slice records photos on the
-   Job, because that is where Job Activity projects them (`BR-080`) and because a Job need not have a
-   Visit (`BR-051`). A Visit-scoped photo stream would be a product decision.
+5. **Whether evidence may be attached to a Visit rather than the Job.** **Decided 2026-09-28** — the
+   opposite way round: evidence is recorded **against the Visit** it was taken during. Product ownership
+   named the requirement after field testing (photos and audio landed in the Job-level group of Job Activity
+   while text notes landed in the Visit's), so both upload routes require a `visitId` that belongs to the Job,
+   `job_photos.visit_id` and `job_audio_notes.visit_id` are written, and the Activity projection reports those
+   events with the Visit's sequence (`BR-047`, `BR-080`,
+   `docs/tracker/056-evidence-belongs-to-a-visit.md`). Evidence recorded before the change keeps no Visit:
+   attributing it retroactively would be inventing business data (`BR-042`, `BR-088`).
 6. **The metadata written into evidence.** **Decided 2026-09-16** (`BR-091`, tracker 029 Phase 6c):
    GPS/location EXIF and metadata Servora does not need are stripped from uploaded evidence by default,
    and only what the application needs is kept — normalized orientation and dimensions, plus Servora's own

@@ -228,25 +228,33 @@ and, where the user's permissions allow, one contextual action
 The bar leaves `TopAppBarDefaults.windowInsets` in place, so it applies the status-bar inset itself
 and content begins directly below it. No status-bar height is hard-coded.
 
-## Management action row (Job Details)
-## Job Details — hierarchy and contextual actions
+## Job Details — the technician's hierarchy and contextual actions
 
-The Manager Job Details screen reads top to bottom as the manager's question: what the job is, the
-visit that represents it, the technicians on that visit, and then the job's activity
-(`docs/tracker/019-android-job-details-hierarchy.md`). Each action is drawn with the record it affects
-rather than in one global action row, because a global row made every action look equally relevant to
-the whole screen and separated each one from the data it changes (`BR-066`). An action is drawn only
-when the session holds the capability the API enforces, and it is enabled from the backend's own answer
-rather than from a rule re-implemented in the client (`BR-006`, `BR-007`, `BR-041`). The Job's status
-control carries that rule one step further
-(`docs/tracker/020-android-job-details-status-control.md`): the chip that presents the status **is** the
-control that changes it, so the state a user wants to change is the thing they tap and no separate
-action is drawn beside it.
+One destination serves both audiences, and it reads top to bottom as the **technician's** questions
+(`BR-010`, `BR-012`; `docs/tracker/052-android-technician-job-details-redesign.md`): what the work is (the
+Job's number, title and description, as a heading rather than a card), where it is (**Location**), who can
+be reached there (**Contacts**), what the office recorded (**Notes**), the Visit being worked (**Current
+visit**, **Today's visit**, … with its working states and its field actions), and what has happened (the
+Job's activity, grouped by the Visit each update belongs to). The Manager's own hierarchy — what the job
+is, the visit that represents it, the technicians on that visit, then the activity
+(`docs/tracker/019-android-job-details-hierarchy.md`) — is the same page, and each action is drawn with the
+record it affects rather than in one global action row, because a global row made every action look equally
+relevant to the whole screen and separated each one from the data it changes (`BR-066`). An action is drawn
+only when the session holds the capability the API enforces, and it is enabled from the backend's own answer
+rather than from a rule re-implemented in the client (`BR-006`, `BR-007`, `BR-041`).
+
+**A routine Job status is not presented.** `ACTIVE` states only that the customer request is open, which a
+technician acting on an assigned Visit already knows, so the page draws no status chip for a session that
+cannot change it — and a Job that has *stopped* being open is reported by the prominent notice above the
+work instead (`BR-058`, `BR-062`, `BR-079`). A session that **may** change the Job keeps the control the
+Manager's path uses (`docs/tracker/020-android-job-details-status-control.md`): the chip that presents the
+status **is** the control that changes it, so the state a user wants to change is the thing they tap and no
+separate action is drawn beside it.
 
 Because a Job and its Visit are two state machines (`BR-059`), each status is named for what it belongs
-to: the header's status is labelled **Job status**, and the Visit card labels its row for the Visit's
-date rather than with a word that reads as a status, so the card's own badge is the only status a Visit
-appears to have (`docs/tracker/021-android-job-details-status-polish.md`).
+to: the Job's control is labelled **Job status**, and the Visit card labels its row for the Visit's date
+rather than with a word that reads as a status, so the card's own badge is the only status a Visit appears
+to have (`docs/tracker/021-android-job-details-status-polish.md`). Neither is ever drawn beside the other.
 
 The section that presents the represented Visit is labelled for **when that field attempt is for**, as
 of the device's own clock and zone (`docs/tracker/046-android-job-details-visit-period-and-card.md`): the
@@ -259,21 +267,27 @@ selection is decided by it (`BR-001`, `BR-007`).
 
 | Part | Token |
 | --- | --- |
-| Job identity | the Job number, `labelMedium` on `onSurfaceVariant`; then the title, `headlineSmall` bold on `onSurface`; then the description, `bodyMedium` on `onSurfaceVariant`. The number is stated once and is never repeated inside the title (`BR-052`). The three stay one group: the status is not drawn above them, so nothing separates the Job's number from what the Job is |
-| Job status | the identity's own labelled control: a `SectionLabel` reading **Job status**, then the status control below it, so the status is read as the Job's rather than as the header's decoration or the Visit's (`BR-028`, `BR-059`) |
+| Job identity | the Job number, `labelMedium` on `onSurfaceVariant`; then the title, `headlineSmall` bold on `onSurface`; then the description, `bodyMedium` on `onSurfaceVariant`. The number is stated once and is never repeated inside the title (`BR-052`). The three are a heading rather than a card — the page's hierarchy, not one record among the record cards — and they stay one group, so nothing separates the Job's number from what the Job is (`BR-012`) |
+| Job status (only for a session that may change it) | a compact labelled control inside the Job heading group: a `labelSmall` **Job status** label over the same status chip/menu, so status reads as part of the Job summary rather than as a large standalone section. A session that cannot act on the Job is drawn no status at all, and a closed Job is drawn as the notice below instead (`BR-012`, `BR-028`, `BR-059`, `BR-062`) |
+| Location | a `SectionLabel` reading **Location** over one `InfoCard`: the Job's preserved address snapshot (`BR-056`) as an `OverviewRow` labelled **Address**, ending in the 18 dp `ic_navigation` affordance (`primary`) that opens it in the device's map application, with the row itself the target. A Job with no address states **No address yet** and is not tappable (`BR-049`, `BR-012`) |
+| Contacts | a `SectionLabel` reading **Contacts** over one `InfoCard` — see *Job Details — the Contacts section* below (`BR-092`, `BR-095`) |
+| Notes | a `SectionLabel` reading **Notes** over one `InfoCard` holding the notes the office recorded (`BR-092`), in `bodyLarge`, drawn only when the Customer has notes: they are what a technician needs to know before working, so they are not a row of the contact metadata (`BR-012`) |
 | Contextual action | `TextButton`, `labelLarge`, `heightIn(min = 48.dp)`; disabled with the platform's own dimming |
 | Status control | a Material 3 clickable `Surface` shaped as the shared status chip (`JobStatusPill`): the current status's own container and content colours, its 1 dp `content@25%` border, an 8 dp dot in the chip's own content colour that marks it as a status, the chip's localized label, and a 16 dp `ic_chevron_down` in the same content colour saying it opens something. Tapping it opens the control's own compact menu — one fixed 216 dp column anchored at the chip — made of an `outlineVariant` divider under a non-acting row stating the status the Job is in now (its own dot, its localized label, `bodyMedium` semibold and a 16 dp `ic_check_circle` in its accent colour, with the "Current status" content description), then one `DropdownMenuItem` per destination the API reported (`BR-058`), each a `bodyMedium` label with a dot in that status's accent colour rather than a second row of chips. Every destination the API reported is listed, in the status vocabulary's order: an open Job offers each other open status and `Completed`, and a closed Job offers only `New`; a destination the Job does not currently qualify for is still listed, because the API answers that question (`BR-061`, `BR-062`). Choosing a destination sends **one** change; the two consequential destinations are confirmed first by a Material 3 `AlertDialog` at the screen's dialog width — **Close this job?** (with a body naming the Job, and confirming that closing ends the field work and makes the visit outcomes final) or **Reopen this job?** — whose actions are a filled **Confirm** and a text **Cancel** (`BR-062`, `BR-063`). Without the capability, or with no permitted destination, the status is drawn as the same dot-led chip and does not act (`BR-006`, `BR-007`); the two states differ only by the affordance the control adds, because the clickable `Surface` keeps the chip's own size, reserves the platform's touch target around it and confines the ripple to the chip |
 | Visit card row | the represented Visit's date is labelled **Visit date** (`labelMedium` on `onSurfaceVariant`, as every information row is) rather than with a word that reads as a status, and the Visit's status badge stays at the end of that row. The date row and the badge therefore state the Visit's date and its status, never the same thing twice (`BR-074`) |
+| Visit working-status bar | one `SingleChoiceSegmentedButtonRow` across the Visit card's width, under an `outlineVariant` divider, and **only** for a session that may drive the Visit: four equal segments — **Scheduled**, **En route**, **On site**, **In progress** — at `labelSmall` bold, centred, the Visit's own state filled `primaryContainer` on `onPrimaryContainer` and the others Material's muted unselected colours, sharing one outline so the four read as **one bar** rather than as four objects (`docs/tracker/054-android-job-details-visit-status-bar.md`). Four equal segments rather than four chips that size to their own labels, because a ragged chip row wraps as soon as a label grows — in French, or at a larger text size — and one control then reads as two unrelated rows (`BR-012`, `BR-028`). The state the Visit holds is the selected segment and is **not** tappable — moving a Visit to where it already is is not a transition — so the disabled-and-selected colours are stated as the selected ones and the current state stays the obvious one; a segment that is neither the Visit's state nor a destination the API reported is muted. The row carries **no group label**: each segment names the state it moves the Visit to, `Role.RadioButton` inside the row's `selectableGroup` announces the selected one, and the section's own label above already says when the Visit is for, which is why the visible **Visit status** label was removed. A session that may not drive the Visit is shown the Visit's badge on the date row instead (`BR-006`, `BR-007`, `BR-041`, `BR-074`) |
 | Visit section label | the section's `SectionLabel`, stating **when the represented Visit is for**: `Current visit`, `Today's visit`, `Tomorrow's visit`, `Upcoming visit` or `Previous visit`, resolved from the Visit's own schedule, its field status and the device's clock (`BR-072`, `BR-074`, `BR-081`) |
-| Visit card action | at the foot of the visit card behind an `outlineVariant` divider: **Reschedule**, disabled when the API says the visit is not reschedulable (`BR-073`) |
+| Visit card action | at the foot of the visit card behind an `outlineVariant` divider: **Reschedule**, disabled when the API says the visit is not reschedulable (`BR-073`), and **Manage technicians** when the crew may be edited. **Schedule a visit** appears only when the Job has no Visit yet; **Schedule follow-up visit** appears only after the represented Visit is completed with a follow-up outcome. A scheduled or active Visit does not offer casual creation of a parallel Visit. **Request another visit** remains the technician's follow-up request action (`BR-071`, `BR-078`, `BR-FV-001`) |
 | Technicians section action | at the foot of the crew card behind the same divider: **Manage technicians**, which states the whole crew — adding a technician, removing one and naming the Lead (`BR-068`, `BR-069`) |
 | Action report | a Material 3 `SnackbarHost` at the bottom of the screen, drawn **above whatever the screen pins below it** — the floating **Add update** action, and the audio notice / photo tray while the device holds evidence the API has not accepted — so a report is never covered by one of them and its whole text is readable (`BR-042`; reported from physical-device QA and fixed 2026-09-17). What an action did is transient: `secondaryContainer` on `onSecondaryContainer`, `SnackbarDuration.Short`. A refusal waits for the user: `errorContainer` on `onErrorContainer`, `SnackbarDuration.Indefinite`, with a **Dismiss** text button |
 | Tappable information row | unchanged: no fill of its own; the row's whole width is the control, so the row's own tokens do not change. A row that opens the Job's address in the device's map application ends in the design's 18 dp `ic_navigation` glyph on `primary` (`Figma/src/screens/JobDetails.tsx`); the glyph also names that action for a screen reader, because the row's own text states the address and not what opening it does (`BR-028`). A Job with no address has nothing to navigate to, so that row is neither tappable nor marked (`BR-056`) |
 | Assignment sheet | a Material 3 `ModalBottomSheet`: one row per technician with a `Checkbox` and a Lead choice, and one primary button; a crew that is not exactly one Lead cannot be confirmed |
+| Visit window sheet | one Material 3 `ModalBottomSheet` shared by the three writes that state a Visit's window — **Schedule a visit** and **Approve & schedule** (`BR-071`, `BR-FV-005`) and the technician's **Request another visit** (`BR-FV-001`): **one** visit date with a start and an end time, because a field attempt starts and ends on the same day (`BR-072`), whose date and time rows open the platform pickers and whose values are read back in the device's own zone and conventions (`BR-028`). The two office writes also state the crew, since a Visit that becomes `SCHEDULED` carries exactly one Lead (`BR-068`); the request states a **reason**, whether the same technician is preferred, and **no crew**, because who performs the follow-up is the office's decision (`BR-FV-003`, `BR-FV-004`). What the API would refuse cannot be submitted — an end that is not after the start, a crew that is not exactly one Lead, a request with no reason — and the form says which is missing instead (`BR-042`) |
+| Follow-up request sheet | the window sheet's request mode, drawn as a proposal rather than an appointment: why another attempt is needed, the suggested window, the same-technician choice, and a message stating that nothing is booked until the office approves it (`BR-FV-002`, `BR-FV-010`). Submitting reports that the request reached the office; it never reports a Visit as scheduled |
 | Reschedule dialog | an `AlertDialog` whose date and time fields open the platform pickers, plus length choices |
 | Conflict confirmation | an `AlertDialog` listing each overlapping technician, job number and window, with **Schedule anyway** as its confirming action (`BR-070`) |
 | Job update action and sheet | one floating **Add update** action at the bottom of the screen — an `ExtendedFloatingActionButton` in `primary` on `onPrimary` with the 18 dp `ic_add` — opening a Material 3 `ModalBottomSheet` titled *Add update*. The sheet is a **hierarchy**: it states the **kind** of update, then draws only that kind's own controls (`docs/tracker/033-android-add-update-hierarchy.md`). The kinds are peers in one segmented control (`JobUpdateKindSelector`) under the `labelSmall` group label **Update type**: one equal-width segment per kind the session may add — **Write note** (`ic_file_text`), **Add photo** (`ic_camera`) and **Add audio** (`ic_mic`, lucide `Mic`) — each drawn as its glyph over its `labelMedium` label, the selected one filled `primary`/`onPrimary` and the others `secondary`/`onSurfaceVariant` with a 1 dp `outlineVariant` hairline. It is a `selectableGroup` of `Role.RadioButton` segments, and the segments share the tallest label's height (`height(IntrinsicSize.Min)`), so three peers fit a phone in either language and grow with a larger text size instead of being squeezed into one 56 dp row (`BR-028`, `ADR-007` D6). Each kind then owns the controls below the selector. **Write note** draws the note's `OutlinedTextField` (4 lines, `outline` label and placeholder) with a `TextButton` **Cancel** and a `Button` **Save update** in `shapes.medium`, exactly as the photo review panel's foot is drawn; it is the kind in effect where a note can be taken, so its field is ready to type in and tapping the segment puts the cursor in it. **Add photo** draws a `labelSmall` label **Add photos from** and, under it, its two sources as **subordinate rows** — `≥ 56 dp` with the whole row as the target, a 22 dp leading glyph in `primary`, the label in `bodyLarge`, an 18 dp `ic_chevron_right` in `onSurfaceVariant`, and no fill, border or card, so they never read as further kinds: **Take photo** (`ic_camera`) and **Choose from device** (`ic_photo_library`, lucide `Images`). Each source closes the sheet and hands over to the flow the photo slice owns (capture or pick, then the review panel, then the tray). **Add audio** draws the recorder's own controls (`BR-091`, `ADR-018`, `docs/tracker/035-android-audio-evidence.md`): the phase selector — the vocabulary photos and audio both carry (`ADR-018` A4) — and then exactly one of three states: the **live-microphone** row (`ic_mic` in `primary` beside *Recording…* in `bodyLarge`) with a 56 dp `Button` **Stop**; the **no take yet** state, a 56 dp `Button` **Record** (`ic_mic`) with a `labelSmall` hint that the take is reviewed before it is attached, which is also the one control that asks for the microphone permission; or the **review** of the take already on the device — its length (`0:18`) beside `ic_mic`, the note's `OutlinedTextField`, and the foot `TextButton` **Delete** / `Button` **Attach to update**. Deleting is what makes another take possible, so *delete/re-record* is one step back to the first state rather than a second recorder beside the first; playing a take back is that tracker's Phase 9c, where one player serves the review and the timeline together. A kind keeps its own draft while the sheet is open (`rememberSaveableStateHolder`), so looking at the photos does not discard a half-typed note. The kinds are drawn on the capability the API enforces for each — the note on the Job update capability **and** a represented Visit, the photo sources on `evidence.photo.add`, audio on `evidence.audio.add` — so a default Technician reaches the camera, the picker and the microphone without being given a Manager capability (`BR-006`, `BR-007`, `BR-009`, `BR-011`, `ADR-018` A7), and the action itself is drawn when the session may do any of them (`BR-015`, `BR-051`); the tray or the notice takes the bottom of the screen while the device holds evidence the API has not accepted, as the tray already did. **Answered (`D14` ✓, 2026-09-16):** the sheet is the canonical way to choose the evidence kind, while inside the photo flow the tray's **Take another** launches the camera again rather than returning the technician to the picker — a run of photos stays one tap each, and the sheet is what changes the kind (`docs/tracker/029-photo-evidence-phases.md`) |
-| Photo review panel | the `ModalBottomSheet` a capture — and each item of a pick — is confirmed in (`BR-012`, `BR-014`, `docs/tracker/029-photo-evidence-phases.md` Phase 3): the photo, the phase label with its three 56 dp targets, one optional note (2 lines at least, 3 shown), and a **Discard** / **Add** foot of the phase buttons' height, with the phase already at the value the technician used last so a run of photos of the same phase is one tap each. The photo is drawn `ContentScale.Fit` — the whole photo rather than a crop of it, because what is being confirmed is the photograph — in a 220 dp box, and the panel's **content scrolls**, so the note stays reachable while the keyboard is up instead of being left underneath it (fixed 2026-09-16; the tray and gallery tiles still crop, being squares that stand for a photo) |
+| Photo review panel | the `ModalBottomSheet` a capture — and each item of a pick — is confirmed in (`BR-012`, `BR-014`, `docs/tracker/029-photo-evidence-phases.md` Phase 3): the photo, the phase label with its three 56 dp targets, one optional note (2 lines at least, 3 shown), and a **Discard** / **Add** foot of the phase buttons' height, with the phase already at the value the technician used last so a run of photos of the same phase is one tap each. The photo is drawn `ContentScale.Fit` — the whole photo rather than a crop of it, because what is being confirmed is the photograph — in a 220 dp box, and the panel's **content scrolls** with its **Discard**/**Add** foot pinned beneath the scrolling area, so the note stays reachable while the keyboard is up and the two decisions stay on screen with it (the panel's scroll fixed 2026-09-16, its pinned foot 2026-09-28 with the keyboard rule below; the tray and gallery tiles still crop, being squares that stand for a photo) |
 | Photo viewer | a full-screen `Dialog` (`usePlatformDefaultWidth = false`) drawn on the viewer's own **black ground with white ink** — a dedicated media surface, the same in both app appearances rather than a card of the light or dark theme, so the photo is read as the photo (`docs/tracker/031-android-photo-viewer-ui.md`). The photo is the content, drawn `ContentScale.Fit`, filling everything between the system bars and the note; the chrome is an overlay on it and takes no height of its own. It opens from a tap on a gallery tile or on a tray tile, and closes on its own action or the platform's back gesture. Zoom, swiping between photos and a gallery-wide pager are deliberately not drawn (`D4`, `docs/tracker/029-photo-evidence-phases.md` Phase 4). **Since Phase 4d (2026-09-15, `D9` ✓) the photo is drawn zoomable and pannable**: it is drawn through **Telephoto** over the Coil 3 image stack Phase 4c put behind `JobPhotoImages` — a pinch to zoom, a drag to pan within the photo's own bounds, a double-tap to the library's zoom ceiling, and no scale below "fit" — and what a zoom shows is the photo's own pixels, because the layer sub-samples the file the stack cached. The gesture surface is the area the photo occupies, so the phase badge, the top bar and the note stay legible and outside the gestures, and the platform back gesture keeps closing the viewer. **Since Phase 4e (2026-09-15, `D11`/`D12`/`D13` ✓) the viewer pages, saves and shares.** The Job's photos are drawn as one `HorizontalPager` in the order Job Details presents them — the evidence the backend holds first, as the gallery lists it, then the photos this device still holds, as the tray lists them — so a tap on a tray tile and a tap on a gallery tile open the same sequence, and a swipe continues through what the technician sees around the photo they opened. The top row carries the phase badge, a localized position (`1 / 4`, drawn only when the Job has more than one photo) and the same 48 dp close target; the note stays under the photo and pages with it, bounded and scrollable so a long one cannot push the photo out; and a photo the backend has not accepted yet keeps reporting its upload state beneath it. A swipe pages **only while the photo is at fit** — zoomed, the same drag pans the photo (`D9`) — so the two gestures never compete for one drag. **Since Phase 4f (2026-09-16, `docs/tracker/031-android-photo-viewer-ui.md`) the chrome is one minimal overlay:** a top bar — a flat `black@62%` scrim, so the controls' contrast comes from the viewer rather than from the photo under them — carries a 48 dp close target (`ic_close`) on the left, the localized position (`1 / 4`, only when the Job has more than one photo, `titleSmall` in white) centred in the screen, and the evidence actions as 48 dp icons on the right; the photo's phase is the same badge the tile draws, over the photo's own bottom-left corner; and under the photo a **Notes** section states the note with an explicit **More**/**Less** once it passes three lines, so a long note never takes the photo's room and a short one draws no action at all. An action that is running shows the viewer's own progress in its place, and what one did is reported by the same Snackbar the screen draws, hosted **inside the viewer** — the screen's own host sits behind the full-screen dialog, so a report drawn there is one the technician never sees. The two evidence actions sit in the top bar at 48 dp: **Save to device** (`ic_download`) and **Share** (`ic_share`, the platform's own chooser), each carrying its own localized label as its accessible name (`BR-028`). Both read the photo's bytes and are therefore drawn on `evidence.view`, the capability the API enforces for reading evidence; neither edits nor deletes anything (`BR-027`). **Since Phase 6b (2026-09-16, `BR-089`) a third action sits beside them for a session that holds `evidence.photo.remove`**: **Remove evidence** (`ic_trash`, lucide `Trash2`) is drawn **last**, so it is the outermost control and is never under the technician's thumb on the way to Save or Share, and it is disabled while any evidence action is running. It does not act directly: it opens a **confirmation dialog** — title *Remove this photo?*, a sentence stating that the photo was recorded as evidence and cannot be deleted, its own reason field (*Why is it being removed?*) and **Cancel** / **Remove** actions — and the Remove action is disabled until a reason is given, because the API refuses a removal without one (`BR-067`, `BR-089`). The action reports that it is working while the API answers, and a refusal, a photo that is no longer available, an unreachable server and a missing capability are each reported as themselves (`BR-042`). A technician's viewer draws no such control: removing recorded evidence is a Manager capability. **A gallery-wide pager and any cross-Job gallery remain deliberately not drawn** (`D4`, `D9`, `D11`) |
 
 The action surfaces are localized in both languages and are the same rows the customer screens use for
@@ -285,16 +299,32 @@ needs (`BR-001`). A refusal is the opposite case — nothing on screen reflects 
 happen — so it stays until the user dismisses it.
 
 **Job Activity is grouped by the Visit each update belongs to** (`BR-047`, `BR-080`,
-`docs/tracker/045-android-job-activity-visit-groups.md`). The section holds one foldable group per Visit —
-headed `Visit N · date`, with the Visit's status and its crew as the folded summary — and a group of its
-own for the events that belong to the Job and to no Visit (**General job updates**). The Visit the read
-represents opens by default; every other Visit's group starts folded, and the general group starts open
-because it holds the Job's accepted evidence (`BR-015`). What an expanded group reveals is headed by one
-bordered card stating that Visit's own facts — its date, its scheduled start – end, and the technicians
-**assigned** to it — and the Visit's entries then follow it as the one timeline they are; a Visit with
-nothing recorded says so inside its own group (`BR-042`, `BR-068`, `BR-072`). Which group an entry belongs
-to is the API's own `visitSequence` answer, and an entry naming no Visit of the Job is reported as the
-Job's rather than guessed into one.
+`docs/tracker/045-android-job-activity-visit-groups.md`, reworked by
+`docs/tracker/052-android-technician-job-details-redesign.md`). The section holds one foldable group per
+Visit — headed `Visit N · date` over a summary line stating where that field attempt ended up and what it
+resulted in (`Completed · Needs follow-up`, from the shared status and outcome labels, `BR-074`, `BR-078`) —
+and a group of its own for the events that belong to the Job and to no Visit (**General job updates**). The
+Visit the read represents opens by default; every other Visit's group starts folded. The general group
+starts **folded**: after `docs/tracker/056-evidence-belongs-to-a-visit.md` it holds only the office's
+Job-level lifecycle events (`Job status changed`, `Property changed`, `Customer changed`, `BR-080`) and any
+evidence recorded before that change, because everything a technician records in the field — a text note, a
+photo, a recording — belongs to a Visit (`BR-015`, `BR-091`). It stays one tap away rather than being removed,
+because those Job-level events are history no other surface states. What an expanded group reveals is that
+Visit's own accepted evidence, read as a compact gallery, and then its primary operational entries as the one timeline they are; administrative/system entries — assignment changes, schedule creation, routine status bookkeeping and other low-value audit history — remain available in a collapsed **Administrative history** disclosure inside the same group rather than dominating the timeline;
+it does **not** repeat the Visit's date, its scheduled window, its outcome or its crew, which the group's own
+heading and the Visit section already state (`BR-047`, `BR-068`, `BR-072`, `BR-077`). A Visit with nothing
+recorded says so inside its own group (`BR-042`). Which group an entry belongs to is the API's own
+`visitSequence` answer, and an entry naming no Visit of the Job is reported as the Job's rather than guessed
+into one.
+
+**A Visit status event is stated in the language of the field** (`BR-080`, `BR-012`,
+`docs/tracker/052-android-technician-job-details-redesign.md`). `VISIT_STATUS_CHANGED` reads `Work started`,
+`Arrived on site`, `En route`, `Visit scheduled`, `Visit completed` or `Visit canceled` — one field phrase
+per destination the status route offers, in place of `Updated visit status to IN_PROGRESS` — and
+`VISIT_OUTCOME_RECORDED` states the outcome itself (`Needs follow-up`, `Resolved`), so a completion and what
+resulted from it read as one account. A code this build cannot name reports itself generically rather than
+being given another status's wording, and no audit record is altered by the wording: the event, both its
+statuses, its actor and its time are the API's own (`BR-001`, `BR-041`, `BR-042`, `BR-067`).
 
 **Inside a group, the entries are the one timeline** (`BR-080`,
 `docs/tracker/022-android-job-activity-timeline.md`). A group's entries are a slice of the Job's one
@@ -325,8 +355,23 @@ photo whose id this build cannot read is left out rather than replaced by anothe
 **One Add update action adds everything to the Activity** (`BR-012`, `BR-027`,
 `docs/tracker/028-android-unified-job-update.md`). The section itself draws no action — a second
 **Add photo** action used to sit beside it, and two entry points for one write made the technician choose
-a place before choosing what they were recording. The floating action opens the sheet that states the
-kind, and the accepted photos it produces are drawn in the gallery above the timeline.
+a place before choosing what they were recording. The action opens the sheet that states the kind, and the
+accepted photos it produces are drawn in the gallery above the timeline.
+
+**Where that one action is drawn** (`BR-012`, `BR-027`,
+`docs/tracker/053-android-job-details-add-update-floating-action.md`). The action is the page's own
+**floating** action — an `ExtendedFloatingActionButton` in `primary` on `onPrimary` with the 18 dp
+`ic_add`, pinned to the bottom end with a 16 dp inset — and it is drawn at **every** scroll position
+rather than only once part of the record has been read past: a technician's update is the write this page
+exists for, so it is reachable the moment the Job is read. It is therefore the **one** Add update control,
+and the Current Visit card draws no second one, so two entry points for one write never make the technician
+choose a place before choosing what they are recording. **Complete visit** stays where the field attempt
+is — the card's own action, a `FilledTonalButton` in `shapes.medium` with its 22 dp `ic_check_circle`
+across the card's width — because completing a Visit is an action **on** that Visit rather than an entry
+point into the Activity. The floating action is withheld while the device holds evidence the API has not
+accepted, because the bottom of the screen belongs to the tray or the notice (`BR-014`), and the action
+itself is drawn only when the API's `addUpdateAllowed` on the represented Visit and the session's own
+capabilities both allow a write (`BR-006`, `BR-007`, `BR-062`, `BR-079`).
 
 **The gallery is a collapsible section** (`BR-012`, `BR-080`,
 `docs/tracker/032-android-job-activity-photo-ux.md`). **Photos · n** — the count from the shared
@@ -481,15 +526,30 @@ bottom-bar-sized gap between the form and the keyboard. Like the status-bar hand
 keyboard height is hard-coded: where the platform already resizes the window for the IME, the
 reported inset is zero and nothing is applied twice.
 
-**A `ModalBottomSheet` is a window of its own**, so the shell's inset above does not reach it: the
-keyboard would draw over the sheet's lower part. Material 3's sheet applies the keyboard inset inside
-that window itself (its dialog is edge-to-edge, so the inset is reported there and the sheet lifts
-with the keyboard). What a sheet has to provide is a **content area that can shrink** — its content
-scrolls — because that is the resize Compose answers by bringing the focused text field back into
-view, exactly as it does for a form. The customer filter sheet and the Job Details photo review panel
-scroll for this reason. A sheet's content does not add `imePadding()` of its own: the inset is
-already consumed above it, so it would add nothing, and a sheet whose content fits needs no scrolling
-either.
+**A `ModalBottomSheet` is a window of its own**, so the shell's inset above does not reach it — and it
+does not need to, because the sheet window lifts its content above the keyboard itself. Material 3's
+sheet dialog is edge-to-edge (`ModalBottomSheet.android.kt` calls
+`WindowCompat.setDecorFitsSystemWindows(window, false)` and, from API 30, sets
+`SOFT_INPUT_ADJUST_NOTHING`, so the IME does not resize the window), and the sheet pads its content
+with `BottomSheetDefaults.windowInsets` — `WindowInsets.safeDrawing` restricted to the top and bottom
+sides, and `safeDrawing` is `systemBars ∪ ime ∪ displayCutout`. The keyboard's height is part of that,
+so a sheet's content is already laid out above it and the inset is consumed above that content: a
+sheet's content must **not** add `imePadding()` of its own (it would add nothing), and the
+`navigationBarsPadding()` a sheet's content carries is covered the same way.
+
+What a sheet must provide is a **content area that can shrink** — the body scrolls
+(`verticalScroll`/`LazyColumn`) — and, beyond that, **its actions must not live inside that shrinking
+region**. The body is a `Column` with `Modifier.weight(1f, fill = false)` and the action row is the
+sheet's last non-scrolling child: while everything fits, `fill = false` keeps the sheet short and the
+row sits under the body; when the keyboard shortens the sheet, the body is capped by what is left and
+scrolls, and the action the user is confirming stays on screen. An action *inside* the scrolling body
+is the defect reported by product ownership on 2026-09-28
+(`docs/tracker/057-qa-issue-list-visit-workflow.md` §3): the text was visible while typing and the
+Save/Cancel row beneath it was not, so the keyboard had to be dismissed to reach it. The Visit
+completion sheet, the request-another-visit sheet, the Job Details photo review panel and the Job
+Update sheet's note and audio kinds follow that shape; the sheets with no field at all (schedule a
+Visit, assign technicians) carry no keyboard and are unchanged, and the schedule's technician filter
+sheet already keeps its list and its Apply/Clear footer in exactly that arrangement.
 
 ## Collapsible section headings (disclosure)
 
@@ -550,18 +610,25 @@ filter rows do. That row is disabled while the contact already holds the flag, b
 shows the same contacts read-only, with the hint that they are managed from the customer detail screen
 (`ADR-022` D5).
 
-## Job Details — the customer block
+## Job Details — the Contacts section
 
-The Job card answers *who do I reach, and how* (`BR-092`, `BR-095`; `ADR-022` D10). It presents **one**
-phone and folds every other way of reaching the customer away, so the number a technician came for is not
-buried under the customer's whole contact book (`BR-012`).
+The Contacts section answers *who do I reach, and how* (`BR-092`, `BR-095`; `ADR-022` D6, D10;
+`docs/tracker/052-android-technician-job-details-redesign.md`). It presents **one** contact and folds every
+other way of reaching the Customer away, so the person a technician came for is not buried under the
+Customer's whole contact book (`BR-012`).
 
 | Part | Presentation |
 | --- | --- |
-| Primary phone | The card's **Phone** row (`OverviewRow`), carrying the **effective primary** contact's number with the shared **Primary** badge as its trailing control. The row is drawn only when that contact has a number — so the row and the marker appear together, and a flagged contact person with no number is never replaced by the customer's own (`BR-095`) |
-| The customer's own email and notes | The card's own rows, unchanged, in `bodyLarge` (`BR-092`) |
-| Other numbers | The disclosure under the card's rows: a heading — *N other contacts* from the `job_details_customer_other_contacts` plural — with an `18 dp` `ic_chevron_right` rotated 90° while open, `stateDescription` announced, the whole row the target at `≥ 56 dp`, and the convention above for the chevron's content description (`BR-028`, `BR-011`). It starts **closed**: nothing about the other numbers is composed until it is opened |
-| One other contact | A row per entry: the owner's name (`bodyMedium`, semibold), then its phone and, when recorded, its email (`bodySmall`, `onSurfaceVariant`). The entry that stands for the customer's own general line is named after the customer and carries no email, because the customer's own email is already a visible row above — one card does not state one value twice (`BR-012`) |
+| Customer row | the card's first row (`OverviewRow`): the label **Customer** over the Customer's name, which opens the office Customer destination for a session whose read the API accepts and is inert for a technician, who holds no `customers.view` (`BR-011`, `BR-092`) |
+| Effective primary contact | the block under that row: the primary's own **name** (`bodyLarge`, semibold) with the shared **Primary** badge as its trailing control (`BR-095`), then that person's phone and email as `CustomerContactLine`s — the app's own contact affordance, a 12 dp `primary` glyph and the value in `primary`, the whole line the target — opening the dialer (`ACTION_DIAL`) and the mail client (`ACTION_SENDTO`). A value the office never recorded is left out rather than drawn as an empty line (`BR-012`) |
+| Who the primary is | the contact person the API flags (`isPrimary`), or the **Customer itself** when no contact person is flagged — a legal state, and then the Customer's own name, phone and email are the block. Nothing is promoted to fill the gap: a flagged contact with no number leaves the block without one rather than handing the role to the Customer's own line (`BR-095`, `BR-041`) |
+| The marker, when the Customer is its own primary | the **Primary** badge rides the **first value the Customer recorded** — its phone, or its email when it has no phone — rather than a second statement of the Customer's name, because the row above already names it and one card does not state one value twice (`BR-012`). A Customer with no recorded value and no contact persons draws no block at all: the row above is the whole answer (`BR-095`) |
+| Other contacts | the disclosure under the block: a heading — *N other contacts* from the `job_details_customer_other_contacts` plural — with an `18 dp` `ic_chevron_right` rotated 90° while open, `stateDescription` announced, the whole row the target at `≥ 56 dp`, and the convention above for the chevron's content description (`BR-028`, `BR-011`). It starts **closed**: nothing about the others is composed until it is opened |
+| One other contact | a row per entry: the owner's name (`bodyMedium`, semibold), then its own phone and email as the same tappable `CustomerContactLine`s (`BR-095`, `ADR-022` D6). The entry that stands for the Customer's own general line is named after the Customer and carries the Customer's own values |
+
+The section draws exactly what the read gave it: a session the API did not admit to the Customer receives no
+contact block and is therefore shown nothing, because whether it may read the Customer is the API's answer
+and never the client's (`BR-001`, `BR-007`).
 
 ## Home screens — the manager’s and the technician’s
 
@@ -584,14 +651,28 @@ rather than comparing the schedule against the device clock (`BR-001`). And **th
 describe is resolved by the API** from the `timeZone` the client names, so the manager’s screen and
 the technician’s cannot disagree about which Visits are today’s (`BR-041`).
 
+**When the day is read.** Both homes are reads over records the backend owns (`BR-001`), so the day is read
+when Home is entered **and again whenever the bottom-navigation area is entered again** — a return from a
+Job, a customer or any other drill-down (`docs/tracker/055-android-home-refresh-on-return.md`). Coming back
+is the moment a change the technician just made becomes visible, so the screen asks for the day rather than
+continuing to describe the one it was left with; the day already known stays on screen while that read is in
+flight, a read already in flight is not started twice, and a read that cannot reach the backend is served
+from the last-reported copy and marked as such (`BR-013`, `offline-first-architecture.md` §7).
+
 What the technician home does **not** copy from the manager home:
 
 - No counts, KPIs or dashboard summary: the screen leads with the **next Visit** (the largest thing on
   it, with the time first and one primary action that opens the Job), then **today** in chronological
-  order, then a capped **upcoming** preview whose heading reports the whole count.
+  order, then its **Needs attention** section, then a capped **upcoming** preview whose heading reports
+  the whole count.
 - Its **Needs attention** section is *absent* rather than empty when there is nothing to act on: an
   all-clear card would compete with the next Visit for the same glance (`BR-012`). The manager
-  home’s all-clear card stays, because there the absence of exceptions is itself the answer.
+  home’s all-clear card stays, because there the absence of exceptions is itself the answer. It is
+  drawn **before** the preview of the days after today, because a late attempt is work to resolve rather
+  than work to look forward to, and it never repeats a Visit the home already states: the Visit to do
+  next, and today's own rows, carry their own derived condition, so the section holds the late work the
+  screen says nowhere else — an attempt from an earlier day that is neither. That is why it can be
+  absent while the caller still has something overdue (`BR-001`, `BR-041`).
 - No status control and no scheduling affordance: changing a Visit’s status is a field **write**
   (`BR-074`, `BR-066`) and belongs beside the Visit on the Job’s screen, which is where every row
   of this home leads (`BR-012`).
@@ -611,6 +692,7 @@ the height it takes is height the day's work does not get.
 | Week strip | A `HorizontalPager` of weeks, 48 dp tall, one page per week. Each day is a 44 × 48 dp cell: the abbreviated weekday (`EEE`) in `labelSmall` `onSurfaceVariant` over the day number in `titleMedium` bold, with a 5 dp marker dot. The selected day is filled `primary`/`onPrimary`; the marker is `primary` on an unselected today and `onPrimary` inside the selected fill, so "today" and "selected" stay two different facts. Swiping moves the strip a week at a time; tapping a day selects it. It is the part that **collapses** (below). |
 | Control row | One 48 dp row under the strip holding the lane selector and the technician chip, 8 dp apart, because both are secondary to the agenda and 48 dp is the smallest a control can be hit at. Each control draws a 32 dp surface inside its own target — the Material "target 48, surface smaller" arrangement — so the row reads as filtering rather than as a pair of actions. |
 | Lane selector | A compact segmented control: two segments the width of their own labels, 2 dp apart (`selectableGroup`, `Role.Tab`). The lane in effect carries a 32 dp `shapes.large` pill in `primaryContainer`/`onPrimaryContainer` with `labelMedium` semibold text; the other is quiet `onSurfaceVariant` text with no fill. The Unassigned segment carries the API's own total as a rounded badge — `error`/`onError` while unselected, `primary`/`onPrimary` while its pill is selected — drawn only when the count is not zero. |
+| Field schedule view selector | **The same control is My Schedule's view selector** (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.8): two segments — **Schedule** and **Requests** — drawn to the lane selector's own metrics (32 dp `shapes.large` pill, 2 dp apart, inside a 48 dp target, `selectableGroup` of `Role.Tab`), the view in effect taking `primaryContainer`/`onPrimaryContainer`. The Requests segment carries the count of the caller's own requests the office has still to answer, as a rounded badge — **`secondary`/`onSurfaceVariant` while unselected and `primary`/`onPrimary` while its pill is selected** — drawn only when the count is not zero. It is deliberately quieter than the office screen's Unassigned total: an unanswered request is the office's to act on rather than the technician's, so the count informs instead of alarming (`BR-012`). **No date control is drawn beside the requests view**, because nothing on it is scoped to the selected day: a request is a proposal about another attempt (`BR-FV-002`), and a week strip over undated content would say otherwise. |
 | Technician chip | A 32 dp `shapes.large` chip inside a 48 dp target, holding a 16 dp `ic_users`, the filter's own summary and an 18 dp `ic_chevron_down`. `secondary`/`onSecondary` with a 1 dp `outlineVariant` hairline while the whole organization is shown; `primaryContainer`/`onPrimaryContainer`, semibold and borderless, once a filter is in effect — so a narrowed day is visible without opening anything. |
 | Technician sheet | A `ModalBottomSheet` titled **Technician** with a one-line subtitle, a **filled** 44 dp search field (`secondary`, no outline) that reads as part of the list beneath it, then a `LazyColumn` (320 dp at most, so its own actions stay on screen for a long team): `All technicians` first, then the technicians the API returned. Every option is a checkbox row of at least 48 dp — the row owns the tap (`toggleable`, `Role.Checkbox`) and the checkbox reports it — tinted `primary` at 10% while chosen, and **selected options are listed before the rest** so "who did I pick?" is answered at the top. The search narrows what is *offered* and never what is *chosen* (`BR-012`), `All technicians` is offered while searching because clearing a filter is not the same question as finding a technician, and a search that matches nobody says so in the sheet's own words. Its actions are a `Clear` `OutlinedButton` (shown only while something is chosen; it empties the draft and asks for the whole organization at once, staying open) and an `Apply` `Button` reading `Apply (n)`, which commits the draft and **closes** the sheet — the same draft/apply route the customer filter sheet takes (`BR-068`, `BR-067`; the closing behaviour was reported missing from physical-device QA and fixed 2026-09-17). |
 
@@ -680,4 +762,24 @@ own.
 
 Nothing on this screen opens the manager's surface, and nothing on it changes a Visit: a technician acts
 on their work through the Job Details and Visit flows the rest of the app already provides (`BR-066`).
+
+### My Schedule — Requests, and one request's details
+
+The **Requests** view of My Schedule is the technician's own record of the extra visits they asked for
+and of what the office did with each of them (`BR-FV-012`, `BR-FV-013`;
+`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.8, §5.11, §5.12). It is a **record**, not a
+dispatch board: nothing on it reviews a request, and a request is drawn as a proposal rather than as an
+appointment (`BR-FV-002`, `BR-FV-010`).
+
+| Part | Presentation |
+| --- | --- |
+| View selector | The shared field view selector — **Schedule** and **Requests** — described in the manager schedule's table above. |
+| Request row | A bordered `shapes.large` surface, 12 dp padding, 2–4 dp between lines, and the whole card is the touch target: it opens the **request details** destination, not the Job. Its lines are the office's decision as a `RequestStatusPill`, the window the technician **proposed** (`You proposed · Sep 9, 9:00 a.m.` / `Vous avez proposé · …`, or `You proposed no time` when none was named), the reason they gave another attempt was needed, the same-technician line behind a 14 dp `ic_users`, and the office's note when the office wrote one. Every line ellipsizes rather than growing the card. |
+| Conversation on the row | A request the office returned draws the same `FollowUpRequestConversation` the office's card draws, and — while an answer is owed — the **Answer** action at the row's foot, disabled while one is on its way. |
+| Request details | One pushed destination, titled **Request details** / *Détail de la demande*, with the standard back control. The request's own record is a bordered `shapes.large` card holding the status pill and the proposed window on one row, the reason in `bodyLarge` medium, the same-technician line, and the office's note; the conversation follows on its own card under a `labelSmall` section label (*With the office* / *Avec le bureau*), and the actions sit at the foot, right-aligned: **View job details** / *Voir l'intervention*, then **Answer** while one is owed. |
+| Details states | Loading is a centred spinner over *Loading your requests…*; a failed request read is a centred failure with a **Try again** action, because the request is read out of that list; and a request the caller's own read does not hold is stated plainly (*This request isn't available* / *Cette demande n'est pas disponible*) with nothing invented in its place (`BR-042`). A list that is on screen as the last one the backend reported carries the shared `OfflineNotice` above the record (`BR-013`). |
+
+The details destination leaves the Job as a **pushed** screen, so Back returns to the request the
+technician was reading; it never states a request in a Visit's vocabulary and never presents one as
+scheduled work (`BR-047`, `BR-059`, `BR-FV-002`).
 

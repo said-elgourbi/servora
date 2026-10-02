@@ -99,10 +99,10 @@ it; the API never returns presentation text (`BR-028`).
 | `VISIT_TECHNICIAN_ROLE_CHANGED` | Visit | `technicianName?`, `previousRoleCode`, `roleCode` |
 | `VISIT_OUTCOME_RECORDED`      | Visit | `outcomeCode`, `outcomeSummary?`                |
 | `VISIT_NOTE_ADDED`            | Visit | `body`                                          |
-| `JOB_PHOTO_ADDED`             | Job   | `photoId`, `photoPhase?`, `body?`               |
-| `JOB_PHOTO_REMOVED`           | Job   | `photoId`, `photoRemovalReason?`                |
-| `JOB_AUDIO_ADDED`             | Job   | `audioNoteId`, `audioPhase?`, `audioDurationSeconds`, `body?` |
-| `JOB_AUDIO_REMOVED`           | Job   | `audioNoteId`, `audioRemovalReason?`            |
+| `JOB_PHOTO_ADDED`             | Visit | `photoId`, `photoPhase?`, `body?`               |
+| `JOB_PHOTO_REMOVED`           | Visit | `photoId`, `photoRemovalReason?`                |
+| `JOB_AUDIO_ADDED`             | Visit | `audioNoteId`, `audioPhase?`, `audioDurationSeconds`, `body?` |
+| `JOB_AUDIO_REMOVED`           | Visit | `audioNoteId`, `audioRemovalReason?`            |
 
 `fromStatus`/`toStatus` are the status codes the kind's vocabulary defines (`BR-058` for a Job,
 `BR-074` for a Visit); the kind names which vocabulary the codes belong to.
@@ -117,21 +117,25 @@ derived from this read: it travels on the Visit itself, as `visits[].outcomeCode
 (`GET /jobs/:id/photos/:photoId/content`, `docs/api/job-photos.md` §4). `photoPhase` is the field-work
 phase the technician chose (`BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK`) — a stable code, not a label
 (`BR-028`, `BR-041`) — and a photo's note travels in `body`, the same field a text update uses.
-`JOB_PHOTO_ADDED` is Job-level, because that is where a photo is recorded (`BR-015`, `BR-051`).
+`JOB_PHOTO_ADDED` is **Visit-level**: a photo is recorded against the Visit it was taken during
+(`BR-047`, `BR-080`), so its `visitSequence` names that Visit (`docs/tracker/056-evidence-belongs-to-a-visit.md`).
+A photo recorded before that link existed carries no Visit, which is the only case in which an evidence
+entry is Job-level.
 
 `JOB_PHOTO_REMOVED` records that accepted evidence was taken out of ordinary use (`BR-088`, `BR-089`):
 its `photoId` names the evidence, and the reason the removal was performed travels in
 `photoRemovalReason` — its own field rather than `body`, because `body` is text an author recorded with
-a record while this is the reason a removal was performed. The entry is Job-level and carries neither a
-phase nor a photo.
+a record while this is the reason a removal was performed. The entry carries the Visit of the evidence it
+removed, so a removal is read beside the photo it took out of use rather than against another field
+attempt; it carries neither a phase nor a photo.
 
 `JOB_AUDIO_ADDED` and `JOB_AUDIO_REMOVED` are the same two events for the **audio** kind
 (`BR-091`, `ADR-018` A6): `audioNoteId` names the recording and is the value its bytes are read with
 (`GET /jobs/:id/audio-notes/:audioNoteId/content`, `docs/api/job-audio.md` §4.1), `audioPhase` is the
 same field-work phase vocabulary a photo carries, `audioDurationSeconds` is the length the API read from
 the recording's own container (`ADR-018` A3) so a client can draw it without opening the file, and a
-removal's reason travels in `audioRemovalReason` for the same reason a photo's does. Both are Job-level,
-because that is where the evidence is recorded (`BR-051`).
+removal's reason travels in `audioRemovalReason` for the same reason a photo's does. Both are Visit-level
+for the same reason a photo's are, and a recording made before the link existed is the only Job-level case.
 
 ### 3.3 The Visit sequence
 

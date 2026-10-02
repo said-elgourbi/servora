@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -171,6 +170,7 @@ internal fun ScheduleTopSection(
     onSelectLane: (ScheduleLane) -> Unit,
     onApplyTechnicians: (List<ScheduleTechnician>) -> Unit,
     modifier: Modifier = Modifier,
+    showLaneSelector: Boolean = true,
 ) {
     val locale = deviceLocale()
 
@@ -179,89 +179,56 @@ internal fun ScheduleTopSection(
             .fillMaxWidth()
             .padding(horizontal = HomePageGutter),
     ) {
-        ScheduleDateHeader(
-            selectedDate = selectedDate,
-            locale = locale,
-            showsTodayAction = selectedDate != today,
-            onSelectDate = onSelectDate,
-            onSelectToday = { onSelectDate(today) },
-        )
-        // The strip keeps its state while it is collapsed: the pager stays composed and is clipped away
-        // rather than disposed, so expanding it returns to the week the manager was on instead of
-        // scrolling forward from the anchor week.
-        val stripHeight by animateDpAsState(
-            targetValue = if (collapsed) 0.dp else ScheduleWeekStripHeight,
-            label = "schedule-week-strip",
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(stripHeight)
-                .clipToBounds()
-                // A collapsed strip is not merely invisible: its days are unreachable while it is away,
-                // so a screen reader never offers a date nobody can see (`BR-012`).
-                .then(if (collapsed) Modifier.clearAndSetSemantics {} else Modifier),
-        ) {
-            ScheduleWeekStrip(
+        if (showLaneSelector) {
+            ScheduleLaneSelector(
+                lane = state.lane,
+                unassignedCount = state.unassignedCount,
+                requestCount = state.reviewableRequestCount,
+                onSelectLane = onSelectLane,
+            )
+            Spacer(Modifier.height(ScheduleSectionSpacing))
+        }
+        if (state.lane == ScheduleLane.SCHEDULE) {
+            ScheduleDateHeader(
                 selectedDate = selectedDate,
-                displayedWeekStart = state.displayedWeekStart ?: selectedDate,
-                today = today,
                 locale = locale,
+                showsTodayAction = selectedDate != today,
                 onSelectDate = onSelectDate,
-                onShowWeek = onShowWeek,
+                onSelectToday = { onSelectDate(today) },
+            )
+            // The strip keeps its state while it is collapsed: the pager stays composed and is clipped away
+            // rather than disposed, so expanding it returns to the week the manager was on instead of
+            // scrolling forward from the anchor week.
+            val stripHeight by animateDpAsState(
+                targetValue = if (collapsed) 0.dp else ScheduleWeekStripHeight,
+                label = "schedule-week-strip",
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(stripHeight)
+                    .clipToBounds()
+                    // A collapsed strip is not merely invisible: its days are unreachable while it is away,
+                    // so a screen reader never offers a date nobody can see (`BR-012`).
+                    .then(if (collapsed) Modifier.clearAndSetSemantics {} else Modifier),
+            ) {
+                ScheduleWeekStrip(
+                    selectedDate = selectedDate,
+                    displayedWeekStart = state.displayedWeekStart ?: selectedDate,
+                    today = today,
+                    locale = locale,
+                    onSelectDate = onSelectDate,
+                    onShowWeek = onShowWeek,
+                )
+            }
+            Spacer(Modifier.height(ScheduleSectionSpacing))
+            ScheduleTechnicianFilter(
+                selected = state.technicianFilters,
+                technicians = state.schedule?.technicians.orEmpty(),
+                onApply = onApplyTechnicians,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-        Spacer(Modifier.height(ScheduleSectionSpacing))
-        ScheduleControlRow(
-            lane = state.lane,
-            unassignedCount = state.unassignedCount,
-            requestCount = state.pendingRequestCount,
-            selected = state.technicianFilters,
-            technicians = state.schedule?.technicians.orEmpty(),
-            onSelectLane = onSelectLane,
-            onApplyTechnicians = onApplyTechnicians,
-        )
-    }
-}
-
-/**
- * The two controls that narrow the day, on one row: which lane is being read, and whose work is
- * shown.
- *
- * They are one row because they are both secondary to the agenda, and because 48 dp is the smallest
- * a control can be and still be hit (`BR-012`). The target is [HomeTouchTarget] and each control
- * draws a smaller surface inside its own target, so the row reads as filtering rather than as a pair
- * of actions.
- */
-@Composable
-private fun ScheduleControlRow(
-    lane: ScheduleLane,
-    unassignedCount: Int,
-    requestCount: Int,
-    selected: List<ScheduleTechnician>,
-    technicians: List<ScheduleTechnician>,
-    onSelectLane: (ScheduleLane) -> Unit,
-    onApplyTechnicians: (List<ScheduleTechnician>) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(HomeTouchTarget),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ScheduleLaneSelector(
-            lane = lane,
-            unassignedCount = unassignedCount,
-            requestCount = requestCount,
-            onSelectLane = onSelectLane,
-        )
-        Spacer(Modifier.width(ScheduleControlsSpacing))
-        ScheduleTechnicianFilter(
-            selected = selected,
-            technicians = technicians,
-            onApply = onApplyTechnicians,
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 
@@ -684,7 +651,7 @@ private fun ScheduleTechnicianSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
-        Column(modifier = Modifier.imePadding()) {
+        Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

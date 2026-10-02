@@ -54,26 +54,15 @@ export const SEED_TECHNICIAN_MEMBER_TEMPLATES = [
 
 /** The seeded people work is assigned to. `SEEDED` is the documented technician QA account. */
 export type SeedTechnicianKey =
-  | 'SEEDED'
-  | (typeof SEED_TECHNICIAN_MEMBER_TEMPLATES)[number]['key'];
+  'SEEDED' | (typeof SEED_TECHNICIAN_MEMBER_TEMPLATES)[number]['key'];
 
 export type SeedCustomerKind = 'INDIVIDUAL' | 'COMPANY';
 export type SeedCustomerStatus = 'ACTIVE' | 'INACTIVE';
 export type SeedContactMethod = 'EMAIL' | 'PHONE' | 'SMS' | 'NONE';
 export type SeedLanguage = 'en-CA' | 'fr-CA';
-export type SeedJobStatus =
-  | 'NEW'
-  | 'SCHEDULED'
-  | 'IN_PROGRESS'
-  | 'PENDING_REVIEW'
-  | 'COMPLETED'
-  | 'CANCELED';
+export type SeedJobStatus = 'NEW' | 'ACTIVE' | 'COMPLETED' | 'CANCELED';
 export type SeedJobTypeCode =
-  | 'REPAIR'
-  | 'MAINTENANCE'
-  | 'INSTALLATION'
-  | 'INSPECTION'
-  | 'SERVICE_CALL';
+  'REPAIR' | 'MAINTENANCE' | 'INSTALLATION' | 'INSPECTION' | 'SERVICE_CALL';
 export type SeedVisitStatus =
   | 'DRAFT'
   | 'SCHEDULED'
@@ -81,14 +70,9 @@ export type SeedVisitStatus =
   | 'ON_SITE'
   | 'IN_PROGRESS'
   | 'COMPLETED'
-  | 'CANCELED'
-  | 'NO_SHOW';
+  | 'CANCELED';
 export type SeedVisitOutcomeCode =
-  | 'RESOLVED'
-  | 'NEEDS_PARTS'
-  | 'NEEDS_FOLLOWUP'
-  | 'NEEDS_QUOTE_APPROVAL'
-  | 'UNABLE_TO_COMPLETE';
+  'RESOLVED' | 'NEEDS_FOLLOW_UP' | 'NEEDS_PARTS' | 'UNABLE_TO_COMPLETE';
 export type SeedVisitCancellationReason =
   | 'CUSTOMER_RESCHEDULED'
   | 'CUSTOMER_CANCELED'
@@ -228,10 +212,14 @@ export interface SeedCustomerPlan {
 /**
  * How a Visit reached the status it is seeded with (`BR-074`).
  *
- * The path is walked one permitted transition at a time, so the seeded history is a history the
- * lifecycle could actually have produced rather than a single invented row. `CANCELED` carries the
- * structured reason `BR-076` requires; `OTHER` is avoided because it also requires an explanation the
- * demo data does not have to invent.
+ * The path is a sequence of statuses the Visit really passed through, written as append-only history, so
+ * the seeded history is one the lifecycle could have produced. A Visit the API creates directly in a
+ * status — `POST /jobs/:id/visits` schedules one — has no earlier event, so its path begins at that
+ * status and the first recorded row's previous status is `null`, the same shape `BR-094` gives a Job's
+ * initial `NEW`. `DRAFT` is a stored, unscheduled attempt: nothing has happened to it yet.
+ *
+ * `CANCELED` carries the structured reason `BR-076` requires; `OTHER` is avoided because it also
+ * requires an explanation the demo data does not have to invent.
  */
 export const VISIT_STATUS_PATHS: Record<
   SeedVisitStatus,
@@ -241,27 +229,15 @@ export const VISIT_STATUS_PATHS: Record<
   }
 > = {
   DRAFT: { path: [] },
-  SCHEDULED: { path: ['DRAFT', 'SCHEDULED'] },
-  EN_ROUTE: { path: ['DRAFT', 'SCHEDULED', 'EN_ROUTE'] },
-  ON_SITE: { path: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE'] },
-  IN_PROGRESS: {
-    path: ['DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'],
-  },
-  COMPLETED: {
-    path: [
-      'DRAFT',
-      'SCHEDULED',
-      'EN_ROUTE',
-      'ON_SITE',
-      'IN_PROGRESS',
-      'COMPLETED',
-    ],
-  },
+  SCHEDULED: { path: ['SCHEDULED'] },
+  EN_ROUTE: { path: ['SCHEDULED', 'EN_ROUTE'] },
+  ON_SITE: { path: ['SCHEDULED', 'ON_SITE'] },
+  IN_PROGRESS: { path: ['SCHEDULED', 'IN_PROGRESS'] },
+  COMPLETED: { path: ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED'] },
   CANCELED: {
-    path: ['DRAFT', 'SCHEDULED', 'CANCELED'],
+    path: ['SCHEDULED', 'CANCELED'],
     cancellationReasonCode: 'CUSTOMER_RESCHEDULED',
   },
-  NO_SHOW: { path: ['DRAFT', 'SCHEDULED', 'NO_SHOW'] },
 };
 
 /**
@@ -270,1489 +246,146 @@ export const VISIT_STATUS_PATHS: Record<
  * A Job's status history is what the Activity read projects (`BR-080`), so it is a path the lifecycle
  * permits rather than a single row invented to match the current status.
  */
-export const JOB_STATUS_PATHS: Record<SeedJobStatus, readonly SeedJobStatus[]> = {
-  NEW: ['NEW'],
-  SCHEDULED: ['NEW', 'SCHEDULED'],
-  IN_PROGRESS: ['NEW', 'SCHEDULED', 'IN_PROGRESS'],
-  PENDING_REVIEW: ['NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW'],
-  COMPLETED: ['NEW', 'SCHEDULED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED'],
-  CANCELED: ['NEW', 'CANCELED'],
-};
-
+export const JOB_STATUS_PATHS: Record<SeedJobStatus, readonly SeedJobStatus[]> =
+  {
+    NEW: ['NEW'],
+    ACTIVE: ['NEW', 'ACTIVE'],
+    COMPLETED: ['NEW', 'ACTIVE', 'COMPLETED'],
+    CANCELED: ['NEW', 'CANCELED'],
+  };
 
 /**
- * The demo dataset: 14 customers across Canada, the work the organization holds for them, and the crews
- * assigned to it. Titles, notes and outcomes read the way an office and a technician write them, in the
- * Customer's own language where that Customer is French-speaking (`BR-028`).
- *
- * Two properties of the spread are deliberate: every Job status and every Visit status appears, so each
- * screen and filter has something real to present, and no technician is booked on two overlapping
- * Visits (`BR-070`).
+ * The demo dataset `make seed` writes: five Canadian Customers spanning both kinds, with Properties,
+ * Jobs across every status, and Visits across every status. Relative schedules keep the dataset honest
+ * whatever time of day it runs; `assertSeedScenariosAreCoherent` refuses it the moment a future field
+ * attempt is presented as finished work or a technician is double-booked.
  */
 export const SEED_CUSTOMERS: readonly SeedCustomerPlan[] = [
   {
     kind: 'COMPANY',
-    displayName: 'Northwood Dental Group',
-    legalName: 'Northwood Dental Group Inc.',
-    businessName: 'Northwood Dental Group',
-    taxNumber: 'GST-7102-4821',
-    email: 'office@northwooddental.test',
-    phone: '+1 613 555 0141',
-    billingEmail: 'accounts@northwooddental.test',
-    billingPhone: '+1 613 555 0142',
+    displayName: 'Maple Ridge Property Management',
+    legalName: 'Maple Ridge Property Management Ltd.',
+    businessName: 'Maple Ridge PM',
+    email: 'office@mapleridgepm.test',
+    phone: '+1 604 555 0140',
+    billingEmail: 'ap@mapleridgepm.test',
+    billingPhone: '+1 604 555 0141',
     notes:
-      'Two clinics. Both sites ask the technician to call ahead so the room can be cleared.',
+      'Largest portfolio client. Prefers email for scheduling and a courtesy call the day before each visit.',
     preferredContactMethod: 'EMAIL',
     language: 'en-CA',
     status: 'ACTIVE',
-    customerSinceDaysAgo: 420,
+    customerSinceDaysAgo: 410,
     billingAddress: {
-      addressLine1: '1420 Bank Street',
-      city: 'Ottawa',
-      province: 'Ontario',
-      postalCode: 'K1V 7H7',
-    },
-    contacts: [
-      {
-        firstName: 'Danielle',
-        lastName: 'Roy',
-        role: 'Practice Manager',
-        email: 'danielle.roy@northwooddental.test',
-        phone: '+1 613 555 0143',
-        isPrimary: true,
-        isJobContact: true,
-      },
-      {
-        firstName: 'Isabelle',
-        lastName: 'Grant',
-        role: 'Office Administrator',
-        email: 'isabelle.grant@northwooddental.test',
-        phone: '+1 613 555 0144',
-        isBillingContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Northwood Dental — Bank Street',
-        addressLine1: '1420 Bank Street',
-        city: 'Ottawa',
-        province: 'Ontario',
-        postalCode: 'K1V 7H7',
-        notes: 'Suite entrance on the south side; the reception desk holds the key.',
-      },
-      {
-        name: 'Northwood Dental — Kanata',
-        addressLine1: '300 Eagleson Road',
-        addressLine2: 'Unit 12',
-        city: 'Kanata',
-        province: 'Ontario',
-        postalCode: 'K2M 1C9',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Sterilizer room ceiling leak',
-        description:
-          'Water dripping from the ceiling tile above the sterilizer. Staff have a bucket under it and the room is still in use.',
-        typeCode: 'REPAIR',
-        status: 'IN_PROGRESS',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 3, hour: 13, durationHours: 2 },
-            crew: ['SEEDED'],
-            outcome: {
-              code: 'NEEDS_PARTS',
-              summary:
-                'Ceiling opened and the leak traced to a failed shut-off valve above the sterilizer. Line drained; replacement valve ordered.',
-            },
-            notes: [
-              {
-                atHours: -20,
-                author: 'MANAGER',
-                body: 'Patient rooms are directly below. Keep the area tarped and call Danielle before the ceiling comes down.',
-              },
-              {
-                atHours: 1,
-                author: 'SEEDED',
-                body: 'Leak isolated and the line drained. The valve is a half-inch sweat fit — part ordered.',
-              },
-            ],
-          },
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 2, hour: 13, durationHours: 2 },
-            crew: ['SEEDED', 'JOHN'],
-            notes: [
-              {
-                atHours: -72,
-                author: 'MANAGER',
-                body: 'Valve is in. Danielle booked the return so the room can stay closed for the afternoon.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Autoclave not reaching sterilization temperature',
-        description:
-          'The Kanata autoclave faults out two minutes into a cycle and never reaches temperature.',
-        typeCode: 'REPAIR',
-        status: 'COMPLETED',
-        propertyIndex: 1,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 12, hour: 9, durationHours: 3 },
-            crew: ['SARAH'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Heating element replaced and the cycle verified at 134 °C twice before the room was handed back.',
-            },
-            notes: [
-              {
-                atHours: 2,
-                author: 'SARAH',
-                body: 'Ran two test cycles with a load and left the printouts at the front desk.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Annual backflow preventer test — both clinics',
-        description:
-          'Municipal requirement. Certificates have to be filed for both locations before the end of the quarter.',
-        typeCode: 'INSPECTION',
-        status: 'NEW',
-        propertyIndex: 0,
-        owner: false,
-        visits: [
-          {
-            status: 'DRAFT',
-            schedule: null,
-            crew: [],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Harbourview Property Management',
-    legalName: 'Harbourview Property Management Ltd.',
-    businessName: 'Harbourview Property Management',
-    taxNumber: 'GST-4471-9036',
-    email: 'operations@harbourviewpm.test',
-    phone: '+1 604 555 0161',
-    billingEmail: 'ap@harbourviewpm.test',
-    billingPhone: '+1 604 555 0162',
-    notes:
-      'Four buildings under contract. Security desks sign contractors in and the loading bay is off Richards Street.',
-    preferredContactMethod: 'PHONE',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 880,
-    billingAddress: {
-      addressLine1: '555 West Hastings Street',
-      addressLine2: 'Suite 900',
+      addressLine1: '900 West Georgia Street',
+      addressLine2: 'Suite 1400',
       city: 'Vancouver',
       province: 'British Columbia',
-      postalCode: 'V6B 1L6',
+      postalCode: 'V6C 1P9',
     },
     contacts: [
       {
-        firstName: 'Ken',
-        lastName: 'Nakamura',
-        role: 'Building Operations Lead',
-        email: 'ken.nakamura@harbourviewpm.test',
-        phone: '+1 604 555 0163',
-        isPrimary: true,
-        isJobContact: true,
-      },
-      {
-        firstName: 'Priya',
-        lastName: 'Desai',
-        role: 'Accounts Payable',
-        email: 'priya.desai@harbourviewpm.test',
-        phone: '+1 604 555 0164',
-        isBillingContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Marina Pointe — Tower A',
-        addressLine1: '1088 Marinaside Crescent',
-        city: 'Vancouver',
-        province: 'British Columbia',
-        postalCode: 'V6Z 2Z4',
-        notes: 'Mechanical room is in the parkade, level P2, beside the bike storage.',
-      },
-      {
-        name: 'Marina Pointe — Tower B',
-        addressLine1: '1090 Marinaside Crescent',
-        city: 'Vancouver',
-        province: 'British Columbia',
-        postalCode: 'V6Z 2Z4',
-      },
-      {
-        name: 'Harbourview Commercial Centre',
-        addressLine1: '555 West Hastings Street',
-        city: 'Vancouver',
-        province: 'British Columbia',
-        postalCode: 'V6B 1L6',
-      },
-    ],
-    jobs: [
-
-      {
-        title: 'Boiler losing pressure in Tower A',
-        description:
-          'The boiler drops from 18 psi to 8 psi overnight and the building manager tops it up by hand each morning.',
-        typeCode: 'REPAIR',
-        status: 'IN_PROGRESS',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'EN_ROUTE',
-            schedule: { kind: 'HOURS_FROM_NOW', hours: -1, durationHours: 5 },
-            crew: ['PRIYA'],
-            notes: [
-              {
-                atHours: -2,
-                author: 'MANAGER',
-                body: 'Ken is meeting the crew at the P2 mechanical room and has the isolation valves tagged.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Elevator machine room cooling unit service',
-        description:
-          'Annual service on the machine room cooler. The freight elevator is reserved for the morning.',
-        typeCode: 'MAINTENANCE',
-        status: 'SCHEDULED',
-        propertyIndex: 1,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 2, hour: 8, durationHours: 3 },
-            crew: ['JOHN', 'LUC'],
-            notes: [
-              {
-                atHours: -72,
-                author: 'MANAGER',
-                body: 'Ken reserved the freight elevator from 08:00 to 11:00. Bring the extension ladder.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Lobby door closer replacement',
-        description:
-          'The main lobby door slams and does not latch on the second sweep. Replacement parts are on the service van.',
-        typeCode: 'REPAIR',
-        status: 'PENDING_REVIEW',
-        propertyIndex: 2,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 1, hour: 10, durationHours: 2 },
-            crew: ['SEEDED'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Closer replaced and adjusted; the door latches fully on the second sweep.',
-            },
-            notes: [
-              {
-                atHours: 1,
-                author: 'SEEDED',
-                body: 'The concierge watched it cycle a dozen times and is happy with the adjustment.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Parkade exhaust fan inspection — both towers',
-        description:
-          'Semi-annual inspection of the parkade exhaust fans, including the CO sensors they interlock with.',
-        typeCode: 'INSPECTION',
-        status: 'SCHEDULED',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 5, hour: 13, durationHours: 3 },
-            crew: ['SARAH', 'PRIYA'],
-            removedTechnician: 'LUC',
-            notes: [
-              {
-                atHours: -144,
-                author: 'MANAGER',
-                body: 'Ken asked for both towers on one afternoon so the parkade notices only go out once.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Loading dock door off track',
-        description:
-          'The centre dock door came off its track. The building is using the side door until it is repaired.',
-        typeCode: 'REPAIR',
-        status: 'IN_PROGRESS',
-        propertyIndex: 2,
-        owner: true,
-        visits: [
-          {
-            status: 'IN_PROGRESS',
-            schedule: { kind: 'HOURS_FROM_NOW', hours: -2, durationHours: 5 },
-            crew: ['LUC', 'JOHN'],
-            notes: [
-              {
-                atHours: -1,
-                author: 'LUC',
-                body: 'Top rollers are bent and the track is bowed. Replacing the roller set and straightening the track.',
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'INDIVIDUAL',
-    displayName: 'Amélie Tremblay',
-    firstName: 'Amélie',
-    lastName: 'Tremblay',
-    email: 'amelie.tremblay@servora.test',
-    phone: '+1 514 555 0102',
-    notes:
-      'Préfère un texto avant l’arrivée du technicien. Le chien est amical mais reste dans la cour.',
-    preferredContactMethod: 'SMS',
-    language: 'fr-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 210,
-    billingAddress: {
-      addressLine1: '4285 rue Saint-Denis',
-      city: 'Montréal',
-      province: 'Québec',
-      postalCode: 'H2J 2K8',
-    },
-    contacts: [],
-    properties: [
-      {
-        name: 'Maison Tremblay',
-        addressLine1: '4285 rue Saint-Denis',
-        city: 'Montréal',
-        province: 'Québec',
-        postalCode: 'H2J 2K8',
-        notes: 'Porte arrière accessible par la ruelle; code de la remise 4821.',
-      },
-    ],
-    jobs: [
-      {
-        title: "Fuite sous l'évier de la cuisine",
-        description:
-          "La cliente a remarqué de l'eau sous l'armoire depuis deux jours. Un seau est en place.",
-        typeCode: 'REPAIR',
-        status: 'COMPLETED',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 9, hour: 9, durationHours: 1 },
-            crew: ['LUC'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Joint du siphon et tuyau de vidange remplacés. Aucune fuite après un essai de trente minutes.',
-            },
-            notes: [
-              {
-                atHours: 1,
-                author: 'LUC',
-                body: 'Sous l’armoire asséché et vérifié; la cliente a confirmé que tout est sec.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Entretien annuel de la fournaise',
-        description:
-          'Entretien annuel avant l’hiver : nettoyage des brûleurs, filtre et vérification du ventilateur.',
-        typeCode: 'MAINTENANCE',
-        status: 'SCHEDULED',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 11, hour: 9, durationHours: 2 },
-            crew: ['LUC'],
-            notes: [
-              {
-                atHours: -288,
-                author: 'MANAGER',
-                body: 'Rendez-vous confirmé par texto avec la cliente, comme elle le préfère.',
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Riverside Logistics',
-    legalName: 'Riverside Logistics Inc.',
-    businessName: 'Riverside Logistics',
-    taxNumber: 'GST-2288-5174',
-    email: 'dispatch@riversidelogistics.test',
-    phone: '+1 204 555 0171',
-    billingEmail: 'ap@riversidelogistics.test',
-    billingPhone: '+1 204 555 0172',
-    notes:
-      'Report to the dispatch office before entering the yard. Hearing protection is required past the gate.',
-    preferredContactMethod: 'EMAIL',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 1460,
-    billingAddress: {
-      addressLine1: '1250 Inkster Boulevard',
-      city: 'Winnipeg',
-      province: 'Manitoba',
-      postalCode: 'R2X 1P5',
-    },
-    contacts: [
-      {
-        firstName: 'Marc',
-        lastName: 'Beaulieu',
-        role: 'Facilities Supervisor',
-        email: 'marc.beaulieu@riversidelogistics.test',
-        phone: '+1 204 555 0173',
-        isPrimary: true,
-        isJobContact: true,
-      },
-      {
-        firstName: 'Dana',
-        lastName: 'White',
-        role: 'Accounts Payable',
-        email: 'dana.white@riversidelogistics.test',
-        phone: '+1 204 555 0174',
-        isBillingContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Riverside Logistics — Dock 4',
-        addressLine1: '1200 Inkster Boulevard',
-        city: 'Winnipeg',
-        province: 'Manitoba',
-        postalCode: 'R2X 1P5',
-        notes: 'Dock 4 is the last door on the north wall; the yard jockey escorts contractors.',
-      },
-      {
-        name: 'Riverside Logistics — Office',
-        addressLine1: '1250 Inkster Boulevard',
-        city: 'Winnipeg',
-        province: 'Manitoba',
-        postalCode: 'R2X 1P5',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Dock leveller hydraulics leaking',
-        description:
-          'Hydraulic oil is pooling under the dock leveller and the deck drifts down under a loaded forklift.',
-        typeCode: 'REPAIR',
-        status: 'IN_PROGRESS',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 6, hour: 7, durationHours: 3 },
-            crew: ['JOHN'],
-            outcome: {
-              code: 'NEEDS_FOLLOWUP',
-              summary:
-                'Hydraulic line replaced and topped up, but the deck still drifts under load — the pump needs a rebuild.',
-            },
-            notes: [
-              {
-                atHours: 2,
-                author: 'JOHN',
-                body: 'Recommend booking the pump rebuild with two technicians and the yard closed at that door.',
-              },
-            ],
-          },
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 4, hour: 7, durationHours: 4 },
-            crew: ['JOHN', 'LUC'],
-            notes: [
-              {
-                atHours: -120,
-                author: 'MANAGER',
-                body: 'Seal kit is in. Marc booked the morning shift and will have the door blocked off.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Overhead door annual inspection — docks 1 to 4',
-        description:
-          'Annual inspection of the four overhead doors, including springs, sensors and the manual release.',
-        typeCode: 'INSPECTION',
-        status: 'COMPLETED',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 21, hour: 9, durationHours: 4 },
-            crew: ['PRIYA', 'LUC'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Four doors inspected, springs and safety sensors adjusted. No defects recorded.',
-            },
-            notes: [
-              {
-                atHours: 2,
-                author: 'PRIYA',
-                body: 'Dock 2 sensor was misaligned and is corrected; all four doors cycle cleanly now.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Warehouse LED retrofit — phase one',
-        description:
-          'Replace the high-bay fixtures over aisles 1 to 6 with LED. Phase two covers the mezzanine.',
-        typeCode: 'INSTALLATION',
-        status: 'SCHEDULED',
-        propertyIndex: 1,
-        owner: false,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 13, hour: 6, durationHours: 8 },
-            crew: ['SARAH', 'JOHN', 'LUC'],
-            notes: [
-              {
-                atHours: -336,
-                author: 'MANAGER',
-                body: 'Lift is rented for the day. Aisles 1 to 6 must be clear of pallets before 06:00.',
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'INDIVIDUAL',
-    displayName: 'Grace Liu',
-    firstName: 'Grace',
-    lastName: 'Liu',
-    email: 'grace.liu@servora.test',
-    phone: '+1 416 555 0116',
-    notes:
-      'The concierge holds the key and has to be told before the technician goes up.',
-    preferredContactMethod: 'SMS',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 55,
-    billingAddress: {
-      addressLine1: '88 Harbour Street',
-      addressLine2: 'Unit 2103',
-      city: 'Toronto',
-      province: 'Ontario',
-      postalCode: 'M5J 0C3',
-    },
-    contacts: [],
-    properties: [
-      {
-        name: 'Suite 2103 — 88 Harbour Street',
-        addressLine1: '88 Harbour Street',
-        addressLine2: 'Unit 2103',
-        city: 'Toronto',
-        province: 'Ontario',
-        postalCode: 'M5J 0C3',
-        notes: 'Fan coil is behind the hallway ceiling panel; bring the step ladder.',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Air conditioner running but not cooling',
-        description:
-          'The fan coil runs continuously but blows warm air. Building management says the riser temperature is normal.',
-        typeCode: 'REPAIR',
-        status: 'SCHEDULED',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 1, hour: 10, durationHours: 2 },
-            crew: ['SEEDED'],
-            notes: [
-              {
-                atHours: -48,
-                author: 'MANAGER',
-                body: 'Concierge will let the technician up. The unit is a fan coil above the hallway ceiling.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Bathroom exhaust fan rattling',
-        description:
-          'Owner reports a rattle that starts a few minutes after the bathroom light is switched on.',
-        typeCode: 'SERVICE_CALL',
-        status: 'NEW',
-        propertyIndex: 0,
-        owner: false,
-        visits: [],
-      },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Cedar & Pine Hotel',
-    legalName: 'Cedar and Pine Hospitality Inc.',
-    businessName: 'Cedar & Pine Hotel',
-    taxNumber: 'GST-9930-2218',
-    email: 'engineering@cedarandpine.test',
-    phone: '+1 902 555 0126',
-    billingEmail: 'finance@cedarandpine.test',
-    billingPhone: '+1 902 555 0127',
-    notes:
-      'Service entrance is the loading dock off the laneway. Sign in at the front desk before going to the kitchen.',
-    preferredContactMethod: 'PHONE',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 1120,
-    billingAddress: {
-      addressLine1: '1269 Barrington Street',
-      city: 'Halifax',
-      province: 'Nova Scotia',
-      postalCode: 'B3J 1Y2',
-    },
-    contacts: [
-      {
-        firstName: 'Nadine',
-        lastName: 'Cormier',
-        role: 'Chief Engineer',
-        email: 'nadine.cormier@cedarandpine.test',
-        phone: '+1 902 555 0128',
+        firstName: 'Nadia',
+        lastName: 'Patel',
+        role: 'Operations Manager',
+        email: 'nadia.patel@mapleridgepm.test',
+        phone: '+1 604 555 0142',
         isPrimary: true,
         isJobContact: true,
       },
       {
         firstName: 'Tom',
-        lastName: 'Ashford',
-        role: 'Purchasing',
-        email: 'tom.ashford@cedarandpine.test',
-        phone: '+1 902 555 0129',
-        isBillingContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Cedar & Pine Hotel — Main Building',
-        addressLine1: '1269 Barrington Street',
-        city: 'Halifax',
-        province: 'Nova Scotia',
-        postalCode: 'B3J 1Y2',
-        notes: 'Kitchen refrigeration is on the mezzanine; the chef holds the panel key.',
-      },
-      {
-        name: 'Cedar & Pine Hotel — Annex',
-        addressLine1: '1271 Barrington Street',
-        city: 'Halifax',
-        province: 'Nova Scotia',
-        postalCode: 'B3J 1Y2',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Walk-in cooler not holding temperature in the main kitchen',
-        description:
-          'The cooler is sitting at 8 °C with the door closed. Product has been moved to the annex cooler.',
-        typeCode: 'REPAIR',
-        status: 'IN_PROGRESS',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'HOURS_FROM_NOW', hours: -7, durationHours: 3 },
-            crew: ['JOHN', 'PRIYA'],
-            outcome: {
-              code: 'NEEDS_PARTS',
-              summary:
-                'Compressor contactor burnt out. Cooler running on the spare fan at 8 °C; replacement contactor ordered.',
-            },
-            notes: [
-              {
-                atHours: -5,
-                author: 'JOHN',
-                body: 'The chef moved product to the annex as a precaution. Contactor is on the morning delivery.',
-              },
-            ],
-          },
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 1, hour: 7, durationHours: 2 },
-            crew: ['SEEDED'],
-            notes: [
-              {
-                atHours: -48,
-                author: 'MANAGER',
-                body: 'Nadine booked first thing tomorrow and will have the panel open when the crew arrives.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Guest room 412 — shower valve replacement',
-        description:
-          'Both the hot and cold handles were replaced last month; the valve body itself is now leaking behind the wall.',
-        typeCode: 'REPAIR',
-        status: 'PENDING_REVIEW',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 1, hour: 8, durationHours: 2 },
-            crew: ['SEEDED'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Valve body replaced and the wall closed. Hot and cold verified at the fixture.',
-            },
-            notes: [
-              {
-                atHours: 1,
-                author: 'SEEDED',
-                body: 'Ran the shower for ten minutes with the access panel open — no weeping at the new joints.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Quarterly fire alarm verification',
-        description:
-          'Quarterly verification of the annex panel, including the corridor sounders and the stairwell pulls.',
-        typeCode: 'INSPECTION',
-        status: 'SCHEDULED',
-        propertyIndex: 1,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 7, hour: 8, durationHours: 5 },
-            crew: ['PRIYA', 'SARAH'],
-            notes: [
-              {
-                atHours: -192,
-                author: 'MANAGER',
-                body: 'Nadine will post the notice and asked the crew to start on the upper floors.',
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Summit Ridge School Board',
-    legalName: 'Summit Ridge School Board',
-    businessName: 'Summit Ridge Schools',
-    taxNumber: 'GST-1042-7783',
-    email: 'facilities@summitridgeschools.test',
-    phone: '+1 403 555 0181',
-    billingEmail: 'accounts@summitridgeschools.test',
-    billingPhone: '+1 403 555 0182',
-    notes:
-      'Work at any school must finish before 15:00 and be cleared with the front office on arrival.',
-    preferredContactMethod: 'EMAIL',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 1980,
-    billingAddress: {
-      addressLine1: '1400 8 Avenue NW',
-      city: 'Calgary',
-      province: 'Alberta',
-      postalCode: 'T2N 1B9',
-    },
-    contacts: [
-      {
-        firstName: 'Alan',
-        lastName: 'Whitehorse',
-        role: 'Facilities Director',
-        email: 'alan.whitehorse@summitridgeschools.test',
-        phone: '+1 403 555 0183',
-        isPrimary: true,
-        isJobContact: true,
-      },
-      {
-        firstName: 'Rosa',
-        lastName: 'Mendoza',
-        role: 'Maintenance Coordinator',
-        email: 'rosa.mendoza@summitridgeschools.test',
-        phone: '+1 403 555 0184',
-        isJobContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Summit Ridge Elementary',
-        addressLine1: '1400 8 Avenue NW',
-        city: 'Calgary',
-        province: 'Alberta',
-        postalCode: 'T2N 1B9',
-        notes: 'Boiler room is through the gym; the caretaker meets contractors at the front office.',
-      },
-      {
-        name: 'Summit Ridge Middle School',
-        addressLine1: '2200 Richmond Road SW',
-        city: 'Calgary',
-        province: 'Alberta',
-        postalCode: 'T2T 5C6',
-      },
-      {
-        name: 'Summit Ridge High School',
-        addressLine1: '800 32 Street NE',
-        city: 'Calgary',
-        province: 'Alberta',
-        postalCode: 'T2A 7X6',
-        notes: 'Rooftop units are reached from the stairwell beside the drama room.',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Gymnasium rooftop unit — no heat',
-        description:
-          'The gym unit locks out on high limit and never heats. A tournament is booked in the gym this weekend.',
-        typeCode: 'REPAIR',
-        status: 'SCHEDULED',
-        propertyIndex: 2,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 1, hour: 8, durationHours: 4 },
-            crew: ['SARAH', 'JOHN'],
-            notes: [
-              {
-                atHours: -48,
-                author: 'MANAGER',
-                body: 'Tournament is Saturday. Alan asked for the unit to be proven before the school day ends.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Annual boiler inspection — three sites',
-        description:
-          'Annual inspection of the three school boilers. Certificates are due to the board at the end of the month.',
-        typeCode: 'INSPECTION',
-        status: 'SCHEDULED',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 6, hour: 9, durationHours: 6 },
-            crew: ['PRIYA', 'LUC'],
-            notes: [
-              {
-                atHours: -168,
-                author: 'MANAGER',
-                body: 'Rosa booked all three sites on one day; the caretakers will have the boiler rooms open.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Classroom thermostat replacement — wing B',
-        description:
-          'Twelve thermostats in wing B are reading several degrees off and cannot be adjusted from the BMS.',
-        typeCode: 'INSTALLATION',
-        status: 'COMPLETED',
-        propertyIndex: 1,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 16, hour: 8, durationHours: 5 },
-            crew: ['LUC', 'PRIYA'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Twelve thermostats replaced and paired with the BMS; each room verified against the setpoint.',
-            },
-            notes: [
-              {
-                atHours: 3,
-                author: 'PRIYA',
-                body: 'Showed two of the teachers how to adjust the setpoint on the new wall units.',
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Evergreen Physiotherapy',
-    legalName: 'Evergreen Physiotherapy Inc.',
-    businessName: 'Evergreen Physiotherapy',
-    taxNumber: 'GST-5518-3372',
-    email: 'clinic@evergreenphysio.test',
-    phone: '+1 250 555 0107',
-    billingEmail: 'admin@evergreenphysio.test',
-    billingPhone: '+1 250 555 0108',
-    notes:
-      'Inactive: the clinic changed owners and no new work is being booked. Kept for service history.',
-    preferredContactMethod: 'EMAIL',
-    language: 'en-CA',
-    status: 'INACTIVE',
-    customerSinceDaysAgo: 690,
-    billingAddress: {
-      addressLine1: '3020 Cook Street',
-      city: 'Victoria',
-      province: 'British Columbia',
-      postalCode: 'V8X 1A6',
-    },
-    contacts: [
-      {
-        firstName: 'Helen',
-        lastName: 'Osei',
-        role: 'Clinic Owner',
-        email: 'helen.osei@evergreenphysio.test',
-        phone: '+1 250 555 0109',
-        isPrimary: true,
-      },
-      {
-        firstName: 'Megan',
-        lastName: 'Clarke',
-        role: 'Billing',
-        isBillingContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Evergreen Physiotherapy — Cook Street',
-        addressLine1: '3020 Cook Street',
-        city: 'Victoria',
-        province: 'British Columbia',
-        postalCode: 'V8X 1A6',
-        notes: 'Treatment rooms are at the back; the exhaust grilles sit above each door.',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Treatment room exhaust vent cleaning',
-        description:
-          'Annual cleaning of the four treatment room exhaust grilles and their duct runs.',
-        typeCode: 'MAINTENANCE',
-        status: 'COMPLETED',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 34, hour: 11, durationHours: 2 },
-            crew: ['PRIYA'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Grilles and duct runs cleaned; airflow measured at each of the four rooms and recorded.',
-            },
-            notes: [
-              {
-                atHours: 2,
-                author: 'PRIYA',
-                body: 'Airflow improved from 40 to 190 cfm at the far treatment room.',
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Atlas Fitness Clubs',
-    legalName: 'Atlas Fitness Clubs Inc.',
-    businessName: 'Atlas Fitness',
-    taxNumber: 'GST-8813-4460',
-    email: 'facilities@atlasfitness.test',
-    phone: '+1 416 555 0198',
-    billingEmail: 'accounting@atlasfitness.test',
-    billingPhone: '+1 416 555 0199',
-    notes:
-      'Two clubs. Staff door is on the laneway at Queen West; both clubs share the Liberty Village loading bay.',
-    preferredContactMethod: 'EMAIL',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 1310,
-    billingAddress: {
-      addressLine1: '700 Queen Street West',
-      city: 'Toronto',
-      province: 'Ontario',
-      postalCode: 'M6J 1E9',
-    },
-    contacts: [
-      {
-        firstName: 'Sam',
         lastName: 'Whitfield',
-        role: 'Facilities Manager',
-        email: 'sam.whitfield@atlasfitness.test',
-        phone: '+1 416 555 0197',
-        isPrimary: true,
+        role: 'Site Coordinator',
+        email: 'tom.whitfield@mapleridgepm.test',
+        phone: '+1 604 555 0143',
         isJobContact: true,
       },
-      {
-        firstName: 'Jo-Anne',
-        lastName: 'Peters',
-        role: 'Accounting',
-        email: 'jo-anne.peters@atlasfitness.test',
-        phone: '+1 416 555 0196',
-        isBillingContact: true,
-      },
     ],
     properties: [
       {
-        name: 'Atlas Fitness — Queen West',
-        addressLine1: '700 Queen Street West',
-        city: 'Toronto',
-        province: 'Ontario',
-        postalCode: 'M6J 1E9',
-        notes: 'Staff door is on the laneway; the locker rooms are one level down.',
+        name: 'Cedar Court Apartments',
+        addressLine1: '1280 Cedar Street',
+        city: 'Vancouver',
+        province: 'British Columbia',
+        postalCode: 'V6J 2K4',
       },
       {
-        name: 'Atlas Fitness — Liberty Village',
-        addressLine1: '171 East Liberty Street',
-        city: 'Toronto',
-        province: 'Ontario',
-        postalCode: 'M6K 3P6',
+        name: 'Birchfield Townhomes',
+        addressLine1: '412 Birchfield Way',
+        city: 'Burnaby',
+        province: 'British Columbia',
+        postalCode: 'V5G 1T2',
       },
     ],
     jobs: [
       {
-        title: "Men's locker room — intermittent hot water",
+        title: 'Annual boiler inspection — Cedar Court',
         description:
-          'Hot water drops out for a few seconds at a time, mostly in the morning. Six showers share the line.',
-        typeCode: 'REPAIR',
-        status: 'PENDING_REVIEW',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 2, hour: 7, durationHours: 4 },
-            crew: ['JOHN', 'PRIYA'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Mixing valve replaced; hot water stable across six fixtures with a ten-minute draw at each.',
-            },
-            notes: [
-              {
-                atHours: 3,
-                author: 'JOHN',
-                body: 'Ran all six showers at once and then one at a time — no temperature swing either way.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'HVAC filter replacement — both clubs',
-        description:
-          'Quarterly filter change on the rooftop units at both clubs, including the two make-up air units.',
-        typeCode: 'MAINTENANCE',
-        status: 'SCHEDULED',
-        propertyIndex: 1,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 4, hour: 7, durationHours: 4 },
-            crew: ['SARAH', 'PRIYA'],
-            notes: [
-              {
-                atHours: -120,
-                author: 'MANAGER',
-                body: 'Sam will have the roof hatch unlocked and a cart for the used filters.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Spin studio ceiling fan installation',
-        description:
-          'Install four ceiling fans in the spin studio. The ceiling was scheduled for painting first.',
-        typeCode: 'INSTALLATION',
-        status: 'CANCELED',
-        propertyIndex: 1,
-        owner: true,
-        cancellationNote:
-          'The club postponed the fan installation until the ceiling painting is finished.',
-        visits: [
-          {
-            status: 'CANCELED',
-            schedule: { kind: 'DAYS_AGO', days: 5, hour: 8, durationHours: 3 },
-            crew: ['JOHN'],
-            cancellation: {
-              reasonCode: 'CUSTOMER_RESCHEDULED',
-              note: 'The club asked to postpone until the ceiling is painted.',
-            },
-            notes: [
-              {
-                atHours: -26,
-                author: 'MANAGER',
-                body: 'Sam moved the painting ahead of the fan install; we will be asked to rebook once it is dry.',
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'INDIVIDUAL',
-    displayName: 'Marie-Claude Fortin',
-    firstName: 'Marie-Claude',
-    lastName: 'Fortin',
-    email: 'marie-claude.fortin@servora.test',
-    phone: '+1 418 555 0123',
-    notes:
-      'Préfère être appelée avant l’arrivée. Accès par la porte de côté, près de la remise.',
-    preferredContactMethod: 'PHONE',
-    language: 'fr-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 145,
-    billingAddress: {
-      addressLine1: '1180 avenue Cartier',
-      city: 'Québec',
-      province: 'Québec',
-      postalCode: 'G1R 2S9',
-    },
-    contacts: [],
-    properties: [
-      {
-        name: 'Maison Fortin',
-        addressLine1: '1180 avenue Cartier',
-        city: 'Québec',
-        province: 'Québec',
-        postalCode: 'G1R 2S9',
-        notes: 'Le chauffe-eau est au sous-sol, derrière la fournaise.',
-      },
-    ],
-    jobs: [
-      {
-        title: "Chauffe-eau — plus d'eau chaude",
-        description:
-          "Le chauffe-eau ne fournit plus d'eau chaude depuis la veille; aucun voyant allumé.",
-        typeCode: 'REPAIR',
+          'Yearly boiler inspection for the Cedar Court apartment building, including safety certification for the strata.',
+        typeCode: 'INSPECTION',
         status: 'COMPLETED',
         propertyIndex: 0,
         owner: true,
         visits: [
           {
             status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 4, hour: 8, durationHours: 2 },
-            crew: ['LUC'],
+            schedule: { kind: 'DAYS_AGO', days: 12, hour: 9, durationHours: 3 },
+            crew: ['SEEDED', 'SARAH'],
             outcome: {
               code: 'RESOLVED',
               summary:
-                "Élément chauffant et thermostat remplacés; eau chaude rétablie à 49 °C.",
+                'Boiler passed inspection; annual safety certificate filed with the strata.',
             },
-            notes: [
-              {
-                atHours: 2,
-                author: 'LUC',
-                body: "Tension et mise à la terre vérifiées; la cliente a confirmé l'eau chaude en soirée.",
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Bluebird Grocers',
-    legalName: 'Bluebird Grocers Ltd.',
-    businessName: 'Bluebird Grocers',
-    taxNumber: 'GST-6620-1195',
-    email: 'maintenance@bluebirdgrocers.test',
-    phone: '+1 306 555 0121',
-    billingEmail: 'payables@bluebirdgrocers.test',
-    billingPhone: '+1 306 555 0122',
-    notes:
-      'Night work only at the store; the last customer leaves at 22:00. Warehouse is keyed differently.',
-    preferredContactMethod: 'PHONE',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 790,
-    billingAddress: {
-      addressLine1: '2934 Gordon Road',
-      city: 'Regina',
-      province: 'Saskatchewan',
-      postalCode: 'S4S 6H2',
-    },
-    contacts: [
-      {
-        firstName: 'Kevin',
-        lastName: "O'Brien",
-        role: 'Store Operations Manager',
-        email: 'kevin.obrien@bluebirdgrocers.test',
-        phone: '+1 306 555 0123',
-        isPrimary: true,
-        isJobContact: true,
-      },
-      {
-        firstName: 'Lisa',
-        lastName: 'Tran',
-        role: 'Administration',
-        email: 'lisa.tran@bluebirdgrocers.test',
-        phone: '+1 306 555 0124',
-        isBillingContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Bluebird Grocers — Southland',
-        addressLine1: '2934 Gordon Road',
-        city: 'Regina',
-        province: 'Saskatchewan',
-        postalCode: 'S4S 6H2',
-        notes: 'Refrigeration rack is behind the dairy wall; night manager opens the panel.',
-      },
-      {
-        name: 'Bluebird Grocers — Warehouse',
-        addressLine1: '1050 Winnipeg Street',
-        city: 'Regina',
-        province: 'Saskatchewan',
-        postalCode: 'S4R 8P8',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Refrigeration rack alarm — aisle 3',
-        description:
-          'The rack has been alarming since this morning and the aisle 3 case is running warm.',
-        typeCode: 'REPAIR',
-        status: 'IN_PROGRESS',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'ON_SITE',
-            schedule: { kind: 'HOURS_FROM_NOW', hours: -1, durationHours: 3 },
-            crew: ['SEEDED'],
             notes: [
               {
                 atHours: -1,
-                author: 'SEEDED',
-                body: 'Night manager has the panel open. Checking the condenser fan and the suction pressure.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Annual refrigeration leak inspection',
-        description:
-          'Annual leak inspection across the store rack and the two walk-in freezers. Requires the store to be closed.',
-        typeCode: 'INSPECTION',
-        status: 'SCHEDULED',
-        propertyIndex: 0,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 8, hour: 22, durationHours: 4 },
-            crew: ['JOHN', 'LUC'],
-            notes: [
-              {
-                atHours: -216,
                 author: 'MANAGER',
-                body: 'Kevin confirmed the store closes at 22:00. Park at the back and sign in with the night manager.',
+                body: 'Send the certificate to the strata manager once the visit closes.',
               },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Automatic entrance door sensor replacement',
-        description:
-          'The entrance door is slow to open and occasionally closes on a customer. Sensor was flagged as faulty last month.',
-        typeCode: 'REPAIR',
-        status: 'COMPLETED',
-        propertyIndex: 1,
-        owner: true,
-        visits: [
-          {
-            status: 'COMPLETED',
-            schedule: { kind: 'DAYS_AGO', days: 10, hour: 13, durationHours: 2 },
-            crew: ['SARAH'],
-            outcome: {
-              code: 'RESOLVED',
-              summary:
-                'Sensor replaced and tuned; the door opens and holds from both approach directions.',
-            },
-            notes: [
               {
                 atHours: 1,
-                author: 'SARAH',
-                body: 'Cycled the door forty times with a cart and walked it from both sides.',
+                author: 'SEEDED',
+                body: 'Replaced the pressure relief valve gasket while on site; logged it in the report.',
               },
             ],
           },
         ],
       },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Maple Ridge Office Park',
-    legalName: 'Maple Ridge Office Park Inc.',
-    businessName: 'Maple Ridge Office Park',
-    taxNumber: 'GST-3390-7741',
-    email: 'admin@mapleridgeoffice.test',
-    phone: '+1 905 555 0131',
-    billingEmail: 'billing@mapleridgeoffice.test',
-    billingPhone: '+1 905 555 0132',
-    notes:
-      'Two office buildings. Rooftop access is through the penthouse stairwell; keys are at the security desk.',
-    preferredContactMethod: 'EMAIL',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 610,
-    billingAddress: {
-      addressLine1: '2450 Meadowvale Boulevard',
-      addressLine2: 'Suite 100',
-      city: 'Mississauga',
-      province: 'Ontario',
-      postalCode: 'L5N 6M1',
-    },
-    contacts: [
       {
-        firstName: 'Owen',
-        lastName: 'Clarke',
-        role: 'Property Administrator',
-        email: 'owen.clarke@mapleridgeoffice.test',
-        phone: '+1 905 555 0133',
-        isPrimary: true,
-        isJobContact: true,
-      },
-      {
-        firstName: 'Hana',
-        lastName: 'Sato',
-        role: 'Billing Coordinator',
-        email: 'hana.sato@mapleridgeoffice.test',
-        phone: '+1 905 555 0134',
-        isBillingContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Maple Ridge — Building 300',
-        addressLine1: '2450 Meadowvale Boulevard',
-        city: 'Mississauga',
-        province: 'Ontario',
-        postalCode: 'L5N 6M1',
-        notes: 'Suite 302 is on the top floor; the tenant leaves a key with the security desk.',
-      },
-      {
-        name: 'Maple Ridge — Building 400',
-        addressLine1: '2500 Meadowvale Boulevard',
-        city: 'Mississauga',
-        province: 'Ontario',
-        postalCode: 'L5N 6M1',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Suite 302 rooftop unit short cycling',
+        title: 'Replace lobby HVAC thermostat — Birchfield',
         description:
-          'The unit starts and stops every few minutes and the suite never reaches its setpoint.',
+          'The Birchfield lobby thermostat stopped responding. Diagnose and replace the unit.',
         typeCode: 'REPAIR',
-        status: 'PENDING_REVIEW',
-        propertyIndex: 0,
+        status: 'ACTIVE',
+        propertyIndex: 1,
         owner: true,
         visits: [
           {
             status: 'COMPLETED',
-            schedule: { kind: 'HOURS_FROM_NOW', hours: -5, durationHours: 3 },
-            crew: ['SEEDED'],
+            schedule: { kind: 'DAYS_AGO', days: 3, hour: 13, durationHours: 2 },
+            crew: ['JOHN'],
             outcome: {
-              code: 'RESOLVED',
+              code: 'NEEDS_PARTS',
               summary:
-                'Return-air sensor relocated out of the supply stream and filters replaced; the unit now runs a full cycle.',
+                'Thermostat model is obsolete; ordered the replacement and scheduled the install.',
             },
-            notes: [
-              {
-                atHours: -3,
-                author: 'SEEDED',
-                body: 'Tenant confirmed the suite held its setpoint for the rest of the afternoon.',
-              },
-            ],
+          },
+          {
+            status: 'SCHEDULED',
+            schedule: { kind: 'IN_DAYS', days: 2, hour: 10, durationHours: 3 },
+            crew: ['JOHN', 'PRIYA'],
+            removedTechnician: 'LUC',
           },
         ],
       },
       {
-        title: 'Common area lighting upgrade — building 400',
+        title: 'Leak repair — Cedar Court unit 3A',
         description:
-          'Replace the corridor and lobby fixtures with LED panels. Scope to be confirmed with the property administrator.',
-        typeCode: 'INSTALLATION',
+          'Resident reported water damage under the kitchen sink in unit 3A. Site visit to be scheduled.',
+        typeCode: 'REPAIR',
         status: 'NEW',
-        propertyIndex: 1,
+        propertyIndex: 0,
         owner: false,
         visits: [
           {
@@ -1762,24 +395,275 @@ export const SEED_CUSTOMERS: readonly SeedCustomerPlan[] = [
           },
         ],
       },
+    ],
+  },
+  {
+    kind: 'COMPANY',
+    displayName: 'Boucher & Fils Plomberie',
+    legalName: 'Boucher & Fils Plomberie Inc.',
+    businessName: 'Boucher & Fils Plomberie',
+    email: 'info@boucherplomberie.test',
+    phone: '+1 514 555 0160',
+    billingEmail: 'facturation@boucherplomberie.test',
+    billingPhone: '+1 514 555 0161',
+    notes:
+      "Client commercial francophone. Appeler Claude avant chaque intervention à l'atelier.",
+    preferredContactMethod: 'PHONE',
+    language: 'fr-CA',
+    status: 'ACTIVE',
+    customerSinceDaysAgo: 180,
+    billingAddress: {
+      addressLine1: '1240 Rue Saint-Denis',
+      city: 'Montréal',
+      province: 'Québec',
+      postalCode: 'H2X 3J6',
+    },
+    contacts: [
       {
-        title: 'Parking garage sump pump inspection',
+        firstName: 'Claude',
+        lastName: 'Boucher',
+        role: 'Directeur',
+        email: 'claude.boucher@boucherplomberie.test',
+        phone: '+1 514 555 0162',
+        isPrimary: true,
+        isJobContact: true,
+      },
+      {
+        firstName: 'Isabelle',
+        lastName: 'Fortin',
+        role: 'Adjointe administrative',
+        email: 'isabelle.fortin@boucherplomberie.test',
+        phone: '+1 514 555 0163',
+        isBillingContact: true,
+      },
+    ],
+    properties: [
+      {
+        name: 'Atelier principal',
+        addressLine1: '1240 Rue Saint-Denis',
+        city: 'Montréal',
+        province: 'Québec',
+        postalCode: 'H2X 3J6',
+      },
+      {
+        name: 'Entrepôt',
+        addressLine1: '77 Rue Saint-Jacques',
+        city: 'Longueuil',
+        province: 'Québec',
+        postalCode: 'J4H 2V6',
+      },
+    ],
+    jobs: [
+      {
+        title: 'Remplacement du chauffe-eau',
         description:
-          'Inspect and test the two garage sump pumps before the fall rain. One float has been sticking.',
-        typeCode: 'MAINTENANCE',
-        status: 'SCHEDULED',
+          "Remplacement du chauffe-eau défectueux de l'atelier principal.",
+        typeCode: 'INSTALLATION',
+        status: 'ACTIVE',
+        propertyIndex: 0,
+        owner: true,
+        visits: [
+          {
+            status: 'IN_PROGRESS',
+            schedule: { kind: 'HOURS_FROM_NOW', hours: -3, durationHours: 4 },
+            crew: ['PRIYA', 'LUC'],
+            removedTechnician: 'SARAH',
+            notes: [
+              {
+                atHours: 0,
+                author: 'PRIYA',
+                body: 'Ancien chauffe-eau vidangé; le nouveau modèle est en place, branchement en cours.',
+              },
+            ],
+          },
+        ],
+      },
+      {
+        title: "Déblocage du drain de l'entrepôt",
+        description:
+          "Drain de plancher de l'entrepôt obstrué; déblocage et inspection caméra.",
+        typeCode: 'REPAIR',
+        status: 'COMPLETED',
+        propertyIndex: 1,
+        owner: true,
+        visits: [
+          {
+            status: 'COMPLETED',
+            schedule: { kind: 'DAYS_AGO', days: 5, hour: 8, durationHours: 2 },
+            crew: ['SARAH'],
+            outcome: {
+              code: 'RESOLVED',
+              summary:
+                'Drain débloqué; recommandé une inspection caméra au printemps.',
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    kind: 'INDIVIDUAL',
+    displayName: 'Diane Rousseau',
+    firstName: 'Diane',
+    lastName: 'Rousseau',
+    email: 'diane.rousseau@servora.test',
+    phone: '+1 819 555 0170',
+    notes:
+      "Cliente résidentielle. Préfère être prévenue par texto avant l'arrivée du technicien.",
+    preferredContactMethod: 'SMS',
+    language: 'fr-CA',
+    status: 'ACTIVE',
+    customerSinceDaysAgo: 95,
+    billingAddress: {
+      addressLine1: '38 Chemin du Lac',
+      city: 'Gatineau',
+      province: 'Québec',
+      postalCode: 'J8P 4R2',
+    },
+    contacts: [],
+    properties: [
+      {
+        name: 'Résidence Rousseau',
+        addressLine1: '38 Chemin du Lac',
+        city: 'Gatineau',
+        province: 'Québec',
+        postalCode: 'J8P 4R2',
+      },
+    ],
+    jobs: [
+      {
+        title: 'Inspection de toiture après tempête',
+        description:
+          'Inspection de la toiture suite à la tempête de grêle; vérifier les bardeaux et les solins.',
+        typeCode: 'INSPECTION',
+        status: 'ACTIVE',
         propertyIndex: 0,
         owner: true,
         visits: [
           {
             status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 3, hour: 9, durationHours: 2 },
+            schedule: { kind: 'IN_DAYS', days: 1, hour: 9, durationHours: 2 },
+            crew: ['SEEDED'],
+          },
+        ],
+      },
+      {
+        title: 'Nettoyage des gouttières',
+        description: 'Nettoyage annuel des gouttières de la résidence.',
+        typeCode: 'MAINTENANCE',
+        status: 'CANCELED',
+        propertyIndex: 0,
+        owner: false,
+        cancellationNote:
+          'Diane a annulé; le nettoyage sera reporté au printemps.',
+        visits: [
+          {
+            status: 'CANCELED',
+            schedule: { kind: 'IN_DAYS', days: 3, hour: 14, durationHours: 2 },
             crew: ['LUC'],
+            cancellation: {
+              reasonCode: 'CUSTOMER_CANCELED',
+              note: 'Diane a annulé; report au printemps demandé.',
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    kind: 'COMPANY',
+    displayName: 'Harbourview Dental Clinic',
+    legalName: 'Harbourview Dental Clinic Ltd.',
+    businessName: 'Harbourview Dental',
+    email: 'frontdesk@harbourviewdental.test',
+    phone: '+1 250 555 0180',
+    billingEmail: 'accounts@harbourviewdental.test',
+    billingPhone: '+1 250 555 0181',
+    notes:
+      'Clinic occupies a heritage building; after-hours access requires a site escort.',
+    preferredContactMethod: 'EMAIL',
+    language: 'en-CA',
+    status: 'ACTIVE',
+    customerSinceDaysAgo: 230,
+    billingAddress: {
+      addressLine1: '1100 Government Street',
+      city: 'Victoria',
+      province: 'British Columbia',
+      postalCode: 'V8W 1Y2',
+    },
+    contacts: [
+      {
+        firstName: 'Elena',
+        lastName: 'Vasquez',
+        role: 'Owner Dentist',
+        email: 'elena.vasquez@harbourviewdental.test',
+        phone: '+1 250 555 0182',
+        isPrimary: true,
+        isJobContact: true,
+      },
+      {
+        firstName: 'Mark',
+        lastName: 'Lee',
+        role: 'Clinic Manager',
+        email: 'mark.lee@harbourviewdental.test',
+        phone: '+1 250 555 0183',
+        isJobContact: true,
+      },
+    ],
+    properties: [
+      {
+        name: 'Harbourview Dental Clinic',
+        addressLine1: '1100 Government Street',
+        city: 'Victoria',
+        province: 'British Columbia',
+        postalCode: 'V8W 1Y2',
+      },
+    ],
+    jobs: [
+      {
+        title: 'Autoclave maintenance',
+        description:
+          'Preventive maintenance on the clinic autoclave to keep sterilization certifications current.',
+        typeCode: 'MAINTENANCE',
+        status: 'ACTIVE',
+        propertyIndex: 0,
+        owner: true,
+        visits: [
+          {
+            status: 'EN_ROUTE',
+            schedule: { kind: 'HOURS_FROM_NOW', hours: -1, durationHours: 2 },
+            crew: ['JOHN'],
+          },
+        ],
+      },
+      {
+        title: 'Replace dental chair compressor',
+        description:
+          'Compressor on operatory chair 2 failed. Replace the unit and verify the chair.',
+        typeCode: 'REPAIR',
+        status: 'COMPLETED',
+        propertyIndex: 0,
+        owner: true,
+        visits: [
+          {
+            status: 'COMPLETED',
+            schedule: {
+              kind: 'DAYS_AGO',
+              days: 20,
+              hour: 10,
+              durationHours: 3,
+            },
+            crew: ['SEEDED', 'PRIYA'],
+            outcome: {
+              code: 'RESOLVED',
+              summary:
+                'Compressor replaced and tested; chair restored to full function.',
+            },
             notes: [
               {
-                atHours: -96,
+                atHours: 0,
                 author: 'MANAGER',
-                body: 'Owen will have the pit lids off and the wet vac beside the lower pit.',
+                body: 'Mark confirmed the chair holds pressure after the swap.',
               },
             ],
           },
@@ -1789,158 +673,52 @@ export const SEED_CUSTOMERS: readonly SeedCustomerPlan[] = [
   },
   {
     kind: 'INDIVIDUAL',
-    displayName: 'Noah Singh',
-    firstName: 'Noah',
-    lastName: 'Singh',
-    email: 'noah.singh@servora.test',
-    phone: '+1 905 555 0105',
-    notes: 'New request taken by phone. Prefers a text the day before.',
-    preferredContactMethod: 'SMS',
+    displayName: 'Marcus Chen',
+    firstName: 'Marcus',
+    lastName: 'Chen',
+    email: 'marcus.chen@servora.test',
+    phone: '+1 778 555 0190',
+    notes:
+      'Homeowner with a service contract. Leave the furnace room as found.',
+    preferredContactMethod: 'PHONE',
     language: 'en-CA',
     status: 'ACTIVE',
-    customerSinceDaysAgo: 40,
+    customerSinceDaysAgo: 60,
     billingAddress: {
-      addressLine1: '3475 Fieldgate Drive',
-      city: 'Mississauga',
-      province: 'Ontario',
-      postalCode: 'L4X 2J6',
+      addressLine1: '2211 Sea Island Way',
+      city: 'Richmond',
+      province: 'British Columbia',
+      postalCode: 'V7B 1E9',
     },
     contacts: [],
     properties: [
       {
-        name: 'Noah Singh — Residence',
-        addressLine1: '3475 Fieldgate Drive',
-        city: 'Mississauga',
-        province: 'Ontario',
-        postalCode: 'L4X 2J6',
-        notes: 'Furnace and humidifier are in the basement; the side gate is unlocked.',
+        name: 'Chen Residence',
+        addressLine1: '2211 Sea Island Way',
+        city: 'Richmond',
+        province: 'British Columbia',
+        postalCode: 'V7B 1E9',
       },
     ],
     jobs: [
       {
-        title: 'Furnace maintenance before winter',
+        title: 'Furnace service call',
         description:
-          'Booked by phone for a furnace cleaning and a humidifier check before the heating season.',
-        typeCode: 'MAINTENANCE',
-        status: 'NEW',
-        propertyIndex: 0,
-        owner: false,
-        visits: [],
-      },
-    ],
-  },
-
-  {
-    kind: 'COMPANY',
-    displayName: 'Lakeside Condominium Corporation',
-    legalName: 'Lakeside Condominium Corporation No. 118',
-    businessName: 'Lakeside Condominiums',
-    taxNumber: 'GST-7756-2003',
-    email: 'board@lakesidecondos.test',
-    phone: '+1 613 555 0151',
-    billingEmail: 'treasurer@lakesidecondos.test',
-    billingPhone: '+1 613 555 0152',
-    notes:
-      'Two towers. Garage access needs a fob and the board has to be told which sub-contractor is coming.',
-    preferredContactMethod: 'EMAIL',
-    language: 'en-CA',
-    status: 'ACTIVE',
-    customerSinceDaysAgo: 1690,
-    billingAddress: {
-      addressLine1: '250 Lett Street',
-      city: 'Ottawa',
-      province: 'Ontario',
-      postalCode: 'K1R 7R7',
-    },
-    contacts: [
-      {
-        firstName: 'Gilles',
-        lastName: 'Poirier',
-        role: 'Board President',
-        email: 'gilles.poirier@lakesidecondos.test',
-        phone: '+1 613 555 0153',
-        isPrimary: true,
-      },
-      {
-        firstName: 'Michelle',
-        lastName: 'Adams',
-        role: 'Property Manager',
-        email: 'michelle.adams@lakesidecondos.test',
-        phone: '+1 613 555 0154',
-        isJobContact: true,
-      },
-    ],
-    properties: [
-      {
-        name: 'Lakeside Condominiums — Tower 1',
-        addressLine1: '250 Lett Street',
-        city: 'Ottawa',
-        province: 'Ontario',
-        postalCode: 'K1R 7R7',
-        notes: 'Garage exhaust fans are above the P1 ramp; access through the garage elevator.',
-      },
-      {
-        name: 'Lakeside Condominiums — Tower 2',
-        addressLine1: '252 Lett Street',
-        city: 'Ottawa',
-        province: 'Ontario',
-        postalCode: 'K1R 7R7',
-      },
-    ],
-    jobs: [
-      {
-        title: 'Garage exhaust fan — noise complaint from unit 704',
-        description:
-          'The owner in 704 reports a rhythmic noise through the night. Fan runs against a closed damper.',
+          'Furnace short-cycles overnight. Diagnose the cause and service the unit.',
         typeCode: 'SERVICE_CALL',
-        status: 'IN_PROGRESS',
+        status: 'ACTIVE',
         propertyIndex: 0,
         owner: true,
         visits: [
           {
-            status: 'NO_SHOW',
-            schedule: { kind: 'DAYS_AGO', days: 1, hour: 13, durationHours: 2 },
+            status: 'ON_SITE',
+            schedule: { kind: 'HOURS_FROM_NOW', hours: -2, durationHours: 3 },
             crew: ['SARAH'],
             notes: [
               {
                 atHours: 0,
                 author: 'SARAH',
-                body: 'Attended at 13:05 but the garage fob was not programmed and nobody from the board answered. Left after twenty minutes.',
-              },
-            ],
-          },
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 3, hour: 13, durationHours: 2 },
-            crew: ['SARAH'],
-            notes: [
-              {
-                atHours: -96,
-                author: 'MANAGER',
-                body: 'Board has programmed a fob for us and Gilles will meet the technician at the P1 ramp.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        title: 'Fire pump annual test',
-        description:
-          'Annual flow test on the Tower 2 fire pump with the sprinkler contractor present.',
-        typeCode: 'INSPECTION',
-        status: 'SCHEDULED',
-        propertyIndex: 1,
-        owner: true,
-        visits: [
-          {
-            status: 'SCHEDULED',
-            schedule: { kind: 'IN_DAYS', days: 11, hour: 9, durationHours: 4 },
-            crew: ['PRIYA', 'JOHN'],
-            notes: [
-              {
-                atHours: -288,
-                author: 'MANAGER',
-                body: 'Michelle posted the test notice and booked the sprinkler contractor for the same morning.',
+                body: 'Arrived and found the flame sensor fouled; cleaning and testing now.',
               },
             ],
           },
@@ -2008,7 +786,6 @@ export function resolveSeedWindow(
   }
 }
 
-
 /** A Visit status a field attempt may carry while its window is still ahead (`BR-074`). */
 const FUTURE_VISIT_STATUSES: ReadonlySet<SeedVisitStatus> = new Set([
   'DRAFT',
@@ -2027,7 +804,6 @@ const IN_FLIGHT_VISIT_STATUSES: ReadonlySet<SeedVisitStatus> = new Set([
 const TERMINAL_VISIT_STATUSES: ReadonlySet<SeedVisitStatus> = new Set([
   'COMPLETED',
   'CANCELED',
-  'NO_SHOW',
 ]);
 
 /** A Visit status that means somebody actually worked, which is what starts a Job (`BR-058`). */
@@ -2070,7 +846,10 @@ export function pastInstant(
   minutesBeforeNow: number,
 ): Date {
   return new Date(
-    Math.min(candidate.getTime(), now.getTime() - minutesBeforeNow * ONE_MINUTE),
+    Math.min(
+      candidate.getTime(),
+      now.getTime() - minutesBeforeNow * ONE_MINUTE,
+    ),
   );
 }
 
@@ -2151,8 +930,6 @@ function visitEventCandidate(
       return window.scheduledEnd;
     case 'CANCELED':
       return addHours(window.scheduledStart, -24);
-    case 'NO_SHOW':
-      return addHours(window.scheduledEnd, 1);
   }
 }
 
@@ -2203,12 +980,8 @@ function jobStatusEventTimes(timeline: SeedJobTimeline): readonly Date[] {
     switch (to) {
       case 'NEW':
         return addHours(timeline.earliestVisitStart ?? timeline.now, -72);
-      case 'SCHEDULED':
-        return addHours(timeline.earliestVisitStart ?? timeline.now, -48);
-      case 'IN_PROGRESS':
+      case 'ACTIVE':
         return timeline.workStartedAt ?? addHours(timeline.now, -6);
-      case 'PENDING_REVIEW':
-        return addHours(timeline.latestVisitEnd ?? timeline.now, 1);
       case 'COMPLETED':
         return addHours(timeline.latestVisitEnd ?? timeline.now, 2);
       case 'CANCELED':
@@ -2231,7 +1004,6 @@ function maximumDate(values: readonly Date[]): Date | null {
   }
   return new Date(Math.max(...values.map((value) => value.getTime())));
 }
-
 
 /** One technician's resolved booking, used to check that nobody is double-booked (`BR-070`). */
 interface SeedAssignment {
@@ -2344,7 +1116,6 @@ function assertCustomerIsCoherent(
   });
 }
 
-
 function assertVisitIsCoherent(
   resolved: ResolvedSeedVisit,
   now: Date,
@@ -2380,9 +1151,6 @@ function assertVisitIsCoherent(
     }
     if (status === 'COMPLETED' && ended >= now.getTime()) {
       fail(`${label} is COMPLETED but its window has not finished yet.`);
-    }
-    if (status === 'NO_SHOW' && ended >= now.getTime()) {
-      fail(`${label} is NO_SHOW but its window has not finished yet (BR-074).`);
     }
     if (IN_FLIGHT_VISIT_STATUSES.has(status) && started > now.getTime()) {
       fail(`${label} is ${status} but has not started yet (BR-074).`);
@@ -2452,12 +1220,11 @@ function assertVisitIsCoherent(
   }
 }
 
-
 /**
- * A Job's status must agree with the work its Visits describe (`BR-058`, `BR-061`, `BR-062`).
+ * A Job's status must agree with the work its Visits describe (`BR-058`, `BR-062`, `BR-065`).
  *
- * Without this the demo could show a job awaiting review over an open Visit, or a completed Job whose
- * field work is still running — states the API refuses to create.
+ * Without this the demo could show a Job closed over an open Visit, or a canceled Job whose field work
+ * is still running — states the API refuses to create.
  */
 function assertJobStatusMatchesItsVisits(
   job: SeedJobPlan,
@@ -2471,58 +1238,22 @@ function assertJobStatusMatchesItsVisits(
 
   switch (job.status) {
     case 'NEW':
+      // A Job that has not entered execution holds no real work: a stored `DRAFT` Visit does not make
+      // it active by itself (tracker 051).
       if (statuses.some((status) => status !== 'DRAFT')) {
         fail(`${label} is NEW but holds started or scheduled work (BR-058).`);
       }
       break;
-    case 'SCHEDULED':
-      if (!statuses.includes('SCHEDULED')) {
-        fail(
-          `${label} is SCHEDULED without a scheduled Visit (BR-058, BR-060).`,
-        );
-      }
-      if (
-        statuses.some(
-          (status) =>
-            status === 'DRAFT' || IN_FLIGHT_VISIT_STATUSES.has(status),
-        )
-      ) {
-        fail(
-          `${label} is SCHEDULED while a Visit is still a draft or already under way (BR-058).`,
-        );
-      }
-      break;
-    case 'IN_PROGRESS':
+    case 'ACTIVE':
       if (job.visits.length === 0) {
-        fail(`${label} is IN_PROGRESS without any Visit (BR-058).`);
+        fail(`${label} is ACTIVE without any Visit (BR-058).`);
       }
-      if (statuses.includes('DRAFT')) {
-        fail(`${label} is IN_PROGRESS but still holds a draft Visit (BR-058).`);
-      }
-      break;
-    case 'PENDING_REVIEW': {
-      if (open.length > 0) {
+      if (!statuses.some((status) => status !== 'DRAFT')) {
         fail(
-          `${label} awaits review while ${open.length} Visit(s) are still open (BR-061).`,
-        );
-      }
-      const completed = resolved.visits
-        .filter((visit) => visit.plan.status === 'COMPLETED')
-        .sort(
-          (left, right) =>
-            (left.window?.scheduledEnd.getTime() ?? 0) -
-            (right.window?.scheduledEnd.getTime() ?? 0),
-        );
-      const latest = completed.at(-1);
-      if (latest === undefined) {
-        fail(`${label} awaits review without a completed Visit (BR-061).`);
-      } else if (latest.plan.outcome?.code !== 'RESOLVED') {
-        fail(
-          `${label} awaits review but its latest completed Visit did not resolve the Job (BR-061, BR-078).`,
+          `${label} is ACTIVE while every Visit is still a draft (BR-058, tracker 051).`,
         );
       }
       break;
-    }
     case 'COMPLETED':
       if (open.length > 0) {
         fail(
@@ -2531,8 +1262,11 @@ function assertJobStatusMatchesItsVisits(
       }
       break;
     case 'CANCELED':
-      if (statuses.some((status) => IN_FLIGHT_VISIT_STATUSES.has(status))) {
-        fail(`${label} is CANCELED while a Visit is under way (BR-064).`);
+      // Canceling a Job cancels its open Visits (`BR-065`), so a canceled Job holds no open one.
+      if (open.length > 0) {
+        fail(
+          `${label} is CANCELED while ${open.length} Visit(s) are still open (BR-065).`,
+        );
       }
       break;
   }
@@ -2590,4 +1324,3 @@ function assertNoTechnicianIsDoubleBooked(
     }
   }
 }
-

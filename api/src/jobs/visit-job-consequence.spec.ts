@@ -9,189 +9,119 @@ import {
 } from './job.types.js';
 import { jobStatusConsequenceForVisitTransition } from './visit-job-consequence.js';
 
-/**
- * The Visit → Job consequence (`BR-058`, `BR-061`; `ADR-019` D4).
- *
- * The mapping is the one place a field event's effect on the Job's business lifecycle is defined, so it
- * is asserted directly: what each event does, what it deliberately never does, and that every
- * consequence it can produce is a transition `BR-058` actually permits.
- */
-const OPEN_JOB_STATUSES: readonly JobStatus[] = [
-  'NEW',
-  'SCHEDULED',
-  'IN_PROGRESS',
-  'PENDING_REVIEW',
-];
+const OPEN_JOB_STATUSES: readonly JobStatus[] = ['NEW', 'ACTIVE'];
 
-/** The Visit statuses a field caller may move a Visit to — everything but the dispatch pair. */
-const WORKING_VISIT_STATUSES: readonly VisitStatus[] = VISIT_STATUSES.filter(
+const FIELD_DESTINATIONS: readonly VisitStatus[] = VISIT_STATUSES.filter(
   (status) => status === 'COMPLETED' || !isTerminalVisitStatus(status),
 );
 
 describe('the Visit to Job consequence', () => {
-  it('moves the Job to IN_PROGRESS when field work starts or continues', () => {
-    // `BR-058`'s meaning of `IN_PROGRESS` is "work has started and/or work remains", which is exactly
-    // what these three field events report.
+  it('activates the Job when a real Visit becomes actionable or worked', () => {
     for (const jobStatus of OPEN_JOB_STATUSES) {
-      for (const to of ['EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'] as const) {
-        expect(
-          jobStatusConsequenceForVisitTransition(to, null, false, jobStatus),
-        ).toBe('IN_PROGRESS');
-        // A resolving completion that happens to be in flight is irrelevant to a non-completing event.
-        expect(
-          jobStatusConsequenceForVisitTransition(
-            to,
-            'RESOLVED',
-            true,
-            jobStatus,
-          ),
-        ).toBe('IN_PROGRESS');
+      for (const to of ['SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'] as const) {
+        expect(jobStatusConsequenceForVisitTransition(to, null, jobStatus)).toBe(
+          'ACTIVE',
+        );
       }
     }
   });
 
-  it('lets a resolved Visit put the Job in review, but only while BR-061 holds', () => {
-    // `BR-061` states both the entry condition for `PENDING_REVIEW` and the outcome of failing it.
-    for (const jobMayAwaitReview of [true, false]) {
+  it('completes the Job when a Visit completes as resolved', () => {
+    for (const jobStatus of OPEN_JOB_STATUSES) {
       expect(
         jobStatusConsequenceForVisitTransition(
           'COMPLETED',
           'RESOLVED',
-          jobMayAwaitReview,
-          'IN_PROGRESS',
+          jobStatus,
         ),
-      ).toBe(jobMayAwaitReview ? 'PENDING_REVIEW' : 'IN_PROGRESS');
+      ).toBe('COMPLETED');
     }
   });
 
-  it('keeps the Job in progress for every outcome that expects follow-up', () => {
-    // `BR-078`: only `RESOLVED` expects none, so every other outcome leaves work outstanding.
-    const followUpOutcomes: readonly VisitOutcomeCode[] =
+  it('keeps the Job active when a resolving completion leaves another Visit open', () => {
+    // `BR-062`: a Job is never `COMPLETED` while it still has an open Visit, so a resolving completion
+    // closes the Job only when the attempt that just ended was its last remaining work.
+    for (const jobStatus of OPEN_JOB_STATUSES) {
+      expect(
+        jobStatusConsequenceForVisitTransition(
+          'COMPLETED',
+          'RESOLVED',
+          jobStatus,
+          { hasOtherOpenVisit: true },
+        ),
+      ).toBe('ACTIVE');
+    }
+  });
+
+  it('ignores the open-Visit context for every event that cannot close the Job', () => {
+    // The guard is `BR-062`'s alone: no other consequence consults it, so the answer is the same
+    // whether or not another Visit is open.
+    for (const to of ['SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'] as const) {
+      expect(
+        jobStatusConsequenceForVisitTransition(to, null, 'ACTIVE', {
+          hasOtherOpenVisit: true,
+        }),
+      ).toBe('ACTIVE');
+    }
+    for (const outcomeCode of ['NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE'] as const) {
+      expect(
+        jobStatusConsequenceForVisitTransition(
+          'COMPLETED',
+          outcomeCode,
+          'ACTIVE',
+          { hasOtherOpenVisit: true },
+        ),
+      ).toBe('ACTIVE');
+    }
+  });
+
+  it('keeps the Job active for every non-resolving outcome', () => {
+    const nonResolvingOutcomes: readonly VisitOutcomeCode[] =
       VISIT_OUTCOME_CODES.filter((code) => code !== 'RESOLVED');
-    expect(followUpOutcomes).toEqual([
+    expect(nonResolvingOutcomes).toEqual([
+      'NEEDS_FOLLOW_UP',
       'NEEDS_PARTS',
-      'NEEDS_FOLLOWUP',
-      'NEEDS_QUOTE_APPROVAL',
       'UNABLE_TO_COMPLETE',
     ]);
-    for (const outcomeCode of followUpOutcomes) {
-      for (const jobMayAwaitReview of [true, false]) {
-        // Even where `BR-061`'s conditions happen to hold, an unresolved outcome is not "awaiting review".
-        expect(
-          jobStatusConsequenceForVisitTransition(
-            'COMPLETED',
-            outcomeCode,
-            jobMayAwaitReview,
-            'IN_PROGRESS',
-          ),
-        ).toBe('IN_PROGRESS');
-      }
-    }
-  });
 
-  it('takes a Job awaiting review back out of it when a Visit becomes working work again', () => {
-    // `BR-061`'s invariant read in the other direction, and the reason it is not cosmetic: `BR-074` lets
-    // a technician reopen a `COMPLETED` Visit, step backward or skip a step, and none of those may leave
-    // an actively worked Visit beside a Job awaiting completion review. `DRAFT` and `SCHEDULED` are the
-    // two destinations this rule actually changes — the other three already imply `IN_PROGRESS` alone.
-    for (const to of [
-      'DRAFT',
-      'SCHEDULED',
-      'EN_ROUTE',
-      'ON_SITE',
-      'IN_PROGRESS',
-    ] as const) {
-      for (const jobMayAwaitReview of [true, false]) {
-        expect(
-          jobStatusConsequenceForVisitTransition(
-            to,
-            null,
-            jobMayAwaitReview,
-            'PENDING_REVIEW',
-          ),
-        ).toBe('IN_PROGRESS');
-      }
-    }
-    // A completion is not this rule's business: `COMPLETED` is historical, so the outcome decides.
-    expect(
-      jobStatusConsequenceForVisitTransition(
-        'COMPLETED',
-        'RESOLVED',
-        true,
-        'PENDING_REVIEW',
-      ),
-    ).toBe('PENDING_REVIEW');
-  });
-
-  it('gives a step backward or a return to draft no Job consequence of its own', () => {
-    // `BR-058` has no backwards Job destination and `NEW` is not one for an open Job, so a Visit merely
-    // being returned to `SCHEDULED` or `DRAFT` mirrors nothing (`BR-042`, `ADR-019` D4). `BR-075`'s
-    // original correction is the `SCHEDULED` case below, and no field event moves a Job out of
-    // `PENDING_REVIEW` except by the rule above.
-    for (const to of ['DRAFT', 'SCHEDULED'] as const) {
-      for (const jobStatus of ['NEW', 'SCHEDULED', 'IN_PROGRESS'] as const) {
-        expect(
-          jobStatusConsequenceForVisitTransition(to, null, true, jobStatus),
-        ).toBeNull();
-      }
-    }
-  });
-
-  it('moves nothing for the destinations no field caller may take', () => {
-    // `CANCELED` and `NO_SHOW` are dispatch actions no capability authorizes, so no field event reaches
-    // them and neither moves the Job (`BR-066`, `BR-076`, `ADR-019` D7).
-    for (const jobStatus of OPEN_JOB_STATUSES) {
+    for (const outcomeCode of nonResolvingOutcomes) {
       expect(
-        jobStatusConsequenceForVisitTransition('CANCELED', null, true, jobStatus),
-      ).toBeNull();
-      expect(
-        jobStatusConsequenceForVisitTransition('NO_SHOW', null, true, jobStatus),
-      ).toBeNull();
+        jobStatusConsequenceForVisitTransition(
+          'COMPLETED',
+          outcomeCode,
+          'ACTIVE',
+        ),
+      ).toBe('ACTIVE');
     }
   });
 
-  it('never completes, cancels or otherwise terminalises a Job', () => {
-    for (const jobStatus of OPEN_JOB_STATUSES) {
-      for (const to of VISIT_STATUSES) {
+  it('does not mutate terminal Jobs through field consequences', () => {
+    for (const jobStatus of ['COMPLETED', 'CANCELED'] as const) {
+      for (const to of FIELD_DESTINATIONS) {
         for (const outcomeCode of [null, ...VISIT_OUTCOME_CODES]) {
-          for (const jobMayAwaitReview of [true, false]) {
-            const destination = jobStatusConsequenceForVisitTransition(
-              to,
-              outcomeCode,
-              jobMayAwaitReview,
-              jobStatus,
-            );
-            // `BR-062` makes closing a Job an explicit authorized office action and `BR-064` requires a
-            // structured cancellation reason, so no field event may produce either.
-            expect(destination).not.toBe('COMPLETED');
-            expect(destination).not.toBe('CANCELED');
-            expect(destination).not.toBe('NEW');
-          }
+          expect(
+            jobStatusConsequenceForVisitTransition(to, outcomeCode, jobStatus),
+          ).toBeNull();
         }
       }
     }
   });
 
-  it('only ever produces a status BR-058 permits the Job to move to', () => {
-    // The consequence is applied as a Job transition, so it is always the target of one that exists. A
-    // destination equal to the Job's current status is not a transition and writes nothing (`BR-058`).
+  it('only ever produces a permitted Job transition', () => {
     for (const jobStatus of OPEN_JOB_STATUSES) {
-      for (const to of WORKING_VISIT_STATUSES) {
+      for (const to of FIELD_DESTINATIONS) {
         for (const outcomeCode of [null, ...VISIT_OUTCOME_CODES]) {
-          for (const jobMayAwaitReview of [true, false]) {
-            const destination = jobStatusConsequenceForVisitTransition(
-              to,
-              outcomeCode,
-              jobMayAwaitReview,
-              jobStatus,
-            );
-            if (destination === null || destination === jobStatus) {
-              continue;
-            }
-            expect(isPermittedJobStatusTransition(jobStatus, destination)).toBe(
-              true,
-            );
+          const destination = jobStatusConsequenceForVisitTransition(
+            to,
+            outcomeCode,
+            jobStatus,
+          );
+          if (destination === null || destination === jobStatus) {
+            continue;
           }
+          expect(isPermittedJobStatusTransition(jobStatus, destination)).toBe(
+            true,
+          );
         }
       }
     }

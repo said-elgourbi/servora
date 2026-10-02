@@ -28,7 +28,9 @@ import com.servora.android.data.jobs.QueuedVisitFieldAction
 import com.servora.android.data.jobs.QueuedVisitNote
 import com.servora.android.data.jobs.TEST_CLOCK
 import com.servora.android.data.jobs.VisitNote
+import com.servora.android.data.jobs.VisitCompletion
 import com.servora.android.data.jobs.VisitStatusChange
+import com.servora.android.data.jobs.VisitRequestSubmitResult
 import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.data.offline.OutboxFailureReason
 import com.servora.android.domain.model.AssignableTechnician
@@ -37,6 +39,7 @@ import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.EvidencePhase
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
@@ -878,8 +881,8 @@ private class PhotoJobRepository(
                 jobNumber = 1042,
                 title = "Furnace repair",
                 description = null,
-                status = JobStatus.SCHEDULED,
-                allowedStatusTransitions = listOf(JobStatus.IN_PROGRESS),
+                status = JobStatus.ACTIVE,
+                allowedStatusTransitions = listOf(JobStatus.COMPLETED),
                 version = 7,
                 customerId = "customer-1",
                 customerName = "Martha Reynolds",
@@ -896,8 +899,22 @@ private class PhotoJobRepository(
 
     override suspend fun addVisitNoteRequest(note: VisitNote): ActivityWriteResult = unsupported()
 
+    override suspend fun editVisitNote(
+        jobId: String,
+        noteId: String,
+        body: String,
+    ): ActivityWriteResult = unsupported()
+
+    override suspend fun removeVisitNote(
+        jobId: String,
+        noteId: String,
+        reason: String,
+    ): ActivityWriteResult = unsupported()
+
     override suspend fun changeVisitStatus(action: VisitStatusChange): JobActionResult =
         unsupported()
+
+    override suspend fun completeVisit(action: VisitCompletion): JobActionResult = unsupported()
 
     override suspend fun queuedVisitAction(jobId: String): QueuedVisitFieldAction? = null
 
@@ -910,6 +927,8 @@ private class PhotoJobRepository(
         unsupported()
 
     override val appliedOperations: Flow<Unit> = MutableSharedFlow()
+
+    override val refusedOperations: Flow<Unit> = MutableSharedFlow()
 
     override suspend fun removeJobPhoto(
         jobId: String,
@@ -950,6 +969,37 @@ private class PhotoJobRepository(
 
     override suspend fun loadAssignableTechnicians(): AssignableTechniciansResult =
         unsupported()
+
+    /** These tests only capture photos, so scheduling a Visit is not exercised here. */
+    override suspend fun createVisit(
+        jobId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        confirmConflicts: Boolean,
+    ): JobActionResult = unsupported()
+
+    /** These tests only capture photos, so approving a request is not exercised here. */
+    override suspend fun approveVisitRequest(
+        jobId: String,
+        requestId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        expectedStatus: FollowUpVisitRequestStatus,
+        expectedVersion: Int,
+        confirmConflicts: Boolean,
+    ): JobActionResult = unsupported()
+
+    /** These tests only capture photos, so proposing a follow-up Visit is not exercised here. */
+    override suspend fun requestFollowUpVisit(
+        jobId: String,
+        sourceVisitId: String,
+        proposedStart: Instant,
+        proposedEnd: Instant,
+        reason: String,
+        sameTechnicianPreferred: Boolean,
+    ): VisitRequestSubmitResult = unsupported()
 
     private fun unsupported(): Nothing =
         throw AssertionError("these tests only capture photos")

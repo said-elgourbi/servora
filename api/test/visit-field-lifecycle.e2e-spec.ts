@@ -277,7 +277,7 @@ describe('visit field lifecycle (e2e)', () => {
 
     const job = await newJob(
       customer.id,
-      options.jobStatus ?? 'SCHEDULED',
+      options.jobStatus ?? 'ACTIVE',
       property?.id,
     );
     const start = new Date(Date.now() + 3_600_000);
@@ -370,6 +370,25 @@ describe('visit field lifecycle (e2e)', () => {
   ) {
     return request(app.getHttpServer())
       .patch(`${base}/${jobId}/visits/${visitId}/status`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send(body);
+  }
+
+  /**
+   * One completion, as the caller's session performs it (`BR-077`).
+   *
+   * Completion is its **own** operation rather than a destination of the status route
+   * (`docs/api/job-actions.md` §7.6), because `BR-077` makes the outcome part of the operation that
+   * completes the Visit.
+   */
+  function completeVisit(
+    session: { accessToken: string },
+    jobId: string,
+    visitId: string,
+    body: Record<string, unknown>,
+  ) {
+    return request(app.getHttpServer())
+      .post(`${base}/${jobId}/visits/${visitId}/completion`)
       .set('Authorization', `Bearer ${session.accessToken}`)
       .send(body);
   }
@@ -520,10 +539,13 @@ describe('visit field lifecycle (e2e)', () => {
       id: visit.id,
       fieldActionable: false,
       allowedStatusTransitions: [],
+      completionAllowed: false,
     });
 
-    await changeStatus(session, job.id, visit.id, {
-      status: 'COMPLETED',
+    await changeStatus(session, job.id, visit.id, { status: 'EN_ROUTE' }).expect(
+      404,
+    );
+    await completeVisit(session, job.id, visit.id, {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Done.',
     }).expect(404);
@@ -541,7 +563,7 @@ describe('visit field lifecycle (e2e)', () => {
     ]);
     const crew = await newMembership();
     const { job, visit } = await jobWithVisit({
-      jobStatus: 'IN_PROGRESS',
+      jobStatus: 'ACTIVE',
       visitStatus: 'IN_PROGRESS',
       crew: [{ membershipId: crew.id, roleCode: 'LEAD' }],
     });
@@ -553,23 +575,18 @@ describe('visit field lifecycle (e2e)', () => {
     expect(read.body.selectedVisit).toMatchObject({
       id: visit.id,
       fieldActionable: true,
-      // The whole working table, the completion included: this caller holds the capability a completion
-      // requires of every caller (`BR-009`, `BR-077`).
-      allowedStatusTransitions: [
-        'DRAFT',
-        'SCHEDULED',
-        'EN_ROUTE',
-        'ON_SITE',
-        'COMPLETED',
-      ],
+      // `BR-074` offers free movement between the working statuses, so an `IN_PROGRESS` Visit reaches
+      // every other one of them. The completion is **not** in this list: it is the explicit completion
+      // operation, and `completionAllowed` carries its own answer (`BR-077`, `BR-093`).
+      allowedStatusTransitions: ['SCHEDULED', 'EN_ROUTE', 'ON_SITE'],
+      completionAllowed: true,
     });
     // The Visit keeps the crew it has: the office member driving it is not added to it.
     expect(read.body.technicians).toMatchObject([
       { membershipId: crew.id, roleCode: 'LEAD' },
     ]);
 
-    await changeStatus(office, job.id, visit.id, {
-      status: 'COMPLETED',
+    await completeVisit(office, job.id, visit.id, {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Closed by the office after the technician called in.',
     }).expect(200);
@@ -594,7 +611,12 @@ describe('visit field lifecycle (e2e)', () => {
       .where(eq(visitOutcomeHistory.visitId, visit.id));
     expect(outcomes).toHaveLength(1);
     expect(outcomes[0]).toMatchObject({ outcomeCode: 'RESOLVED' });
-    expect(await jobRow(job.id)).toMatchObject({ status: 'PENDING_REVIEW' });
+    // The resolving completion closed the Job, and there is no review step between the field work and
+    // the closure (`BR-058`, tracker 051).
+    expect(await jobRow(job.id)).toMatchObject({ status: 'COMPLETED' });
+    expect(await jobHistory(job.id)).toEqual([
+      { fromStatus: 'ACTIVE', toStatus: 'COMPLETED' },
+    ]);
 
     // Both records name the member who actually performed the action, never the crew's Lead
     // (`BR-033`, `BR-067`, `BR-093`).
@@ -621,107 +643,82 @@ describe('visit field lifecycle (e2e)', () => {
       .expect(200);
     expect(read.body.selectedVisit).toMatchObject({
       fieldActionable: true,
-      // The office capability admits the caller, and the completion is absent because the capability a
-      // completion requires of **every** caller is not held (`BR-009`, `BR-077`).
-      allowedStatusTransitions: ['DRAFT', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'],
+      // The office capability admits the caller, and the completion is absent from the destinations
+      // because it is never one of them; `completionAllowed` carries its own answer and is `false` here,
+      // since the capability a completion requires of **every** caller is not held (`BR-009`, `BR-077`).
+      allowedStatusTransitions: ['EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'],
+      completionAllowed: false,
     });
 
     // The destinations the projection offered are the ones the route applies ...
     await changeStatus(office, job.id, visit.id, { status: 'EN_ROUTE' }).expect(200);
 
-    // ... and the one it did not offer is refused by the API rather than by a hidden control
+    // ... and the operation it did not offer is refused by the API rather than by a hidden control
     // (`BR-007`).
-    await changeStatus(office, job.id, visit.id, {
-      status: 'COMPLETED',
+    await completeVisit(office, job.id, visit.id, {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Done.',
     }).expect(403);
+    // The status route takes no completion at all, whichever capabilities the caller holds (`BR-077`).
+    await changeStatus(office, job.id, visit.id, { status: 'COMPLETED' }).expect(
+      409,
+    );
     expect(await statusHistory(visit.id)).toHaveLength(1);
   });
 
-
-
-  it('applies the whole normal lifecycle, one recorded transition at a time', async () => {
+  it('keeps free movement between the working statuses, with the completion as its own action', async () => {
     const session = await signInTechnician();
     const { job, visit } = await jobWithVisit({
       jobStatus: 'NEW',
-      visitStatus: 'DRAFT',
+      visitStatus: 'SCHEDULED',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
 
-    const scheduled = await changeStatus(session, job.id, visit.id, {
-      status: 'SCHEDULED',
-    }).expect(200);
-    // The client draws the technician's action from the server's own lifecycle table (`BR-074`,
-    // `BR-041`).
-    expect(scheduled.body.selectedVisit).toMatchObject({
-      status: 'SCHEDULED',
-      version: 2,
-      // `BR-074` offers the whole working vocabulary in either direction, read from the server's own
-      // table so the client holds no copy of the lifecycle (`BR-041`).
-      allowedStatusTransitions: [
-        'DRAFT',
-        'EN_ROUTE',
-        'ON_SITE',
-        'IN_PROGRESS',
-        'COMPLETED',
-      ],
-      reschedulable: true,
-    });
-    // Reaching `SCHEDULED` records nothing on the Job: `ADR-019` D4 gives the scheduling move no Job
-    // consequence, because `BR-058` has no Job destination for a field attempt merely being scheduled.
-    expect(await jobHistory(job.id)).toEqual([]);
-
-    const enRoute = await changeStatus(session, job.id, visit.id, {
-      status: 'EN_ROUTE',
+    // `BR-074` does not enforce a next-status chain: a technician who never tapped "en route" moves the
+    // Visit straight to `IN_PROGRESS` in one operation (`BR-074`, `BR-075`).
+    const started = await changeStatus(session, job.id, visit.id, {
+      status: 'IN_PROGRESS',
       capturedAt: '2026-09-17T11:00:00.000Z',
       clientOperationId: '55555555-5555-4555-8555-555555555555',
     }).expect(200);
-    expect(enRoute.body.selectedVisit).toMatchObject({
-      status: 'EN_ROUTE',
-      version: 3,
-      allowedStatusTransitions: [
-        'DRAFT',
-        'SCHEDULED',
-        'ON_SITE',
-        'IN_PROGRESS',
-        'COMPLETED',
-      ],
+    expect(started.body.selectedVisit).toMatchObject({
+      status: 'IN_PROGRESS',
+      version: 2,
+      // The server's own table, read back so the client holds no copy of the lifecycle (`BR-041`).
+      allowedStatusTransitions: ['SCHEDULED', 'EN_ROUTE', 'ON_SITE'],
+      completionAllowed: true,
+      reschedulable: false,
     });
-    // Work has started, so the Job is in progress (`BR-058`, `ADR-019` D4).
+    // Work has started, so the Job becomes `ACTIVE` (`BR-058`, `ADR-019` D4).
     expect(await jobHistory(job.id)).toEqual([
-      { fromStatus: 'NEW', toStatus: 'IN_PROGRESS' },
+      { fromStatus: 'NEW', toStatus: 'ACTIVE' },
     ]);
 
     await changeStatus(session, job.id, visit.id, { status: 'ON_SITE' }).expect(
       200,
     );
-    await changeStatus(session, job.id, visit.id, {
-      status: 'IN_PROGRESS',
-    }).expect(200);
-    // A Job already in the status an event implies does not move: a status that does not change is not
-    // a transition (`BR-058`, `BR-067`).
+    await changeStatus(session, job.id, visit.id, { status: 'EN_ROUTE' }).expect(
+      200,
+    );
+    // Stepping around the working statuses leaves the Job where it is: a Job already in the status an
+    // event implies does not move, because a status that does not change is not a transition
+    // (`BR-058`, `BR-067`).
     expect(await jobHistory(job.id)).toEqual([
-      { fromStatus: 'NEW', toStatus: 'IN_PROGRESS' },
+      { fromStatus: 'NEW', toStatus: 'ACTIVE' },
     ]);
 
-    const completed = await changeStatus(session, job.id, visit.id, {
-      status: 'COMPLETED',
+    const completed = await completeVisit(session, job.id, visit.id, {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Replaced the igniter.',
     }).expect(200);
     expect(completed.body.selectedVisit).toMatchObject({
       status: 'COMPLETED',
-      version: 6,
-      // A completed Visit is reopenable (`BR-074`), so it is the one historical status that is not a
-      // dead end.
-      allowedStatusTransitions: [
-        'DRAFT',
-        'SCHEDULED',
-        'EN_ROUTE',
-        'ON_SITE',
-        'IN_PROGRESS',
-      ],
+      version: 5,
+      // A completed Visit is a dead end today: `BR-074` permits reopening it, and the API does not offer
+      // that turn yet, so it stays an `OPEN QUESTION` and the list is empty (`BR-042`, §10).
+      allowedStatusTransitions: [],
+      completionAllowed: false,
+      reschedulable: false,
     });
 
     // Every applied transition is recorded once, in order, with the device's own instant beside the
@@ -730,13 +727,12 @@ describe('visit field lifecycle (e2e)', () => {
     expect(
       history.map((row) => [row.fromStatus, row.toStatus, row.isCorrection]),
     ).toEqual([
-      ['DRAFT', 'SCHEDULED', false],
-      ['SCHEDULED', 'EN_ROUTE', false],
-      ['EN_ROUTE', 'ON_SITE', false],
-      ['ON_SITE', 'IN_PROGRESS', false],
-      ['IN_PROGRESS', 'COMPLETED', false],
+      ['SCHEDULED', 'IN_PROGRESS', false],
+      ['IN_PROGRESS', 'ON_SITE', false],
+      ['ON_SITE', 'EN_ROUTE', false],
+      ['EN_ROUTE', 'COMPLETED', false],
     ]);
-    expect(history[1]).toMatchObject({
+    expect(history[0]).toMatchObject({
       clientOperationId: '55555555-5555-4555-8555-555555555555',
       capturedAt: new Date('2026-09-17T11:00:00.000Z'),
     });
@@ -746,7 +742,7 @@ describe('visit field lifecycle (e2e)', () => {
       status: 'COMPLETED',
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Replaced the igniter.',
-      version: 6,
+      version: 5,
     });
     const outcomes = await database.db
       .select()
@@ -759,12 +755,13 @@ describe('visit field lifecycle (e2e)', () => {
       previousOutcomeCode: null,
     });
 
-    // No Visit remains active and the latest completion resolves the Job, so `BR-061` lets the Job await
-    // review — and `BR-062` keeps the API from completing it (`ADR-019` D4).
-    expect(await jobRow(job.id)).toMatchObject({ status: 'PENDING_REVIEW' });
+    // No Visit remains open and the latest completion resolves the Job, so the Job is closed by the
+    // completion itself — there is no business-review step between the field work and the closure
+    // (`BR-058`, `BR-062`, tracker 051).
+    expect(await jobRow(job.id)).toMatchObject({ status: 'COMPLETED' });
     expect(await jobHistory(job.id)).toEqual([
-      { fromStatus: 'NEW', toStatus: 'IN_PROGRESS' },
-      { fromStatus: 'IN_PROGRESS', toStatus: 'PENDING_REVIEW' },
+      { fromStatus: 'NEW', toStatus: 'ACTIVE' },
+      { fromStatus: 'ACTIVE', toStatus: 'COMPLETED' },
     ]);
   });
 
@@ -776,12 +773,13 @@ describe('visit field lifecycle (e2e)', () => {
     });
 
     // `BR-074`'s free movement means a working Visit reaches every other working status, so what is left
-    // to refuse is standing still (`BR-067` says a status that does not change is not a transition) and
-    // the two dispatch actions no field caller may take (`BR-066`, `BR-076`, `ADR-019` D7).
+    // to refuse from `SCHEDULED` is standing still (`BR-067` says a status that does not change is not a
+    // transition), the internal `DRAFT` state, and the dispatch pair no field caller may take
+    // (`BR-066`, `BR-076`, `ADR-019` D7).
     for (const body of [
       { status: 'SCHEDULED' },
+      { status: 'DRAFT' },
       { status: 'CANCELED' },
-      { status: 'NO_SHOW' },
     ]) {
       const response = await changeStatus(
         session,
@@ -794,10 +792,17 @@ describe('visit field lifecycle (e2e)', () => {
         details: {
           from: 'SCHEDULED',
           to: body.status,
-          allowed: ['DRAFT', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED'],
+          allowed: ['EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'],
         },
       });
     }
+
+    // A status Servora does not have is not a transition refusal: it is input the vocabulary cannot
+    // resolve, and it is answered as such (`BR-041`).
+    const unknown = await changeStatus(session, job.id, visit.id, {
+      status: 'NO_SHOW',
+    }).expect(400);
+    expect(unknown.body.code).toBe('VALIDATION_FAILED');
 
     // Nothing was applied and nothing was recorded.
     expect((await visitRow(visit.id))?.status).toBe('SCHEDULED');
@@ -811,7 +816,7 @@ describe('visit field lifecycle (e2e)', () => {
     // A technician who never tapped "en route" is not made to walk the chain: `SCHEDULED →
     // IN_PROGRESS` is one permitted transition (`BR-074`).
     const skipping = await jobWithVisit({
-      jobStatus: 'SCHEDULED',
+      jobStatus: 'ACTIVE',
       visitStatus: 'SCHEDULED',
       crew,
     });
@@ -836,7 +841,7 @@ describe('visit field lifecycle (e2e)', () => {
     // A technician who tapped too far ahead steps back: `ON_SITE → EN_ROUTE` is one transition, and it
     // is recorded as what it is rather than rewriting the status it corrects (`BR-067`, `BR-075`).
     const backward = await jobWithVisit({
-      jobStatus: 'IN_PROGRESS',
+      jobStatus: 'ACTIVE',
       visitStatus: 'ON_SITE',
       crew,
     });
@@ -853,58 +858,64 @@ describe('visit field lifecycle (e2e)', () => {
     ).toEqual([['ON_SITE', 'EN_ROUTE', false]]);
     // Stepping back has no Job consequence: `BR-058` has no backwards Job destination, so the Job keeps
     // the status the forward work gave it (`ADR-019` D4).
-    expect(await jobRow(backward.job.id)).toMatchObject({ status: 'IN_PROGRESS' });
+    expect(await jobRow(backward.job.id)).toMatchObject({ status: 'ACTIVE' });
     expect(await jobHistory(backward.job.id)).toEqual([]);
   });
 
-  it('reopens a completed visit, clearing its current outcome and taking the job out of review', async () => {
+  it('closes a completed visit to further field work and keeps its outcome in history', async () => {
+    // `BR-074` permits a `COMPLETED` Visit to be reopened — a Visit completed by mistake, or one whose
+    // work must continue. The API does not offer that turn yet, so no client may invent it (`BR-042`),
+    // and this pins what the API does today rather than a client's assumption: the Visit is a dead end,
+    // its outcome is current, and no field write reaches it (`docs/api/job-actions.md` §10).
     const session = await signInTechnician();
     const { job, visit } = await jobWithVisit({
       jobStatus: 'NEW',
-      visitStatus: 'DRAFT',
+      visitStatus: 'IN_PROGRESS',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
 
-    await changeStatus(session, job.id, visit.id, {
-      status: 'IN_PROGRESS',
-    }).expect(200);
-    await changeStatus(session, job.id, visit.id, {
-      status: 'COMPLETED',
+    await completeVisit(session, job.id, visit.id, {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Done the first time.',
     }).expect(200);
-    // No Visit remains active and the outcome resolves the Job, so `BR-061` lets it await review.
-    expect(await jobRow(job.id)).toMatchObject({ status: 'PENDING_REVIEW' });
+    // No Visit remained open and the outcome resolved the Job, so the Job is closed (`BR-062`).
+    expect(await jobRow(job.id)).toMatchObject({ status: 'COMPLETED' });
 
-    // The technician completed it by mistake and reopens it into a working status (`BR-074`).
-    const reopened = await changeStatus(session, job.id, visit.id, {
-      status: 'IN_PROGRESS',
-    }).expect(200);
-    expect(reopened.body.selectedVisit).toMatchObject({
-      status: 'IN_PROGRESS',
+    const read = await request(app.getHttpServer())
+      .get(`${base}/${job.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(read.body.selectedVisit).toMatchObject({
+      status: 'COMPLETED',
+      allowedStatusTransitions: [],
+      completionAllowed: false,
     });
 
-    // The reopen is one recorded transition, and every earlier event is still there (`BR-067`, `BR-075`).
-    expect(
-      (await statusHistory(visit.id)).map((row) => [
-        row.fromStatus,
-        row.toStatus,
-        row.isCorrection,
-      ]),
-    ).toEqual([
-      ['DRAFT', 'IN_PROGRESS', false],
-      ['IN_PROGRESS', 'COMPLETED', false],
-      ['COMPLETED', 'IN_PROGRESS', false],
-    ]);
-
-    // The previous completion and its outcome stay in append-only history, while the Visit holds **no**
-    // current outcome until it is completed again (`BR-074`, `BR-079`).
-    expect(await visitRow(visit.id)).toMatchObject({
+    // The reopen turn is refused as a destination the table does not have, and `BR-074` names it as an
+    // open question rather than as behaviour a client may assume.
+    const refused = await changeStatus(session, job.id, visit.id, {
       status: 'IN_PROGRESS',
-      outcomeCode: null,
-      outcomeSummary: null,
-      outcomeRecordedAt: null,
-      outcomeRecordedByMembershipId: null,
+    }).expect(409);
+    expect(refused.body).toMatchObject({
+      code: 'VISIT_STATUS_TRANSITION_NOT_ALLOWED',
+      details: { from: 'COMPLETED', to: 'IN_PROGRESS', allowed: [] },
+    });
+    // Completing it again is refused for the same reason: only a working Visit is completable.
+    await completeVisit(session, job.id, visit.id, {
+      outcomeCode: 'NEEDS_PARTS',
+      outcomeSummary: 'Ordered the igniter.',
+    }).expect(409);
+
+    // Nothing changed: one recorded transition, one outcome, and the Visit still carries it
+    // (`BR-067`, `BR-079`).
+    expect(
+      (await statusHistory(visit.id)).map((row) => [row.fromStatus, row.toStatus]),
+    ).toEqual([['IN_PROGRESS', 'COMPLETED']]);
+    expect(await visitRow(visit.id)).toMatchObject({
+      status: 'COMPLETED',
+      outcomeCode: 'RESOLVED',
+      outcomeSummary: 'Done the first time.',
+      version: 2,
     });
     const outcomes = await database.db
       .select()
@@ -915,38 +926,9 @@ describe('visit field lifecycle (e2e)', () => {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Done the first time.',
     });
-
-    // A Job must not await review while its field work is unfinished, so it returns to `IN_PROGRESS` and
-    // the move is recorded (`BR-061`, `BR-074`).
-    expect(await jobRow(job.id)).toMatchObject({ status: 'IN_PROGRESS' });
     expect(await jobHistory(job.id)).toEqual([
-      { fromStatus: 'NEW', toStatus: 'IN_PROGRESS' },
-      { fromStatus: 'IN_PROGRESS', toStatus: 'PENDING_REVIEW' },
-      { fromStatus: 'PENDING_REVIEW', toStatus: 'IN_PROGRESS' },
+      { fromStatus: 'NEW', toStatus: 'COMPLETED' },
     ]);
-
-    // Completing it again requires a **new** outcome, which becomes the Visit's current one (`BR-077`).
-    await changeStatus(session, job.id, visit.id, {
-      status: 'COMPLETED',
-    }).expect(400);
-    await changeStatus(session, job.id, visit.id, {
-      status: 'COMPLETED',
-      outcomeCode: 'NEEDS_PARTS',
-      outcomeSummary: 'Ordered the igniter.',
-    }).expect(200);
-    expect(await visitRow(visit.id)).toMatchObject({
-      status: 'COMPLETED',
-      outcomeCode: 'NEEDS_PARTS',
-      outcomeSummary: 'Ordered the igniter.',
-    });
-    expect(
-      await database.db
-        .select()
-        .from(visitOutcomeHistory)
-        .where(eq(visitOutcomeHistory.visitId, visit.id)),
-    ).toHaveLength(2);
-    // The follow-up outcome keeps the Job in progress rather than awaiting review (`BR-061`, `BR-078`).
-    expect(await jobRow(job.id)).toMatchObject({ status: 'IN_PROGRESS' });
   });
 
   it('refuses a completion that carries no outcome (`BR-077`)', async () => {
@@ -956,13 +938,23 @@ describe('visit field lifecycle (e2e)', () => {
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
 
-    await changeStatus(session, job.id, visit.id, {
-      status: 'COMPLETED',
-    }).expect(400);
-    // The outcome is a pair: a code without its summary is not the record `BR-077` requires.
-    await changeStatus(session, job.id, visit.id, {
-      status: 'COMPLETED',
+    // The completion operation requires the outcome: an empty request and a code without its summary are
+    // both refused, because neither is the record `BR-077` requires (`docs/api/job-actions.md` §7.6).
+    await completeVisit(session, job.id, visit.id, {}).expect(400);
+    await completeVisit(session, job.id, visit.id, {
       outcomeCode: 'RESOLVED',
+    }).expect(400);
+    // A code Servora does not have is refused too, rather than stored (`BR-041`, `BR-078`).
+    await completeVisit(session, job.id, visit.id, {
+      outcomeCode: 'NEEDS_QUOTE_APPROVAL',
+      outcomeSummary: 'Approval pending.',
+    }).expect(400);
+    // The status route takes no outcome at all: it records none, so it must not be told about one
+    // (`BR-077`, `docs/api/job-actions.md` §7.1).
+    await changeStatus(session, job.id, visit.id, {
+      status: 'ON_SITE',
+      outcomeCode: 'RESOLVED',
+      outcomeSummary: 'Done.',
     }).expect(400);
 
     expect((await visitRow(visit.id))?.status).toBe('IN_PROGRESS');
@@ -991,8 +983,7 @@ describe('visit field lifecycle (e2e)', () => {
       visitStatus: 'IN_PROGRESS',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
-    await changeStatus(session, completing.job.id, completing.visit.id, {
-      status: 'COMPLETED',
+    await completeVisit(session, completing.job.id, completing.visit.id, {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Done.',
     }).expect(403);
@@ -1019,11 +1010,15 @@ describe('visit field lifecycle (e2e)', () => {
   });
 
   it('refuses a visit that is not ready to be scheduled (`BR-072`)', async () => {
+    // `BR-074`'s table offers `SCHEDULED` from a working status, so `BR-072`'s conditions are the
+    // runtime eligibility the API evaluates whenever a Visit is moved back to it — a scheduled Visit
+    // whose attempt was undone, for instance. The conditions are `BR-072`'s own answer rather than a gap
+    // in the table (`BR-058`'s split between structural transitions and runtime conditions).
     const session = await signInTechnician();
 
     const noProperty = await jobWithVisit({
-      jobStatus: 'NEW',
-      visitStatus: 'DRAFT',
+      jobStatus: 'ACTIVE',
+      visitStatus: 'EN_ROUTE',
       property: false,
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
@@ -1039,8 +1034,8 @@ describe('visit field lifecycle (e2e)', () => {
     });
 
     const noSchedule = await jobWithVisit({
-      jobStatus: 'NEW',
-      visitStatus: 'DRAFT',
+      jobStatus: 'ACTIVE',
+      visitStatus: 'EN_ROUTE',
       schedule: false,
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
@@ -1059,8 +1054,8 @@ describe('visit field lifecycle (e2e)', () => {
     // reaches this Visit through their own assignment, so the crew that fails this condition is one
     // whose technician is not the Lead.
     const noLead = await jobWithVisit({
-      jobStatus: 'NEW',
-      visitStatus: 'DRAFT',
+      jobStatus: 'ACTIVE',
+      visitStatus: 'EN_ROUTE',
       crew: [
         { membershipId: session.membershipId, roleCode: 'TECHNICIAN' },
       ],
@@ -1076,18 +1071,18 @@ describe('visit field lifecycle (e2e)', () => {
       details: { reason: 'CREW_LEAD' },
     });
 
-    // None of the three was applied, and the destination was refused as ineligible rather than as
-    // non-existent (`BR-058`'s split between structural transitions and runtime conditions).
-    expect((await visitRow(noProperty.visit.id))?.status).toBe('DRAFT');
-    expect((await visitRow(noSchedule.visit.id))?.status).toBe('DRAFT');
-    expect((await visitRow(noLead.visit.id))?.status).toBe('DRAFT');
+    // None of the three was applied, and each destination was refused as ineligible rather than as
+    // non-existent.
+    expect((await visitRow(noProperty.visit.id))?.status).toBe('EN_ROUTE');
+    expect((await visitRow(noSchedule.visit.id))?.status).toBe('EN_ROUTE');
+    expect((await visitRow(noLead.visit.id))?.status).toBe('EN_ROUTE');
   });
 
   it('reports a scheduling conflict before applying it, and records what was confirmed', async () => {
     const session = await signInTechnician();
     const first = await jobWithVisit({
-      jobStatus: 'NEW',
-      visitStatus: 'DRAFT',
+      jobStatus: 'ACTIVE',
+      visitStatus: 'EN_ROUTE',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
     const start = (first.visit.scheduledStart as Date).getTime();
@@ -1095,7 +1090,7 @@ describe('visit field lifecycle (e2e)', () => {
     // The same technician is already booked for an overlapping window on another Visit (`BR-070`).
     const secondJob = await newJob(
       first.customer.id,
-      'SCHEDULED',
+      'ACTIVE',
       first.property?.id,
     );
     const overlapping = await newVisit({
@@ -1120,7 +1115,7 @@ describe('visit field lifecycle (e2e)', () => {
       visitId: overlapping.id,
       technicianMembershipId: session.membershipId,
     });
-    expect((await visitRow(first.visit.id))?.status).toBe('DRAFT');
+    expect((await visitRow(first.visit.id))?.status).toBe('EN_ROUTE');
 
     // A conflict is a warning, not a prohibition (`BR-070`): the same request, confirmed, applies — and
     // what was accepted is recorded with the transition.
@@ -1136,7 +1131,7 @@ describe('visit field lifecycle (e2e)', () => {
   it('records the BR-075 correction as a correction and moves no job', async () => {
     const session = await signInTechnician();
     const { job, visit } = await jobWithVisit({
-      jobStatus: 'IN_PROGRESS',
+      jobStatus: 'ACTIVE',
       visitStatus: 'EN_ROUTE',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
@@ -1164,7 +1159,7 @@ describe('visit field lifecycle (e2e)', () => {
 
     // `BR-058` has no Job destination a correction could mirror, so the Job keeps its status and its
     // history records nothing (`ADR-019` D4).
-    expect(await jobRow(job.id)).toMatchObject({ status: 'IN_PROGRESS' });
+    expect(await jobRow(job.id)).toMatchObject({ status: 'ACTIVE' });
     expect(await jobHistory(job.id)).toEqual([]);
   });
 
@@ -1172,21 +1167,19 @@ describe('visit field lifecycle (e2e)', () => {
     const session = await signInTechnician();
     const codes = [
       'RESOLVED',
+      'NEEDS_FOLLOW_UP',
       'NEEDS_PARTS',
-      'NEEDS_FOLLOWUP',
-      'NEEDS_QUOTE_APPROVAL',
       'UNABLE_TO_COMPLETE',
     ] as const;
 
     for (const code of codes) {
       const { job, visit } = await jobWithVisit({
-        jobStatus: 'IN_PROGRESS',
+        jobStatus: 'ACTIVE',
         visitStatus: 'IN_PROGRESS',
         crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
       });
 
-      await changeStatus(session, job.id, visit.id, {
-        status: 'COMPLETED',
+      await completeVisit(session, job.id, visit.id, {
         outcomeCode: code,
         outcomeSummary: `Outcome ${code}.`,
       }).expect(200);
@@ -1197,25 +1190,26 @@ describe('visit field lifecycle (e2e)', () => {
         outcomeSummary: `Outcome ${code}.`,
       });
 
-      // Only `RESOLVED` expects no follow-up, so only it lets the Job await review (`BR-061`,
-      // `BR-078`). Every other outcome leaves the Job in progress — where it already was, so nothing
-      // is recorded (`BR-058`).
+      // Only `RESOLVED` resolves the request, so only it closes the Job (`BR-062`, `BR-078`). Every
+      // other outcome leaves the Job `ACTIVE` — where it already was, so nothing is recorded
+      // (`BR-058`), and the office learns what is outstanding from the derived attention instead
+      // (`BR-060`, `api/src/jobs/job-attention.ts`).
       if (code === 'RESOLVED') {
-        expect((await jobRow(job.id))?.status).toBe('PENDING_REVIEW');
+        expect((await jobRow(job.id))?.status).toBe('COMPLETED');
         expect(await jobHistory(job.id)).toEqual([
-          { fromStatus: 'IN_PROGRESS', toStatus: 'PENDING_REVIEW' },
+          { fromStatus: 'ACTIVE', toStatus: 'COMPLETED' },
         ]);
       } else {
-        expect((await jobRow(job.id))?.status).toBe('IN_PROGRESS');
+        expect((await jobRow(job.id))?.status).toBe('ACTIVE');
         expect(await jobHistory(job.id)).toEqual([]);
       }
     }
   });
 
-  it('keeps a job out of review while another visit is still scheduled (`BR-061`)', async () => {
+  it('keeps a job active while another visit is still scheduled (`BR-062`)', async () => {
     const session = await signInTechnician();
     const first = await jobWithVisit({
-      jobStatus: 'IN_PROGRESS',
+      jobStatus: 'ACTIVE',
       visitStatus: 'IN_PROGRESS',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
@@ -1234,13 +1228,15 @@ describe('visit field lifecycle (e2e)', () => {
       roleCode: 'TECHNICIAN',
     });
 
-    await changeStatus(session, first.job.id, first.visit.id, {
-      status: 'COMPLETED',
+    await completeVisit(session, first.job.id, first.visit.id, {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Diagnosis complete.',
     }).expect(200);
 
-    expect((await jobRow(first.job.id))?.status).toBe('IN_PROGRESS');
+    // `BR-062`: a Job is never `COMPLETED` while it still has an open Visit, so the resolving completion
+    // leaves the Job `ACTIVE` rather than closing it under work that is still to come. Nothing is
+    // recorded, because the Job was already `ACTIVE` (`BR-058`, `BR-067`).
+    expect((await jobRow(first.job.id))?.status).toBe('ACTIVE');
     expect(await jobHistory(first.job.id)).toEqual([]);
     // `BR-059`: the Job's state machine and the Visit's stay separate, so the completion left the
     // scheduled Visit exactly as it was.
@@ -1338,12 +1334,17 @@ describe('visit field lifecycle (e2e)', () => {
         visitStatus: 'IN_PROGRESS',
         crew,
       });
-      const response = await changeStatus(session, job.id, visit.id, {
-        status: 'COMPLETED',
+      const fieldWrite = await changeStatus(session, job.id, visit.id, {
+        status: 'ON_SITE',
+      }).expect(409);
+      expect(fieldWrite.body).toMatchObject({
+        code: 'JOB_CLOSED_FOR_FIELD_WORK',
+      });
+      const completion = await completeVisit(session, job.id, visit.id, {
         outcomeCode: 'RESOLVED',
         outcomeSummary: 'Done.',
       }).expect(409);
-      expect(response.body).toMatchObject({
+      expect(completion.body).toMatchObject({
         code: 'JOB_CLOSED_FOR_FIELD_WORK',
       });
       expect((await visitRow(visit.id))?.status).toBe('IN_PROGRESS');
@@ -1354,25 +1355,26 @@ describe('visit field lifecycle (e2e)', () => {
   it('leaves every visit untouched when the office moves the job (`BR-059`)', async () => {
     const office = await signInFor([JOB_PERMISSIONS.UPDATE]);
     const session = await signInTechnician();
+    // Both were stored directly, so no Visit event has moved the Job yet.
     const { job, visit } = await jobWithVisit({
-      jobStatus: 'IN_PROGRESS',
-      visitStatus: 'EN_ROUTE',
+      jobStatus: 'NEW',
+      visitStatus: 'SCHEDULED',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
 
     await request(app.getHttpServer())
       .patch(`${base}/${job.id}/status`)
       .set('Authorization', `Bearer ${office.accessToken}`)
-      .send({ status: 'SCHEDULED' })
+      .send({ status: 'ACTIVE' })
       .expect(200);
 
     // The Job's business lifecycle and the field execution lifecycle are two state machines
     // (`BR-059`): the Job moved and the Visit did not, and no Visit history was written.
     expect(await jobHistory(job.id)).toEqual([
-      { fromStatus: 'IN_PROGRESS', toStatus: 'SCHEDULED' },
+      { fromStatus: 'NEW', toStatus: 'ACTIVE' },
     ]);
     expect(await visitRow(visit.id)).toMatchObject({
-      status: 'EN_ROUTE',
+      status: 'SCHEDULED',
       version: 1,
     });
     expect(await statusHistory(visit.id)).toEqual([]);
@@ -1400,7 +1402,7 @@ describe('visit field lifecycle (e2e)', () => {
         jobNumber: jobNumberSequence,
         customerId: otherCustomer.id,
         title: 'Other job',
-        status: 'SCHEDULED',
+        status: 'ACTIVE',
       })
       .returning();
     const [otherVisit] = await database.db

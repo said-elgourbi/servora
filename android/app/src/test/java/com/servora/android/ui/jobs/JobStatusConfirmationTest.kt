@@ -39,25 +39,17 @@ class JobStatusConfirmationTest {
 
     @Test
     fun sendsAnOrdinaryDestinationWithoutAsking() {
-        // Moving a Job between open statuses, forwards or backwards, is the everyday correction: it is
-        // sent as it is chosen (`BR-058`).
-        assertFalse(requiresJobStatusConfirmation(JobStatus.NEW, JobStatus.SCHEDULED))
-        assertFalse(requiresJobStatusConfirmation(JobStatus.SCHEDULED, JobStatus.IN_PROGRESS))
-        assertFalse(
-            requiresJobStatusConfirmation(JobStatus.IN_PROGRESS, JobStatus.SCHEDULED),
-        )
-        assertFalse(
-            requiresJobStatusConfirmation(JobStatus.SCHEDULED, JobStatus.PENDING_REVIEW),
-        )
-        assertFalse(
-            requiresJobStatusConfirmation(JobStatus.PENDING_REVIEW, JobStatus.IN_PROGRESS),
-        )
+        // Moving a Job between its open statuses is the everyday correction: it is sent as it is chosen
+        // (`BR-058`).
+        assertFalse(requiresJobStatusConfirmation(JobStatus.NEW, JobStatus.ACTIVE))
     }
 
+    /**
+     * The canonical lifecycle's open statuses: a Job is `NEW` or `ACTIVE` until it is closed, and
+     * `COMPLETED` and `CANCELED` are what closing produces.
+     */
     private val openStatuses = listOf(
         JobStatus.NEW,
-        JobStatus.SCHEDULED,
-        JobStatus.IN_PROGRESS,
-        JobStatus.PENDING_REVIEW,
+        JobStatus.ACTIVE,
     )
 }

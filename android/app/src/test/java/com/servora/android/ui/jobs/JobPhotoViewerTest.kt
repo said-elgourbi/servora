@@ -219,6 +219,7 @@ private fun pendingPhoto(
 ) = PendingJobPhoto(
     photoId = photoId,
     jobId = "job-1",
+    visitId = "visit-1",
     localPath = "app-private/job-photos/user-1/$photoId.jpg",
     phase = phase,
     note = note,

@@ -83,6 +83,16 @@ enum class OutboxFailureReason {
     /** `409`: the entity moved past the version the client last saw (`BR-086`). */
     STALE,
 
+    /**
+     * `409 JOB_CLOSED_FOR_FIELD_WORK`: the Job the operation belongs to is `COMPLETED` or `CANCELED`,
+     * so its field record is final (`BR-062`, `BR-079`).
+     *
+     * It is its own reason rather than [STALE] because the technician can do nothing about it: the work
+     * they recorded was made against a Job the office closed while they were offline, and the screen has
+     * to say so rather than offer "reopen the job and try again" (`BR-032`, `ADR-019` D4).
+     */
+    JOB_CLOSED,
+
     /** `400`/`422`: the API refused the operation's values. */
     INVALID,
 

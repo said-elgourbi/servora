@@ -1,6 +1,7 @@
 package com.servora.android.ui.schedule
 
 import com.servora.android.domain.model.ScheduleTechnician
+import com.servora.android.domain.model.ScheduleVisit
 import java.text.Normalizer
 import java.time.Instant
 import java.time.ZoneId
@@ -119,6 +120,67 @@ internal fun chosenTechnicians(
     technicians: List<ScheduleTechnician>,
     ids: Collection<String>,
 ): List<ScheduleTechnician> = technicians.filter { it.membershipId in ids }
+
+/** The operational Work view's top-level tabs. */
+enum class WorkTab {
+    ALL_JOBS,
+    UNASSIGNED,
+    REQUESTS,
+}
+
+/** Fast local filters for the Work view's All Jobs list. */
+enum class WorkJobFilter {
+    ALL,
+    SCHEDULED,
+    UNASSIGNED,
+    OVERDUE,
+}
+
+internal fun filterWorkVisits(
+    scheduled: List<ScheduleVisit>,
+    unassigned: List<ScheduleVisit>,
+    query: String,
+    filter: WorkJobFilter,
+): List<ScheduleVisit> {
+    val unassignedVisits = unassigned.filter { visit -> visit.technicians.isEmpty() }
+    val unassignedIds = unassignedVisits.mapTo(mutableSetOf()) { it.visitId }
+    return (scheduled + unassignedVisits)
+        .distinctBy { it.visitId }
+        .filter { visit ->
+            when (filter) {
+                WorkJobFilter.ALL -> true
+                WorkJobFilter.SCHEDULED -> visit.visitId !in unassignedIds
+                WorkJobFilter.UNASSIGNED -> visit.visitId in unassignedIds
+                WorkJobFilter.OVERDUE -> visit.isOverdue
+            }
+        }
+        .filter { visit -> matchesWorkVisitQuery(visit, query) }
+}
+
+internal fun matchesWorkVisitQuery(visit: ScheduleVisit, query: String): Boolean {
+    val wanted = searchText(query)
+    if (wanted.isEmpty()) {
+        return true
+    }
+    return workVisitSearchFields(visit).any { field -> searchText(field).contains(wanted) }
+}
+
+private fun workVisitSearchFields(visit: ScheduleVisit): List<String> = buildList {
+    add(visit.jobNumber.toString())
+    add(visit.jobTitle)
+    add(visit.customerName)
+    visit.address?.let { address ->
+        listOf(
+            address.propertyName,
+            address.addressLine1,
+            address.addressLine2,
+            address.city,
+            address.province,
+            address.postalCode,
+        ).mapNotNullTo(this) { it }
+    }
+    visit.technicians.mapNotNullTo(this) { technician -> technician.name }
+}
 
 /** The instant a scheduled value names, or `null` when this build cannot read it (`BR-042`). */
 internal fun instantOf(scheduled: String?): Instant? =

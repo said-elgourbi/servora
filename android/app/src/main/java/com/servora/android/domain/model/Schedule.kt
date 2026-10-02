@@ -133,10 +133,44 @@ enum class FollowUpVisitRequestStatus {
 }
 
 /**
+ * Which side of a request's clarification conversation wrote a message (`BR-FV-012`).
+ *
+ * The API derives it from the request's own requester, so a screen states "You" and "the office" from
+ * the backend's answer rather than comparing membership ids itself (`BR-041`).
+ */
+enum class FollowUpVisitRequestMessageAuthorKind {
+    /** The technician who raised the request. */
+    REQUESTER,
+
+    /** The office that reviews it. */
+    OFFICE,
+}
+
+/**
+ * One message of a request's clarification conversation (`BR-FV-012`).
+ *
+ * The conversation is **append-only**: the office's question and the requester's answer are both
+ * records, and neither is edited or removed afterwards (`BR-067`, `BR-FV-013`). It is the request's
+ * own conversation rather than a general message thread — nothing here is a comment on a Job or a
+ * Visit (`BR-047`).
+ */
+data class FollowUpVisitRequestMessage(
+    val id: String,
+    val authorKind: FollowUpVisitRequestMessageAuthorKind,
+    val body: String,
+    /** ISO-8601 UTC instant the API recorded the message. */
+    val recordedAt: String,
+)
+
+/**
  * A technician's proposal for another Visit on an existing Job.
  *
  * This is not a Visit and must not be drawn as confirmed work. The manager schedule presents pending
  * requests in their own lane so dispatch can review them without pretending they are appointments.
+ *
+ * [messages] is the clarification conversation that belongs to this request, oldest first — what the
+ * office asked and what the requester answered (`BR-FV-012`). A request that was never returned for
+ * clarification carries none.
  */
 data class FollowUpVisitRequest(
     val id: String,
@@ -155,4 +189,12 @@ data class FollowUpVisitRequest(
     val version: Int,
     val createdAt: String,
     val updatedAt: String,
+    val messages: List<FollowUpVisitRequestMessage> = emptyList(),
+    val jobNumber: Int = 0,
+    val jobTitle: String = "",
+    val customerName: String = "",
+    val address: ScheduleAddress? = null,
+    val sourceVisitScheduledStart: String? = null,
+    val sourceVisitStatus: String? = null,
+    val sourceVisitOutcomeCode: String? = null,
 )

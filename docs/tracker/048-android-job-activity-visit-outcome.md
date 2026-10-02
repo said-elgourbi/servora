@@ -13,6 +13,12 @@ Refines, and does not replace: `docs/tracker/045-android-job-activity-visit-grou
 groups) and `docs/tracker/046-android-job-details-visit-period-and-card.md` (the card that heads a group's
 activity)
 
+**Amended by `docs/tracker/052-android-technician-job-details-redesign.md` (2026-09-20).** The outcome is
+still read from the **Visit** and never derived from the timeline — that decision is unchanged. What moved
+is where it is stated: the outcome is part of the group's **summary line** under its heading
+(`Completed · Needs follow-up`), read from the same `visits[].outcomeCode` this tracker added, and the card's
+`Outcome` row is gone with the card (`BR-047`, `BR-079`, `BR-012`).
+
 Contract: `docs/api/job-details.md` §3.2 (`visits[].outcomeCode`)
 
 Design reference: none — no Figma screen exists for the redesigned page, so the established Servora Material 3

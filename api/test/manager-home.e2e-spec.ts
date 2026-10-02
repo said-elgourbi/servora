@@ -461,7 +461,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 1,
-      status: 'SCHEDULED',
+      status: 'ACTIVE',
       title: 'Water heater replacement',
     });
     const visit = await newVisit({
@@ -501,7 +501,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 1,
-      status: 'IN_PROGRESS',
+      status: 'ACTIVE',
     });
     await newVisit({
       organizationId: organization.id,
@@ -522,7 +522,7 @@ describe('manager home derivation (e2e)', () => {
     expect(read.attention).toEqual([]);
   });
 
-  it('reports a NEW or IN_PROGRESS Job with no active Visit as needing scheduling', async () => {
+  it('reports a NEW or ACTIVE Job with no active Visit as needing scheduling', async () => {
     const organization = await newOrganization();
     const member = await newMembership(organization.id);
     const customer = await newCustomer(organization.id, 'Planning Co');
@@ -539,7 +539,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 2,
-      status: 'IN_PROGRESS',
+      status: 'ACTIVE',
     });
     await newVisit({
       organizationId: organization.id,
@@ -552,7 +552,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 3,
-      status: 'SCHEDULED',
+      status: 'ACTIVE',
     });
     await newVisit({
       organizationId: organization.id,
@@ -581,16 +581,31 @@ describe('manager home derivation (e2e)', () => {
     expect(read.attention[0]?.scheduledStart).toBeNull();
   });
 
-  it('reports a Job awaiting office review (`BR-061`, `BR-062`)', async () => {
+  it('reports the parts a completed Visit requires as office attention', async () => {
+    // A Job needs no office review step to be closed (`BR-058`): what the office must act on is the
+    // **outcome** of a completed Visit. `BR-078` derives that condition, and it is reported as
+    // attention rather than as a Job status (`BR-060`, `api/src/jobs/job-attention.ts`).
     const organization = await newOrganization();
     const member = await newMembership(organization.id);
-    const customer = await newCustomer(organization.id, 'Review Co');
+    const customer = await newCustomer(organization.id, 'Parts Co');
     const job = await newJob({
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 1,
-      status: 'PENDING_REVIEW',
+      status: 'ACTIVE',
     });
+    const completed = await newVisit({
+      organizationId: organization.id,
+      jobId: job.id,
+      status: 'COMPLETED',
+      scheduledStart: new Date(now.getTime() - 3 * 3_600_000),
+      scheduledEnd: new Date(now.getTime() - 2 * 3_600_000),
+      actorMembershipId: member.id,
+    });
+    await database.db
+      .update(visits)
+      .set({ outcomeCode: 'NEEDS_PARTS' })
+      .where(eq(visits.id, completed.id));
 
     const read = await service.readManagerHome(
       scopeOf(organization.id),
@@ -600,7 +615,12 @@ describe('manager home derivation (e2e)', () => {
     );
 
     expect(read.attention).toEqual([
-      expect.objectContaining({ kind: 'JOB_PENDING_REVIEW', jobId: job.id }),
+      expect.objectContaining({
+        kind: 'PARTS_REQUIRED',
+        jobId: job.id,
+        visitId: completed.id,
+        reasonCode: null,
+      }),
     ]);
   });
 
@@ -629,7 +649,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 2,
-      status: 'SCHEDULED',
+      status: 'ACTIVE',
       title: 'AC repair',
       withPropertySnapshot: true,
     });
@@ -637,7 +657,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 3,
-      status: 'IN_PROGRESS',
+      status: 'ACTIVE',
       title: 'Furnace repair',
       withPropertySnapshot: true,
     });
@@ -731,7 +751,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: other.id,
       customerId: otherCustomer.id,
       jobNumber: 1,
-      status: 'PENDING_REVIEW',
+      status: 'ACTIVE',
     });
     await newVisit({
       organizationId: other.id,
@@ -764,7 +784,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: organization.id,
       customerId: deletedCustomer.id,
       jobNumber: 1,
-      status: 'PENDING_REVIEW',
+      status: 'ACTIVE',
     });
     await newVisit({
       organizationId: organization.id,
@@ -791,11 +811,33 @@ describe('manager home derivation (e2e)', () => {
     const member = await newMembership(organization.id);
     const customer = await newCustomer(organization.id, 'Mixed Co');
 
-    await newJob({
+    // A Job whose latest completed Visit requires parts, and which already has a return attempt
+    // scheduled, so it reports `PARTS_REQUIRED` rather than also needing scheduling (`BR-078`).
+    const partsJob = await newJob({
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 2,
-      status: 'PENDING_REVIEW',
+      status: 'ACTIVE',
+    });
+    const partsVisit = await newVisit({
+      organizationId: organization.id,
+      jobId: partsJob.id,
+      status: 'COMPLETED',
+      scheduledStart: new Date(now.getTime() - 6 * 3_600_000),
+      scheduledEnd: new Date(now.getTime() - 5 * 3_600_000),
+      actorMembershipId: member.id,
+    });
+    await database.db
+      .update(visits)
+      .set({ outcomeCode: 'NEEDS_PARTS' })
+      .where(eq(visits.id, partsVisit.id));
+    await newVisit({
+      organizationId: organization.id,
+      jobId: partsJob.id,
+      status: 'SCHEDULED',
+      scheduledStart: new Date(now.getTime() + 24 * 3_600_000),
+      scheduledEnd: new Date(now.getTime() + 25 * 3_600_000),
+      actorMembershipId: member.id,
     });
     await newJob({
       organizationId: organization.id,
@@ -807,7 +849,7 @@ describe('manager home derivation (e2e)', () => {
       organizationId: organization.id,
       customerId: customer.id,
       jobNumber: 1,
-      status: 'SCHEDULED',
+      status: 'ACTIVE',
     });
     await newVisit({
       organizationId: organization.id,
@@ -827,7 +869,7 @@ describe('manager home derivation (e2e)', () => {
 
     expect(read.attention.map((item) => item.kind)).toEqual([
       'VISIT_OVERDUE',
-      'JOB_PENDING_REVIEW',
+      'PARTS_REQUIRED',
       'JOB_NEEDS_SCHEDULING',
     ]);
     expect(read.attentionTotal).toBe(3);

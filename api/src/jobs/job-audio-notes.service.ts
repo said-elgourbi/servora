@@ -6,6 +6,7 @@ import {
   jobAudioNoteRemovals,
   jobAudioNotes,
   jobs,
+  visits,
 } from '../database/schema.js';
 import { isUniqueViolation } from '../database/unique-violation.js';
 import {
@@ -22,7 +23,7 @@ import type {
   RemoveJobAudioNoteDto,
   ValidatedJobAudioNote,
 } from './job-audio.dto.js';
-import { JobNotFoundError } from './jobs.service.js';
+import { JobClosedForFieldWorkError, JobNotFoundError, VisitNotFoundError } from './jobs.service.js';
 
 /**
  * The Job audio note evidence write and read (`BR-027`, `BR-091`, `ADR-018`).
@@ -38,8 +39,11 @@ import { JobNotFoundError } from './jobs.service.js';
  * key's last segment, so a replay finds the row that already exists and a retry after a timeout writes
  * the same key instead of leaving an orphan object behind (`ADR-018` A10).
  *
- * A recording is recorded on the **Job**, so it can be made whether or not the Job has a Visit: a Job may
- * exist with no Visit at all (`BR-051`).
+ * A recording is recorded against the **Visit** the technician was working (`BR-047`, `BR-071`), exactly
+ * as a photo is: evidence is field work, and the Activity projection reports the entry with that Visit's
+ * account so a reader finds it beside the field attempt it belongs to (`BR-080`). The route requires a
+ * Visit, and one of another Job or another organization is refused as a Visit that does not exist
+ * (`BR-001`, `BR-042`).
  */
 @Injectable()
 export class JobAudioNotesService {
@@ -65,7 +69,8 @@ export class JobAudioNotesService {
     input: CreateJobAudioNoteDto,
     audio: ValidatedJobAudioNote,
   ): Promise<JobActivityEventDto[]> {
-    await this.requireJob(scope, jobId);
+    await this.requireOpenJob(scope, jobId);
+    await this.requireVisit(scope, jobId, input.visitId);
 
     const existing = await this.findByOperationId(scope, input.clientOperationId);
     if (existing !== null) {
@@ -91,6 +96,7 @@ export class JobAudioNotesService {
         id: input.clientOperationId,
         organizationId: scope.organizationId,
         jobId,
+        visitId: input.visitId,
         uploaderMembershipId,
         phase: input.phase,
         note: input.note,
@@ -134,6 +140,7 @@ export class JobAudioNotesService {
     audioNoteId: string,
     actorMembershipId: string,
     input: RemoveJobAudioNoteDto,
+    canRemoveAny: boolean = true,
   ): Promise<JobActivityEventDto[]> {
     await this.requireJob(scope, jobId);
 
@@ -143,6 +150,9 @@ export class JobAudioNotesService {
     }
     if (audioNote.removed) {
       throw new JobAudioNoteAlreadyRemovedError();
+    }
+    if (!canRemoveAny && audioNote.uploaderMembershipId !== actorMembershipId) {
+      throw new JobAudioNoteRemovalForbiddenError();
     }
 
     try {
@@ -230,9 +240,12 @@ export class JobAudioNotesService {
     scope: OrganizationScope,
     jobId: string,
     audioNoteId: string,
-  ): Promise<{ removed: boolean } | null> {
+  ): Promise<{ removed: boolean; uploaderMembershipId: string } | null> {
     const [row] = await this.db
-      .select({ removalId: jobAudioNoteRemovals.id })
+      .select({
+        removalId: jobAudioNoteRemovals.id,
+        uploaderMembershipId: jobAudioNotes.uploaderMembershipId,
+      })
       .from(jobAudioNotes)
       .leftJoin(
         jobAudioNoteRemovals,
@@ -249,7 +262,12 @@ export class JobAudioNotesService {
         ),
       )
       .limit(1);
-    return row === undefined ? null : { removed: row.removalId !== null };
+    return row === undefined
+      ? null
+      : {
+          removed: row.removalId !== null,
+          uploaderMembershipId: row.uploaderMembershipId,
+        };
   }
 
   /** One audio note row of the caller's organization, or `null`. */
@@ -289,9 +307,9 @@ export class JobAudioNotesService {
    * A Job whose Customer the organization has deleted is not addressable, exactly as the Job read and its
    * actions treat it (`BR-023`).
    */
-  private async requireJob(scope: OrganizationScope, jobId: string): Promise<void> {
+  private async requireJob(scope: OrganizationScope, jobId: string): Promise<{ status: string }> {
     const [row] = await this.db
-      .select({ id: jobs.id })
+      .select({ id: jobs.id, status: jobs.status })
       .from(jobs)
       .innerJoin(customers, eq(customers.id, jobs.customerId))
       .where(
@@ -304,6 +322,45 @@ export class JobAudioNotesService {
       .limit(1);
     if (row === undefined) {
       throw new JobNotFoundError();
+    }
+    return row;
+  }
+
+  private async requireOpenJob(
+    scope: OrganizationScope,
+    jobId: string,
+  ): Promise<void> {
+    const job = await this.requireJob(scope, jobId);
+    if (job.status === 'COMPLETED' || job.status === 'CANCELED') {
+      throw new JobClosedForFieldWorkError();
+    }
+  }
+
+  /**
+   * One Visit of the caller's organization **and** of the Job the recording is filed under.
+   *
+   * The same two questions the photo kind asks (`job-photos.service.ts`): the organization boundary is
+   * `BR-001`, and the Job is the record the Activity read reports the evidence on (`BR-042`). A Visit
+   * that fails either check is reported exactly as one that does not exist (`BR-023`).
+   */
+  private async requireVisit(
+    scope: OrganizationScope,
+    jobId: string,
+    visitId: string,
+  ): Promise<void> {
+    const [row] = await this.db
+      .select({ id: visits.id })
+      .from(visits)
+      .where(
+        and(
+          eq(visits.organizationId, scope.organizationId),
+          eq(visits.jobId, jobId),
+          eq(visits.id, visitId),
+        ),
+      )
+      .limit(1);
+    if (row === undefined) {
+      throw new VisitNotFoundError();
     }
   }
 }
@@ -323,6 +380,13 @@ export class JobAudioNoteNotFoundError extends Error {
  * removal would record a state change that did not happen. It is reported rather than absorbed, so a
  * Manager who attempts it learns that the evidence is already removed (`BR-067`).
  */
+export class JobAudioNoteRemovalForbiddenError extends Error {
+  constructor() {
+    super('This audio note can only be removed by its uploader or a manager.');
+    this.name = 'JobAudioNoteRemovalForbiddenError';
+  }
+}
+
 export class JobAudioNoteAlreadyRemovedError extends Error {
   constructor() {
     super('That audio note has already been removed.');

@@ -8,6 +8,7 @@ import {
   CUSTOMER_PERMISSIONS,
   JOB_PERMISSIONS,
   TECHNICIAN_PERMISSIONS,
+  VISIT_PERMISSIONS,
   type PermissionCode,
 } from '../src/auth/permissions.js';
 import {
@@ -42,12 +43,14 @@ const PASSWORD = 'servora-e2e-password';
 /**
  * The Job and Visit management actions (`BR-058` – `BR-079`).
  *
- * Authorization is asserted per route (`401` / `403` / `200`), and so is the business rule each
- * action exists for: the lifecycle table refuses a destination `BR-058` does not permit, `BR-061`
- * gates `PENDING_REVIEW` and `BR-062` gates `COMPLETED` as runtime eligibility on top of structurally
- * permitted destinations, `BR-073` restricts rescheduling to a `SCHEDULED` Visit, `BR-070` reports a
- * conflict before applying it, and `BR-069` records the assignment history without ever promoting a
- * technician on its own.
+ * The lifecycle asserted here is the one `docs/tracker/051-job-visit-lifecycle-redesign.md` defines:
+ * a Job is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED`, and operational attention is derived rather
+ * than stored. Authorization is asserted per route (`401` / `403` / `200`), and so is the business
+ * rule each action exists for: the lifecycle table refuses a destination `BR-058` does not permit,
+ * `BR-062`'s open-Visit invariant gates `COMPLETED` as runtime eligibility on top of structurally
+ * permitted destinations, `BR-064`/`BR-065` cascade a cancellation to the Job's open Visits, `BR-073`
+ * restricts rescheduling to a `SCHEDULED` Visit, `BR-070` reports a conflict before applying it, and
+ * `BR-069` records the assignment history without ever promoting a technician on its own.
  */
 describe('job actions (e2e)', () => {
   let app: INestApplication;
@@ -302,7 +305,7 @@ describe('job actions (e2e)', () => {
     const customer = await newCustomer('Martha Reynolds');
     const property = await newProperty('987 Cedar Lane');
     await linkProperty(property.id, customer.id, actor.id);
-    const job = await newJob(customer.id, 'SCHEDULED', property.id);
+    const job = await newJob(customer.id, 'ACTIVE', property.id);
     const now = Date.now();
     const visit = await newVisit({
       jobId: job.id,
@@ -356,32 +359,34 @@ describe('job actions (e2e)', () => {
   });
 
   it('applies a permitted transition and records it in history', async () => {
-    const fixture = await scheduledJobWithCrew();
+    const customer = await newCustomer('Transition Co');
+    const job = await newJob(customer.id, 'NEW');
     const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
 
     const response = await request(app.getHttpServer())
-      .patch(`/jobs/${fixture.job.id}/status`)
+      .patch(`/jobs/${job.id}/status`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'IN_PROGRESS', expectedVersion: fixture.job.version })
+      .send({ status: 'ACTIVE', expectedVersion: job.version })
       .expect(200);
 
-    expect(response.body.status).toBe('IN_PROGRESS');
+    expect(response.body.status).toBe('ACTIVE');
     // The action answers with the Job as it now stands, so the client does not have to re-read it.
-    expect(response.body.version).toBe(fixture.job.version + 1);
+    expect(response.body.version).toBe(job.version + 1);
+    // An `ACTIVE` Job has no open status to move to: its destinations are the terminal pair
+    // (`BR-058`).
     expect(response.body.allowedStatusTransitions).toEqual([
-      'SCHEDULED',
-      'PENDING_REVIEW',
       'COMPLETED',
+      'CANCELED',
     ]);
 
     const history = await database.db
       .select()
       .from(jobStatusHistory)
-      .where(eq(jobStatusHistory.jobId, fixture.job.id));
+      .where(eq(jobStatusHistory.jobId, job.id));
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({
-      fromStatus: 'SCHEDULED',
-      toStatus: 'IN_PROGRESS',
+      fromStatus: 'NEW',
+      toStatus: 'ACTIVE',
       actorMembershipId: session.membershipId,
     });
   });
@@ -401,9 +406,9 @@ describe('job actions (e2e)', () => {
 
     expect(response.body.code).toBe('JOB_STATUS_TRANSITION_NOT_ALLOWED');
     expect(response.body.details).toEqual({
-      from: 'SCHEDULED',
+      from: 'ACTIVE',
       to: 'NEW',
-      allowed: ['IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETED'],
+      allowed: ['COMPLETED', 'CANCELED'],
     });
 
     const history = await database.db
@@ -414,14 +419,14 @@ describe('job actions (e2e)', () => {
   });
 
   it('closes a Job directly from an open status, in one operation and one history record', async () => {
-    // `SCHEDULED` → `COMPLETED` is one request rather than a walk through every status of the
+    // `ACTIVE` → `COMPLETED` is one request rather than a walk through every status of the
     // lifecycle, and it writes exactly one transition carrying its actor and timestamp
     // (`BR-058`, `BR-067`).
     const actor = await newMembership();
     const customer = await newCustomer('Direct Close Co');
     const property = await newProperty('12 Direct Way');
     await linkProperty(property.id, customer.id, actor.id);
-    const job = await newJob(customer.id, 'SCHEDULED', property.id);
+    const job = await newJob(customer.id, 'ACTIVE', property.id);
     const now = Date.now();
     const visit = await newVisit({
       jobId: job.id,
@@ -441,8 +446,8 @@ describe('job actions (e2e)', () => {
       .expect(200);
 
     expect(response.body.status).toBe('COMPLETED');
-    // A terminal Job offers its reopen and nothing else (`BR-063`).
-    expect(response.body.allowedStatusTransitions).toEqual(['NEW']);
+    // A terminal Job offers its reopen and nothing else (`BR-058`, `BR-063`).
+    expect(response.body.allowedStatusTransitions).toEqual(['ACTIVE']);
 
     const history = await database.db
       .select()
@@ -450,7 +455,7 @@ describe('job actions (e2e)', () => {
       .where(eq(jobStatusHistory.jobId, job.id));
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({
-      fromStatus: 'SCHEDULED',
+      fromStatus: 'ACTIVE',
       toStatus: 'COMPLETED',
       actorMembershipId: session.membershipId,
     });
@@ -472,31 +477,43 @@ describe('job actions (e2e)', () => {
     expect(visitHistory).toEqual([]);
   });
 
-  it('moves an open Job backwards in one operation', async () => {
-    // Moving backwards is an operational correction a manager makes deliberately (`BR-058`), and it is
-    // one request and one recorded transition — not a walk back through the lifecycle.
+  it('cancels a Job and cascades the cancellation to its open Visits', async () => {
+    // Canceling is a destination of the Job lifecycle (`BR-058`) and it moves the Job in one
+    // operation; `BR-064`/`BR-065` then cancel the Job's open Visits in the same transaction, each
+    // with its own append-only status-history row recording the trigger.
     const actor = await newMembership();
-    const customer = await newCustomer('Backward Co');
-    const property = await newProperty('9 Backward Row');
+    const customer = await newCustomer('Cancellation Co');
+    const property = await newProperty('9 Cancellation Row');
     await linkProperty(property.id, customer.id, actor.id);
-    const job = await newJob(customer.id, 'IN_PROGRESS', property.id);
+    const job = await newJob(customer.id, 'ACTIVE', property.id);
     const now = Date.now();
-    const visit = await newVisit({
+    const openVisit = await newVisit({
       jobId: job.id,
       status: 'EN_ROUTE',
       scheduledStart: new Date(now + 3_600_000),
       scheduledEnd: new Date(now + 7_200_000),
       propertyId: property.id,
     });
+    const historicalVisit = await newVisit({
+      jobId: job.id,
+      status: 'COMPLETED',
+      scheduledStart: new Date(now - 7_200_000),
+      scheduledEnd: new Date(now - 3_600_000),
+      propertyId: property.id,
+      outcomeCode: 'RESOLVED',
+      actorMembershipId: actor.id,
+    });
     const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
 
     const response = await request(app.getHttpServer())
       .patch(`/jobs/${job.id}/status`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'SCHEDULED', note: 'Technician turned back.' })
+      .send({ status: 'CANCELED', note: 'Customer called.' })
       .expect(200);
 
-    expect(response.body.status).toBe('SCHEDULED');
+    expect(response.body.status).toBe('CANCELED');
+    // A terminal Job offers its reopen and nothing else (`BR-058`, `BR-063`).
+    expect(response.body.allowedStatusTransitions).toEqual(['ACTIVE']);
 
     const history = await database.db
       .select()
@@ -504,17 +521,45 @@ describe('job actions (e2e)', () => {
       .where(eq(jobStatusHistory.jobId, job.id));
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({
-      fromStatus: 'IN_PROGRESS',
-      toStatus: 'SCHEDULED',
-      note: 'Technician turned back.',
+      fromStatus: 'ACTIVE',
+      toStatus: 'CANCELED',
+      note: 'Customer called.',
+      actorMembershipId: session.membershipId,
     });
 
-    // The Visit keeps its own field status: it is still `EN_ROUTE` (`BR-059`).
-    const [visitAfter] = await database.db
+    // The open Visit was canceled by the cascade, with the trigger recorded on its own history row.
+    const [openAfter] = await database.db
       .select({ status: visits.status })
       .from(visits)
-      .where(eq(visits.id, visit.id));
-    expect(visitAfter?.status).toBe('EN_ROUTE');
+      .where(eq(visits.id, openVisit.id));
+    expect(openAfter?.status).toBe('CANCELED');
+
+    const cascadeHistory = await database.db
+      .select()
+      .from(visitStatusHistory)
+      .where(eq(visitStatusHistory.visitId, openVisit.id));
+    expect(cascadeHistory).toHaveLength(1);
+    expect(cascadeHistory[0]).toMatchObject({
+      fromStatus: 'EN_ROUTE',
+      toStatus: 'CANCELED',
+      cancellationSource: 'JOB_CANCELLATION',
+      actorMembershipId: session.membershipId,
+    });
+
+    // A historical Visit is not touched, and no Visit status history is invented for it (`BR-065`).
+    const [historicalAfter] = await database.db
+      .select({ status: visits.status, version: visits.version })
+      .from(visits)
+      .where(eq(visits.id, historicalVisit.id));
+    expect(historicalAfter).toMatchObject({
+      status: 'COMPLETED',
+      version: historicalVisit.version,
+    });
+    const historicalHistory = await database.db
+      .select()
+      .from(visitStatusHistory)
+      .where(eq(visitStatusHistory.visitId, historicalVisit.id));
+    expect(historicalHistory).toEqual([]);
   });
 
   it('closes a Job administratively when it has no Visit', async () => {
@@ -534,11 +579,11 @@ describe('job actions (e2e)', () => {
   });
 
   it('closes a Job whose Visits are all historical', async () => {
-    // `BR-062`: a historical Visit — `COMPLETED`, `CANCELED` or `NO_SHOW` (`BR-074`) — does not
-    // prevent completion, whatever the Job's history holds.
+    // `BR-062`: a historical Visit — `COMPLETED` or `CANCELED` (`BR-074`) — does not prevent
+    // completion, whatever the Job's history holds.
     const actor = await newMembership();
     const customer = await newCustomer('Historical Visits Co');
-    const job = await newJob(customer.id, 'IN_PROGRESS');
+    const job = await newJob(customer.id, 'ACTIVE');
     const now = Date.now();
     await newVisit({
       jobId: job.id,
@@ -553,12 +598,6 @@ describe('job actions (e2e)', () => {
       status: 'CANCELED',
       scheduledStart: new Date(now - 7_200_000),
       scheduledEnd: new Date(now - 3_600_000),
-    });
-    await newVisit({
-      jobId: job.id,
-      status: 'NO_SHOW',
-      scheduledStart: new Date(now - 1_800_000),
-      scheduledEnd: new Date(now - 1_700_000),
     });
     const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
 
@@ -593,7 +632,7 @@ describe('job actions (e2e)', () => {
       .from(jobs)
       .where(eq(jobs.id, fixture.job.id));
     expect(unchanged).toMatchObject({
-      status: 'SCHEDULED',
+      status: 'ACTIVE',
       version: fixture.job.version,
     });
     const history = await database.db
@@ -606,7 +645,7 @@ describe('job actions (e2e)', () => {
   it('keeps a Job completion-blocked while a Visit is still being worked', async () => {
     // `BR-062` applies whatever open status the field work is in (`BR-074`).
     const customer = await newCustomer('Open Work Co');
-    const job = await newJob(customer.id, 'IN_PROGRESS');
+    const job = await newJob(customer.id, 'ACTIVE');
     const now = Date.now();
     await newVisit({
       jobId: job.id,
@@ -643,19 +682,29 @@ describe('job actions (e2e)', () => {
     expect(response.body.code).toBe('JOB_COMPLETION_BLOCKED');
   });
 
-  it('refuses a cancellation while the reason catalogue is undefined', async () => {
-    // `BR-064` requires a structured reason; its catalogue is an open question, so the API refuses
-    // the cancellation rather than inventing the vocabulary (`BR-042`).
+  it('refuses a second cancellation, because a terminal Job only reopens', async () => {
+    // `BR-064`'s structured reason catalogue is still an `OPEN QUESTION`, so the request's optional
+    // `note` is the only explanation recorded and no reason vocabulary is invented (`BR-042`). What
+    // the lifecycle does state is that `CANCELED` has exactly one destination (`BR-058`).
     const fixture = await scheduledJobWithCrew();
     const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+
+    await request(app.getHttpServer())
+      .patch(`/jobs/${fixture.job.id}/status`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ status: 'CANCELED', note: 'Customer called.' })
+      .expect(200);
 
     const response = await request(app.getHttpServer())
       .patch(`/jobs/${fixture.job.id}/status`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'CANCELED', note: 'Customer called.' })
+      .send({ status: 'CANCELED' })
       .expect(409);
 
-    expect(response.body.code).toBe('JOB_CANCELLATION_UNAVAILABLE');
+    expect(response.body).toMatchObject({
+      code: 'JOB_STATUS_TRANSITION_NOT_ALLOWED',
+      details: { from: 'CANCELED', to: 'CANCELED', allowed: ['ACTIVE'] },
+    });
   });
 
   it('refuses a status the vocabulary does not have', async () => {
@@ -676,7 +725,7 @@ describe('job actions (e2e)', () => {
     const response = await request(app.getHttpServer())
       .patch(`/jobs/${fixture.job.id}/status`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'IN_PROGRESS', expectedVersion: fixture.job.version + 5 })
+      .send({ status: 'CANCELED', expectedVersion: fixture.job.version + 5 })
       .expect(409);
 
     expect(response.body.code).toBe('VERSION_CONFLICT');
@@ -708,7 +757,7 @@ describe('job actions (e2e)', () => {
         jobNumber: 1,
         customerId: otherCustomer.id,
         title: 'Other organization job',
-        status: 'SCHEDULED',
+        status: 'ACTIVE',
       })
       .returning();
 
@@ -717,7 +766,7 @@ describe('job actions (e2e)', () => {
     const response = await request(app.getHttpServer())
       .patch(`/jobs/${otherJob.id}/status`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'IN_PROGRESS' })
+      .send({ status: 'CANCELED' })
       .expect(404);
     expect(response.body.code).toBe('JOB_NOT_FOUND');
 
@@ -726,49 +775,33 @@ describe('job actions (e2e)', () => {
       .select({ status: jobs.status })
       .from(jobs)
       .where(eq(jobs.id, fixture.job.id));
-    expect(unchanged?.status).toBe('SCHEDULED');
+    expect(unchanged?.status).toBe('ACTIVE');
   });
 
-  it('offers PENDING_REVIEW structurally and refuses it while a Visit is still active', async () => {
-    // `PENDING_REVIEW` is a structurally permitted destination and stays in the read for a client to
-    // offer (`BR-058`); what refuses the attempt is `BR-061`, and it names the condition that failed.
+  it('reports the destinations a Job has and never a derived condition as one', async () => {
+    // The read is the client's source of the lifecycle (`BR-041`): an `ACTIVE` Job offers the terminal
+    // pair and nothing else. Operational attention is a separate projection (`BR-060`), so no derived
+    // condition may appear in this list.
     const fixture = await scheduledJobWithCrew();
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([CUSTOMER_PERMISSIONS.VIEW]);
 
-    const response = await request(app.getHttpServer())
-      .patch(`/jobs/${fixture.job.id}/status`)
+    const open = await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'PENDING_REVIEW' })
-      .expect(409);
-
-    expect(response.body).toMatchObject({
-      code: 'JOB_REVIEW_CONDITION_NOT_MET',
-      details: { reason: 'ACTIVE_VISIT' },
-    });
-
-    // The same refusal holds once the Job has started: `BR-061` is about the Job's field work, not
-    // about the status it moved from.
-    await request(app.getHttpServer())
-      .patch(`/jobs/${fixture.job.id}/status`)
-      .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'IN_PROGRESS' })
       .expect(200);
-    const review = await request(app.getHttpServer())
-      .patch(`/jobs/${fixture.job.id}/status`)
-      .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'PENDING_REVIEW' })
-      .expect(409);
 
-    expect(review.body).toMatchObject({
-      code: 'JOB_REVIEW_CONDITION_NOT_MET',
-      details: { reason: 'ACTIVE_VISIT' },
-    });
+    expect(open.body.status).toBe('ACTIVE');
+    expect(open.body.allowedStatusTransitions).toEqual(['COMPLETED', 'CANCELED']);
+    expect(open.body.allowedStatusTransitions).not.toContain('JOB_NEEDS_SCHEDULING');
+    expect(open.body.attention).toEqual([]);
   });
 
-  it('awaits review once no Visit is active and the latest completed Visit resolved the Job', async () => {
+  it('completes a Job directly once its Visits are all historical', async () => {
+    // There is no review status between the field work and the closure (`BR-058`): an open Job whose
+    // Visits are all historical closes in one operation (`BR-062`).
     const actor = await newMembership();
-    const customer = await newCustomer('Review Co');
-    const job = await newJob(customer.id, 'IN_PROGRESS');
+    const customer = await newCustomer('Closure Co');
+    const job = await newJob(customer.id, 'ACTIVE');
     const now = Date.now();
     await newVisit({
       jobId: job.id,
@@ -783,18 +816,22 @@ describe('job actions (e2e)', () => {
     const response = await request(app.getHttpServer())
       .patch(`/jobs/${job.id}/status`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'PENDING_REVIEW' })
+      .send({ status: 'COMPLETED' })
       .expect(200);
 
-    expect(response.body.status).toBe('PENDING_REVIEW');
+    expect(response.body.status).toBe('COMPLETED');
+    // A terminal Job offers its reopen and nothing else (`BR-058`, `BR-063`).
+    expect(response.body.allowedStatusTransitions).toEqual(['ACTIVE']);
   });
 
-  it('refuses PENDING_REVIEW when the latest completed Visit expects follow-up', async () => {
+  it('derives office attention from the latest completed Visit outcome', async () => {
+    // What the office must act on is the **outcome** of the latest completed Visit, projected as
+    // attention rather than stored as a status (`BR-060`, `BR-078`, `api/src/jobs/job-attention.ts`).
+    // The most recent outcome is the one that decides.
     const actor = await newMembership();
     const customer = await newCustomer('Follow-up Co');
-    const job = await newJob(customer.id, 'IN_PROGRESS');
+    const job = await newJob(customer.id, 'ACTIVE');
     const now = Date.now();
-    // The most recent outcome is the one that decides (`BR-061`, `BR-078`).
     await newVisit({
       jobId: job.id,
       status: 'COMPLETED',
@@ -811,20 +848,29 @@ describe('job actions (e2e)', () => {
       outcomeCode: 'NEEDS_PARTS',
       actorMembershipId: actor.id,
     });
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([CUSTOMER_PERMISSIONS.VIEW]);
 
     const response = await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
+      .get(`/jobs/${job.id}`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'PENDING_REVIEW' })
-      .expect(409);
+      .expect(200);
 
-    expect(response.body.details).toEqual({ reason: 'OUTCOME' });
+    expect(response.body.status).toBe('ACTIVE');
+    expect(response.body.attention).toHaveLength(1);
+    expect(response.body.attention[0]).toMatchObject({
+      code: 'PARTS_REQUIRED',
+      reasonCode: null,
+    });
+    // Attention is not lifecycle: it never appears among the Job's destinations.
+    expect(response.body.allowedStatusTransitions).toEqual(['COMPLETED', 'CANCELED']);
   });
 
-  it('closes a Job awaiting review and reopens it to NEW with the reopen note recorded', async () => {
+  it('reopens a completed Job to ACTIVE with the reopen note recorded', async () => {
+    // Reopening is the only way out of a terminal status (`BR-058`, `BR-063`), and it returns the
+    // request to execution — `ACTIVE`, the status a Job with historical Visits really has
+    // (`docs/tracker/051-job-visit-lifecycle-redesign.md`; an `OPEN QUESTION` in `BR-063`).
     const customer = await newCustomer('Close Co');
-    const job = await newJob(customer.id, 'PENDING_REVIEW');
+    const job = await newJob(customer.id, 'ACTIVE');
     const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
 
     await request(app.getHttpServer())
@@ -836,26 +882,25 @@ describe('job actions (e2e)', () => {
     const reopened = await request(app.getHttpServer())
       .patch(`/jobs/${job.id}/status`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ status: 'NEW', note: 'Customer reported the fault returned.' })
+      .send({ status: 'ACTIVE', note: 'Customer reported the fault returned.' })
       .expect(200);
 
-    // Reopening returns the Job to the scheduling workflow and never to IN_PROGRESS (`BR-063`).
-    expect(reopened.body.status).toBe('NEW');
+    expect(reopened.body.status).toBe('ACTIVE');
     const history = await database.db
       .select()
       .from(jobStatusHistory)
       .where(eq(jobStatusHistory.jobId, job.id))
       .orderBy(jobStatusHistory.recordedAt);
     expect(history.map((row) => `${row.fromStatus}->${row.toStatus}`)).toEqual([
-      'PENDING_REVIEW->COMPLETED',
-      'COMPLETED->NEW',
+      'ACTIVE->COMPLETED',
+      'COMPLETED->ACTIVE',
     ]);
     expect(history[1]?.note).toBe('Customer reported the fault returned.');
   });
 
   it('reschedules a scheduled Visit and records the previous schedule', async () => {
     const fixture = await scheduledJobWithCrew();
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([VISIT_PERMISSIONS.UPDATE_SCHEDULE]);
     const start = new Date(Date.now() + 86_400_000);
     const end = new Date(start.getTime() + 3_600_000);
 
@@ -905,7 +950,7 @@ describe('job actions (e2e)', () => {
       .update(visits)
       .set({ status: 'EN_ROUTE' })
       .where(eq(visits.id, fixture.visit.id));
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([VISIT_PERMISSIONS.UPDATE_SCHEDULE]);
     const start = new Date(Date.now() + 86_400_000);
 
     const response = await request(app.getHttpServer())
@@ -946,7 +991,7 @@ describe('job actions (e2e)', () => {
       technicianMembershipId: other.lead.id,
       roleCode: 'TECHNICIAN',
     });
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([VISIT_PERMISSIONS.UPDATE_SCHEDULE]);
     const body = {
       scheduledStart: start.toISOString(),
       scheduledEnd: new Date(start.getTime() + 3_600_000).toISOString(),
@@ -992,7 +1037,7 @@ describe('job actions (e2e)', () => {
   it('states the whole crew and records every assignment change', async () => {
     const fixture = await scheduledJobWithCrew();
     const third = await newTechnician('John', 'Tremblay');
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([VISIT_PERMISSIONS.ASSIGN_TECHNICIANS]);
 
     // The Lead is removed and the second technician is promoted in one action (`BR-069`), and a new
     // technician is added.
@@ -1045,7 +1090,7 @@ describe('job actions (e2e)', () => {
 
   it('refuses a crew that does not name exactly one Lead', async () => {
     const fixture = await scheduledJobWithCrew();
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([VISIT_PERMISSIONS.ASSIGN_TECHNICIANS]);
 
     await request(app.getHttpServer())
       .put(`/jobs/${fixture.job.id}/visits/${fixture.visit.id}/technicians`)
@@ -1067,7 +1112,7 @@ describe('job actions (e2e)', () => {
 
   it('refuses to assign a technician who is not an active member of the organization', async () => {
     const fixture = await scheduledJobWithCrew();
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([VISIT_PERMISSIONS.ASSIGN_TECHNICIANS]);
     const other = await createTestOrganization(database.db, {
       name: 'Other Assignees Org',
     });
@@ -1135,7 +1180,7 @@ describe('job actions (e2e)', () => {
   it('answers a Visit that does not belong to the Job with 404', async () => {
     const customer = await newCustomer('No Visit Co');
     const job = await newJob(customer.id, 'NEW');
-    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const session = await signInFor([VISIT_PERMISSIONS.UPDATE_SCHEDULE]);
 
     // A Job may exist with no Visit (`BR-051`), and none is invented for it.
     await request(app.getHttpServer())

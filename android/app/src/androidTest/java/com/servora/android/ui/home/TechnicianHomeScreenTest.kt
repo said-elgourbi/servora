@@ -2,6 +2,7 @@ package com.servora.android.ui.home
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -144,6 +145,60 @@ class TechnicianHomeScreenTest {
 
         assertTrue(retried)
     }
+
+    @Test
+    fun drawsWhatNeedsAttentionBeforeThePreviewOfTheDaysAfterToday() {
+        // A late attempt from an earlier day is not today's work and is not what the technician does
+        // next, so the section is the only place this screen names it — and it is read before the
+        // work that is still to come (`BR-012`).
+        render(
+            TechnicianHomeUiState(
+                home = day(
+                    nextVisit = null,
+                    upcoming = listOf(visit(visitId = "upcoming")),
+                    upcomingTotal = 1,
+                    attention = listOf(attentionItem()),
+                    attentionTotal = 1,
+                ),
+            ),
+        )
+
+        val attention = composeTestRule
+            .onNodeWithText(
+                sectionCount(R.string.home_attention_title, 1),
+                useUnmergedTree = true,
+            )
+            .getBoundsInRoot()
+        val upcoming = composeTestRule
+            .onNodeWithText(
+                sectionCount(R.string.technician_home_upcoming_title, 1),
+                useUnmergedTree = true,
+            )
+            .getBoundsInRoot()
+
+        assertTrue(attention.top < upcoming.top)
+    }
+
+    @Test
+    fun saysWhenTheDayOnScreenCouldNotBeRefreshed() {
+        var retried = false
+        render(
+            state = TechnicianHomeUiState(
+                home = day(nextVisit = visit()),
+                failureReason = CustomersFailureReason.NETWORK,
+            ),
+            onRetry = { retried = true },
+        )
+
+        // The day stays on screen with the notice above it, because a stale answer must not look like a
+        // current one — a technician who cannot tell would believe finished work is still waiting
+        // (`BR-013`, `BR-014`).
+        composeTestRule.onNodeWithTag(TechnicianHomeUnrefreshedTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TechnicianHomeNextVisitTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TechnicianHomeRetryTag).performClick()
+
+        assertTrue(retried)
+    }
 }
 
 /** The screen a test drives, and the callbacks it recorded. */
@@ -196,7 +251,7 @@ private fun visit(
     jobId = jobId,
     jobNumber = 1042,
     jobTitle = "Furnace repair",
-    jobStatus = JobStatus.SCHEDULED,
+    jobStatus = JobStatus.ACTIVE,
     customerId = "customer-1",
     customerName = "ABC Property Management",
     address = null,
@@ -210,7 +265,7 @@ private fun attentionItem() = TechnicianAttentionItem(
     jobId = "job-9",
     jobNumber = 1049,
     jobTitle = "Water heater service",
-    jobStatus = JobStatus.SCHEDULED,
+    jobStatus = JobStatus.ACTIVE,
     customerId = "customer-1",
     customerName = "ABC Property Management",
     scheduledStart = "2026-09-16T09:00:00.000Z",

@@ -20,6 +20,7 @@ import {
   permissions,
   rolePermissions,
   userProfiles,
+  visits,
 } from '../src/database/schema.js';
 import { hashPassword } from '../src/users/password-hasher.js';
 import { FakeObjectStorage } from './support/fake-object-storage.js';
@@ -183,7 +184,29 @@ describe('job photos (e2e)', () => {
     };
   }
 
-  /** A Job owned by the caller's organization, with no Visit: photos do not require one. */
+  /**
+   * The Visit each fixture Job was created with, so an upload names the field attempt its evidence
+   * belongs to (`BR-047`, `BR-071`; tracker 056). A test that means "a Visit this Job does not own"
+   * passes its own `visitId` to `uploadPhoto`.
+   */
+  const visitByJob = new Map<string, string>();
+
+  /** The Visit of a fixture Job, or a fixture defect when the Job was created without one. */
+  function visitFor(jobId: string): string {
+    const visitId = visitByJob.get(jobId);
+    if (visitId === undefined) {
+      throw new Error(`No fixture Visit was created for job ${jobId}`);
+    }
+    return visitId;
+  }
+
+  /**
+   * A Job owned by the caller's organization, with the Visit its evidence is recorded on (`BR-047`,
+   * `BR-071`).
+   *
+   * A photo names the Visit it was taken during, so the fixture creates one; `DRAFT` is a real state
+   * (`BR-074`) and the API's check is that the Visit is this Job's own, not what state it holds.
+   */
   async function newJobInOrganization(
     targetOrganizationId: string = organizationId,
   ) {
@@ -205,15 +228,31 @@ describe('job photos (e2e)', () => {
         title: `Photo job ${jobNumberSequence}`,
       })
       .returning();
+    const [visit] = await database.db
+      .insert(visits)
+      .values({
+        organizationId: targetOrganizationId,
+        jobId: job.id,
+        status: 'DRAFT',
+      })
+      .returning();
+    visitByJob.set(job.id, visit.id);
     return job;
   }
 
-  /** Uploads one photo, as the Android client does: multipart with the metadata as fields. */
+  /**
+   * Uploads one photo, as the Android client does: multipart with the metadata as fields.
+   *
+   * `visitId` defaults to the Visit the fixture Job was created with, because a photo belongs to the
+   * field attempt it was recorded on and the API refuses one that names no Visit (`BR-047`, tracker
+   * 056). Passing `null` sends no `visitId` part at all, which is how that refusal is exercised.
+   */
   function uploadPhoto(
     jobId: string,
     accessToken: string,
     fields: {
       clientOperationId?: string;
+      visitId?: string | null;
       phase?: string;
       note?: string;
       capturedAt?: string;
@@ -227,6 +266,11 @@ describe('job photos (e2e)', () => {
       .field('clientOperationId', fields.clientOperationId ?? randomUUID())
       .field('phase', fields.phase ?? 'DURING_WORK');
 
+    const visitId =
+      fields.visitId === undefined ? visitFor(jobId) : fields.visitId;
+    if (visitId !== null) {
+      call.field('visitId', visitId);
+    }
     if (fields.note !== undefined) {
       call.field('note', fields.note);
     }
@@ -338,7 +382,9 @@ describe('job photos (e2e)', () => {
       photoId: clientOperationId,
       photoPhase: 'BEFORE_WORK',
       body: 'Panel before the repair',
-      visitSequence: null,
+      // The Visit the photo was recorded on, as the Activity read reports it: `Visit 1` of this Job
+      // (`BR-080`, `BR-047`) — the point of link evidence to a field attempt (tracker 056).
+      visitSequence: 1,
     });
 
     // The key is derived by the API, provider-agnostic, and names the row's own operation id.
@@ -356,6 +402,8 @@ describe('job photos (e2e)', () => {
     expect(row?.note).toBe('Panel before the repair');
     expect(row?.uploaderMembershipId).toBe(session.membershipId);
     expect(row?.capturedAt?.toISOString()).toBe('2026-09-15T13:04:05.000Z');
+    // The row records the field attempt the photo belongs to (`BR-047`, tracker 056).
+    expect(row?.visitId).toBe(visitFor(job.id));
   });
 
   it('records a replay of the same operation id once and does not upload it twice', async () => {
@@ -448,6 +496,55 @@ describe('job photos (e2e)', () => {
       .expect((response) => {
         expect(response.body.code).toBe('JOB_NOT_FOUND');
       });
+  });
+
+  it('refuses a photo that names no Visit, and stores nothing', async () => {
+    // Evidence is field work, so every write names the Visit it was recorded during (`BR-047`,
+    // `BR-080`): a request with no Visit is refused rather than filed with no attribution (`BR-042`).
+    const session = await signInFor([EVIDENCE_PERMISSIONS.PHOTO_ADD]);
+    const job = await newJobInOrganization();
+
+    await uploadPhoto(job.id, session.accessToken, { visitId: null })
+      .expect(400)
+      .expect((response) => {
+        expect(response.body.code).toBe('VALIDATION_FAILED');
+      });
+
+    const rows = await database.db
+      .select()
+      .from(jobPhotos)
+      .where(eq(jobPhotos.jobId, job.id));
+    expect(rows).toHaveLength(0);
+    expect(storage.puts).toHaveLength(0);
+  });
+
+  it("refuses a Visit that is not the Job's own, and a Visit of another organization", async () => {
+    // The Visit answers two independent questions: the organization boundary (`BR-001`) and the Job the
+    // evidence is filed under (`BR-042`). One that fails either is reported exactly as one that does
+    // not exist, so an id cannot be probed (`BR-023`).
+    const session = await signInFor([EVIDENCE_PERMISSIONS.PHOTO_ADD]);
+    const job = await newJobInOrganization();
+    const otherJob = await newJobInOrganization();
+    const otherOrganization = await createTestOrganization(database.db, {
+      name: 'Third Job Photo Org',
+    });
+    database.cleanup.trackOrganization(otherOrganization.id);
+    const foreignJob = await newJobInOrganization(otherOrganization.id);
+
+    for (const visitId of [visitFor(otherJob.id), visitFor(foreignJob.id)]) {
+      await uploadPhoto(job.id, session.accessToken, { visitId })
+        .expect(404)
+        .expect((response) => {
+          expect(response.body.code).toBe('VISIT_NOT_FOUND');
+        });
+    }
+
+    const rows = await database.db
+      .select()
+      .from(jobPhotos)
+      .where(eq(jobPhotos.jobId, job.id));
+    expect(rows).toHaveLength(0);
+    expect(storage.puts).toHaveLength(0);
   });
 
   it('serves the stored bytes through the API on the API port', async () => {
@@ -666,7 +763,9 @@ describe('job photos (e2e)', () => {
       photoRemovalReason: 'Photographed the wrong property',
       photoPhase: null,
       body: null,
-      visitSequence: null,
+      // The removal carries the Visit of the evidence it removed, so the entry is reported with the
+      // field attempt it belongs to (`BR-080`, `BR-089`, tracker 056).
+      visitSequence: 1,
     });
     expect(typeof removal?.recordedAt).toBe('string');
 

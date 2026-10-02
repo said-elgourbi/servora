@@ -1,5 +1,7 @@
 # Tracker 016 — Manager Home (Android) and its API read
 
+> **Superseded vocabulary, 2026-09-20.** The implemented behaviour this tracker records is described in it with the Job statuses and Visit statuses that were current then — `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW` and `NO_SHOW`. Those are retired: a Job is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED` (`BR-058`), a Visit is `DRAFT`, `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or `CANCELED` (`BR-074`), `BR-061` is **REMOVED**, and operational attention is derived (`BR-060`). The behaviour this tracker **decided** stands; only the vocabulary in its prose is historic. See `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+
 **Status: COMPLETE for API and Android implementation; physical-device QA is the product owner's**
 
 Date: 2026-09-14
@@ -25,7 +27,7 @@ design specifies, backed by authoritative data, for **Manager** users of the And
 | `GET /home/manager` — one request serving the whole screen | Implemented |
 | Authorization: `customers.view`, the existing Job/Visit capability | Implemented |
 | Day window resolved by the API from the caller's time zone | Implemented |
-| Needs attention: `VISIT_OVERDUE`, `JOB_PENDING_REVIEW`, `JOB_NEEDS_SCHEDULING` | Implemented |
+| Needs attention: `VISIT_OVERDUE`, `JOB_NEEDS_SCHEDULING`, `FOLLOW_UP_NEEDS_SCHEDULING`, `PARTS_REQUIRED`, `UNABLE_TO_COMPLETE` | Implemented (the outcome-derived three and the retirement of `JOB_PENDING_REVIEW` landed 2026-09-20) |
 | Today: `total` / `completed` / `inProgress` / `upcoming`, the three counts partitioning the total | Implemented |
 | Today's schedule: Visit status, technicians (Lead first), Job title, Customer, address | Implemented |
 | Operational ordering of both lists | Implemented |

@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import { isUniqueViolation } from '../database/unique-violation.js';
-import { customers, jobPhotoRemovals, jobPhotos, jobs } from '../database/schema.js';
+import { customers, jobPhotoRemovals, jobPhotos, jobs, visits } from '../database/schema.js';
 import {
   OBJECT_STORAGE,
   ObjectNotFoundError,
@@ -17,7 +17,7 @@ import type {
   RemoveJobPhotoDto,
   ValidatedJobPhoto,
 } from './job-photo.dto.js';
-import { JobNotFoundError } from './jobs.service.js';
+import { JobClosedForFieldWorkError, JobNotFoundError, VisitNotFoundError } from './jobs.service.js';
 
 /**
  * The Job photo evidence write and read (`BR-015`, `BR-027`).
@@ -37,8 +37,10 @@ import { JobNotFoundError } from './jobs.service.js';
  * - a retry after a timeout writes the **same** object key, so a failed attempt cannot leave an
  *   orphan object behind.
  *
- * A photo is recorded on the **Job**, so it can be captured whether or not the Job has a Visit: a Job
- * may exist with no Visit at all (`BR-051`).
+ * A photo is recorded against the **Visit** the technician was working (`BR-047`, `BR-071`): evidence is
+ * field work, and the Activity projection reports the entry with that Visit's account so a reader finds
+ * it beside the field attempt it belongs to (`BR-080`). The route therefore requires a Visit, and one of
+ * another Job or another organization is refused as a Visit that does not exist (`BR-001`, `BR-042`).
  */
 @Injectable()
 export class JobPhotosService {
@@ -64,7 +66,8 @@ export class JobPhotosService {
     input: CreateJobPhotoDto,
     photo: ValidatedJobPhoto,
   ): Promise<JobActivityEventDto[]> {
-    await this.requireJob(scope, jobId);
+    await this.requireOpenJob(scope, jobId);
+    await this.requireVisit(scope, jobId, input.visitId);
 
     const existing = await this.findByOperationId(scope, input.clientOperationId);
     if (existing !== null) {
@@ -90,6 +93,7 @@ export class JobPhotosService {
         id: input.clientOperationId,
         organizationId: scope.organizationId,
         jobId,
+        visitId: input.visitId,
         uploaderMembershipId,
         phase: input.phase,
         note: input.note,
@@ -132,6 +136,7 @@ export class JobPhotosService {
     photoId: string,
     actorMembershipId: string,
     input: RemoveJobPhotoDto,
+    canRemoveAny: boolean = true,
   ): Promise<JobActivityEventDto[]> {
     await this.requireJob(scope, jobId);
 
@@ -141,6 +146,9 @@ export class JobPhotosService {
     }
     if (photo.removed) {
       throw new JobPhotoAlreadyRemovedError();
+    }
+    if (!canRemoveAny && photo.uploaderMembershipId !== actorMembershipId) {
+      throw new JobPhotoRemovalForbiddenError();
     }
 
     try {
@@ -229,9 +237,12 @@ export class JobPhotosService {
     scope: OrganizationScope,
     jobId: string,
     photoId: string,
-  ): Promise<{ removed: boolean } | null> {
+  ): Promise<{ removed: boolean; uploaderMembershipId: string } | null> {
     const [row] = await this.db
-      .select({ removalId: jobPhotoRemovals.id })
+      .select({
+        removalId: jobPhotoRemovals.id,
+        uploaderMembershipId: jobPhotos.uploaderMembershipId,
+      })
       .from(jobPhotos)
       .leftJoin(
         jobPhotoRemovals,
@@ -248,7 +259,12 @@ export class JobPhotosService {
         ),
       )
       .limit(1);
-    return row === undefined ? null : { removed: row.removalId !== null };
+    return row === undefined
+      ? null
+      : {
+          removed: row.removalId !== null,
+          uploaderMembershipId: row.uploaderMembershipId,
+        };
   }
 
   /** One photo row of the caller's organization, or `null`. */
@@ -288,9 +304,9 @@ export class JobPhotosService {
    * A Job whose Customer the organization has deleted is not addressable, exactly as the Job read and
    * its actions treat it (`BR-023`).
    */
-  private async requireJob(scope: OrganizationScope, jobId: string): Promise<void> {
+  private async requireJob(scope: OrganizationScope, jobId: string): Promise<{ status: string }> {
     const [row] = await this.db
-      .select({ id: jobs.id })
+      .select({ id: jobs.id, status: jobs.status })
       .from(jobs)
       .innerJoin(customers, eq(customers.id, jobs.customerId))
       .where(
@@ -303,6 +319,46 @@ export class JobPhotosService {
       .limit(1);
     if (row === undefined) {
       throw new JobNotFoundError();
+    }
+    return row;
+  }
+
+  private async requireOpenJob(
+    scope: OrganizationScope,
+    jobId: string,
+  ): Promise<void> {
+    const job = await this.requireJob(scope, jobId);
+    if (job.status === 'COMPLETED' || job.status === 'CANCELED') {
+      throw new JobClosedForFieldWorkError();
+    }
+  }
+
+  /**
+   * One Visit of the caller's organization **and** of the Job the evidence is recorded on.
+   *
+   * Both conditions are checked, because they are different questions: the organization boundary is
+   * `BR-001`, and the Job is the record the evidence is filed under — a Visit of another Job would file
+   * the evidence where its own Activity read would never report it (`BR-042`). A Visit that fails either
+   * check is reported exactly as one that does not exist, so an id cannot be probed (`BR-023`).
+   */
+  private async requireVisit(
+    scope: OrganizationScope,
+    jobId: string,
+    visitId: string,
+  ): Promise<void> {
+    const [row] = await this.db
+      .select({ id: visits.id })
+      .from(visits)
+      .where(
+        and(
+          eq(visits.organizationId, scope.organizationId),
+          eq(visits.jobId, jobId),
+          eq(visits.id, visitId),
+        ),
+      )
+      .limit(1);
+    if (row === undefined) {
+      throw new VisitNotFoundError();
     }
   }
 }
@@ -323,6 +379,13 @@ export class JobPhotoNotFoundError extends Error {
  * Manager who attempts it learns that the evidence is already removed (`BR-067`) instead of being
  * shown a success for an action the API did not perform.
  */
+export class JobPhotoRemovalForbiddenError extends Error {
+  constructor() {
+    super('This photo can only be removed by its uploader or a manager.');
+    this.name = 'JobPhotoRemovalForbiddenError';
+  }
+}
+
 export class JobPhotoAlreadyRemovedError extends Error {
   constructor() {
     super('That photo has already been removed.');
@@ -342,4 +405,3 @@ export class JobPhotoOperationReusedError extends Error {
     this.name = 'JobPhotoOperationReusedError';
   }
 }
-

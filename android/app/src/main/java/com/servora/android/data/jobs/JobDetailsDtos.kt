@@ -19,6 +19,18 @@ data class JobDetailsDto(
     val description: String? = null,
     val typeCode: String? = null,
     val status: String,
+    /**
+     * Why field-facing Job actions are read-only, or absent while the Job stays open (`BR-062`,
+     * `BR-079`).
+     *
+     * It is the API's answer to whether this Job's field record is final, so the screen hides or
+     * disables the Visit's field controls from the server's own statement rather than from a status it
+     * interpreted itself (`BR-007`, `BR-041`). It defaults to `null` so an answer that predates the
+     * field — a working-set row an earlier build wrote included — is read as an open Job rather than
+     * failing the read (`BR-042`, `offline-first-architecture.md` §10); the field controls stay gated by
+     * the Visit's own `fieldActionable`/`completionAllowed`/`addUpdateAllowed` answers beside it.
+     */
+    val readOnlyReason: String? = null,
     val allowedStatusTransitions: List<String> = emptyList(),
     val version: Int = 0,
     val customerId: String,
@@ -43,6 +55,27 @@ data class JobDetailsDto(
      * (`BR-042`, `offline-first-architecture.md` §10).
      */
     val visits: List<JobDetailsVisitSummaryDto> = emptyList(),
+    val followUpVisitRequest: JobDetailsFollowUpVisitRequestDto? = null,
+    /**
+     * Whether the API answered that this caller may schedule a new Visit on the Job right now
+     * (`BR-062`, `BR-071`, `BR-072`).
+     *
+     * It defaults to `false` so an answer that predates the field — or a working-set row written by an
+     * earlier build — offers no schedule action rather than one the API would refuse (`BR-042`,
+     * `offline-first-architecture.md` §10).
+     */
+    val canScheduleVisit: Boolean = false,
+)
+
+@Serializable
+data class JobDetailsFollowUpVisitRequestDto(
+    val id: String,
+    val jobId: String,
+    val sourceVisitId: String? = null,
+    val createdVisitId: String? = null,
+    val requestingTechnicianMembershipId: String,
+    val status: String,
+    val version: Int = 0,
 )
 
 /** The Visit the Job is represented by, with the schedule it carries (`BR-072`). */
@@ -55,15 +88,45 @@ data class JobDetailsVisitDto(
     val version: Int = 0,
     val reschedulable: Boolean = false,
     /**
+     * Whether this Visit admits a follow-up Visit request (`BR-FV-001`, `BR-078`).
+     *
+     * The action is offered only for a field attempt that is over and whose recorded outcome expects a
+     * follow-up — `COMPLETED` with `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE`
+     * (`BR-078`). A `RESOLVED` attempt expects none, so the action is not offered for it. It defaults
+     * to `false`, so an answer that predates the field offers nothing (`BR-042`, `BR-007`).
+     */
+    val requestFollowUpAllowed: Boolean = false,
+    /**
      * The statuses **this caller** may move the Visit to (`BR-074`, `BR-093`).
      *
      * The API reports the table `PATCH /jobs/{jobId}/visits/{visitId}/status` validates against,
      * already narrowed to what the caller is authorized to execute, so the screen draws its Visit
      * actions from the server's own answer rather than holding a second copy of the lifecycle
-     * (`BR-022`, `BR-041`). An unknown code is dropped rather than offered. `CANCELED` and `NO_SHOW`
-     * are absent because they are dispatch actions no capability authorizes today (`BR-066`).
+     * (`BR-022`, `BR-041`). An unknown code is dropped rather than offered. `CANCELED` is absent
+     * because cancelling is a dispatch action no capability authorizes today (`BR-066`), and
+     * `COMPLETED` is absent because finishing a Visit is the explicit completion operation the API
+     * validates on its own route (`BR-077`).
      */
     val allowedStatusTransitions: List<String> = emptyList(),
+    /**
+     * Whether this caller may complete the Visit right now, as the API answered it (`BR-077`, `BR-093`).
+     *
+     * Completion is its own operation, so the API answers it separately: the caller must drive the
+     * Visit, hold the capability a completion requires of every caller (`VISIT_RECORD_OUTCOME`) and the
+     * Job and Visit must both still be open (`BR-009`, `BR-062`, `BR-079`). It defaults to `false`, so
+     * an answer that predates the field never offers the action (`BR-042`, `BR-007`).
+     */
+    val completionAllowed: Boolean = false,
+    /**
+     * Whether this caller may add a Visit-scoped field update — a note, a photo, a future recording —
+     * to this Visit right now (`BR-013`, `BR-027`).
+     *
+     * It is the API's answer to whether the Job and the Visit still take field work, which is what keeps
+     * this screen from offering a write under a Job the office has already canceled or completed
+     * (`BR-062`, `BR-079`). It defaults to `false`, so a payload that predates the field offers nothing
+     * rather than offering a write the API would refuse (`BR-042`, `BR-007`).
+     */
+    val addUpdateAllowed: Boolean = false,
     /**
      * Whether **this session** is authorized to drive the Visit's field lifecycle, as the API answered
      * it (`BR-074`, `BR-066`, `BR-093`; `ADR-019` D3, D7).

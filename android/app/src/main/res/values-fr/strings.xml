@@ -101,6 +101,7 @@
     <!-- Clients (`customers.*`). -->
     <string name="nav_home">Accueil</string>
     <string name="nav_schedule">Horaire</string>
+    <string name="nav_work">Travail</string>
     <string name="nav_customers">Clients</string>
     <string name="nav_settings">Réglages</string>
     <!-- Le contrôle de retour d'un écran secondaire est une icône (`BR-028`). -->
@@ -110,11 +111,13 @@
     <string name="home_attention_all_clear_title">Vous êtes à jour</string>
     <string name="home_attention_all_clear_detail">Rien ne requiert votre attention pour le moment.</string>
     <string name="home_attention_overdue_title">L\'intervention n° %1$d est en retard</string>
-    <string name="home_attention_review_title">L\'intervention n° %1$d attend une révision</string>
     <string name="home_attention_scheduling_title">L\'intervention n° %1$d doit être planifiée</string>
+    <string name="home_attention_follow_up_title">L\'intervention n° %1$d nécessite une visite de suivi</string>
+    <string name="home_attention_parts_title">L\'intervention n° %1$d attend des pièces</string>
+    <string name="home_attention_unable_to_complete_title">L\'intervention n° %1$d n\'a pas pu être réalisée</string>
     <string name="home_attention_detail_format">%1$s · %2$s</string>
     <string name="home_attention_scheduled">Prévue %1$s</string>
-    <string name="home_attention_open">Ouvrir le client</string>
+    <string name="home_attention_open">Ouvrir l\'intervention</string>
     <string name="home_attention_expand">Afficher les éléments à traiter</string>
     <string name="home_attention_collapse">Masquer les éléments à traiter</string>
     <string name="home_greeting_morning">Bonjour</string>
@@ -147,7 +150,6 @@
     <string name="visit_status_in_progress">En cours</string>
     <string name="visit_status_completed">Terminée</string>
     <string name="visit_status_canceled">Annulée</string>
-    <string name="visit_status_no_show">Absence</string>
     <string name="home_visit_status_overdue">En retard</string>
     <string name="home_loading">Chargement de la journée…</string>
     <string name="home_error_title">Impossible de charger la journée</string>
@@ -177,7 +179,7 @@
     -->
     <string name="schedule_lane_schedule">Horaire</string>
     <string name="schedule_lane_unassigned">Non assignés</string>
-    <string name="schedule_lane_requests">Demandes</string>
+    <string name="schedule_lane_requests">Demandes de visite</string>
     <plurals name="schedule_unassigned_more">
         <item quantity="one">%1$d autre en attente d’un technicien</item>
         <item quantity="other">%1$d autres en attente d’un technicien</item>
@@ -211,13 +213,69 @@
     <string name="schedule_empty_requests_title">Aucune demande en attente</string>
     <string name="schedule_empty_requests_detail">Aucune visite de suivi n’attend une révision.</string>
     <string name="schedule_request_same_technician">Même technicien préféré</string>
+    <string name="schedule_request_preferred_technician">Technicien préféré : %1$s</string>
+    <string name="schedule_request_preferred_technician_unknown">Technicien préféré : demandeur</string>
+    <string name="schedule_request_previous_visit">Visite précédente · %1$s</string>
+    <string name="schedule_request_job_context">Intervention no %1$d · %2$s</string>
+    <string name="schedule_request_customer_context">%1$s</string>
     <string name="schedule_request_open_job">Ouvrir l’intervention</string>
-    <string name="schedule_request_clarify">Clarifier</string>
+    <string name="schedule_request_clarify">Demander au technicien</string>
     <string name="schedule_request_reject">Rejeter</string>
+    <string name="schedule_request_more_actions">Autres actions sur la demande</string>
+    <string name="schedule_request_schedule">Planifier</string>
+    <!--
+      Le motif consigné avec une clarification ou un rejet (`BR-FV-013`). Un rejet ferme la demande sans
+      créer de visite : son motif est donc la seule chose qui peut l’expliquer. La question d’une
+      clarification est offerte sans être obligatoire, car aucune règle ne l’exige (`BR-042`).
+    -->
+    <string name="schedule_request_review_cancel">Annuler</string>
+    <string name="schedule_request_clarify_title">Renvoyer pour clarification</string>
+    <string name="schedule_request_clarify_message">La demande reste ouverte et peut encore être approuvée ou rejetée ici. Ce que vous écrivez y est consigné.</string>
+    <string name="schedule_request_clarify_note">Que manque-t-il? (facultatif)</string>
+    <string name="schedule_request_clarify_confirm">La renvoyer</string>
+    <string name="schedule_request_reject_title">Rejeter la demande</string>
+    <string name="schedule_request_reject_message">Aucune visite n’est créée et la demande est fermée. Ce que vous écrivez est consigné comme motif du refus.</string>
+    <string name="schedule_request_reject_note">Pourquoi est-elle refusée?</string>
+    <string name="schedule_request_reject_confirm">Rejeter</string>
+    <!-- La décision appliquée par l’API, et une décision qu’elle n’a pas appliquée (`BR-001`, `BR-FV-013`). -->
+    <string name="schedule_request_returned">Demande renvoyée pour clarification.</string>
+    <string name="schedule_request_rejected">Demande rejetée.</string>
+    <string name="schedule_request_decision_failed">La décision n’a pas été consignée — la demande est inchangée.</string>
+    <!-- Une demande renvoyée pour clarification : non résolue et toujours en attente d’une décision (`BR-FV-012`). -->
+    <string name="schedule_request_needs_clarification">Renvoyée pour clarification</string>
+    <!--
+      Les statuts propres d’une demande de visite de suivi (`BR-FV-012`), pour que le technicien qui
+      consulte ses demandes lise l’état dans lequel le bureau l’a décidée. Une demande clarifiée garde
+      l’intitulé de l’écran du bureau ci-dessus : c’est un seul statut et un seul vocabulaire (`BR-041`).
+    -->
+    <string name="request_status_pending">En attente d’examen</string>
+    <string name="request_status_approved">Approuvée</string>
+    <string name="request_status_rejected">Rejetée</string>
+    <!--
+      Approving a pending request (`BR-FV-004`, `BR-FV-005`). Approval is the decision that creates the
+      Visit, so it opens the schedule form rather than accepting the technician's proposal as an
+      appointment (`BR-FV-003`, `BR-FV-010`).
+    -->
+    <string name="schedule_request_approve">Accepter</string>
+    <string name="schedule_request_reschedule">Replanifier</string>
+    <string name="schedule_request_approve_title">Approuver et planifier</string>
+    <string name="schedule_request_approve_message">Précisez le moment de la visite et qui l’assure. La demande est approuvée dès que vous confirmez.</string>
+    <string name="schedule_request_approve_confirm">Approuver et planifier</string>
+    <string name="schedule_request_approved">Visite planifiée — la demande est approuvée.</string>
     <string name="schedule_crew_more">%1$s +%2$d</string>
     <string name="schedule_customer_property_format">%1$s · %2$s</string>
     <string name="schedule_loading">Chargement de l’horaire…</string>
     <string name="schedule_error_title">Impossible de charger l’horaire</string>
+    <string name="work_tab_all_visits">Toutes les visites</string>
+    <string name="work_tab_unassigned_jobs_count">Non assignées · %1$d</string>
+    <string name="work_tab_visit_requests_count">Demandes · %1$d</string>
+    <string name="work_search_placeholder">Rechercher intervention, client, adresse, tech…</string>
+    <string name="work_filter_all">Toutes</string>
+    <string name="work_filter_scheduled">Planifiées</string>
+    <string name="work_filter_unassigned">Non assignées</string>
+    <string name="work_filter_overdue">En retard</string>
+    <string name="work_empty_jobs_title">Aucune intervention trouvée</string>
+    <string name="work_empty_jobs_detail">Essayez une autre recherche ou un autre filtre.</string>
     <!-- L’horaire du technicien : la semaine, le jour et les visites assignées au technicien connecté. -->
     <string name="nav_my_schedule">Mon horaire</string>
     <string name="technician_schedule_week_range">%1$s–%2$s</string>
@@ -230,6 +288,84 @@
     <string name="technician_schedule_empty_detail">Rien ne vous est assigné pour ce jour.</string>
     <string name="technician_schedule_loading">Chargement de votre horaire…</string>
     <string name="technician_schedule_error_title">Impossible de charger votre horaire</string>
+    <!--
+      La seconde vue de Mon horaire : les demandes de visite de suivi du technicien et la réponse du
+      bureau à chacune (`BR-FV-012`, `BR-FV-013`) — c’est ainsi que le technicien apprend que la visite
+      demandée a été approuvée, renvoyée pour clarification ou refusée. Une demande est une proposition
+      et non un rendez-vous (`BR-FV-002`) : sa plage est donc présentée comme ce que le technicien a
+      proposé, et la visite créée par une approbation est ce que la vue Horaire elle-même montre
+      (`BR-FV-005`).
+    -->
+    <string name="technician_schedule_tab_schedule">Horaire</string>
+    <string name="technician_schedule_tab_requests">Demandes de visite</string>
+    <string name="technician_requests_loading">Chargement de vos demandes…</string>
+    <string name="technician_requests_error_title">Impossible de charger vos demandes</string>
+    <string name="technician_requests_unrefreshed">Impossible d’actualiser vos demandes.</string>
+    <string name="technician_requests_empty_title">Aucune demande</string>
+    <string name="technician_requests_empty_detail">Vous n’avez pas demandé d’autre visite.</string>
+    <string name="technician_requests_proposed">Vous avez proposé · %1$s</string>
+    <string name="technician_requests_proposed_none">Vous n’avez proposé aucun moment</string>
+    <string name="technician_request_job">Intervention no %1$d · %2$s</string>
+    <string name="technician_request_status_label">Statut</string>
+    <string name="technician_request_proposed_label">Visite proposée</string>
+    <string name="technician_request_source_visit_label">Visite précédente</string>
+    <string name="technician_request_reason_label">Raison d’une autre visite</string>
+    <string name="technician_request_preference_label">Préférence de technicien</string>
+    <string name="technician_request_preference_none">Aucune préférence de technicien</string>
+    <string name="technician_request_office_note_label">Réponse du bureau</string>
+    <!-- Les mots du bureau : ce qu’une clarification attend encore, ou pourquoi une demande a été refusée (`BR-FV-013`). -->
+    <string name="technician_requests_note">Note du bureau : %1$s</string>
+    <!--
+      La conversation de clarification d’une demande renvoyée, et le composeur qui y répond
+      (`BR-FV-012`). L’échange appartient à la demande : la question du bureau, la réponse du
+      technicien, et l’action qui la donne. Les deux surfaces lisent le même fil.
+    -->
+    <string name="follow_up_conversation_you">Vous</string>
+    <string name="follow_up_conversation_office">Bureau</string>
+    <string name="follow_up_conversation_technician">Technicien</string>
+    <string name="follow_up_conversation_speaker">%1$s · %2$s</string>
+    <string name="technician_request_answer_action">Répondre</string>
+    <string name="technician_request_answer_title">Répondre au bureau</string>
+    <string name="technician_request_answer_message">Le bureau a renvoyé cette demande en précisant ce qui manque. Votre réponse est consignée sur la demande et la replace devant le bureau.</string>
+    <string name="technician_request_answer_question">Le bureau a demandé : %1$s</string>
+    <string name="technician_request_answer_label">Votre réponse</string>
+    <string name="technician_request_answer_send">Envoyer la réponse</string>
+    <string name="technician_request_answer_recorded">Réponse consignée — le bureau a de nouveau la demande.</string>
+    <string name="technician_request_answer_failed">La réponse n’a pas été consignée — la demande est inchangée.</string>
+    <string name="technician_ad_hoc_report_action">Signaler du travail non planifié</string>
+    <string name="technician_ad_hoc_report_title">Signaler du travail non planifié</string>
+    <string name="technician_ad_hoc_report_customer">Client, s’il est connu</string>
+    <string name="technician_ad_hoc_report_property">Propriété</string>
+    <string name="technician_ad_hoc_report_outcome">Résultat</string>
+    <string name="technician_ad_hoc_report_summary">Ce qui s’est passé</string>
+    <string name="technician_ad_hoc_report_notes">Notes</string>
+    <string name="technician_ad_hoc_report_submit">Envoyer le rapport</string>
+    <string name="technician_ad_hoc_report_recorded">Rapport envoyé au bureau pour examen.</string>
+    <string name="technician_ad_hoc_report_failed">Le rapport n’a pas pu être envoyé.</string>
+    <string name="technician_ad_hoc_report_queued">Rapport enregistré. Il sera envoyé dès que vous serez de nouveau en ligne.</string>
+    <string name="technician_ad_hoc_report_problem_summary">Décrivez ce qui s’est passé avant d’envoyer.</string>
+    <string name="technician_ad_hoc_report_work_window">Quand le travail a eu lieu</string>
+    <string name="technician_ad_hoc_report_unknown_customer">Je ne trouve pas le client</string>
+    <string name="technician_ad_hoc_report_use_customer_search">Rechercher plutôt le client</string>
+    <string name="technician_ad_hoc_report_reported_name">Nom du client</string>
+    <string name="technician_ad_hoc_report_reported_phone">Téléphone du client</string>
+    <string name="technician_ad_hoc_report_reported_address">Adresse du client</string>
+    <string name="technician_ad_hoc_report_no_property">Aucune propriété n’est répertoriée pour ce client.</string>
+    <string name="technician_ad_hoc_report_property_unnamed">Propriété sans nom</string>
+    <string name="technician_ad_hoc_report_related_work">Travail lié, le cas échéant</string>
+    <string name="technician_ad_hoc_report_no_related_work">Aucun travail lié n’est répertorié pour ce client.</string>
+    <!--
+      L’écran de détail d’une demande : une des demandes du technicien, ouverte en touchant sa ligne
+      dans la liste des demandes. Une demande est une proposition d’autre visite (`BR-FV-002`) : l’écran
+      porte donc sur la proposition et sur la décision du bureau, et l’intervention visée est à une
+      action.
+    -->
+    <string name="technician_request_detail_title">Détail de la demande</string>
+    <string name="technician_request_detail_conversation_label">Avec le bureau</string>
+    <string name="technician_request_detail_open_job">Voir l’intervention</string>
+    <string name="technician_request_detail_unavailable_title">Cette demande n’est pas disponible</string>
+    <string name="technician_request_detail_unavailable_detail">Elle ne fait pas partie de vos demandes. Ouvrez Demandes pour lire celles que vous avez faites.</string>
+    <string name="manager_request_detail_unavailable_detail">Cette demande n’est plus disponible pour révision.</string>
     <string name="customers_title">Clients</string>
     <string name="customers_subtitle">Gérer les clients et leurs propriétés de service</string>
     <string name="customers_search_placeholder">Nom, téléphone, adresse…</string>
@@ -352,9 +488,7 @@
     <string name="customers_job_unassigned">Non assigné</string>
     <!-- Codes d\'état d\'intervention stables, affichés en libellés (`BR-058`, `BR-041`). -->
     <string name="customers_job_status_new">Nouveau</string>
-    <string name="customers_job_status_scheduled">Planifié</string>
-    <string name="customers_job_status_in_progress">En cours</string>
-    <string name="customers_job_status_pending_review">En attente de révision</string>
+    <string name="customers_job_status_active">Actif</string>
     <string name="customers_job_status_completed">Terminé</string>
     <string name="customers_job_status_canceled">Annulé</string>
 
@@ -528,6 +662,14 @@
     <string name="job_details_customer_phone_label">Téléphone</string>
     <string name="job_details_customer_email_label">Courriel</string>
     <string name="job_details_customer_notes_label">Notes</string>
+    <!--
+      Les trois sections qu'un technicien lit avant de travailler (`BR-012`, `BR-092`) : où est le travail,
+      qui il peut joindre sur place, et ce que le bureau a consigné qu'il doit savoir. Chacune est une
+      section étiquetée plutôt qu'une ligne dans l'information de l'intervention, afin qu'une consigne
+      d'accès ne soit pas enfouie parmi les métadonnées.
+    -->
+    <string name="job_details_location_label">Lieu</string>
+    <string name="job_details_contacts_label">Contacts</string>
     <plurals name="job_details_customer_other_contacts">
         <item quantity="one">%1$d autre contact</item>
         <item quantity="other">%1$d autres contacts</item>
@@ -549,7 +691,6 @@
       étiquetée selon ce à quoi elle appartient, pour qu'aucune ne soit lue comme une autre, et le groupe
       d'activité d'une visite est intitulé `Visite N · date`.
     -->
-    <string name="job_details_overview_label">Aperçu de l\'intervention</string>
     <!--
       L'étiquette de la section qui présente la visite que la lecture représente (`BR-081`). Elle énonce
       quand cette tentative a lieu, selon l'horloge et le fuseau de l'appareil, pour que la section ne
@@ -563,21 +704,6 @@
     <string name="job_details_no_selected_visit_detail">Cette intervention n\'a encore aucune visite planifiée.</string>
     <string name="job_details_visit_activity_label">Activité de la visite</string>
     <string name="job_details_visit_activity_empty">Rien n\'a encore été consigné pour cette visite.</string>
-    <string name="job_details_visit_time_label">Heure prévue</string>
-    <string name="job_details_visit_time_range">%1$s – %2$s</string>
-    <!--
-      Ce qui est résulté de la tentative sur place (`BR-077`, `BR-078`). C'est le résultat **courant** de
-      la visite que l'API rapporte, donc la ligne n'est dessinée que lorsque la visite en détient un : une
-      visite rouverte après avoir été terminée n'en détient aucun, et une visite jamais terminée non plus
-      (`BR-079`).
-    -->
-    <string name="job_details_visit_outcome_label">Résultat</string>
-    <!--
-      L'équipe qu'un groupe de visite énonce est celle que la lecture rapporte, c'est-à-dire les
-      techniciens **assignés** à la tentative (`BR-068`) : Servora ne consigne pas qui était présent, donc
-      l'étiquette ne l'affirme jamais.
-    -->
-    <string name="job_details_assigned_technicians_label">Techniciens assignés</string>
     <string name="job_details_job_updates_label">Mises à jour générales de l\'intervention</string>
     <string name="job_details_job_updates_empty">Aucune mise à jour générale pour l\'instant.</string>
 
@@ -596,11 +722,21 @@
       pareil, et la date énonce ce pour quoi le groupe existait (`BR-052`, `BR-072`).
     -->
     <string name="job_activity_visit_title_format">Visite %1$d · %2$s</string>
+    <!--
+      Ce qu'un groupe de visite replié énonce sous son titre : où la tentative s'est rendue et ce qu'elle a
+      donné — « Terminée · Suivi requis » (`BR-074`, `BR-078`, `BR-080`). Le statut est celui de la visite
+      et le résultat est celui qu'elle a consigné, donc une visite qui n'en a aucun n'énonce que son
+      statut (`BR-079`, `BR-042`).
+    -->
+    <string name="job_activity_visit_summary_format">%1$s · %2$s</string>
     <string name="job_activity_visit_expand_label">Développer la visite %1$d</string>
     <string name="job_activity_visit_collapse_label">Réduire la visite %1$d</string>
     <!-- Le groupe qui contient les mises à jour propres à l'intervention, sans visite (`BR-080`). -->
     <string name="job_activity_general_expand_label">Développer les mises à jour générales</string>
     <string name="job_activity_general_collapse_label">Réduire les mises à jour générales</string>
+    <string name="job_activity_admin_label">Historique administratif · %1$d</string>
+    <string name="job_activity_admin_expand_label">Développer l’historique administratif</string>
+    <string name="job_activity_admin_collapse_label">Réduire l’historique administratif</string>
     <!-- L'état qu'un groupe replié ou déployé annonce à un lecteur d'écran (`BR-028`). -->
     <string name="job_activity_group_expanded">Déployé</string>
     <string name="job_activity_group_collapsed">Replié</string>
@@ -621,7 +757,19 @@
     <string name="job_activity_cancel_update">Annuler</string>
     <string name="job_activity_job_status_changed">Statut de l\'intervention changé pour %1$s</string>
     <string name="job_activity_job_status_changed_generic">Statut de l\'intervention mis à jour</string>
-    <string name="job_activity_visit_status_changed">Statut de la visite changé pour %1$s</string>
+    <!--
+      Un changement de statut de visite est énoncé dans la langue du terrain, et non comme un code de statut
+      assigné (`BR-012`, `BR-080`) : le technicien lit ce qui s\'est passé — « Travail commencé », « Arrivé
+      sur place » — plutôt que « Statut de la visite changé pour EN_PROGRESS ». Une chaîne par destination
+      offerte par la route de statut, afin qu\'un code que cette version ne sait pas nommer s\'énonce
+      génériquement plutôt que faussement (`BR-042`).
+    -->
+    <string name="job_activity_visit_status_scheduled">Visite planifiée</string>
+    <string name="job_activity_visit_status_en_route">En route</string>
+    <string name="job_activity_visit_status_on_site">Arrivé sur place</string>
+    <string name="job_activity_visit_status_in_progress">Travail commencé</string>
+    <string name="job_activity_visit_status_completed">Visite terminée</string>
+    <string name="job_activity_visit_status_canceled">Visite annulée</string>
     <string name="job_activity_visit_status_changed_generic">Statut de la visite mis à jour</string>
     <string name="job_activity_property_changed">Lieu de l\'intervention modifié</string>
     <string name="job_activity_customer_changed">Client de l\'intervention modifié</string>
@@ -630,12 +778,15 @@
     <string name="job_activity_technician_assigned">Assignation : %1$s (%2$s)</string>
     <string name="job_activity_technician_removed">Retrait : %1$s</string>
     <string name="job_activity_technician_role_changed">Changement de rôle de %1$s : %2$s → %3$s</string>
-    <string name="job_activity_outcome_recorded">Résultat consigné : %1$s</string>
+    <!--
+      Le résultat qu\'une entrée consigne, énoncé comme le résultat lui-même (`BR-078`, `BR-080`) : la
+      completion et ce qui en résulte se lisent comme un seul récit — « Visite terminée » puis « Suivi
+      requis » — plutôt que comme deux événements visuellement indépendants.
+    -->
     <string name="job_activity_outcome_recorded_generic">Résultat consigné</string>
     <string name="job_activity_outcome_resolved">Résolu</string>
     <string name="job_activity_outcome_needs_parts">Pièces requises</string>
-    <string name="job_activity_outcome_needs_followup">Suivi requis</string>
-    <string name="job_activity_outcome_needs_quote_approval">Approbation de soumission requise</string>
+    <string name="job_activity_outcome_needs_follow_up">Suivi requis</string>
     <string name="job_activity_outcome_unable_to_complete">Impossible de terminer</string>
 
     <!--
@@ -694,6 +845,7 @@
     <string name="job_photo_error_type_not_accepted">Ce format de photo n’est pas accepté par Servora. Prenez ou choisissez une image JPEG, PNG ou WebP.</string>
     <string name="job_photo_error_too_large">Cette photo est trop volumineuse pour être téléversée. Reprenez-la dans un format plus petit.</string>
     <string name="job_photo_error_not_saved">La photo n’a pas pu être enregistrée sur cet appareil.</string>
+    <string name="job_photo_error_no_visit">Cette photo n’a aucune visite à laquelle appartenir. Rouvrez le travail.</string>
     <string name="job_photo_error_not_read">Cette photo n’a pas pu être lue sur cet appareil.</string>
     <string name="job_photo_error_picker_unavailable">Le sélecteur de photos de l’appareil n’a pas pu être ouvert.</string>
     <!--
@@ -739,6 +891,29 @@
     <string name="job_action_change_status">Changer le statut</string>
     <string name="job_action_reschedule">Replanifier</string>
     <string name="job_action_manage_technicians">Gérer les techniciens</string>
+    <!--
+      Scheduling a further Visit on a Job (`BR-071`, `BR-072`). Addition to a Job's work is represented by
+      another Visit, never by a new Job (`BR-047`, `BR-051`), so the action sits with the Visit's own.
+    -->
+    <string name="job_action_schedule_visit">Planifier une visite</string>
+    <string name="job_action_schedule_follow_up_visit">Planifier une visite de suivi</string>
+    <string name="job_action_done_schedule_visit">Visite planifiée.</string>
+    <!--
+      Demander une visite de suivi (`BR-FV-001`, `BR-FV-003`). C’est une demande que le bureau examine,
+      et non une visite planifiée (`BR-FV-002`) : l’action comme sa confirmation le disent et ne
+      laissent jamais croire qu’une visite a été réservée.
+    -->
+    <string name="job_action_request_follow_up">Demander une autre visite</string>
+    <string name="job_action_done_follow_up_request">Visite de suivi demandée. Le bureau l’examinera.</string>
+    <string name="job_follow_up_request_sent">Demande envoyée</string>
+    <string name="job_follow_up_request_title">Demande de visite de suivi</string>
+    <string name="job_follow_up_request_source">Issue de la visite précédente · %1$s</string>
+    <string name="job_follow_up_request_source_generic">Créée à partir d’une visite précédente</string>
+    <string name="job_follow_up_request_awaiting_schedule">Approuvée · En attente de planification</string>
+    <string name="job_follow_up_request_scheduled_for">Planifiée pour %1$s</string>
+    <string name="job_follow_up_request_open">Ouvrir la demande de visite</string>
+    <string name="job_follow_up_request_review">Réviser la demande</string>
+    <string name="job_follow_up_request_view">Voir la demande</string>
     <string name="job_action_ok">OK</string>
     <string name="job_action_cancel">Annuler</string>
     <string name="job_action_dismiss">Fermer</string>
@@ -753,9 +928,7 @@
     <string name="job_action_error_validation">Le changement a été refusé. Vérifiez les valeurs et réessayez.</string>
     <string name="job_action_error_version_conflict">L’intervention a changé depuis son ouverture. Rouvrez-la et réessayez.</string>
     <string name="job_action_error_transition">L’intervention ne peut pas passer à ce statut depuis le statut actuel.</string>
-    <string name="job_action_error_review_condition">L’intervention ne peut pas encore être en révision : du travail est toujours ouvert ou la dernière visite ne l’a pas résolue.</string>
     <string name="job_action_error_completion_blocked">Cette intervention ne peut pas être terminée tant qu’elle a des visites en cours.</string>
-    <string name="job_action_error_cancellation_unavailable">L’annulation d’une intervention n’est pas encore disponible.</string>
     <string name="job_action_error_visit_not_reschedulable">Seule une visite planifiée peut être replanifiée.</string>
     <string name="job_action_error_technicians_not_assignable">Un ou plusieurs techniciens ne peuvent pas être assignés.</string>
     <string name="job_action_error_network">Vérifiez votre réseau et réessayez.</string>
@@ -765,16 +938,39 @@
     <string name="job_action_error_visit_scheduling">La visite ne peut pas encore être planifiée : il lui faut un lieu, un horaire et une équipe avec un seul responsable.</string>
     <string name="job_action_error_job_closed">Cette intervention est fermée ; aucun travail de visite ne peut y être enregistré.</string>
     <string name="job_action_error_visit_operation_reused">Cette mise à jour a déjà servi pour une autre visite.</string>
-    <string name="job_action_change_visit_status">Changer le statut de la visite</string>
+    <!--
+      The follow-up request's own two answers to an approval (`BR-FV-012`, `docs/api/visit-requests.md`):
+      the request moved on since it was read, or it is no longer open for review at all.
+    -->
+    <string name="job_action_error_visit_request_changed">Cette demande a changé depuis sa lecture. Actualisez l’horaire et réessayez.</string>
+    <string name="job_action_error_visit_request_reviewed">Cette demande a déjà été traitée. Actualisez l’horaire pour voir le résultat.</string>
     <string name="job_action_done_visit_status">Statut de la visite mis à jour</string>
+    <string name="job_action_done_visit_completion">Visite terminée</string>
     <string name="job_action_queued_visit_status">Enregistré sur cet appareil. La visite sera mise à jour dès le retour de la connexion.</string>
+    <string name="job_action_queued_visit_completion">Enregistré sur cet appareil. La visite sera terminée dès le retour de la connexion.</string>
     <string name="job_action_queued_activity_text">Enregistré sur cet appareil. La mise à jour sera envoyée dès le retour de la connexion.</string>
     <string name="job_action_queued_generic">Enregistré sur cet appareil. Ce sera appliqué dès le retour de la connexion.</string>
+    <!--
+      Terminer une visite (`BR-077`, `BR-078`). Terminer est une action à part entière plutôt qu'un
+      statut, donc elle est nommée pour ce qu'elle fait, et chaque résultat est expliqué en une ligne
+      pour qu'un technicien sur place choisisse sans lire le catalogue. Le texte exigé par l'API avec le
+      résultat est demandé comme motif lorsque la visite n'a pas pu être terminée, et comme résumé
+      autrement, ce que l'API elle-même nomme ainsi.
+    -->
+    <string name="job_visit_status_label">Statut de la visite</string>
+    <string name="job_visit_complete_action">Terminer la visite</string>
     <string name="job_visit_complete_title">Terminer la visite</string>
     <string name="job_visit_complete_outcome_label">Résultat</string>
+    <string name="job_visit_complete_outcome_resolved_support">Le travail est terminé et rien d’autre n’est requis.</string>
+    <string name="job_visit_complete_outcome_needs_followup_support">Une autre visite est requise pour terminer le travail.</string>
+    <string name="job_visit_complete_outcome_needs_parts_support">Le travail nécessite des pièces avant de pouvoir être terminé.</string>
+    <string name="job_visit_complete_outcome_unable_support">Le travail n’a pas pu être fait. Indiquez pourquoi.</string>
     <string name="job_visit_complete_summary_label">Résumé</string>
     <string name="job_visit_complete_summary_placeholder">Que s’est-il passé sur place ?</string>
     <string name="job_visit_complete_summary_required">Obligatoire : indiquez le résultat de la visite.</string>
+    <string name="job_visit_complete_reason_label">Motif</string>
+    <string name="job_visit_complete_reason_placeholder">Pourquoi le travail n’a-t-il pas pu être terminé ?</string>
+    <string name="job_visit_complete_reason_required">Obligatoire : indiquez pourquoi le travail n’a pas pu être terminé.</string>
     <string name="job_visit_complete_confirm">Terminer la visite</string>
     <string name="job_visit_pending_title">En attente de synchronisation</string>
     <string name="job_visit_pending_action">Visite → %1$s</string>
@@ -783,7 +979,18 @@
     <string name="job_visit_pending_retrying">Envoi impossible. Une nouvelle tentative suivra.</string>
     <string name="job_visit_pending_refused">Non appliqué</string>
     <string name="job_visit_pending_stale">La visite a changé, ou la nouvelle heure entre en conflit avec une autre visite. Rouvrez l’intervention et réessayez.</string>
+    <string name="job_visit_pending_job_closed">Cette intervention a été annulée ou terminée, donc la visite ne peut plus être mise à jour. Demandez au bureau si le travail est toujours requis.</string>
     <string name="job_visit_pending_discard">Supprimer</string>
+
+    <!--
+      Une intervention que le bureau a fermée (`BR-062`, `BR-079`). Rien d'autre ne peut y être
+      enregistré, donc ses commandes de terrain sont absentes; l'annulation est énoncée de façon
+      bien visible parce qu'elle change matériellement le travail confié au technicien.
+    -->
+    <string name="job_details_job_canceled_title">Cette intervention a été annulée</string>
+    <string name="job_details_job_canceled_message">Le bureau a annulé cette intervention, donc aucun travail de visite ne peut y être enregistré. Ce qui a déjà été consigné reste lisible ci-dessous.</string>
+    <string name="job_details_job_completed_title">Cette intervention est terminée</string>
+    <string name="job_details_job_completed_message">L’intervention est fermée : ses visites et ses preuves sont en lecture seule. Pour plus de travail, le bureau doit la rouvrir.</string>
 
     <!-- Replanification d’une visite (`BR-073`). -->
     <string name="job_reschedule_title">Replanifier la visite</string>
@@ -806,6 +1013,36 @@
     <string name="job_conflict_title">Cette plage horaire chevauche une autre visite</string>
     <string name="job_conflict_message">Le même technicien est déjà occupé. Vous pouvez tout de même planifier cette visite.</string>
     <string name="job_conflict_confirm">Planifier quand même</string>
+
+    <!--
+      The form that schedules a Visit (`BR-068`, `BR-071`, `BR-072`). One form serves the direct schedule
+      and the approval of a follow-up request, because both state the same window and crew. It asks for
+      one visit date and the two times that day, because a field attempt starts and ends on the same day.
+    -->
+    <string name="schedule_visit_title">Planifier une visite</string>
+    <string name="schedule_visit_message">Précisez le moment de la visite et qui l’assure. La visite est créée dès que vous confirmez.</string>
+    <string name="schedule_visit_confirm">Planifier la visite</string>
+    <string name="schedule_visit_date_label">Date de la visite</string>
+    <string name="schedule_visit_start_time_label">Heure de début</string>
+    <string name="schedule_visit_end_time_label">Heure de fin</string>
+    <string name="schedule_visit_crew_label">Techniciens</string>
+    <string name="schedule_visit_problem_end">L’heure de fin doit être après l’heure de début.</string>
+    <string name="schedule_visit_problem_crew">Choisissez au moins un technicien.</string>
+    <string name="schedule_visit_problem_lead">Choisissez le technicien qui dirige la visite.</string>
+
+    <!--
+      Demander une visite de suivi (`BR-FV-001`, `BR-FV-003`). Le formulaire demande la plage proposée,
+      la raison d’une autre visite et si le technicien souhaite s’en charger — et aucune équipe, car qui
+      effectue la visite relève du bureau (`BR-FV-004`). Le message précise que rien n’est réservé
+      (`BR-FV-002`, `BR-FV-010`), et les libellés de date et d’heure sont ceux du formulaire de
+      planification, afin que les deux nomment une même plage de la même façon.
+    -->
+    <string name="request_follow_up_title">Demander une autre visite</string>
+    <string name="request_follow_up_message">Indiquez quand la visite de suivi devrait avoir lieu et pourquoi elle est nécessaire. Le bureau examine la demande et confirme l’horaire — rien n’est encore réservé.</string>
+    <string name="request_follow_up_reason_label">Pourquoi une autre visite est nécessaire</string>
+    <string name="request_follow_up_reason_placeholder">Par exemple : la pièce doit être commandée.</string>
+    <string name="request_follow_up_problem_reason">Indiquez pourquoi une autre visite est nécessaire.</string>
+    <string name="request_follow_up_confirm">Envoyer la demande</string>
 
     <!--
       Les changements de statut conséquents que l’utilisateur confirme avant l’envoi (`BR-058`,
@@ -843,6 +1080,7 @@
     <string name="job_audio_error_recording_failed">L’enregistrement n’a pas pu se terminer, donc rien n’a été sauvegardé.</string>
     <string name="job_audio_error_recording_empty">L’enregistrement est vide, donc rien n’a été sauvegardé.</string>
     <string name="job_audio_error_recording_not_saved">L’enregistrement n’a pas pu être sauvegardé sur cet appareil.</string>
+    <string name="job_audio_error_no_visit">Cet enregistrement n’a aucune visite à laquelle appartenir. Rouvrez le travail.</string>
     <string name="job_audio_error_not_queued">L’enregistrement n’a pas pu être sauvegardé pour l’instant. Il reste sur cet appareil.</string>
     <string name="job_audio_error_already_submitted">Cet enregistrement est déjà en attente de téléversement.</string>
     <!--

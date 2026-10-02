@@ -66,6 +66,7 @@ internal fun jobAudioFailureMessage(failure: JobAudioFailure): Int =
         JobAudioFailure.RECORDING_FAILED -> R.string.job_audio_error_recording_failed
         JobAudioFailure.RECORDING_EMPTY -> R.string.job_audio_error_recording_empty
         JobAudioFailure.RECORDING_NOT_SAVED -> R.string.job_audio_error_recording_not_saved
+        JobAudioFailure.NO_VISIT -> R.string.job_audio_error_no_visit
         JobAudioFailure.NOT_QUEUED -> R.string.job_audio_error_not_queued
         JobAudioFailure.ALREADY_SUBMITTED -> R.string.job_audio_error_already_submitted
         // Playback's own failures name what the technician can act on: this device could not play the

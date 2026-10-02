@@ -1,5 +1,7 @@
 # Tracker 034 — The manager's Job status workflow: any permitted destination, one operation, one record
 
+> **Superseded vocabulary, 2026-09-20.** The implemented behaviour this tracker records is described in it with the Job statuses and Visit statuses that were current then — `SCHEDULED`, `IN_PROGRESS`, `PENDING_REVIEW` and `NO_SHOW`. Those are retired: a Job is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED` (`BR-058`), a Visit is `DRAFT`, `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or `CANCELED` (`BR-074`), `BR-061` is **REMOVED**, and operational attention is derived (`BR-060`). The behaviour this tracker **decided** stands; only the vocabulary in its prose is historic. See `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+
 **Status: COMPLETE for the API and Android implementation; physical-device QA is the product owner's**
 
 **Changes business rules.** This slice amends `BR-058` (permitted destinations), `BR-062` (closing and
@@ -93,6 +95,11 @@ steps were legitimate. This slice makes a Job's status a **destination the autho
 `PATCH /jobs/:id/status` is unchanged in shape — the same request body, the same single
 `job_status_history` row, the same Job projection in answer. What changed is the set of destinations it
 accepts and the conditions it applies:
+
+> **Superseded by `docs/tracker/051-job-visit-lifecycle-redesign.md`.** The Job status table below is the
+> lifecycle this tracker implemented at the time: Job `PENDING_REVIEW`, the `BR-061` review-entry condition,
+> the refusal of Job cancellation (`JOB_CANCELLATION_UNAVAILABLE`) and the Visit status `NO_SHOW` are all
+> retired. The implemented lifecycle is recorded in `docs/api/job-actions.md`.
 
 | Destination      | Structural | Runtime eligibility                                                              | Refusal                        |
 | ---------------- | ---------- | -------------------------------------------------------------------------------- | ------------------------------ |

@@ -2,6 +2,8 @@ package com.servora.android.ui.schedule
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -12,6 +14,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.servora.android.R
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.domain.model.FollowUpVisitRequest
+import com.servora.android.domain.model.FollowUpVisitRequestMessage
+import com.servora.android.domain.model.FollowUpVisitRequestMessageAuthorKind
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.Schedule
 import com.servora.android.domain.model.ScheduleAddress
 import com.servora.android.domain.model.ScheduleDay
@@ -19,11 +24,14 @@ import com.servora.android.domain.model.ScheduleScope
 import com.servora.android.domain.model.ScheduleScopeKind
 import com.servora.android.domain.model.ScheduleTechnician
 import com.servora.android.domain.model.ScheduleVisit
+import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.theme.ServoraTheme
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -190,6 +198,16 @@ class ScheduleScreenTest {
 
         composeTestRule.onNodeWithTag(scheduleVisitTag("visit-9")).assertIsDisplayed()
         composeTestRule.onNodeWithTag(scheduleVisitTag("visit-1")).assertDoesNotExist()
+    }
+
+    @Test
+    fun keepsDateControlsOnlyOnTheScheduleLane() {
+        render(state = state(lane = ScheduleLane.REQUESTS, requests = listOf(request())))
+
+        composeTestRule.onNodeWithTag(ScheduleLaneSelectorTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(ScheduleDateHeaderTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(ScheduleWeekStripTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(ScheduleTechnicianFilterTag).assertDoesNotExist()
     }
 
     @Test
@@ -406,30 +424,196 @@ class ScheduleScreenTest {
 
         assertTrue(retried)
     }
+
+    @Test
+    fun keepsARequestReturnedForClarificationInTheLane() {
+        // `BR-FV-012`: a clarified request is unresolved "until it is later approved or rejected", so the
+        // lane that decides it must still hold it — and the card must say which of the two reviewable
+        // states it is in, so the office never decides about one believing it is the other.
+        render(
+            state = state(
+                lane = ScheduleLane.REQUESTS,
+                requests = listOf(request(status = FollowUpVisitRequestStatus.NEEDS_CLARIFICATION)),
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(scheduleRequestTag("request-1")).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(scheduleRequestClarifiedTag("request-1")).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.schedule_request_needs_clarification))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun opensARequestFromItsCard() {
+        var opened: String? = null
+        render(
+            state = state(lane = ScheduleLane.REQUESTS, requests = listOf(request())),
+            onOpenRequest = { opened = it },
+        )
+
+        composeTestRule.onNodeWithTag(scheduleRequestTag("request-1")).performClick()
+
+        assertEquals("request-1", opened)
+    }
+
+    @Test
+    fun showsTheRequestProposedDateWithItsTime() {
+        val proposedWindow = formatRequestWindow(
+            request().proposedStart,
+            request().proposedEnd,
+            ZoneId.of(DEVICE_ZONE),
+            Locale.getDefault(),
+        )
+        render(state = state(lane = ScheduleLane.REQUESTS, requests = listOf(request())))
+
+        composeTestRule.onNodeWithText(requireNotNull(proposedWindow)).assertIsDisplayed()
+    }
+
+    @Test
+    fun doesNotAskForClarificationAgainWhileTheRequestAwaitsTheTechnician() {
+        render(
+            state = state(
+                lane = ScheduleLane.REQUESTS,
+                requests = listOf(request(status = FollowUpVisitRequestStatus.NEEDS_CLARIFICATION)),
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(scheduleClarifyRequestTag("request-1")).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(scheduleRejectRequestTag("request-1")).assertIsDisplayed()
+    }
+
+    @Test
+    fun showsTheAnswerOnTheRequestItAnswers() {
+        // The office reads the same exchange it is deciding about (`BR-FV-012`, `BR-FV-013`): a question
+        // it asked and an answer it has not read would leave it deciding on the information it had.
+        render(
+            state = state(
+                lane = ScheduleLane.REQUESTS,
+                requests = listOf(
+                    request(
+                        status = FollowUpVisitRequestStatus.NEEDS_CLARIFICATION,
+                        messages = listOf(
+                            conversationMessage(
+                                id = "message-1",
+                                authorKind = FollowUpVisitRequestMessageAuthorKind.OFFICE,
+                                body = "Which part number?",
+                            ),
+                            conversationMessage(
+                                id = "message-2",
+                                authorKind = FollowUpVisitRequestMessageAuthorKind.REQUESTER,
+                                body = "PN-4471.",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        composeTestRule
+            .onNodeWithTag(scheduleRequestConversationTag("request-1"))
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Which part number?").assertIsDisplayed()
+        composeTestRule.onNodeWithText("PN-4471.").assertIsDisplayed()
+        // The answer is the technician's: the office reading it is not the author, so it is not "You"
+        // (`BR-041`).
+        composeTestRule
+            .onNodeWithText(
+                string(R.string.follow_up_conversation_technician),
+                substring = true,
+            )
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun rejectsARequestOnlyWithTheReasonItWasRefused() {
+        var rejected: String? = null
+        render(
+            state = state(lane = ScheduleLane.REQUESTS, requests = listOf(request())),
+            onRejectRequest = { _, note -> rejected = note },
+        )
+
+        composeTestRule.onNodeWithTag(scheduleRejectRequestTag("request-1")).performClick()
+
+        // The decision is stated in its own confirmation (`BR-FV-013`), and a rejection cannot be sent
+        // without the reason it was refused — the record `BR-FV-013` asks for is the only thing that can
+        // state why.
+        composeTestRule.onNodeWithTag(ScheduleRejectRequestDialogTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(scheduleReviewConfirmTag("request-1")).assertIsNotEnabled()
+
+        composeTestRule
+            .onNodeWithTag(scheduleReviewNoteTag("request-1"))
+            .performTextInput("No further visit is required.")
+        composeTestRule.onNodeWithTag(scheduleReviewConfirmTag("request-1")).assertIsEnabled()
+        composeTestRule.onNodeWithTag(scheduleReviewConfirmTag("request-1")).performClick()
+
+        assertEquals("No further visit is required.", rejected)
+    }
+
+    @Test
+    fun returnsARequestForClarificationWithWhatIsStillNeeded() {
+        var clarified: String? = null
+        render(
+            state = state(lane = ScheduleLane.REQUESTS, requests = listOf(request())),
+            onClarifyRequest = { _, note -> clarified = note },
+        )
+
+        composeTestRule.onNodeWithTag(scheduleClarifyRequestTag("request-1")).performClick()
+        composeTestRule.onNodeWithTag(ScheduleClarifyRequestDialogTag).assertIsDisplayed()
+
+        // A clarification's question is offered rather than required: no rule states a note requirement
+        // for one, and the route's `note` is optional (`BR-042`).
+        composeTestRule.onNodeWithTag(scheduleReviewConfirmTag("request-1")).assertIsEnabled()
+        composeTestRule
+            .onNodeWithTag(scheduleReviewNoteTag("request-1"))
+            .performTextInput("Which part number?")
+        composeTestRule.onNodeWithTag(scheduleReviewConfirmTag("request-1")).performClick()
+
+        assertEquals("Which part number?", clarified)
+    }
 }
 
 /** The screen a test drives, and the callbacks it recorded. */
 private fun ScheduleScreenTest.render(
     state: ScheduleUiState,
+    canApproveVisitRequests: Boolean = false,
     onSelectDate: (LocalDate) -> Unit = {},
     onSelectLane: (ScheduleLane) -> Unit = {},
     onApplyTechnicians: (List<ScheduleTechnician>) -> Unit = {},
     onOpenJob: (String) -> Unit = {},
-    onClarifyRequest: (FollowUpVisitRequest) -> Unit = {},
-    onRejectRequest: (FollowUpVisitRequest) -> Unit = {},
+    onOpenRequest: (String) -> Unit = {},
+    onClarifyRequest: (FollowUpVisitRequest, String) -> Unit = { _, _ -> },
+    onRejectRequest: (FollowUpVisitRequest, String) -> Unit = { _, _ -> },
+    onStartApproval: (FollowUpVisitRequest) -> Unit = {},
+    onApproveRequest: (
+        FollowUpVisitRequest,
+        Instant,
+        Instant,
+        List<TechnicianAssignment>,
+    ) -> Unit = { _, _, _, _ -> },
+    onConfirmApproval: () -> Unit = {},
     onRetry: () -> Unit = {},
 ) {
     composeTestRule.setContent {
         ServoraTheme {
             ScheduleScreen(
                 state = state,
+                canApproveVisitRequests = canApproveVisitRequests,
                 onSelectDate = onSelectDate,
                 onShowWeek = {},
                 onSelectLane = onSelectLane,
                 onApplyTechnicians = onApplyTechnicians,
                 onOpenJob = onOpenJob,
+                onOpenRequest = onOpenRequest,
                 onClarifyRequest = onClarifyRequest,
                 onRejectRequest = onRejectRequest,
+                onStartApproval = onStartApproval,
+                onDismissApproval = {},
+                onApproveRequest = onApproveRequest,
+                onConfirmApproval = onConfirmApproval,
+                onDismissApprovalConflicts = {},
+                onAcknowledgeApproval = {},
+                onAcknowledgeReview = {},
                 onRetry = onRetry,
             )
         }
@@ -453,6 +637,7 @@ private fun state(
     technicians: List<ScheduleTechnician> = listOf(technician()),
     selected: List<ScheduleTechnician> = emptyList(),
     schedule: Schedule? = null,
+    requests: List<FollowUpVisitRequest> = emptyList(),
     failure: CustomersFailureReason? = null,
 ): ScheduleUiState = ScheduleUiState(
     timeZoneId = DEVICE_ZONE,
@@ -473,7 +658,45 @@ private fun state(
         unassignedTotal = unassignedTotal,
         hasUnassignedLane = true,
     ),
+    visitRequests = requests,
     failureReason = failure,
+)
+
+/** One follow-up request the organization holds, as `GET /jobs/visit-requests` answers it. */
+private fun request(
+    id: String = "request-1",
+    status: FollowUpVisitRequestStatus = FollowUpVisitRequestStatus.PENDING,
+    messages: List<FollowUpVisitRequestMessage> = emptyList(),
+) = FollowUpVisitRequest(
+    id = id,
+    jobId = "job-1",
+    sourceVisitId = "visit-1",
+    requestingTechnicianMembershipId = "member-1",
+    proposedStart = "2026-09-08T13:00:00.000Z",
+    proposedEnd = "2026-09-08T14:00:00.000Z",
+    reason = "Return with a replacement part.",
+    sameTechnicianPreferred = true,
+    status = status,
+    reviewerMembershipId = null,
+    reviewedAt = null,
+    reviewNote = null,
+    createdVisitId = null,
+    version = 1,
+    createdAt = "2026-09-07T12:00:00.000Z",
+    updatedAt = "2026-09-07T12:00:00.000Z",
+    messages = messages,
+)
+
+/** One message of a request's clarification conversation (`BR-FV-012`). */
+private fun conversationMessage(
+    id: String,
+    authorKind: FollowUpVisitRequestMessageAuthorKind,
+    body: String,
+): FollowUpVisitRequestMessage = FollowUpVisitRequestMessage(
+    id = id,
+    authorKind = authorKind,
+    body = body,
+    recordedAt = "2026-09-08T13:00:00.000Z",
 )
 
 private fun technician(

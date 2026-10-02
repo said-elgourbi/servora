@@ -77,6 +77,7 @@ class JobPhotoSession @Inject constructor(
     suspend fun recordCapture(
         capture: CapturedJobPhoto,
         jobId: String,
+        visitId: String,
         phase: EvidencePhase?,
         capturedAt: Instant,
     ): JobPhotoRecordResult {
@@ -98,6 +99,7 @@ class JobPhotoSession @Inject constructor(
             sourcePath = capture.localPath,
             source = bytes,
             jobId = jobId,
+            visitId = visitId,
             phase = phase,
             capturedAt = capturedAt,
         )
@@ -123,6 +125,7 @@ class JobPhotoSession @Inject constructor(
      */
     suspend fun recordPickedPhoto(
         jobId: String,
+        visitId: String,
         source: ByteArray,
         phase: EvidencePhase,
     ): JobPhotoRecordResult {
@@ -139,6 +142,7 @@ class JobPhotoSession @Inject constructor(
             sourcePath = null,
             source = source,
             jobId = jobId,
+            visitId = visitId,
             phase = phase,
             capturedAt = clock.instant(),
         )
@@ -163,6 +167,7 @@ class JobPhotoSession @Inject constructor(
         sourcePath: String?,
         source: ByteArray,
         jobId: String,
+        visitId: String,
         phase: EvidencePhase?,
         capturedAt: Instant,
     ): JobPhotoRecordResult {
@@ -202,6 +207,7 @@ class JobPhotoSession @Inject constructor(
         val photo = PendingJobPhoto(
             photoId = photoId,
             jobId = jobId,
+            visitId = visitId,
             localPath = path,
             phase = phase,
             note = null,

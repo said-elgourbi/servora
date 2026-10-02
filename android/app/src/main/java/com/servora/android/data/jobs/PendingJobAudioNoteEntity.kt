@@ -37,6 +37,8 @@ internal data class PendingJobAudioNoteEntity(
     @PrimaryKey val audioNoteId: String,
     val subjectId: String,
     val jobId: String,
+    /** The Visit the recording was made during (`BR-047`), or `null` on a row written before the link. */
+    val visitId: String?,
     val localPath: String,
     val phase: String?,
     val note: String?,

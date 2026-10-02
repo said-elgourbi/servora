@@ -81,6 +81,9 @@ class TechnicianHomeViewModelTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.uiState.value.showsLastReportedNotice)
+        // A day served from the device already says which answer it is, so it is not also reported as
+        // an unrefreshed one (`BR-013`, `BR-041`).
+        assertFalse(viewModel.uiState.value.showsUnrefreshedNotice)
     }
 
     @Test
@@ -118,6 +121,9 @@ class TechnicianHomeViewModelTest {
         // The failure is reported beside the content rather than instead of it.
         assertTrue(state.hasContent)
         assertFalse(state.isRefreshing)
+        // And the screen says the day it is showing could not be refreshed, so a stale answer is never
+        // presented as a current one (`BR-013`, `BR-014`).
+        assertTrue(state.showsUnrefreshedNotice)
     }
 
     @Test
@@ -139,6 +145,32 @@ class TechnicianHomeViewModelTest {
 
         // The reset drops the day with the session, and the next session reads it again (`BR-001`).
         assertEquals(2, repository.requestedZones.size)
+    }
+
+    @Test
+    fun `reads the day again when Home is entered after the first read finished`() = runTest(dispatcher) {
+        val repository = RecordingTechnicianHomeRepository(
+            TechnicianHomeResult.Success(
+                home().copy(nextVisit = visit("visit-2", VisitStatus.SCHEDULED)),
+            ),
+            TechnicianHomeResult.Success(
+                home().copy(nextVisit = visit("visit-2", VisitStatus.EN_ROUTE)),
+            ),
+        )
+        val viewModel = TechnicianHomeViewModel(repository)
+
+        viewModel.load(DEVICE_ZONE)
+        advanceUntilIdle()
+        assertEquals(VisitStatus.SCHEDULED, viewModel.uiState.value.home?.nextVisit?.visitStatus)
+
+        // Entering Home again — a tab change, or coming back from the Job the technician worked — reads
+        // the day once more rather than leaving the status the screen was left showing, because a Visit's
+        // status is the backend's record and not this device's (`BR-001`, `BR-074`).
+        viewModel.load(DEVICE_ZONE)
+        advanceUntilIdle()
+
+        assertEquals(2, repository.requestedZones.size)
+        assertEquals(VisitStatus.EN_ROUTE, viewModel.uiState.value.home?.nextVisit?.visitStatus)
     }
 
     @Test
@@ -176,7 +208,7 @@ private fun home(): TechnicianHome =
                 jobId = "job-9",
                 jobNumber = 1049,
                 jobTitle = "Water heater service",
-                jobStatus = JobStatus.SCHEDULED,
+                jobStatus = JobStatus.ACTIVE,
                 customerId = "customer-1",
                 customerName = "ABC Property Management",
                 scheduledStart = "2026-09-16T09:00:00.000Z",
@@ -195,7 +227,7 @@ private fun visit(visitId: String, status: VisitStatus) =
         jobId = "job-2",
         jobNumber = 1043,
         jobTitle = "Furnace repair",
-        jobStatus = JobStatus.IN_PROGRESS,
+        jobStatus = JobStatus.ACTIVE,
         customerId = "customer-1",
         customerName = "ABC Property Management",
         address = null,

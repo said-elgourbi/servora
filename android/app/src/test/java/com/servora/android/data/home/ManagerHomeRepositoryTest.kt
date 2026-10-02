@@ -186,6 +186,51 @@ class ManagerHomeRepositoryTest {
         )
     }
 
+    @Test
+    fun `reads the outcome-derived attention codes the API reports`() = runTest {
+        // `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` and `UNABLE_TO_COMPLETE` completions each surface a derived
+        // condition (`BR-078`). A kind this build does not know fails the whole read (`BR-042`), so the
+        // codes being present in the vocabulary is what keeps those items on the screen at all.
+        val repository = DefaultManagerHomeRepository(
+            FakeManagerHomeApi(
+                answer = {
+                    managerHomeDto().copy(
+                        attention = ManagerHomeAttentionDto(
+                            total = 3,
+                            items = listOf(
+                                attentionItemDto().copy(
+                                    kind = "FOLLOW_UP_NEEDS_SCHEDULING",
+                                ),
+                                attentionItemDto().copy(
+                                    kind = "PARTS_REQUIRED",
+                                    // A Job-level condition carries no Visit of its own.
+                                    visitId = null,
+                                    scheduledStart = null,
+                                    scheduledEnd = null,
+                                ),
+                                attentionItemDto().copy(kind = "UNABLE_TO_COMPLETE"),
+                            ),
+                        ),
+                    )
+                },
+            ),
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val home = assertSuccess(repository.loadManagerHome("UTC"))
+
+        assertEquals(
+            listOf(
+                ManagerAttentionKind.FOLLOW_UP_NEEDS_SCHEDULING,
+                ManagerAttentionKind.PARTS_REQUIRED,
+                ManagerAttentionKind.UNABLE_TO_COMPLETE,
+            ),
+            home.attention.map { it.kind },
+        )
+        assertEquals(3, home.attentionTotal)
+        assertNull(home.attention[1].visitId)
+    }
+
     private fun failingWith(failure: Throwable) =
         DefaultManagerHomeRepository(
             FakeManagerHomeApi(answer = { throw failure }),
@@ -233,7 +278,7 @@ internal fun attentionItemDto() = ManagerAttentionItemDto(
     jobId = "job-1",
     jobNumber = 1042,
     jobTitle = "Furnace repair",
-    jobStatus = "SCHEDULED",
+    jobStatus = "ACTIVE",
     customerId = "customer-1",
     customerName = "ABC Property Management",
     visitId = "visit-1",
@@ -249,7 +294,7 @@ internal fun visitDto() = ManagerHomeVisitDto(
     jobId = "job-1",
     jobNumber = 1042,
     jobTitle = "Furnace repair",
-    jobStatus = "SCHEDULED",
+    jobStatus = "ACTIVE",
     customerId = "customer-1",
     customerName = "ABC Property Management",
     address = ManagerHomeAddressDto(addressLine1 = "987 Cedar Lane", city = "Montreal"),

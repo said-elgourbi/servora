@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -258,6 +260,9 @@ internal fun JobUpdateSheet(
                             focusRequester = noteField,
                             onConfirm = onConfirmNote,
                             onDismiss = onDismiss,
+                            // The kind takes the space the sheet has left, so its own body can shrink
+                            // while its Save/Cancel stay on screen (`docs/design/android-design-system.md`).
+                            modifier = Modifier.weight(1f, fill = false),
                         )
 
                         JobUpdateKind.PHOTO -> JobUpdatePhotoContent(
@@ -285,6 +290,9 @@ internal fun JobUpdateSheet(
                             onDiscard = onDiscardAudioDraft,
                             onAttach = onAttachAudio,
                             onMicrophoneDenied = onMicrophoneDenied,
+                            // The same space claim as the note kind, for the note beside a take
+                            // (`docs/design/android-design-system.md`).
+                            modifier = Modifier.weight(1f, fill = false),
                         )
                     }
                 }
@@ -517,20 +525,29 @@ private fun JobUpdateNoteContent(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        OutlinedTextField(
-            value = note,
-            onValueChange = { text -> note = text },
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(focusRequester)
-                .testTag(JobUpdateNoteTag),
-            label = { Text(stringResource(R.string.job_activity_text_label)) },
-            placeholder = { Text(stringResource(R.string.job_activity_text_placeholder)) },
-            minLines = 4,
-            enabled = !isSubmitting,
-        )
+        // The field scrolls and the two decisions stay on screen: with the keyboard up the sheet is
+        // shorter than its content, so an action inside the scrolling region would have to be reached by
+        // dismissing the keyboard (`docs/design/android-design-system.md`).
+        Column(
+            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            OutlinedTextField(
+                value = note,
+                onValueChange = { text -> note = text },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+                    .testTag(JobUpdateNoteTag),
+                label = { Text(stringResource(R.string.job_activity_text_label)) },
+                placeholder = { Text(stringResource(R.string.job_activity_text_placeholder)) },
+                minLines = 4,
+                enabled = !isSubmitting,
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
@@ -609,41 +626,105 @@ private fun JobUpdateAudioContent(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(
-            text = stringResource(R.string.evidence_phase_label),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        EvidencePhaseSelector(
-            selected = phase,
-            enabled = !isAttaching,
-            onSelect = onSelectPhase,
-        )
+        // The body scrolls and the take's own decision stays on screen: the note beside a take is typed
+        // into, so the keyboard shortens the sheet, and a decision inside the scrolling region would
+        // scroll away with it (`docs/design/android-design-system.md`).
+        Column(
+            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.evidence_phase_label),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            EvidencePhaseSelector(
+                selected = phase,
+                enabled = !isAttaching,
+                onSelect = onSelectPhase,
+            )
 
-        when {
-            isRecording -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = JobUpdateAudioActionHeight)
-                        .testTag(JobUpdateAudioRecordingTag),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_mic),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(JobUpdateAudioIconSize),
+            when {
+                isRecording -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = JobUpdateAudioActionHeight)
+                            .testTag(JobUpdateAudioRecordingTag),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_mic),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(JobUpdateAudioIconSize),
+                        )
+                        Text(
+                            text = stringResource(R.string.job_audio_recording),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+
+                draft != null -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = JobUpdateAudioActionHeight)
+                            .testTag(JobUpdateAudioReviewTag),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        JobAudioPlayControl(
+                            tag = JobUpdatePlayAudioTag,
+                            isPlaying = isPlaying,
+                            isLoading = false,
+                            enabled = !isAttaching,
+                            onClick = onPlay,
+                        )
+                        // Where the take is and how long it is, in the same shape the timeline states it
+                        // with: one control, one player and one way of reading a recording on both
+                        // surfaces (`BR-041`, `ADR-018` A11).
+                        JobAudioPositionLabel(
+                            tag = JobUpdateAudioPositionTag,
+                            progress = audioProgress,
+                            audioNoteId = draft.audioNoteId,
+                            totalSeconds = draft.durationSeconds,
+                        )
+                    }
+                    // The track sits directly under the row it belongs to, and the height it carries is
+                    // its own touch area rather than a gap (`A11`, `BR-012`).
+                    JobAudioSeekTrack(
+                        tag = JobUpdateSeekAudioTag,
+                        progress = audioProgress,
+                        audioNoteId = draft.audioNoteId,
+                        enabled = !isAttaching,
+                        onSeek = { positionMillis -> onSeek(draft.audioNoteId, positionMillis) },
                     )
-                    Text(
-                        text = stringResource(R.string.job_audio_recording),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { text -> note = text },
+                        enabled = !isAttaching,
+                        label = { Text(stringResource(R.string.job_photo_note_label)) },
+                        minLines = 2,
+                        maxLines = 3,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(JobUpdateAudioNoteTag),
                     )
                 }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // The state's own decision, kept out of the scrolling body (`BR-012`).
+        when {
+            isRecording -> {
                 Button(
                     onClick = onStopRecording,
                     shape = MaterialTheme.shapes.large,
@@ -674,6 +755,7 @@ private fun JobUpdateAudioContent(
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.job_audio_record))
                 }
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.job_audio_hint),
                     style = MaterialTheme.typography.labelSmall,
@@ -682,52 +764,6 @@ private fun JobUpdateAudioContent(
             }
 
             else -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = JobUpdateAudioActionHeight)
-                        .testTag(JobUpdateAudioReviewTag),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    JobAudioPlayControl(
-                        tag = JobUpdatePlayAudioTag,
-                        isPlaying = isPlaying,
-                        isLoading = false,
-                        enabled = !isAttaching,
-                        onClick = onPlay,
-                    )
-                    // Where the take is and how long it is, in the same shape the timeline states it with:
-                    // one control, one player and one way of reading a recording on both surfaces
-                    // (`BR-041`, `ADR-018` A11).
-                    JobAudioPositionLabel(
-                        tag = JobUpdateAudioPositionTag,
-                        progress = audioProgress,
-                        audioNoteId = draft.audioNoteId,
-                        totalSeconds = draft.durationSeconds,
-                    )
-                }
-                // The track sits directly under the row it belongs to, and the height it carries is its
-                // own touch area rather than a gap (`A11`, `BR-012`).
-                JobAudioSeekTrack(
-                    tag = JobUpdateSeekAudioTag,
-                    progress = audioProgress,
-                    audioNoteId = draft.audioNoteId,
-                    enabled = !isAttaching,
-                    onSeek = { positionMillis -> onSeek(draft.audioNoteId, positionMillis) },
-                )
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { text -> note = text },
-                    enabled = !isAttaching,
-                    label = { Text(stringResource(R.string.job_photo_note_label)) },
-                    minLines = 2,
-                    maxLines = 3,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag(JobUpdateAudioNoteTag),
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -22,23 +22,23 @@ is presented as `Authorization: Bearer <accessToken>`. Route paths carry no vers
 
 ## 2. Permissions
 
-| Route           | Permission                                       |
-| --------------- | ------------------------------------------------ |
-| `GET /schedule` | `customers.view` **or** `VISIT_VIEW_ASSIGNED`     |
+| Route           | Permission                                      |
+| --------------- | ----------------------------------------------- |
+| `GET /schedule` | `schedule.view_org` **or** `VISIT_VIEW_ASSIGNED` |
 
 The route accepts **either** capability, and which one the caller holds is then resolved into the
 **scope** of the read:
 
 | Scope          | Held capability         | What the day holds                                          |
 | -------------- | ----------------------- | ----------------------------------------------------------- |
-| `ORGANIZATION` | `customers.view`        | The operation's day, narrowed by the technician filter when one is named. |
+| `ORGANIZATION` | `schedule.view_org`     | The operation's day, narrowed by the technician filter when one is named. |
 | `SELF`         | `VISIT_VIEW_ASSIGNED`   | Only the Visits the caller's own membership is currently on. |
 
-`customers.view` is the capability the API already uses for the organization's Job and Visit data
-(`GET /customers/:id/jobs`, `GET /home/manager`), and `VISIT_VIEW_ASSIGNED` is the one `BR-009` names
-for a technician's own assigned work. Reusing them keeps the schedule inside the existing permission
-model instead of hand-writing a `schedule.*` set the Jobs feature has not defined (`BR-006`,
-`BR-042`).
+`schedule.view_org` is the capability the catalogue names for organization-wide dispatch visibility
+(`0004_woozy_spitfire`, `0015_follow_up_visit_requests` §`permissions`), and `VISIT_VIEW_ASSIGNED` is the
+one `BR-009` names for a technician's own assigned work. The office capability is the one the API already
+authorizes the organization's schedule with, so reuse of `customers.view` — the interim authorization this
+read carried before the capability existed — no longer applies (`BR-006`, `BR-041`).
 
 **The scope is enforced by the service, never by the client** (`BR-001`, `BR-007`):
 
@@ -168,10 +168,10 @@ excluding the attempts that did not happen:
 
 ```text
 visits.scheduled_start ∈ [day.start, day.end)
-AND visits.status NOT IN ('CANCELED', 'NO_SHOW')   -- NOT_DAY_WORK_VISIT_STATUSES
+AND visits.status NOT IN ('CANCELED')   -- NOT_DAY_WORK_VISIT_STATUSES
 ```
 
-A `CANCELED` or `NO_SHOW` Visit is an attempt that did not happen, so it is absent from the day and
+A `CANCELED` Visit is an attempt that did not happen, so it is absent from the day and
 from its order — the same classification `GET /home/manager` uses (`BR-074`). A `COMPLETED` Visit
 stays: it is what the day has produced so far. When `membershipId` names one or more technicians, the
 day is narrowed to the Visits those memberships are **currently** assigned to (`BR-068`). Several ids
@@ -190,13 +190,13 @@ so clearing the filter is the absence of the predicate rather than a list of eve
 **The unassigned lane** — a Visit that is still open and has nobody on it:
 
 ```text
-visits.status NOT IN ('COMPLETED', 'CANCELED', 'NO_SHOW')   -- HISTORICAL_VISIT_STATUSES
+visits.status NOT IN ('COMPLETED', 'CANCELED')   -- TERMINAL_VISIT_STATUSES
 AND NOT EXISTS (visit_technicians for the Visit)
 ```
 
 This is the absence of an assignment rather than a status (`BR-042`): `BR-071`/`BR-072` explicitly
 allow a Visit to exist with no technicians while it is being arranged, `BR-068` records assignment on
-the Visit, and `BR-074`'s historical set is what "still needs somebody" excludes. The lane is
+the Visit, and `BR-074`'s terminal set is what "still needs somebody" excludes. The lane is
 deliberately **not day-scoped**: a Visit with no agreed time belongs to no day, and work waiting for
 a crew is waiting whoever's day it lands on. It is never narrowed by `membershipId` — with one
 technician or several — because a filter by technician cannot select work that has no technician.

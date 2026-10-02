@@ -16,17 +16,28 @@ import {
   sql,
 } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
-import { addressSnapshotOf } from '../address/address-snapshot.js';
+import { alias } from 'drizzle-orm/pg-core';
+import {
+  addressSnapshotOf,
+  readAddressSnapshot,
+} from '../address/address-snapshot.js';
 import { CustomersService } from '../customers/customers.service.js';
-import { PropertiesService } from '../customers/properties.service.js';
+import {
+  PropertiesService,
+  PropertyNotFoundError,
+  type Executor,
+} from '../customers/properties.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import {
   customers,
+  adHocWorkReports,
+  followUpVisitRequestMessages,
   followUpVisitRequests,
   jobStatusHistory,
   jobs,
   organizationJobNumberCounters,
   organizationMembers,
+  properties,
   userProfiles,
   visitNotes,
   visitOutcomeHistory,
@@ -41,10 +52,27 @@ import { memberName } from '../members/member-name.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
 import type { CreateJobDto } from './job-create.dto.js';
 import type {
+  AdHocWorkReportContext,
+  AdHocWorkReportDto,
+  AdHocWorkReportReviewDto,
+  ConvertAdHocWorkReportDto,
+  LinkAdHocWorkReportDto,
+  SubmitAdHocWorkReportDto,
+} from './ad-hoc-work-report.dto.js';
+import { toAdHocWorkReportDto } from './ad-hoc-work-report.dto.js';
+import type {
+  AdHocReportCustomerOptionDto,
+  AdHocReportCustomerScope,
+  AdHocReportJobOptionDto,
+  AdHocReportPropertyOptionDto,
+} from './ad-hoc-work-report-options.dto.js';
+import type {
   DirectCreateVisitDto,
   FollowUpVisitApprovalDto,
+  FollowUpVisitRequestContext,
   FollowUpVisitRequestDto,
   FollowUpVisitReviewDto,
+  ReplyFollowUpVisitRequestDto,
   RequestedVisitTechnician,
   SubmitFollowUpVisitRequestDto,
 } from './follow-up-visit-request.dto.js';
@@ -54,13 +82,16 @@ import { planAssignmentChanges } from './job-assignment-plan.js';
 import type {
   AssignVisitTechniciansDto,
   AddVisitNoteDto,
+  EditVisitNoteDto,
+  RemoveVisitNoteDto,
   ChangeJobStatusDto,
   ChangeVisitStatusDto,
+  CompleteVisitDto,
   RescheduleVisitDto,
 } from './job-action.dto.js';
 import {
-  ACTIVE_VISIT_STATUSES,
   TERMINAL_VISIT_STATUSES,
+  ACTIVE_VISIT_STATUSES,
   VISIT_STATUS_TRANSITIONS,
   applicableJobStatusTransitions,
   isPermittedJobStatusTransition,
@@ -69,6 +100,7 @@ import {
   isTerminalVisitStatus,
   isVisitStatusCorrection,
   type AssignmentRoleCode,
+  type FollowUpVisitRequestStatus,
   type JobStatus,
   type VisitOutcomeCode,
   type VisitStatus,
@@ -84,6 +116,9 @@ import {
   type JobActivityEventDto,
   type JobActivityOptions,
 } from './job-activity.js';
+
+/** How many Customer matches the type-ahead search answers at most (`BR-AH-009`). */
+const AD_HOC_CUSTOMER_SEARCH_RESULT_LIMIT = 20;
 
 /** The Job does not exist in the caller's organization (`BR-001`). */
 export class JobNotFoundError extends Error {
@@ -152,6 +187,58 @@ export class FollowUpVisitRequestNotReviewableError extends Error {
   }
 }
 
+/**
+ * Only a request the office returned for clarification is awaiting an answer (`BR-FV-012`).
+ *
+ * It is its own outcome rather than a review refusal: nothing is being decided here, so a client can
+ * tell "this request was not returned for clarification" apart from "this request is no longer
+ * reviewable". The destination the requester wanted — a request the office reviews again — is not
+ * reachable from the state the request is in.
+ */
+export class FollowUpVisitRequestNotAwaitingReplyError extends Error {
+  constructor(readonly status: string) {
+    super(`A follow-up visit request in ${status} is not awaiting an answer.`);
+    this.name = 'FollowUpVisitRequestNotAwaitingReplyError';
+  }
+}
+
+export class AdHocWorkReportNotFoundError extends Error {
+  constructor() {
+    super('Ad-hoc work report was not found.');
+    this.name = 'AdHocWorkReportNotFoundError';
+  }
+}
+
+export class AdHocWorkReportConflictError extends Error {
+  constructor(
+    readonly currentStatus: string,
+    readonly currentVersion: number,
+  ) {
+    super('The ad-hoc work report changed since it was read.');
+    this.name = 'AdHocWorkReportConflictError';
+  }
+}
+
+export class AdHocWorkReportNotReviewableError extends Error {
+  constructor(readonly status: string) {
+    super(`An ad-hoc work report in ${status} cannot be reviewed.`);
+    this.name = 'AdHocWorkReportNotReviewableError';
+  }
+}
+
+export class AdHocWorkReportLocationRequiredError extends Error {
+  constructor() {
+    super(
+      'A customer and property are required to create a new job from the report.',
+    );
+    this.name = 'AdHocWorkReportLocationRequiredError';
+  }
+}
+
+/** One message of a request's clarification conversation (`BR-FV-012`). */
+type FollowUpVisitRequestMessageRow =
+  typeof followUpVisitRequestMessages.$inferSelect;
+
 /** `BR-058` does not permit the requested transition. */
 export class JobStatusTransitionNotAllowedError extends Error {
   constructor(
@@ -161,25 +248,6 @@ export class JobStatusTransitionNotAllowedError extends Error {
   ) {
     super(`A job in ${from} cannot move to ${to}.`);
     this.name = 'JobStatusTransitionNotAllowedError';
-  }
-}
-
-/**
- * `BR-064` requires a structured cancellation reason whose catalogue is not defined, so the API does
- * not cancel a Job rather than inventing the reason vocabulary (`BR-042`).
- */
-export class JobCancellationUnavailableError extends Error {
-  constructor() {
-    super('Job cancellation is not available yet.');
-    this.name = 'JobCancellationUnavailableError';
-  }
-}
-
-/** `BR-061`'s entry conditions for `PENDING_REVIEW` are not met. */
-export class JobReviewConditionNotMetError extends Error {
-  constructor(readonly reason: 'ACTIVE_VISIT' | 'OUTCOME') {
-    super('The job cannot await review yet.');
-    this.name = 'JobReviewConditionNotMetError';
   }
 }
 
@@ -210,6 +278,13 @@ type JobMutationClient = Pick<
 >;
 
 /** `BR-073` only permits rescheduling a Visit that is `SCHEDULED`. */
+export class VisitNoteForbiddenError extends Error {
+  constructor() {
+    super('This note can only be changed by its author or a manager.');
+    this.name = 'VisitNoteForbiddenError';
+  }
+}
+
 export class VisitNotReschedulableError extends Error {
   constructor(readonly status: VisitStatus) {
     super(`A visit in ${status} cannot be rescheduled.`);
@@ -388,6 +463,7 @@ export class JobsService {
     scope: OrganizationScope,
     jobId: string,
     assignedViewer: AssignedJobViewer | null = null,
+    representedVisitId: string | null = null,
   ): Promise<JobDetails | null> {
     const [row] = await this.db
       .select({
@@ -423,16 +499,30 @@ export class JobsService {
       return null;
     }
 
-    // The Job may legitimately have no Visit, and a Visit with no schedule is never represented
-    // (`BR-051`, `BR-081`), so both reads answer "nothing" rather than failing.
-    const selectedVisit =
-      (await selectVisitsForJobs(this.db, scope, [row.job.id])).get(
-        row.job.id,
-      ) ?? null;
     // The Job's Visits in their own sequence (`BR-047`, `BR-071`), each with the crew it carries. One
     // read of the crews serves every Visit, so a Job with several Visits does not cost one query each
     // (`BR-068`, `dev.md` §6).
     const jobVisits = await readJobVisits(this.db, scope, row.job.id);
+    // The Job may legitimately have no Visit. When a caller names a Visit, the Job is represented by
+    // that exact field attempt; otherwise the legacy default selection still applies (`BR-081`).
+    const requestedVisit = representedVisitId
+      ? (jobVisits.find((visit) => visit.visitId === representedVisitId) ??
+        null)
+      : null;
+    const selectedVisit =
+      requestedVisit !== null &&
+      requestedVisit.scheduledStart !== null &&
+      requestedVisit.scheduledEnd !== null
+        ? {
+            visitId: requestedVisit.visitId,
+            status: requestedVisit.status,
+            scheduledStart: requestedVisit.scheduledStart,
+            scheduledEnd: requestedVisit.scheduledEnd,
+            version: requestedVisit.version,
+          }
+        : ((await selectVisitsForJobs(this.db, scope, [row.job.id])).get(
+            row.job.id,
+          ) ?? null);
     const technicians = await readAssignedTechnicians(
       this.db,
       scope,
@@ -446,6 +536,27 @@ export class JobsService {
       scope,
       row.customerId,
     );
+    const followUpRequestConditions = [
+      eq(followUpVisitRequests.organizationId, scope.organizationId),
+      eq(followUpVisitRequests.jobId, row.job.id),
+      ...(selectedVisit === null
+        ? []
+        : [eq(followUpVisitRequests.sourceVisitId, selectedVisit.visitId)]),
+      ...(assignedViewer === null
+        ? []
+        : [
+            eq(
+              followUpVisitRequests.requestingTechnicianMembershipId,
+              assignedViewer.membershipId,
+            ),
+          ]),
+    ];
+    const [latestFollowUpVisitRequest] = await this.db
+      .select()
+      .from(followUpVisitRequests)
+      .where(and(...followUpRequestConditions))
+      .orderBy(desc(followUpVisitRequests.createdAt))
+      .limit(1);
 
     return {
       job: row.job,
@@ -466,6 +577,20 @@ export class JobsService {
         ...visit,
         technicians: technicians.get(visit.visitId) ?? [],
       })),
+      followUpVisitRequest:
+        latestFollowUpVisitRequest === undefined
+          ? null
+          : {
+              id: latestFollowUpVisitRequest.id,
+              jobId: latestFollowUpVisitRequest.jobId,
+              sourceVisitId: latestFollowUpVisitRequest.sourceVisitId,
+              createdVisitId: latestFollowUpVisitRequest.createdVisitId,
+              requestingTechnicianMembershipId:
+                latestFollowUpVisitRequest.requestingTechnicianMembershipId,
+              status:
+                latestFollowUpVisitRequest.status as FollowUpVisitRequestStatus,
+              version: latestFollowUpVisitRequest.version,
+            },
     };
   }
 
@@ -593,7 +718,6 @@ export class JobsService {
       if (counter === undefined) {
         throw new Error('The job number counter returned no row.');
       }
-
       const [job] = await tx
         .insert(jobs)
         .values({
@@ -615,7 +739,6 @@ export class JobsService {
       if (job === undefined) {
         throw new Error('The job insert returned no row.');
       }
-
       await tx.insert(jobStatusHistory).values({
         organizationId: scope.organizationId,
         jobId: job.id,
@@ -631,6 +754,436 @@ export class JobsService {
     // Details screen reads it — including the number, the status and the address the backend chose
     // (`BR-001`, `BR-041`).
     return this.requireJobDetails(scope, jobId);
+  }
+
+  async submitAdHocWorkReport(
+    scope: OrganizationScope,
+    actorMembershipId: string,
+    input: SubmitAdHocWorkReportDto,
+  ): Promise<AdHocWorkReportDto> {
+    if (input.clientOperationId !== null) {
+      const applied = await this.findAppliedAdHocReportOperation(
+        scope,
+        input.clientOperationId,
+      );
+      if (applied !== null) {
+        return this.toAdHocWorkReportDto(this.db, scope, applied);
+      }
+    }
+
+    const report = await this.db.transaction(async (tx) => {
+      await this.assertAdHocWorkReportContext(tx, scope, input);
+      const [inserted] = await tx
+        .insert(adHocWorkReports)
+        .values({
+          organizationId: scope.organizationId,
+          reportingTechnicianMembershipId: actorMembershipId,
+          customerId: input.customerId,
+          propertyId: input.propertyId,
+          knownJobId: input.knownJobId,
+          workStartedAt: input.workStartedAt,
+          workEndedAt: input.workEndedAt,
+          outcomeCode: input.outcomeCode,
+          summary: input.summary,
+          notes: input.notes,
+          reportedCustomerName: input.reportedCustomerName,
+          reportedCustomerPhone: input.reportedCustomerPhone,
+          reportedCustomerAddress: input.reportedCustomerAddress,
+          clientOperationId: input.clientOperationId,
+        })
+        .onConflictDoNothing()
+        .returning();
+      return inserted;
+    });
+
+    if (report !== undefined) {
+      return this.toAdHocWorkReportDto(this.db, scope, report);
+    }
+
+    if (input.clientOperationId !== null) {
+      const applied = await this.findAppliedAdHocReportOperation(
+        scope,
+        input.clientOperationId,
+      );
+      if (applied !== null) {
+        return this.toAdHocWorkReportDto(this.db, scope, applied);
+      }
+    }
+    throw new Error('The ad-hoc report insert returned no row.');
+  }
+
+  async listAdHocWorkReports(
+    scope: OrganizationScope,
+    actorMembershipId: string,
+    canReview: boolean,
+  ): Promise<readonly AdHocWorkReportDto[]> {
+    const conditions = [
+      eq(adHocWorkReports.organizationId, scope.organizationId),
+    ];
+    if (!canReview) {
+      conditions.push(
+        eq(adHocWorkReports.reportingTechnicianMembershipId, actorMembershipId),
+      );
+    }
+    const rows = await this.db
+      .select()
+      .from(adHocWorkReports)
+      .where(and(...conditions))
+      .orderBy(desc(adHocWorkReports.createdAt));
+    const contexts = await this.readAdHocWorkReportContexts(
+      this.db,
+      scope,
+      rows.map((row) => row.id),
+    );
+    return rows.map((row) =>
+      toAdHocWorkReportDto(
+        row,
+        this.requireAdHocWorkReportContext(contexts, row.id),
+      ),
+    );
+  }
+
+  async getAdHocWorkReport(
+    scope: OrganizationScope,
+    actorMembershipId: string,
+    canReview: boolean,
+    reportId: string,
+  ): Promise<AdHocWorkReportDto> {
+    const conditions = [
+      eq(adHocWorkReports.organizationId, scope.organizationId),
+      eq(adHocWorkReports.id, reportId),
+    ];
+    if (!canReview) {
+      conditions.push(
+        eq(adHocWorkReports.reportingTechnicianMembershipId, actorMembershipId),
+      );
+    }
+    const [report] = await this.db
+      .select()
+      .from(adHocWorkReports)
+      .where(and(...conditions))
+      .limit(1);
+    if (report === undefined) {
+      throw new AdHocWorkReportNotFoundError();
+    }
+    return this.toAdHocWorkReportDto(this.db, scope, report);
+  }
+
+  /**
+   * Searches the Customers a reporter may name on an ad-hoc work report (`BR-AH-009`).
+   *
+   * The search is a type-ahead, not a list: it answers a name query of at least two characters and
+   * only over the Customers the caller is authorized to reach. An office caller (`customers.view`)
+   * searches the organization's active Customers; a field caller (`customers.view_assigned`, `BR-092`)
+   * searches only the Customers of Jobs their own current crew includes. The scope is the assignment,
+   * never the Customer, exactly as the Job Details customer block scopes it (`ADR-019` D2).
+   *
+   * It decides nothing a client may later submit: the submit route re-validates whatever Customer id
+   * the reporter chooses (`BR-001`, `BR-007`).
+   */
+  async searchAdHocReportCustomers(
+    scope: OrganizationScope,
+    customerScope: AdHocReportCustomerScope,
+    query: string,
+  ): Promise<readonly AdHocReportCustomerOptionDto[]> {
+    return this.db
+      .select({ id: customers.id, displayName: customers.displayName })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.organizationId, scope.organizationId),
+          eq(customers.status, 'ACTIVE'),
+          isNull(customers.deletedAt),
+          sql`${customers.displayName} ilike ${`%${query}%`}`,
+          ...this.adHocReportCustomerScopeConditions(scope, customerScope),
+        ),
+      )
+      .orderBy(asc(customers.displayName))
+      .limit(AD_HOC_CUSTOMER_SEARCH_RESULT_LIMIT);
+  }
+
+  /**
+   * Lists the active Properties of a Customer a reporter may select (`BR-AH-009`, `BR-050`).
+   *
+   * The Customer must first be one the caller is authorized to reach; an id outside that scope is
+   * reported as not found rather than forbidden, so a Customer id cannot be probed (`BR-001`).
+   */
+  async listAdHocReportProperties(
+    scope: OrganizationScope,
+    customerScope: AdHocReportCustomerScope,
+    customerId: string,
+  ): Promise<readonly AdHocReportPropertyOptionDto[]> {
+    await this.requireAdHocReportCustomerSelectable(scope, customerScope, customerId);
+    const rows = await this.customers.findCustomerPropertiesInOrganization(
+      scope,
+      customerId,
+      { status: 'ACTIVE' },
+    );
+    return rows.map((row) => ({
+      id: row.property.id,
+      name: row.property.name,
+      addressLine1: row.property.addressLine1,
+      addressLine2: row.property.addressLine2,
+      city: row.property.city,
+      province: row.property.province,
+      postalCode: row.property.postalCode,
+      country: row.property.country,
+    }));
+  }
+
+  /**
+   * Lists the Jobs of a Customer a reporter may name as the related work (`BR-AH-009`).
+   *
+   * The Job is an optional technician hint, not a decision: it says "this work relates to that Job"
+   * for the office to read, and the submit route validates the id the same way it validates every
+   * other part of the report (`BR-001`, `BR-007`).
+   */
+  async listAdHocReportJobs(
+    scope: OrganizationScope,
+    customerScope: AdHocReportCustomerScope,
+    customerId: string,
+  ): Promise<readonly AdHocReportJobOptionDto[]> {
+    await this.requireAdHocReportCustomerSelectable(scope, customerScope, customerId);
+    const rows = await this.customers.findCustomerJobsInOrganization(
+      scope,
+      customerId,
+    );
+    return rows.map((row) => ({
+      id: row.job.id,
+      jobNumber: row.job.jobNumber,
+      title: row.job.title,
+    }));
+  }
+
+  /**
+   * The Customer scope a reporter's discoverability is narrowed to (`BR-092`, `ADR-019` D2).
+   *
+   * An office caller (`null`) is not narrowed: they read the organization's Customers. A field caller
+   * is narrowed to the Customers of Jobs whose Visit crew currently includes them — the same rows
+   * `assignedViewerConditions` reads, expressed over Customers rather than one Job.
+   */
+  private adHocReportCustomerScopeConditions(
+    scope: OrganizationScope,
+    customerScope: AdHocReportCustomerScope,
+  ): SQL[] {
+    switch (customerScope.kind) {
+      case 'ORGANIZATION':
+        return [];
+      case 'NONE':
+        // No Customer read capability: the search and the option reads answer nothing, and the
+        // unknown-customer path is the only way a reporter states who the work was for (`BR-AH-009`).
+        return [sql`false`];
+      case 'ASSIGNED':
+        return [
+          exists(
+            this.db
+              .select({ present: sql`1` })
+              .from(visitTechnicians)
+              .innerJoin(
+                visits,
+                and(
+                  eq(visits.id, visitTechnicians.visitId),
+                  eq(visits.organizationId, scope.organizationId),
+                ),
+              )
+              .innerJoin(
+                jobs,
+                and(
+                  eq(jobs.id, visits.jobId),
+                  eq(jobs.organizationId, scope.organizationId),
+                ),
+              )
+              .where(
+                and(
+                  eq(visitTechnicians.organizationId, scope.organizationId),
+                  eq(
+                    visitTechnicians.technicianMembershipId,
+                    customerScope.membershipId,
+                  ),
+                  eq(jobs.customerId, customers.id),
+                ),
+              ),
+          ),
+        ];
+    }
+  }
+
+  /**
+   * Asserts a Customer is one the caller may select on an ad-hoc work report (`BR-AH-009`).
+   *
+   * A Customer outside the caller's organization, an inactive or deleted one, and — for a field
+   * caller — one their own assignments do not reach are all reported as not found, the way the Job
+   * reads report a Job a technician is not assigned to (`BR-092`, `ADR-019` D2).
+   */
+  private async requireAdHocReportCustomerSelectable(
+    scope: OrganizationScope,
+    customerScope: AdHocReportCustomerScope,
+    customerId: string,
+  ): Promise<void> {
+    const [customer] = await this.db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.organizationId, scope.organizationId),
+          eq(customers.id, customerId),
+          eq(customers.status, 'ACTIVE'),
+          isNull(customers.deletedAt),
+          ...this.adHocReportCustomerScopeConditions(scope, customerScope),
+        ),
+      )
+      .limit(1);
+    if (customer === undefined) {
+      throw new JobCustomerNotFoundError();
+    }
+  }
+
+  async linkAdHocWorkReportToJob(
+    scope: OrganizationScope,
+    reportId: string,
+    actorMembershipId: string,
+    input: LinkAdHocWorkReportDto,
+  ): Promise<JobDetails> {
+    let jobId = input.jobId;
+    await this.db.transaction(async (tx) => {
+      const report = await this.requirePendingAdHocWorkReport(
+        tx,
+        scope,
+        reportId,
+        input,
+      );
+      await this.assertTechniciansAssignable(scope, [
+        report.reportingTechnicianMembershipId,
+      ]);
+      const job = await this.requireJobRow(tx, scope, input.jobId);
+      const visitId = await this.insertCompletedVisitFromAdHocReport(
+        tx,
+        scope,
+        job,
+        actorMembershipId,
+        report,
+      );
+      await tx
+        .update(adHocWorkReports)
+        .set({
+          status: 'LINKED',
+          reviewerMembershipId: actorMembershipId,
+          reviewedAt: new Date(),
+          reviewNote: input.note,
+          createdVisitId: visitId,
+          version: sql`${adHocWorkReports.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(adHocWorkReports.id, reportId));
+    });
+    return this.requireJobDetails(scope, jobId);
+  }
+
+  async convertAdHocWorkReportToNewJob(
+    scope: OrganizationScope,
+    reportId: string,
+    actorMembershipId: string,
+    input: ConvertAdHocWorkReportDto,
+  ): Promise<JobDetails> {
+    let createdJobId = '';
+    await this.db.transaction(async (tx) => {
+      const report = await this.requirePendingAdHocWorkReport(
+        tx,
+        scope,
+        reportId,
+        input,
+      );
+      await this.assertTechniciansAssignable(scope, [
+        report.reportingTechnicianMembershipId,
+      ]);
+      if (report.customerId === null || report.propertyId === null) {
+        throw new AdHocWorkReportLocationRequiredError();
+      }
+      const [customer] = await tx
+        .select({ id: customers.id, status: customers.status })
+        .from(customers)
+        .where(
+          and(
+            eq(customers.organizationId, scope.organizationId),
+            eq(customers.id, report.customerId),
+            isNull(customers.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (customer === undefined) {
+        throw new JobCustomerNotFoundError();
+      }
+      if (customer.status !== 'ACTIVE') {
+        throw new JobCustomerInactiveError();
+      }
+      const property =
+        await this.properties.assertPropertyAvailableForCustomerNewWork(
+          tx,
+          scope,
+          report.customerId,
+          report.propertyId,
+        );
+      const [counter] = await tx
+        .insert(organizationJobNumberCounters)
+        .values({ organizationId: scope.organizationId, lastJobNumber: 1 })
+        .onConflictDoUpdate({
+          target: organizationJobNumberCounters.organizationId,
+          set: {
+            lastJobNumber: sql`${organizationJobNumberCounters.lastJobNumber} + 1`,
+            updatedAt: sql`now()`,
+          },
+        })
+        .returning({ jobNumber: organizationJobNumberCounters.lastJobNumber });
+      if (counter === undefined) {
+        throw new Error('The job number counter returned no row.');
+      }
+      const [job] = await tx
+        .insert(jobs)
+        .values({
+          organizationId: scope.organizationId,
+          jobNumber: counter.jobNumber,
+          customerId: report.customerId,
+          propertyId: property.id,
+          propertyAddressSnapshot: addressSnapshotOf(property),
+          title: input.title,
+          description: input.description,
+          status: 'ACTIVE',
+          version: 1,
+        })
+        .returning();
+      if (job === undefined) {
+        throw new Error('The job insert returned no row.');
+      }
+      await tx.insert(jobStatusHistory).values({
+        organizationId: scope.organizationId,
+        jobId: job.id,
+        fromStatus: null,
+        toStatus: 'ACTIVE',
+        actorMembershipId,
+      });
+      const visitId = await this.insertCompletedVisitFromAdHocReport(
+        tx,
+        scope,
+        job,
+        actorMembershipId,
+        report,
+      );
+      await tx
+        .update(adHocWorkReports)
+        .set({
+          status: 'CONVERTED',
+          reviewerMembershipId: actorMembershipId,
+          reviewedAt: new Date(),
+          reviewNote: input.note,
+          createdJobId: job.id,
+          createdVisitId: visitId,
+          version: sql`${adHocWorkReports.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(adHocWorkReports.id, reportId));
+      createdJobId = job.id;
+    });
+    return this.requireJobDetails(scope, createdJobId);
   }
 
   /**
@@ -685,10 +1238,8 @@ export class JobsService {
    * refused — including an attempt to leave a terminal Job by anything other than its reopen.
    *
    * A structurally valid destination may still be one the Job does not currently qualify for, and
-   * that is its own rule's answer rather than a gap in the table: `BR-061` decides whether the Job may
-   * enter `PENDING_REVIEW`, and `BR-062` decides whether it may be closed. Both conditions are
-   * evaluated **inside the transaction that applies the change**, through the same client that writes
-   * it, so a Job is never moved on a picture of its Visits that has already changed underneath.
+   * that is its own rule's answer rather than a gap in the table: completion is blocked while open
+   * Visits remain, and cancellation cascades to those open Visits inside the same transaction.
    *
    * The change is recorded as one append-only `job_status_history` row (`BR-033`, `BR-067`). It never
    * writes a Visit's status or history: the Job's business lifecycle and the field execution lifecycle
@@ -709,9 +1260,6 @@ export class JobsService {
     ) {
       throw new JobVersionConflictError(current.job.version);
     }
-    if (input.status === 'CANCELED') {
-      throw new JobCancellationUnavailableError();
-    }
     if (!isPermittedJobStatusTransition(from, input.status)) {
       throw new JobStatusTransitionNotAllowedError(
         from,
@@ -721,19 +1269,17 @@ export class JobsService {
     }
 
     await this.db.transaction(async (tx) => {
-      if (input.status === 'PENDING_REVIEW') {
-        await this.assertJobMayAwaitReview(tx, scope, jobId);
-      }
       if (input.status === 'COMPLETED') {
         await this.assertJobHasNoOpenVisit(tx, scope, jobId);
       }
+      const recordedAt = new Date();
 
       await tx
         .update(jobs)
         .set({
           status: input.status,
           version: sql`${jobs.version} + 1`,
-          updatedAt: new Date(),
+          updatedAt: recordedAt,
         })
         .where(
           and(
@@ -741,14 +1287,28 @@ export class JobsService {
             eq(jobs.id, jobId),
           ),
         );
-      await tx.insert(jobStatusHistory).values({
-        organizationId: scope.organizationId,
-        jobId,
-        fromStatus: from,
-        toStatus: input.status,
-        note: input.note,
-        actorMembershipId,
-      });
+      const [jobStatusEvent] = await tx
+        .insert(jobStatusHistory)
+        .values({
+          organizationId: scope.organizationId,
+          jobId,
+          fromStatus: from,
+          toStatus: input.status,
+          note: input.note,
+          actorMembershipId,
+        })
+        .returning({ id: jobStatusHistory.id });
+
+      if (input.status === 'CANCELED') {
+        await this.cancelOpenVisitsForJobCancellation(
+          tx,
+          scope,
+          jobId,
+          actorMembershipId,
+          jobStatusEvent.id,
+          recordedAt,
+        );
+      }
     });
 
     return this.requireJobDetails(scope, jobId);
@@ -762,8 +1322,8 @@ export class JobsService {
    * direction — a skipped step, a step backward and a reopen out of `COMPLETED` included. The table is
    * consulted first, so a status a client invents, the status the Visit already holds and a destination
    * `BR-074` does not list are all refused, with the destinations the Visit really has. `CANCELED` and
-   * `NO_SHOW` are among the refused destinations: `BR-066` makes them dispatch actions and no capability
-   * authorizes one today (`BR-042`).
+   * `CANCELED` is among the refused field destinations: cancellation is a dispatch/office consequence,
+   * not a technician working-state selection.
    *
    * `writer` is the scope the route resolved from the capability that admitted the caller (`BR-093`): a
    * field caller is bounded by their own current crew, while the office capability addresses the
@@ -975,6 +1535,154 @@ export class JobsService {
     return this.requireJobDetails(scope, jobId);
   }
 
+  async completeVisit(
+    scope: OrganizationScope,
+    jobId: string,
+    visitId: string,
+    actorMembershipId: string,
+    writer: AssignedVisitWriter | null,
+    input: CompleteVisitDto,
+  ): Promise<JobDetails> {
+    await this.requireJobDetails(scope, jobId);
+    const visit = await this.requireVisitForWriter(
+      scope,
+      jobId,
+      visitId,
+      writer,
+    );
+
+    if (input.clientOperationId !== null) {
+      const applied = await this.findAppliedStatusOperation(
+        scope,
+        input.clientOperationId,
+      );
+      if (applied !== null) {
+        this.assertSameVisit(applied.visitId, visitId);
+        return this.requireJobDetails(scope, jobId);
+      }
+    }
+
+    if (
+      input.expectedVersion !== null &&
+      input.expectedVersion !== visit.version
+    ) {
+      throw new VisitVersionConflictError(visit.version);
+    }
+    if (
+      !(ACTIVE_VISIT_STATUSES as readonly VisitStatus[]).includes(
+        visit.status as VisitStatus,
+      )
+    ) {
+      throw new VisitStatusTransitionNotAllowedError(
+        visit.status as VisitStatus,
+        'COMPLETED',
+        [...VISIT_STATUS_TRANSITIONS[visit.status as VisitStatus]],
+      );
+    }
+
+    try {
+      await this.db.transaction(async (tx) => {
+        const [locked] = await tx
+          .select()
+          .from(visits)
+          .where(
+            and(
+              eq(visits.organizationId, scope.organizationId),
+              eq(visits.jobId, jobId),
+              eq(visits.id, visitId),
+            ),
+          )
+          .for('update')
+          .limit(1);
+        if (locked === undefined) {
+          throw new VisitNotFoundError();
+        }
+
+        if (input.clientOperationId !== null) {
+          const applied = await this.findAppliedStatusOperation(
+            scope,
+            input.clientOperationId,
+            tx,
+          );
+          if (applied !== null) {
+            this.assertSameVisit(applied.visitId, visitId);
+            return;
+          }
+        }
+
+        const live = locked.status as VisitStatus;
+        if (!(ACTIVE_VISIT_STATUSES as readonly VisitStatus[]).includes(live)) {
+          throw new VisitStatusTransitionNotAllowedError(live, 'COMPLETED', [
+            ...VISIT_STATUS_TRANSITIONS[live],
+          ]);
+        }
+
+        const jobStatus = await this.requireLockedJobStatus(tx, scope, jobId);
+        if (jobStatus === 'COMPLETED' || jobStatus === 'CANCELED') {
+          throw new JobClosedForFieldWorkError();
+        }
+
+        const recordedAt = new Date();
+        await tx
+          .update(visits)
+          .set({
+            status: 'COMPLETED',
+            version: sql`${visits.version} + 1`,
+            updatedAt: recordedAt,
+            outcomeCode: input.outcomeCode,
+            outcomeSummary: input.outcomeSummary,
+            outcomeRecordedAt: recordedAt,
+            outcomeRecordedByMembershipId: actorMembershipId,
+          })
+          .where(
+            and(
+              eq(visits.organizationId, scope.organizationId),
+              eq(visits.id, visitId),
+            ),
+          );
+
+        await tx.insert(visitStatusHistory).values({
+          organizationId: scope.organizationId,
+          visitId,
+          fromStatus: live,
+          toStatus: 'COMPLETED',
+          isCorrection: false,
+          actorMembershipId,
+          capturedAt: input.capturedAt,
+          clientOperationId: input.clientOperationId,
+        });
+
+        await tx.insert(visitOutcomeHistory).values({
+          organizationId: scope.organizationId,
+          visitId,
+          outcomeCode: input.outcomeCode,
+          outcomeSummary: input.outcomeSummary,
+          previousOutcomeCode: locked.outcomeCode,
+          previousOutcomeSummary: locked.outcomeSummary,
+          actorMembershipId,
+          capturedAt: input.capturedAt,
+          clientOperationId: input.clientOperationId,
+        });
+
+        await this.applyVisitConsequence(
+          tx,
+          scope,
+          jobId,
+          actorMembershipId,
+          jobStatus,
+          'COMPLETED',
+          input.outcomeCode,
+        );
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+    }
+
+    return this.requireJobDetails(scope, jobId);
+  }
+
   /**
    * Edits the existing Visit's schedule (`BR-073`).
    *
@@ -1077,7 +1785,7 @@ export class JobsService {
         sameTechnicianPreferred: input.sameTechnicianPreferred,
       })
       .returning();
-    return toFollowUpVisitRequestDto(request);
+    return this.toFollowUpRequestDto(this.db, scope, request);
   }
 
   async listFollowUpVisitRequests(
@@ -1100,7 +1808,99 @@ export class JobsService {
             ),
       )
       .orderBy(desc(followUpVisitRequests.createdAt));
-    return rows.map(toFollowUpVisitRequestDto);
+    const messages = await this.readFollowUpRequestMessages(
+      this.db,
+      scope,
+      rows.map((row) => row.id),
+    );
+    const contexts = await this.readFollowUpRequestContexts(
+      this.db,
+      scope,
+      rows.map((row) => row.id),
+    );
+    return rows.map((row) =>
+      toFollowUpVisitRequestDto(
+        row,
+        this.requireFollowUpRequestContext(contexts, row.id),
+        messages.get(row.id) ?? [],
+      ),
+    );
+  }
+
+  /**
+   * The requester's answer to a request the office returned for clarification (`BR-FV-012`).
+   *
+   * One operation in one transaction: the answer is appended to the request's conversation **and** the
+   * request returns to `PENDING`, the state the office reviews it in. That pair is one business move and
+   * is never separable — an answer recorded without the request becoming reviewable would leave the
+   * office unable to act on what it asked for, and a request returned to `PENDING` with no answer
+   * recorded would claim the requester answered when they said nothing.
+   *
+   * It is the requester's own action and only theirs: a request raised by another member is reported as
+   * not found rather than as forbidden, so an id is never a way to read or write someone else's request
+   * (`BR-007`, `BR-009`).
+   */
+  async replyToFollowUpVisitRequest(
+    scope: OrganizationScope,
+    requestedJobId: string,
+    requestId: string,
+    actorMembershipId: string,
+    input: ReplyFollowUpVisitRequestDto,
+  ): Promise<FollowUpVisitRequestDto> {
+    return this.db.transaction(async (tx) => {
+      const [request] = await tx
+        .select()
+        .from(followUpVisitRequests)
+        .where(
+          and(
+            eq(followUpVisitRequests.organizationId, scope.organizationId),
+            eq(followUpVisitRequests.id, requestId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (request === undefined) {
+        throw new FollowUpVisitRequestNotFoundError();
+      }
+      if (request.jobId !== requestedJobId) {
+        throw new FollowUpVisitRequestNotFoundError();
+      }
+      if (request.requestingTechnicianMembershipId !== actorMembershipId) {
+        throw new FollowUpVisitRequestNotFoundError();
+      }
+      this.assertFollowUpRequestExpected(request, input);
+      if (request.status !== 'NEEDS_CLARIFICATION') {
+        throw new FollowUpVisitRequestNotAwaitingReplyError(request.status);
+      }
+      await this.appendFollowUpRequestMessage(
+        tx,
+        scope,
+        requestId,
+        actorMembershipId,
+        input.body,
+      );
+      // The request returns to the office's review queue. The reviewer fields and the note stay as the
+      // record of the return for clarification that was answered (`BR-FV-013`): they are the last
+      // review decision, and the answer is not a review.
+      const [updated] = await tx
+        .update(followUpVisitRequests)
+        .set({
+          status: 'PENDING',
+          version: sql`${followUpVisitRequests.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(followUpVisitRequests.id, requestId))
+        .returning();
+      const messages = await this.readFollowUpRequestMessages(tx, scope, [
+        requestId,
+      ]);
+      return this.toFollowUpRequestDto(
+        tx,
+        scope,
+        updated,
+        messages.get(requestId) ?? [],
+      );
+    });
   }
 
   async askFollowUpVisitRequestClarification(
@@ -1303,7 +2103,6 @@ export class JobsService {
       visit.scheduledStart !== null &&
       visit.scheduledEnd !== null &&
       status !== 'CANCELED' &&
-      status !== 'NO_SHOW' &&
       status !== 'COMPLETED';
     const conflicts = hasActiveSchedule
       ? await this.findScheduleConflicts(
@@ -1396,6 +2195,7 @@ export class JobsService {
   ): Promise<JobActivityEventDto[]> {
     await this.requireJobDetails(scope, jobId);
     await this.requireVisitForWriter(scope, jobId, visitId, writer);
+    await this.assertJobOpenForFieldWork(this.db, scope, jobId);
 
     if (input.clientOperationId !== null) {
       const applied = await this.findAppliedNoteOperation(
@@ -1428,6 +2228,137 @@ export class JobsService {
     return readJobActivity(this.db, scope, jobId);
   }
 
+  async editVisitNote(
+    scope: OrganizationScope,
+    jobId: string,
+    noteId: string,
+    actorMembershipId: string,
+    input: EditVisitNoteDto,
+    writer: AssignedVisitWriter | null,
+  ): Promise<JobActivityEventDto[]> {
+    await this.requireJobDetails(scope, jobId);
+    const note = await this.findVisitNote(scope, jobId, noteId);
+    if (note === null) {
+      throw new VisitNotFoundError();
+    }
+    if (writer !== null && note.authorMembershipId !== writer.membershipId) {
+      throw new VisitNoteForbiddenError();
+    }
+    if (note.removedAt !== null) {
+      throw new VisitNotFoundError();
+    }
+
+    await this.db
+      .update(visitNotes)
+      .set({
+        body: input.body,
+        editedAt: new Date(),
+        editedByMembershipId: actorMembershipId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(visitNotes.organizationId, scope.organizationId),
+          eq(visitNotes.id, noteId),
+        ),
+      );
+
+    return readJobActivity(this.db, scope, jobId);
+  }
+
+  async removeVisitNote(
+    scope: OrganizationScope,
+    jobId: string,
+    noteId: string,
+    actorMembershipId: string,
+    input: RemoveVisitNoteDto,
+    writer: AssignedVisitWriter | null,
+  ): Promise<JobActivityEventDto[]> {
+    await this.requireJobDetails(scope, jobId);
+    const note = await this.findVisitNote(scope, jobId, noteId);
+    if (note === null) {
+      throw new VisitNotFoundError();
+    }
+    if (writer !== null && note.authorMembershipId !== writer.membershipId) {
+      throw new VisitNoteForbiddenError();
+    }
+    if (note.removedAt !== null) {
+      throw new VisitNotFoundError();
+    }
+
+    await this.db
+      .update(visitNotes)
+      .set({
+        removedAt: new Date(),
+        removedByMembershipId: actorMembershipId,
+        removalReason: input.reason,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(visitNotes.organizationId, scope.organizationId),
+          eq(visitNotes.id, noteId),
+        ),
+      );
+
+    return readJobActivity(this.db, scope, jobId);
+  }
+
+  private async findVisitNote(
+    scope: OrganizationScope,
+    jobId: string,
+    noteId: string,
+  ): Promise<{ authorMembershipId: string; removedAt: Date | null } | null> {
+    const [row] = await this.db
+      .select({
+        authorMembershipId: visitNotes.authorMembershipId,
+        removedAt: visitNotes.removedAt,
+      })
+      .from(visitNotes)
+      .innerJoin(visits, eq(visits.id, visitNotes.visitId))
+      .where(
+        and(
+          eq(visitNotes.organizationId, scope.organizationId),
+          eq(visitNotes.id, noteId),
+          eq(visits.organizationId, scope.organizationId),
+          eq(visits.jobId, jobId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  private async assertJobOpenForFieldWork(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    jobId: string,
+  ): Promise<void> {
+    const [job] = await client
+      .select({ status: jobs.status })
+      .from(jobs)
+      .where(
+        and(eq(jobs.organizationId, scope.organizationId), eq(jobs.id, jobId)),
+      )
+      .limit(1);
+    if (job === undefined) {
+      throw new JobNotFoundError();
+    }
+    if (job.status === 'COMPLETED' || job.status === 'CANCELED') {
+      throw new JobClosedForFieldWorkError();
+    }
+  }
+
+  /**
+   * Applies the office's decision to a request, and the clarification it asks for.
+   *
+   * A return for clarification is a question the requester answers, so when the office writes one it
+   * enters the request's conversation in the same transaction as the status change (`BR-FV-012`). A
+   * rejection appends nothing: it is a decision that closes the request, and its reason is the request's
+   * own note (`BR-FV-013`).
+   *
+   * The read, the status change and the appended message are one transaction over the locked request, so
+   * two reviewers deciding at once cannot both satisfy the optimistic-concurrency check (`BR-032`).
+   */
   private async reviewFollowUpVisitRequest(
     scope: OrganizationScope,
     jobId: string,
@@ -1436,47 +2367,222 @@ export class JobsService {
     input: FollowUpVisitReviewDto,
     status: 'NEEDS_CLARIFICATION' | 'REJECTED',
   ): Promise<FollowUpVisitRequestDto> {
-    const [request] = await this.db
-      .select()
+    return this.db.transaction(async (tx) => {
+      const [request] = await tx
+        .select()
+        .from(followUpVisitRequests)
+        .where(
+          and(
+            eq(followUpVisitRequests.organizationId, scope.organizationId),
+            eq(followUpVisitRequests.id, requestId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (request === undefined) {
+        throw new FollowUpVisitRequestNotFoundError();
+      }
+      if (request.jobId !== jobId) {
+        throw new FollowUpVisitRequestNotFoundError();
+      }
+      this.assertFollowUpRequestExpected(request, input);
+      if (
+        request.status !== 'PENDING' &&
+        request.status !== 'NEEDS_CLARIFICATION'
+      ) {
+        throw new FollowUpVisitRequestNotReviewableError(request.status);
+      }
+      if (status === 'NEEDS_CLARIFICATION' && input.note !== null) {
+        await this.appendFollowUpRequestMessage(
+          tx,
+          scope,
+          requestId,
+          actorMembershipId,
+          input.note,
+        );
+      }
+      const [updated] = await tx
+        .update(followUpVisitRequests)
+        .set({
+          status,
+          reviewerMembershipId: actorMembershipId,
+          reviewedAt: new Date(),
+          reviewNote: input.note,
+          version: sql`${followUpVisitRequests.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(followUpVisitRequests.id, requestId))
+        .returning();
+      const messages = await this.readFollowUpRequestMessages(tx, scope, [
+        requestId,
+      ]);
+      return this.toFollowUpRequestDto(
+        tx,
+        scope,
+        updated,
+        messages.get(requestId) ?? [],
+      );
+    });
+  }
+
+  /** Adds the Job, Customer and source-Visit identity every request client needs to recognize it. */
+  private async toFollowUpRequestDto(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    request: typeof followUpVisitRequests.$inferSelect,
+    messages: readonly FollowUpVisitRequestMessageRow[] = [],
+  ): Promise<FollowUpVisitRequestDto> {
+    const contexts = await this.readFollowUpRequestContexts(client, scope, [
+      request.id,
+    ]);
+    return toFollowUpVisitRequestDto(
+      request,
+      this.requireFollowUpRequestContext(contexts, request.id),
+      messages,
+    );
+  }
+
+  /** Reads request identity in one batch so a list does not issue one Job query per row. */
+  private async readFollowUpRequestContexts(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    requestIds: readonly string[],
+  ): Promise<ReadonlyMap<string, FollowUpVisitRequestContext>> {
+    if (requestIds.length === 0) {
+      return new Map();
+    }
+    const rows = await client
+      .select({
+        requestId: followUpVisitRequests.id,
+        jobNumber: jobs.jobNumber,
+        jobTitle: jobs.title,
+        customerName: customers.displayName,
+        addressSnapshot: jobs.propertyAddressSnapshot,
+        sourceVisitScheduledStart: visits.scheduledStart,
+        sourceVisitStatus: visits.status,
+        sourceVisitOutcomeCode: visits.outcomeCode,
+      })
       .from(followUpVisitRequests)
+      .innerJoin(
+        jobs,
+        and(
+          eq(jobs.id, followUpVisitRequests.jobId),
+          eq(jobs.organizationId, scope.organizationId),
+        ),
+      )
+      .innerJoin(
+        customers,
+        and(
+          eq(customers.id, jobs.customerId),
+          eq(customers.organizationId, scope.organizationId),
+        ),
+      )
+      .leftJoin(
+        visits,
+        and(
+          eq(visits.id, followUpVisitRequests.sourceVisitId),
+          eq(visits.organizationId, scope.organizationId),
+        ),
+      )
       .where(
         and(
           eq(followUpVisitRequests.organizationId, scope.organizationId),
-          eq(followUpVisitRequests.id, requestId),
+          inArray(followUpVisitRequests.id, [...requestIds]),
+        ),
+      );
+    return new Map(
+      rows.map((row) => [
+        row.requestId,
+        {
+          jobNumber: row.jobNumber,
+          jobTitle: row.jobTitle,
+          customerName: row.customerName,
+          address: readAddressSnapshot(row.addressSnapshot),
+          sourceVisitScheduledStart: row.sourceVisitScheduledStart,
+          sourceVisitStatus: row.sourceVisitStatus,
+          sourceVisitOutcomeCode: row.sourceVisitOutcomeCode,
+        },
+      ]),
+    );
+  }
+
+  private requireFollowUpRequestContext(
+    contexts: ReadonlyMap<string, FollowUpVisitRequestContext>,
+    requestId: string,
+  ): FollowUpVisitRequestContext {
+    const context = contexts.get(requestId);
+    if (context === undefined) {
+      throw new FollowUpVisitRequestNotFoundError();
+    }
+    return context;
+  }
+
+  /**
+   * Appends one message to a request's clarification conversation (`BR-FV-012`).
+   *
+   * The conversation is append-only: it has no update path and no delete path, so what a side said stays
+   * readable after the other side answers it (`BR-067`, `BR-FV-013`).
+   */
+  private async appendFollowUpRequestMessage(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    requestId: string,
+    authorMembershipId: string,
+    body: string,
+  ): Promise<void> {
+    await client.insert(followUpVisitRequestMessages).values({
+      organizationId: scope.organizationId,
+      requestId,
+      authorMembershipId,
+      body,
+    });
+  }
+
+  /**
+   * The clarification conversation of [requestIds], oldest first, grouped by request.
+   *
+   * One query for the whole page rather than one per request: the conversation belongs to every
+   * projection of a request, so a list read must not become a query per row (`dev.md` §6).
+   */
+  private async readFollowUpRequestMessages(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    requestIds: readonly string[],
+  ): Promise<Map<string, FollowUpVisitRequestMessageRow[]>> {
+    const grouped = new Map<string, FollowUpVisitRequestMessageRow[]>();
+    if (requestIds.length === 0) {
+      return grouped;
+    }
+    const rows = await client
+      .select()
+      .from(followUpVisitRequestMessages)
+      .where(
+        and(
+          eq(followUpVisitRequestMessages.organizationId, scope.organizationId),
+          inArray(followUpVisitRequestMessages.requestId, [...requestIds]),
         ),
       )
-      .limit(1);
-    if (request === undefined) {
-      throw new FollowUpVisitRequestNotFoundError();
+      .orderBy(
+        asc(followUpVisitRequestMessages.recordedAt),
+        asc(followUpVisitRequestMessages.createdAt),
+      );
+    for (const row of rows) {
+      const existing = grouped.get(row.requestId);
+      if (existing === undefined) {
+        grouped.set(row.requestId, [row]);
+      } else {
+        existing.push(row);
+      }
     }
-    if (request.jobId !== jobId) {
-      throw new FollowUpVisitRequestNotFoundError();
-    }
-    this.assertFollowUpRequestExpected(request, input);
-    if (
-      request.status !== 'PENDING' &&
-      request.status !== 'NEEDS_CLARIFICATION'
-    ) {
-      throw new FollowUpVisitRequestNotReviewableError(request.status);
-    }
-    const [updated] = await this.db
-      .update(followUpVisitRequests)
-      .set({
-        status,
-        reviewerMembershipId: actorMembershipId,
-        reviewedAt: new Date(),
-        reviewNote: input.note,
-        version: sql`${followUpVisitRequests.version} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(followUpVisitRequests.id, requestId))
-      .returning();
-    return toFollowUpVisitRequestDto(updated);
+    return grouped;
   }
 
   private assertFollowUpRequestExpected(
     request: typeof followUpVisitRequests.$inferSelect,
-    input: FollowUpVisitReviewDto,
+    input: {
+      readonly expectedStatus: FollowUpVisitRequestStatus | null;
+      readonly expectedVersion: number | null;
+    },
   ): void {
     if (
       input.expectedStatus !== null &&
@@ -1498,6 +2604,320 @@ export class JobsService {
     }
   }
 
+  private async assertAdHocWorkReportContext(
+    client: Executor,
+    scope: OrganizationScope,
+    input: SubmitAdHocWorkReportDto,
+  ): Promise<void> {
+    if (input.customerId !== null) {
+      const [customer] = await client
+        .select({ id: customers.id, status: customers.status })
+        .from(customers)
+        .where(
+          and(
+            eq(customers.organizationId, scope.organizationId),
+            eq(customers.id, input.customerId),
+            isNull(customers.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (customer === undefined) {
+        throw new JobCustomerNotFoundError();
+      }
+      if (customer.status !== 'ACTIVE') {
+        throw new JobCustomerInactiveError();
+      }
+    }
+
+    if (input.propertyId !== null) {
+      if (input.customerId === null) {
+        throw new PropertyNotFoundError(input.propertyId);
+      }
+      await this.properties.assertPropertyAvailableForCustomerNewWork(
+        client,
+        scope,
+        input.customerId,
+        input.propertyId,
+      );
+    }
+
+    if (input.knownJobId !== null) {
+      const [job] = await client
+        .select({ id: jobs.id, customerId: jobs.customerId })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.organizationId, scope.organizationId),
+            eq(jobs.id, input.knownJobId),
+          ),
+        )
+        .limit(1);
+      if (job === undefined) {
+        throw new JobNotFoundError();
+      }
+      if (input.customerId !== null && job.customerId !== input.customerId) {
+        throw new JobNotFoundError();
+      }
+    }
+  }
+
+  private async findAppliedAdHocReportOperation(
+    scope: OrganizationScope,
+    clientOperationId: string,
+  ): Promise<typeof adHocWorkReports.$inferSelect | null> {
+    const [report] = await this.db
+      .select()
+      .from(adHocWorkReports)
+      .where(
+        and(
+          eq(adHocWorkReports.organizationId, scope.organizationId),
+          eq(adHocWorkReports.clientOperationId, clientOperationId),
+        ),
+      )
+      .limit(1);
+    return report ?? null;
+  }
+
+  private async requirePendingAdHocWorkReport(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    reportId: string,
+    input: AdHocWorkReportReviewDto,
+  ): Promise<typeof adHocWorkReports.$inferSelect> {
+    const [report] = await client
+      .select()
+      .from(adHocWorkReports)
+      .where(
+        and(
+          eq(adHocWorkReports.organizationId, scope.organizationId),
+          eq(adHocWorkReports.id, reportId),
+        ),
+      )
+      .for('update')
+      .limit(1);
+    if (report === undefined) {
+      throw new AdHocWorkReportNotFoundError();
+    }
+    if (
+      input.expectedStatus !== null &&
+      input.expectedStatus !== report.status
+    ) {
+      throw new AdHocWorkReportConflictError(report.status, report.version);
+    }
+    if (
+      input.expectedVersion !== null &&
+      input.expectedVersion !== report.version
+    ) {
+      throw new AdHocWorkReportConflictError(report.status, report.version);
+    }
+    if (report.status !== 'PENDING') {
+      throw new AdHocWorkReportNotReviewableError(report.status);
+    }
+    return report;
+  }
+
+  private async insertCompletedVisitFromAdHocReport(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    job: typeof jobs.$inferSelect,
+    actorMembershipId: string,
+    report: typeof adHocWorkReports.$inferSelect,
+  ): Promise<string> {
+    const [visit] = await client
+      .insert(visits)
+      .values({
+        organizationId: scope.organizationId,
+        jobId: job.id,
+        propertyId: job.propertyId,
+        locationAddressSnapshot: job.propertyAddressSnapshot,
+        status: 'COMPLETED',
+        scheduledStart: report.workStartedAt,
+        scheduledEnd: report.workEndedAt,
+        outcomeCode: report.outcomeCode as VisitOutcomeCode,
+        outcomeSummary: report.summary,
+        outcomeRecordedAt: new Date(),
+        outcomeRecordedByMembershipId: report.reportingTechnicianMembershipId,
+      })
+      .returning({ id: visits.id });
+    if (visit === undefined) {
+      throw new Error('The visit insert returned no row.');
+    }
+    await client.insert(visitScheduleHistory).values({
+      organizationId: scope.organizationId,
+      visitId: visit.id,
+      previousScheduledStart: null,
+      previousScheduledEnd: null,
+      newScheduledStart: report.workStartedAt,
+      newScheduledEnd: report.workEndedAt,
+      actorMembershipId,
+    });
+    await client.insert(visitStatusHistory).values({
+      organizationId: scope.organizationId,
+      visitId: visit.id,
+      fromStatus: null,
+      toStatus: 'COMPLETED',
+      actorMembershipId: report.reportingTechnicianMembershipId,
+    });
+    await client.insert(visitOutcomeHistory).values({
+      organizationId: scope.organizationId,
+      visitId: visit.id,
+      outcomeCode: report.outcomeCode as VisitOutcomeCode,
+      outcomeSummary: report.summary,
+      actorMembershipId: report.reportingTechnicianMembershipId,
+    });
+    await client.insert(visitTechnicians).values({
+      organizationId: scope.organizationId,
+      visitId: visit.id,
+      technicianMembershipId: report.reportingTechnicianMembershipId,
+      roleCode: 'LEAD',
+    });
+    await client.insert(visitTechnicianHistory).values({
+      organizationId: scope.organizationId,
+      visitId: visit.id,
+      technicianMembershipId: report.reportingTechnicianMembershipId,
+      event: 'ASSIGNED',
+      roleCode: 'LEAD',
+      actorMembershipId,
+    });
+    if (report.notes !== null) {
+      await client.insert(visitNotes).values({
+        organizationId: scope.organizationId,
+        visitId: visit.id,
+        authorMembershipId: report.reportingTechnicianMembershipId,
+        body: report.notes,
+        capturedAt: report.workEndedAt,
+      });
+    }
+    if (job.status === 'NEW') {
+      await client
+        .update(jobs)
+        .set({
+          status: 'ACTIVE',
+          version: sql`${jobs.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(jobs.organizationId, scope.organizationId),
+            eq(jobs.id, job.id),
+          ),
+        );
+      await client.insert(jobStatusHistory).values({
+        organizationId: scope.organizationId,
+        jobId: job.id,
+        fromStatus: 'NEW',
+        toStatus: 'ACTIVE',
+        actorMembershipId,
+      });
+    }
+    return visit.id;
+  }
+
+  private async toAdHocWorkReportDto(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    report: typeof adHocWorkReports.$inferSelect,
+  ): Promise<AdHocWorkReportDto> {
+    const contexts = await this.readAdHocWorkReportContexts(client, scope, [
+      report.id,
+    ]);
+    return toAdHocWorkReportDto(
+      report,
+      this.requireAdHocWorkReportContext(contexts, report.id),
+    );
+  }
+
+  private async readAdHocWorkReportContexts(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    reportIds: readonly string[],
+  ): Promise<ReadonlyMap<string, AdHocWorkReportContext>> {
+    if (reportIds.length === 0) {
+      return new Map();
+    }
+    const createdJobs = alias(jobs, 'created_jobs');
+    const rows = await client
+      .select({
+        reportId: adHocWorkReports.id,
+        customerName: customers.displayName,
+        propertyAddress: properties,
+        knownJobNumber: jobs.jobNumber,
+        knownJobTitle: jobs.title,
+        createdJobNumber: createdJobs.jobNumber,
+        createdJobTitle: createdJobs.title,
+      })
+      .from(adHocWorkReports)
+      .leftJoin(
+        customers,
+        and(
+          eq(customers.id, adHocWorkReports.customerId),
+          eq(customers.organizationId, scope.organizationId),
+        ),
+      )
+      .leftJoin(
+        properties,
+        and(
+          eq(properties.id, adHocWorkReports.propertyId),
+          eq(properties.organizationId, scope.organizationId),
+        ),
+      )
+      .leftJoin(
+        jobs,
+        and(
+          eq(jobs.id, adHocWorkReports.knownJobId),
+          eq(jobs.organizationId, scope.organizationId),
+        ),
+      )
+      .leftJoin(
+        createdJobs,
+        and(
+          eq(createdJobs.id, adHocWorkReports.createdJobId),
+          eq(createdJobs.organizationId, scope.organizationId),
+        ),
+      )
+      .where(
+        and(
+          eq(adHocWorkReports.organizationId, scope.organizationId),
+          inArray(adHocWorkReports.id, [...reportIds]),
+        ),
+      );
+    return new Map(
+      rows.map((row) => [
+        row.reportId,
+        {
+          customerName: row.customerName,
+          propertyAddress:
+            row.propertyAddress === null
+              ? null
+              : addressSnapshotOf(row.propertyAddress),
+          knownJobNumber: row.knownJobNumber,
+          knownJobTitle: row.knownJobTitle,
+          createdJobNumber: row.createdJobNumber,
+          createdJobTitle: row.createdJobTitle,
+        },
+      ]),
+    );
+  }
+
+  private requireAdHocWorkReportContext(
+    contexts: ReadonlyMap<string, AdHocWorkReportContext>,
+    reportId: string,
+  ): AdHocWorkReportContext {
+    const context = contexts.get(reportId);
+    if (context === undefined) {
+      throw new AdHocWorkReportNotFoundError();
+    }
+    return context;
+  }
+
+  /**
+   * The Job a scheduled Visit is created on, locked for the write (`BR-001`, `BR-031`).
+   *
+   * A Visit can be created only on an **open** Job with a Property: `BR-062` keeps a closed Job from
+   * receiving new field work (reopening is the only way back, `BR-063`), and `BR-072` requires a
+   * Property for a Visit to become `SCHEDULED` (`BR-056`). This one guard serves both the direct
+   * schedule route and the follow-up approval route, which create the same kind of Visit.
+   */
   private async requireJobRow(
     client: JobMutationClient,
     scope: OrganizationScope,
@@ -1513,6 +2933,9 @@ export class JobsService {
       .limit(1);
     if (job === undefined) {
       throw new JobNotFoundError();
+    }
+    if (job.status === 'COMPLETED' || job.status === 'CANCELED') {
+      throw new JobClosedForFieldWorkError();
     }
     if (job.propertyId === null || job.propertyAddressSnapshot === null) {
       throw new VisitSchedulingConditionNotMetError('PROPERTY');
@@ -1573,7 +2996,7 @@ export class JobsService {
       await client
         .update(jobs)
         .set({
-          status: 'SCHEDULED',
+          status: 'ACTIVE',
           version: sql`${jobs.version} + 1`,
           updatedAt: new Date(),
         })
@@ -1587,7 +3010,7 @@ export class JobsService {
         organizationId: scope.organizationId,
         jobId: job.id,
         fromStatus: 'NEW',
-        toStatus: 'SCHEDULED',
+        toStatus: 'ACTIVE',
         actorMembershipId,
       });
     }
@@ -1799,13 +3222,13 @@ export class JobsService {
 
   /**
    * Applies the Job consequence `ADR-019` D4 decides for one recorded Visit event, in the same
-   * transaction as the Visit transition (`BR-058`, `BR-059`, `BR-061`, `BR-067`).
+   * transaction as the Visit transition (`BR-058`, `BR-059`, `BR-062`, `BR-067`).
    *
    * The mapping itself lives in `visit-job-consequence.ts`, so the same rule is not implemented twice
-   * (`BR-041`), and nothing here completes or cancels a Job: `BR-062` makes closing a Job an explicit
-   * office action and `BR-064` requires a cancellation reason. `BR-061`'s invariant is applied in both
-   * directions there, so a Visit moved back into a working status takes its Job out of `PENDING_REVIEW`
-   * (`BR-074`).
+   * (`BR-041`), and cancellation remains a Job/dispatch action. A resolving Visit completion completes
+   * the Job **when the attempt that just ended was the Job's last remaining work**: `BR-062` forbids a
+   * `COMPLETED` Job that still holds an open Visit, so the Job is asked about its other Visits and the
+   * answer is part of the rule rather than a second copy of it. Non-resolving outcomes keep it active.
    */
   private async applyVisitConsequence(
     client: JobMutationClient,
@@ -1816,15 +3239,19 @@ export class JobsService {
     to: VisitStatus,
     outcomeCode: VisitOutcomeCode | null,
   ): Promise<void> {
+    // The Visit this event belongs to has already reached [to] when this runs, so the query counts only
+    // the Job's *other* Visits. It is asked only for the one event that could close the Job, because no
+    // other case consults the answer.
+    const hasOtherOpenVisit =
+      to === 'COMPLETED' && outcomeCode === 'RESOLVED'
+        ? await this.jobHasOpenVisit(client, scope, jobId)
+        : false;
+
     const destination = jobStatusConsequenceForVisitTransition(
       to,
       outcomeCode,
-      // `BR-061`'s conditions are asked only where the mapping depends on them, and always against the
-      // state inside this transaction — the Visit being completed included.
-      to === 'COMPLETED'
-        ? (await this.jobReviewConditionFailure(client, scope, jobId)) === null
-        : false,
       currentJobStatus,
+      { hasOtherOpenVisit },
     );
     if (destination === null || destination === currentJobStatus) {
       return;
@@ -1854,75 +3281,81 @@ export class JobsService {
   }
 
   /**
-   * `BR-061`: a Job may enter `PENDING_REVIEW` only when no Visit remains active and the latest
-   * completed Visit's outcome says the Job may be resolved.
+   * Whether [jobId] still has an open Visit: one whose status is not `COMPLETED` or `CANCELED`
+   * (`BR-062`, `BR-074`).
    *
-   * Only `RESOLVED` says that (`BR-078`: every other outcome expects follow-up). The effect of
-   * `NEEDS_QUOTE_APPROVAL` is an **OPEN QUESTION**, so it is not treated as resolvable here rather
-   * than being decided by the implementation (`BR-042`).
-   *
-   * This is runtime eligibility, not a structural limit: `NEW` → `PENDING_REVIEW` is a permitted
-   * transition (`BR-058`) that this rule refuses when the field work does not support it, and the
-   * refusal names which of the two conditions failed.
+   * The guard is the same one the explicit Job close applies (`BR-062`'s open-Visit invariant); it is
+   * asked here so the Visit consequence cannot reach a state the Job's own status route would refuse.
    */
-  private async assertJobMayAwaitReview(
+  private async jobHasOpenVisit(
     client: JobMutationClient,
     scope: OrganizationScope,
     jobId: string,
-  ): Promise<void> {
-    const failure = await this.jobReviewConditionFailure(client, scope, jobId);
-    if (failure !== null) {
-      throw new JobReviewConditionNotMetError(failure);
-    }
-  }
-
-  /**
-   * Which of `BR-061`'s two conditions keeps a Job from awaiting review, or `null` when it may.
-   *
-   * The conditions are defined once here because two callers ask the same question: the Job status
-   * route refuses a destination the Job does not qualify for, and the Visit completion applies
-   * `BR-061` as the Job consequence `ADR-019` D4 decides. Answering with *which* condition failed keeps
-   * the route's refusal as specific as it was.
-   */
-  private async jobReviewConditionFailure(
-    client: JobMutationClient,
-    scope: OrganizationScope,
-    jobId: string,
-  ): Promise<'ACTIVE_VISIT' | 'OUTCOME' | null> {
-    const [active] = await client
+  ): Promise<boolean> {
+    const [open] = await client
       .select({ id: visits.id })
       .from(visits)
       .where(
         and(
           eq(visits.organizationId, scope.organizationId),
           eq(visits.jobId, jobId),
-          inArray(visits.status, [...ACTIVE_VISIT_STATUSES]),
+          notInArray(visits.status, [...TERMINAL_VISIT_STATUSES]),
         ),
       )
       .limit(1);
-    if (active !== undefined) {
-      return 'ACTIVE_VISIT';
-    }
+    return open !== undefined;
+  }
 
-    const [latestCompleted] = await client
-      .select({ outcomeCode: visits.outcomeCode })
+  private async cancelOpenVisitsForJobCancellation(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    jobId: string,
+    actorMembershipId: string,
+    jobStatusHistoryId: string,
+    recordedAt: Date,
+  ): Promise<void> {
+    const openVisits = await client
+      .select({ id: visits.id, status: visits.status })
       .from(visits)
       .where(
         and(
           eq(visits.organizationId, scope.organizationId),
           eq(visits.jobId, jobId),
-          eq(visits.status, 'COMPLETED'),
+          notInArray(visits.status, [...TERMINAL_VISIT_STATUSES]),
         ),
-      )
-      .orderBy(desc(visits.outcomeRecordedAt))
-      .limit(1);
-    return latestCompleted?.outcomeCode === 'RESOLVED' ? null : 'OUTCOME';
+      );
+
+    for (const visit of openVisits) {
+      await client
+        .update(visits)
+        .set({
+          status: 'CANCELED',
+          version: sql`${visits.version} + 1`,
+          updatedAt: recordedAt,
+        })
+        .where(
+          and(
+            eq(visits.organizationId, scope.organizationId),
+            eq(visits.id, visit.id),
+          ),
+        );
+      await client.insert(visitStatusHistory).values({
+        organizationId: scope.organizationId,
+        visitId: visit.id,
+        fromStatus: visit.status,
+        toStatus: 'CANCELED',
+        note: 'Canceled by job cancellation.',
+        cancellationSource: 'JOB_CANCELLATION',
+        jobStatusHistoryId,
+        actorMembershipId,
+      });
+    }
   }
 
   /**
    * `BR-062`: a Job must not be completed while it has an open Visit.
    *
-   * A Visit is open while its status is not historical — `COMPLETED`, `CANCELED` or `NO_SHOW`
+   * A Visit is open while its status is not historical — `COMPLETED` or `CANCELED`
    * (`BR-074`, `BR-083`). A Job whose Visits are all historical may be closed, and a Job with no Visit
    * at all may be closed administratively; a `DRAFT` Visit is a field attempt that has not happened
    * yet, so it is remaining work and keeps the Job open.

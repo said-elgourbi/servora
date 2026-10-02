@@ -471,14 +471,16 @@ private fun AttentionCard(
 /**
  * How one condition is named in plain business language (`BR-012`).
  *
- * Each kind is the backend's answer (`BR-060`, `BR-061`, `BR-072`, `BR-074`); the screen only names
+ * Each kind is the backend's answer (`BR-060`, `BR-072`, `BR-074`, `BR-078`); the screen only names
  * it, and the Job number makes it specific.
  */
 private fun attentionTitle(item: ManagerAttentionItem): Int =
     when (item.kind) {
         ManagerAttentionKind.VISIT_OVERDUE -> R.string.home_attention_overdue_title
-        ManagerAttentionKind.JOB_PENDING_REVIEW -> R.string.home_attention_review_title
         ManagerAttentionKind.JOB_NEEDS_SCHEDULING -> R.string.home_attention_scheduling_title
+        ManagerAttentionKind.FOLLOW_UP_NEEDS_SCHEDULING -> R.string.home_attention_follow_up_title
+        ManagerAttentionKind.PARTS_REQUIRED -> R.string.home_attention_parts_title
+        ManagerAttentionKind.UNABLE_TO_COMPLETE -> R.string.home_attention_unable_to_complete_title
     }
 
 /**

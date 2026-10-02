@@ -32,6 +32,14 @@ object JobPhotoOperations {
 @Serializable
 data class JobPhotoOperationPayload(
     @SerialName("localPath") val localPath: String,
+    /**
+     * The Visit the photo was recorded during (`BR-047`, `BR-071`).
+     *
+     * It is nullable **only** so a payload written by an earlier build still decodes: the handler
+     * refuses an upload that carries none rather than sending evidence with no attribution (`BR-042`).
+     * Every payload this build writes has it.
+     */
+    @SerialName("visitId") val visitId: String? = null,
     @SerialName("phase") val phase: String?,
     @SerialName("note") val note: String? = null,
     @SerialName("capturedAt") val capturedAt: String,

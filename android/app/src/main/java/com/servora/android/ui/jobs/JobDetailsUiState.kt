@@ -9,6 +9,7 @@ import com.servora.android.data.jobs.QueuedVisitNote
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.CapturedJobAudioNote
+import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.EvidencePhase
@@ -49,6 +50,12 @@ enum class JobPhotoFailure {
 
     /** The photo's bytes could not be stored on this device, so nothing was recorded (`BR-014`). */
     PHOTO_NOT_SAVED,
+
+    /**
+     * The screen no longer represents a Visit, so the photo has no field attempt to belong to
+     * (`BR-047`, `BR-081`). Nothing was recorded (`BR-042`).
+     */
+    NO_VISIT,
 
     /** A photo the technician chose handed over nothing readable, so nothing was recorded (`D3`). */
     PHOTO_NOT_READ,
@@ -144,6 +151,12 @@ enum class JobAudioFailure {
     /** The device's recorder could not finish the recording, so nothing was kept. */
     RECORDING_FAILED,
 
+    /**
+     * The screen no longer represents a Visit, so the recording has no field attempt to belong to
+     * (`BR-047`, `BR-081`). Nothing was recorded (`BR-042`).
+     */
+    NO_VISIT,
+
     /** The recorder finished without producing any bytes, so no draft was recorded (`BR-014`). */
     RECORDING_EMPTY,
 
@@ -228,14 +241,35 @@ enum class JobActionKind {
     /** The represented Visit's schedule changed (`BR-073`). */
     RESCHEDULE,
 
+    /** A further Visit was scheduled on the Job (`BR-071`, `BR-072`). */
+    CREATE_VISIT,
+
     /** The represented Visit's crew changed (`BR-068`, `BR-069`). */
     ASSIGNMENT,
 
     /** A text update was added to the represented Visit's activity (`BR-027`, `BR-077`). */
     ACTIVITY_TEXT,
 
-    /** The represented Visit moved through its field lifecycle (`BR-074`, `BR-075`, `BR-077`). */
+    /** A text update was corrected after it was posted. */
+    ACTIVITY_TEXT_EDIT,
+
+    /** A text update was removed from ordinary activity. */
+    ACTIVITY_TEXT_REMOVE,
+
+    /** The represented Visit moved between its working states (`BR-074`, `BR-075`). */
     VISIT_STATUS_CHANGE,
+
+    /** The represented Visit was completed, recording its outcome (`BR-077`, `BR-078`). */
+    VISIT_COMPLETION,
+
+    /**
+     * A follow-up Visit request was submitted for the Job (`BR-FV-001`, `BR-FV-003`).
+     *
+     * It is not a Job change: the request is not a Visit and schedules nothing (`BR-FV-002`), so the
+     * report confirms that the proposal reached the office — where it now waits for a decision
+     * (`BR-FV-004`) — rather than that any work was arranged.
+     */
+    FOLLOW_UP_REQUEST,
 }
 
 /**
@@ -256,6 +290,21 @@ sealed interface PendingJobAction {
         override val conflicts: List<ScheduleConflict>,
     ) : PendingJobAction
 
+    /**
+     * A newly scheduled Visit waiting for confirmation (`BR-070`, `BR-071`).
+     *
+     * It carries the schedule and the whole crew, so confirming it resends the **same** scheduling
+     * decision the user made rather than asking them to enter it again. It belongs to the Job and to no
+     * Visit: the Visit it schedules does not exist until the API creates it, which is why it is the one
+     * pending action a Job without a represented Visit can hold (`BR-051`).
+     */
+    data class CreateVisit(
+        val scheduledStart: Instant,
+        val scheduledEnd: Instant,
+        val assignments: List<TechnicianAssignment>,
+        override val conflicts: List<ScheduleConflict>,
+    ) : PendingJobAction
+
     /** An assignment waiting for confirmation (`BR-068`). */
     data class Assign(
         val assignments: List<TechnicianAssignment>,
@@ -263,16 +312,15 @@ sealed interface PendingJobAction {
     ) : PendingJobAction
 
     /**
-     * A Visit status transition waiting for confirmation (`BR-070`, `BR-074`).
+     * A Visit working-status transition waiting for confirmation (`BR-070`, `BR-074`).
      *
      * A destination that schedules a Visit runs `BR-072`'s availability check, so a technician who
      * chose it — `BR-075`'s correction back to `SCHEDULED`, for instance — is shown the overlapping
-     * Visits and confirms them before anything is sent.
+     * Visits and confirms them before anything is sent. A completion never reaches this state: it
+     * carries no schedule, so the API cannot report a `BR-070` conflict for it.
      */
     data class VisitTransition(
         val status: VisitStatus,
-        val outcome: VisitOutcome?,
-        val outcomeSummary: String?,
         val operationId: String,
         val capturedAt: Instant,
         override val conflicts: List<ScheduleConflict>,
@@ -325,6 +373,8 @@ data class JobDetailsUiState(
     val actionFailure: JobActionFailure? = null,
     /** An action waiting for the user to accept the conflicts it would create (`BR-070`). */
     val pendingConfirmation: PendingJobAction? = null,
+    /** The follow-up Visit request this screen just submitted, if it still belongs to this Job. */
+    val submittedFollowUpRequest: FollowUpVisitRequest? = null,
     /**
      * Whether the action the last answer reported is waiting for the backend rather than applied
      * (`BR-014`, §7).
@@ -471,19 +521,52 @@ data class JobDetailsUiState(
      * Whether the represented Visit's field lifecycle may be driven right now (`BR-074`).
      *
      * The destinations come from the API, which owns the lifecycle, so a Visit the backend reports no
-     * destination for offers no action (`BR-022`, `BR-041`). Whether the **session** may drive it is
-     * the screen's own capability gate, and the API decides again at the route (`BR-007`, `BR-011`).
+     * working destination for offers no action (`BR-022`, `BR-041`) — a `COMPLETED` or `CANCELED` Visit
+     * among them. Whether the **session** may drive it is the screen's own capability gate, and the API
+     * decides again at the route (`BR-007`, `BR-011`).
      *
      * The API's own answer on the caller's place in the Visit's crew is part of the condition rather
      * than a third gate of the screen's own (`ADR-019` D3): a Visit this session may read but whose crew
      * does not include it offers no action, because the field route's only answer to it is a refusal —
      * which a screen presenting it as a Visit that no longer exists would report wrongly (`BR-041`).
+     * A Job the office has closed (`BR-062`, `BR-079`) offers no action either: the API refuses every
+     * field write under it, so the screen draws no control whose only answer is that refusal.
      */
     val canChangeVisitStatus: Boolean
         get() =
-            details?.selectedVisit?.let { visit ->
-                visit.fieldActionable && visit.allowedStatusTransitions.isNotEmpty()
-            } == true && canAct
+            details?.readOnlyReason == null &&
+                details?.selectedVisit?.let { visit ->
+                    visit.fieldActionable && visit.allowedStatusTransitions.isNotEmpty()
+                } == true && canAct
+
+    /**
+     * Whether the represented Visit may be completed right now, as the API answered it (`BR-077`).
+     *
+     * Completion is the Visit card's own primary action rather than one of the status destinations, so
+     * it has its own gate: the API reports `completionAllowed` only when the caller drives the Visit,
+     * holds the capability a completion requires of every caller and neither the Job nor the Visit is
+     * already finished (`BR-009`, `BR-062`, `BR-079`, `BR-093`). A Job the API reports as read-only
+     * offers nothing either, so a projection whose two answers disagreed could not draw a control whose
+     * only answer is a refusal (`BR-007`, `BR-041`).
+     */
+    val canCompleteVisit: Boolean
+        get() =
+            details?.readOnlyReason == null &&
+                details?.selectedVisit?.completionAllowed == true && canAct
+
+    /**
+     * Whether a field update — a note, a photo, a future recording — may be added to the represented
+     * Visit right now (`BR-013`, `BR-027`).
+     *
+     * The API answers it with `addUpdateAllowed`, which is what keeps a technician from creating work
+     * under a Job the office canceled or completed while they were offline (`BR-062`, `BR-079`). The
+     * capability each kind needs stays the screen's own gate beside it (`BR-006`, `BR-007`), and the
+     * Job's own read-only answer is part of the condition for the same reason it is for the completion.
+     */
+    val canAddVisitUpdate: Boolean
+        get() =
+            details?.readOnlyReason == null &&
+                details?.selectedVisit?.addUpdateAllowed == true && canAct
 
     /** Whether the activity has been asked for and not answered yet. */
     val showsActivityLoading: Boolean

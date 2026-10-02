@@ -34,18 +34,23 @@ const WEBP_BYTES = Buffer.concat([
 
 const OPERATION_ID = '6f1a8d1e-4b26-4f8f-9a34-2b7c9e0d5a11';
 
+/** The Visit the evidence belongs to (`BR-047`). */
+const VISIT_ID = '4c9e2b77-1d4a-42f0-8c31-9a0f5d2e6b03';
+
 describe('job photo requests', () => {
   describe('fields', () => {
     it('accepts a known phase, an optional note and the device instant', () => {
       expect(
         parseCreateJobPhotoDto({
           clientOperationId: OPERATION_ID,
+          visitId: VISIT_ID,
           phase: 'BEFORE_WORK',
           note: '  Panel before the repair  ',
           capturedAt: '2026-09-15T13:04:05.000Z',
         }),
       ).toEqual({
         clientOperationId: OPERATION_ID,
+        visitId: VISIT_ID,
         phase: 'BEFORE_WORK',
         note: 'Panel before the repair',
         capturedAt: new Date('2026-09-15T13:04:05.000Z'),
@@ -55,6 +60,7 @@ describe('job photo requests', () => {
     it('treats a blank note as no note, because the note is optional', () => {
       const dto = parseCreateJobPhotoDto({
         clientOperationId: OPERATION_ID,
+        visitId: VISIT_ID,
         phase: 'DURING_WORK',
         note: '   ',
       });
@@ -67,6 +73,7 @@ describe('job photo requests', () => {
       expect(() =>
         parseCreateJobPhotoDto({
           clientOperationId: OPERATION_ID,
+          visitId: VISIT_ID,
           phase: 'BEFORE_AFTER',
         }),
       ).toThrow(DomainValidationError);
@@ -84,10 +91,26 @@ describe('job photo requests', () => {
       ).toThrow(DomainValidationError);
     });
 
+    it('requires the Visit the photo belongs to, because evidence is field work', () => {
+      // A photo is recorded during a Visit (`BR-047`, `BR-080`), so a request that names none — or one
+      // that is not a Visit id at all — is refused rather than stored with no attribution (`BR-042`).
+      expect(() =>
+        parseCreateJobPhotoDto({ clientOperationId: OPERATION_ID, phase: 'DURING_WORK' }),
+      ).toThrow(DomainValidationError);
+      expect(() =>
+        parseCreateJobPhotoDto({
+          clientOperationId: OPERATION_ID,
+          visitId: 'not-a-uuid',
+          phase: 'DURING_WORK',
+        }),
+      ).toThrow(DomainValidationError);
+    });
+
     it('refuses a note longer than the shared limit', () => {
       expect(() =>
         parseCreateJobPhotoDto({
           clientOperationId: OPERATION_ID,
+          visitId: VISIT_ID,
           phase: 'AFTER_WORK',
           note: 'x'.repeat(2001),
         }),

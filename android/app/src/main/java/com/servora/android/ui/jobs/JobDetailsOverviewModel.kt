@@ -2,12 +2,14 @@ package com.servora.android.ui.jobs
 
 import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobActivityEvent
+import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobContactPerson
 import com.servora.android.domain.model.JobCustomerContact
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsVisit
 import com.servora.android.domain.model.JobDetailsVisitSummary
 import com.servora.android.domain.model.JobStatus
+import com.servora.android.domain.model.VisitOutcome
 import com.servora.android.domain.model.VisitStatus
 import java.time.Instant
 import java.time.ZoneId
@@ -61,24 +63,40 @@ internal fun JobDetails.toJobOverview(): JobOverview =
     )
 
 /**
- * The Customer's contact block as the Job's card presents it (`BR-092`, `BR-095`).
+ * The Customer's contact block as the Job's Contacts section presents it (`BR-092`, `BR-095`).
  *
- * The card leads with **one** phone: the effective primary contact's number (`BR-095`). Every other way of
- * reaching the Customer is [others], which the card keeps behind a disclosure that is collapsed and hidden
- * by default — so the number a technician came for is not buried under the Customer's whole contact book
+ * The section leads with **one** contact: whoever the effective primary is (`BR-095`) — the flagged
+ * contact person, or the Customer itself when no contact person is flagged — with the values that person
+ * recorded, so the technician reads who they are about to speak to and not merely a number. Every other
+ * way of reaching the Customer is [others], behind a disclosure that is collapsed and hidden by default,
+ * so the person the technician came for is not buried under the Customer's whole contact book
  * (`BR-012`).
  */
 internal data class JobCustomerContactSummary(
+    val primaryName: String,
     val primaryPhone: String?,
+    val primaryEmail: String?,
+    /**
+     * Whether the effective primary is the **Customer itself**, because no contact person is flagged
+     * (`BR-095`).
+     *
+     * It is what lets the section state the Customer once rather than twice: when the Customer is its own
+     * primary and has no recorded phone or email, the block under the Customer's row would repeat the row
+     * above it and say nothing else (`BR-012`).
+     */
+    val primaryIsCustomer: Boolean,
     val others: List<JobCustomerOtherContact>,
 )
 
 /**
- * One other way of reaching the Customer, which the Job card does not present until it is expanded.
+ * One other way of reaching the Customer, which the Contacts section does not present until it is
+ * expanded.
  *
  * [name] is the contact person's whole name or, for the entry that stands for the Customer's own general
- * line, the Customer's name. [email] is `null` for that entry: the Customer's own email is already one of
- * the card's visible rows, and a value is not drawn twice on one card (`BR-012`).
+ * line, the Customer's name. Its phone and its email are that person's own values (`BR-095`), and a value
+ * the office never recorded is `null` rather than an empty line (`BR-012`). The entry that stands for the
+ * Customer's own line carries both of the Customer's, because the Customer's email is no longer one of the
+ * section's visible rows — the effective primary's own values are (`BR-095`).
  */
 internal data class JobCustomerOtherContact(
     val name: String,
@@ -87,26 +105,28 @@ internal data class JobCustomerOtherContact(
 )
 
 /**
- * Resolves the Customer's effective primary contact and the numbers the Job card hides by default
- * (`BR-095`).
+ * Resolves the Customer's effective primary contact and the ways of reaching it that the Contacts section
+ * hides by default (`BR-095`).
  *
- * The primary phone is the flagged contact person's own number, or the Customer's own number when no
- * contact person is flagged — in which case the Customer itself is the primary. A flagged contact person
- * who has no number recorded leaves the card without a primary phone rather than handing that role to a
- * number `BR-095` does not give it, and that person is then listed among the others so a contact the API
- * reported never disappears from the card.
+ * The effective primary is the contact person flagged primary, or the Customer itself when no contact
+ * person is flagged — which is a legal state, because contacts are optional. The primary's own name, phone
+ * and email are the section's inline block, and a value the flagged person has not recorded stays absent
+ * rather than being handed to the Customer's own number, which `BR-095` does not give it.
+ *
+ * [others] is every other way of reaching the Customer: the Customer's own general line when a contact
+ * person is the primary, plus every contact person who is not that primary. Nothing is dropped and nothing
+ * is stated twice — the flagged person is the block above, never a row below it.
  *
  * [customerName] names the entry that stands for the Customer's own general line, because that entry is a
- * number rather than one of the Customer's people.
+ * way of reaching the Customer rather than one of the Customer's people.
  */
 internal fun JobCustomerContact.contactSummary(customerName: String): JobCustomerContactSummary {
     val primary = contacts.firstOrNull { it.isPrimary }
-    val presentedPrimary = primary?.takeIf { it.phone != null }
     val others = buildList {
-        if (primary != null && phone != null) {
-            add(JobCustomerOtherContact(name = customerName, phone = phone, email = null))
+        if (primary != null && (phone != null || email != null)) {
+            add(JobCustomerOtherContact(name = customerName, phone = phone, email = email))
         }
-        contacts.filter { it != presentedPrimary }.forEach { contact ->
+        contacts.filter { it != primary }.forEach { contact ->
             add(
                 JobCustomerOtherContact(
                     name = contact.contactPersonName(),
@@ -117,11 +137,10 @@ internal fun JobCustomerContact.contactSummary(customerName: String): JobCustome
         }
     }
     return JobCustomerContactSummary(
-        primaryPhone = when {
-            primary == null -> phone
-            presentedPrimary == null -> null
-            else -> presentedPrimary.phone
-        },
+        primaryName = primary?.contactPersonName() ?: customerName,
+        primaryPhone = primary?.phone ?: phone.takeIf { primary == null },
+        primaryEmail = primary?.email ?: email.takeIf { primary == null },
+        primaryIsCustomer = primary == null,
         others = others,
     )
 }
@@ -177,6 +196,97 @@ internal fun groupJobActivity(
     }
     return JobActivityGroups(jobWide = jobWide, byVisitId = byVisitId)
 }
+
+/**
+ * The primary Job Activity timeline is operational, not an audit log (`BR-080`).
+ *
+ * A reader opening Job Details needs to know what actually happened in the field: notes, evidence,
+ * meaningful field milestones and the outcome. Administrative events remain in the activity data and are
+ * available through a secondary history, but they do not dominate the first timeline a reader sees.
+ */
+internal fun List<JobActivityEvent>.primaryActivity(): List<JobActivityEvent> =
+    filter { event -> event.isPrimaryActivity() }
+
+/** Administrative/system history kept out of the primary operational timeline. */
+internal fun List<JobActivityEvent>.administrativeActivity(): List<JobActivityEvent> =
+    filterNot { event -> event.isPrimaryActivity() }
+
+internal fun primaryActivityCount(events: List<JobActivityEvent>?): Int =
+    events.orEmpty().count { event -> event.isPrimaryActivity() }
+
+private fun JobActivityEvent.isPrimaryActivity(): Boolean =
+    when (kind) {
+        JobActivityKind.VISIT_NOTE_ADDED,
+        JobActivityKind.JOB_PHOTO_ADDED,
+        JobActivityKind.JOB_AUDIO_ADDED,
+        JobActivityKind.VISIT_OUTCOME_RECORDED,
+        -> true
+        JobActivityKind.VISIT_STATUS_CHANGED -> toStatus in MeaningfulVisitStatusMilestones
+        JobActivityKind.JOB_STATUS_CHANGED,
+        JobActivityKind.JOB_PROPERTY_CHANGED,
+        JobActivityKind.JOB_CUSTOMER_CHANGED,
+        JobActivityKind.VISIT_SCHEDULED,
+        JobActivityKind.VISIT_RESCHEDULED,
+        JobActivityKind.VISIT_TECHNICIAN_ASSIGNED,
+        JobActivityKind.VISIT_TECHNICIAN_REMOVED,
+        JobActivityKind.VISIT_TECHNICIAN_ROLE_CHANGED,
+        JobActivityKind.JOB_PHOTO_REMOVED,
+        JobActivityKind.JOB_AUDIO_REMOVED,
+        -> false
+    }
+
+private val MeaningfulVisitStatusMilestones = setOf(
+    VisitStatus.EN_ROUTE.name,
+    VisitStatus.ON_SITE.name,
+    VisitStatus.IN_PROGRESS.name,
+    VisitStatus.COMPLETED.name,
+    VisitStatus.CANCELED.name,
+)
+
+/** Which scheduling action, if any, Job Details may offer from the Job's current Visit shape. */
+internal enum class JobVisitScheduleAction {
+    INITIAL_VISIT,
+    FOLLOW_UP_VISIT,
+}
+
+/**
+ * The label the schedule action carries, once the API has answered that scheduling is allowed
+ * (`BR-071`, `BR-078`).
+ *
+ * Whether a session may schedule a new Visit at all is the API's own `canScheduleVisit` answer, which
+ * already folds in the capability, the Job's open state and its Visit shape (`BR-041`, `BR-007`). This
+ * function only picks the label for that answer: a first field attempt when no Visit is represented, and
+ * a follow-up otherwise.
+ */
+internal fun JobDetails.visitScheduleAction(): JobVisitScheduleAction? {
+    if (!canScheduleVisit) return null
+    val representedVisit = selectedVisit
+    if (representedVisit == null) {
+        return if (visits.none { visit -> visit.hasOpenFieldAttempt() }) {
+            JobVisitScheduleAction.INITIAL_VISIT
+        } else {
+            null
+        }
+    }
+
+    val representedSummary = visits.firstOrNull { visit -> visit.id == representedVisit.id }
+    return if (
+        representedVisit.status == VisitStatus.COMPLETED &&
+        representedSummary?.outcome?.requiresFollowUpVisit() == true
+    ) {
+        JobVisitScheduleAction.FOLLOW_UP_VISIT
+    } else {
+        null
+    }
+}
+
+private fun JobDetailsVisitSummary.hasOpenFieldAttempt(): Boolean =
+    status != VisitStatus.COMPLETED && status != VisitStatus.CANCELED
+
+private fun VisitOutcome.requiresFollowUpVisit(): Boolean =
+    this == VisitOutcome.NEEDS_FOLLOW_UP ||
+        this == VisitOutcome.NEEDS_PARTS ||
+        this == VisitOutcome.UNABLE_TO_COMPLETE
 
 /**
  * One Visit's group in the Job Activity section: the Visit, and the activity that belongs to it
@@ -274,14 +384,17 @@ internal enum class VisitSectionPeriod {
  * The field statuses that mean the attempt is under way rather than scheduled for later (`BR-074`).
  *
  * `COMPLETED` is deliberately absent: a completed Visit is over, so its section is described by when it
- * was for, whatever its completion time was. `DRAFT`, `SCHEDULED`, `CANCELED` and `NO_SHOW` are absent
- * for the same reason — none of them says a technician is on the work now.
+ * was for, whatever its completion time was. `DRAFT`, `SCHEDULED` and `CANCELED` are absent for the
+ * same reason — none of them says a technician is on the work now.
  */
 private val VisitUnderWayStatuses = setOf(
     VisitStatus.EN_ROUTE,
     VisitStatus.ON_SITE,
     VisitStatus.IN_PROGRESS,
 )
+
+/** Whether this Visit is actively being worked (`BR-074`). */
+internal fun JobDetailsVisit.isUnderWay(): Boolean = status in VisitUnderWayStatuses
 
 /**
  * When the Visit the page represents is for, as of [now] (`BR-072`, `BR-074`, `BR-081`).

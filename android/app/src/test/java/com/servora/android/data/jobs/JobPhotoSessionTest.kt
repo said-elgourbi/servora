@@ -33,7 +33,7 @@ class JobPhotoSessionTest {
         val capture = requireNotNull(photos.session.beginCapture())
         photos.files.writeCapture(capture.localPath, FakeJobPhotoFiles.PNG_BYTES)
 
-        val recorded = photos.session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT)
+        val recorded = photos.session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT)
 
         val photo = recorded.photo()
         assertEquals("image/png", photo.mimeType)
@@ -57,7 +57,7 @@ class JobPhotoSessionTest {
         val capture = requireNotNull(photos.session.beginCapture())
         photos.files.writeCapture(capture.localPath, FakeJobPhotoFiles.UNACCEPTED_BYTES)
 
-        val recorded = photos.session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT)
+        val recorded = photos.session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT)
 
         val photo = recorded.photo()
         assertEquals(1, photos.processing.conversions)
@@ -75,7 +75,7 @@ class JobPhotoSessionTest {
         val capture = requireNotNull(photos.session.beginCapture())
         photos.files.writeCapture(capture.localPath, oversizedJpeg())
 
-        val recorded = photos.session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT)
+        val recorded = photos.session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT)
 
         val photo = recorded.photo()
         assertEquals(0, photos.processing.conversions)
@@ -91,7 +91,7 @@ class JobPhotoSessionTest {
         val capture = requireNotNull(photos.session.beginCapture())
         photos.files.writeCapture(capture.localPath, FakeJobPhotoFiles.UNACCEPTED_BYTES)
 
-        val recorded = photos.session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT)
+        val recorded = photos.session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT)
 
         assertEquals(JobPhotoRefusal.TYPE_NOT_ACCEPTED, recorded.reason())
         assertNothingRecorded(photos)
@@ -104,7 +104,7 @@ class JobPhotoSessionTest {
         val capture = requireNotNull(photos.session.beginCapture())
         photos.files.writeCapture(capture.localPath, oversizedJpeg())
 
-        val recorded = photos.session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT)
+        val recorded = photos.session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT)
 
         assertEquals(JobPhotoRefusal.TOO_LARGE, recorded.reason())
         assertNothingRecorded(photos)
@@ -117,7 +117,7 @@ class JobPhotoSessionTest {
 
         // A picked photo is the one that is always written: the camera's own capture is already in
         // app-private storage, so it is not rewritten when neither step changed its bytes.
-        val recorded = photos.session.recordPickedPhoto(JOB_ID, FakeJobPhotoFiles.PNG_BYTES, PHASE)
+        val recorded = photos.session.recordPickedPhoto(JOB_ID, VISIT_ID, FakeJobPhotoFiles.PNG_BYTES, PHASE)
 
         assertEquals(JobPhotoRefusal.NOT_STORED, recorded.reason())
         assertNothingRecorded(photos)
@@ -128,7 +128,7 @@ class JobPhotoSessionTest {
         val photos = PhotoCollaborators()
         val capture = requireNotNull(photos.session.beginCapture())
 
-        val recorded = photos.session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT)
+        val recorded = photos.session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT)
 
         assertEquals(JobPhotoRefusal.NO_BYTES, recorded.reason())
         assertNothingRecorded(photos)
@@ -140,7 +140,7 @@ class JobPhotoSessionTest {
         val capture = requireNotNull(photos.session.beginCapture())
         photos.files.writeCapture(capture.localPath)
 
-        val photo = photos.session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT).photo()
+        val photo = photos.session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT).photo()
 
         // The bytes the camera wrote are the bytes to keep, so they are not copied over themselves:
         // a write that failed would otherwise be able to destroy a valid capture (`BR-014`, §9).
@@ -156,7 +156,7 @@ class JobPhotoSessionTest {
     fun `records a picked photo through the same pipeline as a capture`() = runTest {
         val photos = PhotoCollaborators()
 
-        val recorded = photos.session.recordPickedPhoto(JOB_ID, FakeJobPhotoFiles.PNG_BYTES, PHASE)
+        val recorded = photos.session.recordPickedPhoto(JOB_ID, VISIT_ID, FakeJobPhotoFiles.PNG_BYTES, PHASE)
 
         val photo = recorded.photo()
         assertEquals(JOB_ID, photo.jobId)
@@ -178,7 +178,7 @@ class JobPhotoSessionTest {
     fun `refuses a picked photo when no session can own it`() = runTest {
         val photos = PhotoCollaborators(subjectId = null)
 
-        val recorded = photos.session.recordPickedPhoto(JOB_ID, FakeJobPhotoFiles.PNG_BYTES, PHASE)
+        val recorded = photos.session.recordPickedPhoto(JOB_ID, VISIT_ID, FakeJobPhotoFiles.PNG_BYTES, PHASE)
 
         assertEquals(JobPhotoRefusal.NOT_SIGNED_IN, recorded.reason())
         assertNothingRecorded(photos)
@@ -188,7 +188,7 @@ class JobPhotoSessionTest {
     fun `refuses a picked item that handed over no bytes`() = runTest {
         val photos = PhotoCollaborators()
 
-        val recorded = photos.session.recordPickedPhoto(JOB_ID, ByteArray(0), PHASE)
+        val recorded = photos.session.recordPickedPhoto(JOB_ID, VISIT_ID, ByteArray(0), PHASE)
 
         // An item that handed over nothing is the pick's own refusal, not the camera's: the screen
         // reports that the photo could not be read rather than that a camera saved nothing (`BR-042`).
@@ -202,7 +202,7 @@ class JobPhotoSessionTest {
         val capture = requireNotNull(photos.session.beginCapture())
         photos.files.writeCapture(capture.localPath, FakeJobPhotoFiles.PNG_BYTES)
 
-        val photo = photos.session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT).photo()
+        val photo = photos.session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT).photo()
 
         // The idempotency key of the upload is the id the camera's target was allocated with (`BR-031`).
         assertEquals(capture.photoId, photo.photoId)
@@ -222,7 +222,7 @@ class JobPhotoSessionTest {
     private suspend fun PhotoCollaborators.submittedPhoto(): PendingJobPhoto {
         val capture = requireNotNull(session.beginCapture())
         files.writeCapture(capture.localPath, FakeJobPhotoFiles.PNG_BYTES)
-        val recorded = session.recordCapture(capture, JOB_ID, PHASE, CAPTURED_AT).photo()
+        val recorded = session.recordCapture(capture, JOB_ID, VISIT_ID, PHASE, CAPTURED_AT).photo()
         session.submit(listOf(recorded))
         return requireNotNull(store.find(recorded.photoId))
     }
@@ -267,6 +267,9 @@ class JobPhotoSessionTest {
 
     private companion object {
         const val JOB_ID = "job-1"
+
+        /** The Visit every photo in this file is recorded on (`BR-047`, `BR-080`). */
+        const val VISIT_ID = "visit-1"
 
         /** The subject every photo in this file is recorded under (`PhotoCollaborators`' default). */
         const val SUBJECT_ID = "user-1"

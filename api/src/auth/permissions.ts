@@ -196,6 +196,10 @@ export const VISIT_PERMISSIONS = {
   REQUEST_FOLLOW_UP: 'visits.request_follow_up',
   /** Review, clarify, approve, or reject a pending follow-up request. */
   REVIEW_REQUESTS: 'visits.review_requests',
+  /** Report field work that was performed without an existing Visit. */
+  REPORT_AD_HOC_WORK: 'visits.report_ad_hoc_work',
+  /** Review and reconcile field work reported without an existing Visit. */
+  REVIEW_AD_HOC_WORK: 'visits.review_ad_hoc_work',
   /** Advance the field status of an assigned Visit (`BR-074`, `ADR-019` D4). */
   UPDATE_ASSIGNED_STATUS: 'VISIT_UPDATE_ASSIGNED_STATUS',
   /** Add a note to an assigned Visit (`BR-077`, `ADR-019` D3). */

@@ -25,7 +25,10 @@ import {
   JOB_PERMISSIONS,
   VISIT_PERMISSIONS,
 } from '../auth/permissions.js';
-import { RequireAnyPermission, RequirePermissions } from '../auth/permissions.decorator.js';
+import {
+  RequireAnyPermission,
+  RequirePermissions,
+} from '../auth/permissions.decorator.js';
 import { PermissionsGuard } from '../auth/permissions.guard.js';
 import type { PermissionedRequest } from '../auth/permissions.guard.js';
 import { ObjectStorageError } from '../storage/object-storage.js';
@@ -33,12 +36,28 @@ import {
   PropertyNotFoundError,
   PropertyNotAvailableForNewWorkError,
 } from '../customers/properties.service.js';
+import { CustomerNotFoundError } from '../customers/customers.service.js';
 import { DomainValidationError } from '../validation/domain-validation.js';
 import { parseCreateJobDto } from './job-create.dto.js';
+import {
+  parseConvertAdHocWorkReportDto,
+  parseLinkAdHocWorkReportDto,
+  parseSubmitAdHocWorkReportDto,
+  type AdHocWorkReportDto,
+} from './ad-hoc-work-report.dto.js';
+import {
+  parseAdHocCustomerSearchQuery,
+  parseAdHocReportCustomerContextQuery,
+  type AdHocReportCustomerOptionDto,
+  type AdHocReportCustomerScope,
+  type AdHocReportJobOptionDto,
+  type AdHocReportPropertyOptionDto,
+} from './ad-hoc-work-report-options.dto.js';
 import {
   parseDirectCreateVisitDto,
   parseFollowUpVisitApprovalDto,
   parseFollowUpVisitReviewDto,
+  parseReplyFollowUpVisitRequestDto,
   parseSubmitFollowUpVisitRequestDto,
   type FollowUpVisitRequestDto,
 } from './follow-up-visit-request.dto.js';
@@ -67,12 +86,14 @@ import {
 import type { JobAudioNoteUpload } from './job-audio.dto.js';
 import {
   JobAudioNoteAlreadyRemovedError,
+  JobAudioNoteRemovalForbiddenError,
   JobAudioNoteNotFoundError,
   JobAudioNoteOperationReusedError,
   JobAudioNotesService,
 } from './job-audio-notes.service.js';
 import {
   JobPhotoAlreadyRemovedError,
+  JobPhotoRemovalForbiddenError,
   JobPhotoNotFoundError,
   JobPhotoOperationReusedError,
   JobPhotosService,
@@ -80,8 +101,11 @@ import {
 import {
   parseAssignVisitTechniciansDto,
   parseAddVisitNoteDto,
+  parseEditVisitNoteDto,
+  parseRemoveVisitNoteDto,
   parseChangeJobStatusDto,
   parseChangeVisitStatusDto,
+  parseCompleteVisitDto,
   parseRescheduleVisitDto,
 } from './job-action.dto.js';
 import type {
@@ -90,22 +114,26 @@ import type {
   ScheduleConflict,
 } from './jobs.service.js';
 import {
-  JobCancellationUnavailableError,
+  AdHocWorkReportConflictError,
+  AdHocWorkReportLocationRequiredError,
+  AdHocWorkReportNotFoundError,
+  AdHocWorkReportNotReviewableError,
   JobClosedForFieldWorkError,
   JobCompletionBlockedError,
   FollowUpVisitRequestConflictError,
   FollowUpVisitRequestNotFoundError,
+  FollowUpVisitRequestNotAwaitingReplyError,
   FollowUpVisitRequestNotReviewableError,
   JobCustomerInactiveError,
   JobCustomerNotFoundError,
   JobNotFoundError,
-  JobReviewConditionNotMetError,
   JobStatusTransitionNotAllowedError,
   JobsService,
   JobVersionConflictError,
   ScheduleConflictError,
   TechnicianNotAssignableError,
   VisitNotReschedulableError,
+  VisitNoteForbiddenError,
   VisitNotFoundError,
   VisitOperationReusedError,
   VisitSchedulingConditionNotMetError,
@@ -215,6 +243,159 @@ export class JobsController {
     );
   }
 
+  @Post('ad-hoc-work-reports')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(VISIT_PERMISSIONS.REPORT_AD_HOC_WORK)
+  async submitAdHocWorkReport(
+    @Req() request: PermissionedRequest,
+    @Body() body: unknown,
+  ): Promise<AdHocWorkReportDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseSubmitAdHocWorkReportDto(body));
+    try {
+      return await this.jobs.submitAdHocWorkReport(
+        { organizationId: authorization.organizationId },
+        authorization.membershipId,
+        input,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Get('ad-hoc-work-reports')
+  @RequireAnyPermission(
+    VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
+    VISIT_PERMISSIONS.REPORT_AD_HOC_WORK,
+  )
+  async listAdHocWorkReports(
+    @Req() request: PermissionedRequest,
+  ): Promise<readonly AdHocWorkReportDto[]> {
+    const authorization = authorizationOf(request);
+    return this.jobs.listAdHocWorkReports(
+      { organizationId: authorization.organizationId },
+      authorization.membershipId,
+      authorization.permissions.includes(VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK),
+    );
+  }
+
+  @Get('ad-hoc-work-reports/customer-options')
+  @RequirePermissions(VISIT_PERMISSIONS.REPORT_AD_HOC_WORK)
+  async adHocReportCustomerOptions(
+    @Req() request: PermissionedRequest,
+    @Query() query: unknown,
+  ): Promise<readonly AdHocReportCustomerOptionDto[]> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseAdHocCustomerSearchQuery(query));
+    return this.jobs.searchAdHocReportCustomers(
+      { organizationId: authorization.organizationId },
+      adHocReportCustomerScopeOf(authorization),
+      input.query,
+    );
+  }
+
+  @Get('ad-hoc-work-reports/property-options')
+  @RequirePermissions(VISIT_PERMISSIONS.REPORT_AD_HOC_WORK)
+  async adHocReportPropertyOptions(
+    @Req() request: PermissionedRequest,
+    @Query() query: unknown,
+  ): Promise<readonly AdHocReportPropertyOptionDto[]> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseAdHocReportCustomerContextQuery(query));
+    try {
+      return await this.jobs.listAdHocReportProperties(
+        { organizationId: authorization.organizationId },
+        adHocReportCustomerScopeOf(authorization),
+        input.customerId,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Get('ad-hoc-work-reports/job-options')
+  @RequirePermissions(VISIT_PERMISSIONS.REPORT_AD_HOC_WORK)
+  async adHocReportJobOptions(
+    @Req() request: PermissionedRequest,
+    @Query() query: unknown,
+  ): Promise<readonly AdHocReportJobOptionDto[]> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseAdHocReportCustomerContextQuery(query));
+    try {
+      return await this.jobs.listAdHocReportJobs(
+        { organizationId: authorization.organizationId },
+        adHocReportCustomerScopeOf(authorization),
+        input.customerId,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Get('ad-hoc-work-reports/:reportId')
+  @RequireAnyPermission(
+    VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
+    VISIT_PERMISSIONS.REPORT_AD_HOC_WORK,
+  )
+  async getAdHocWorkReport(
+    @Req() request: PermissionedRequest,
+    @Param('reportId') reportId: string,
+  ): Promise<AdHocWorkReportDto> {
+    const authorization = authorizationOf(request);
+    try {
+      return await this.jobs.getAdHocWorkReport(
+        { organizationId: authorization.organizationId },
+        authorization.membershipId,
+        authorization.permissions.includes(
+          VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
+        ),
+        reportId,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Post('ad-hoc-work-reports/:reportId/link')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK)
+  async linkAdHocWorkReport(
+    @Req() request: PermissionedRequest,
+    @Param('reportId') reportId: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseLinkAdHocWorkReportDto(body));
+    return this.action(authorization, () =>
+      this.jobs.linkAdHocWorkReportToJob(
+        { organizationId: authorization.organizationId },
+        reportId,
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
+  @Post('ad-hoc-work-reports/:reportId/convert')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK)
+  async convertAdHocWorkReport(
+    @Req() request: PermissionedRequest,
+    @Param('reportId') reportId: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseConvertAdHocWorkReportDto(body));
+    return this.action(authorization, () =>
+      this.jobs.convertAdHocWorkReportToNewJob(
+        { organizationId: authorization.organizationId },
+        reportId,
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
   /**
    * One Job, for the office caller or for a field caller whose own crew includes the Job (`ADR-019`
    * D1, D2).
@@ -235,12 +416,14 @@ export class JobsController {
   async findOne(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
+    @Query('visitId') visitId?: string,
   ): Promise<JobDetailsDto> {
     const authorization = authorizationOf(request);
     const details = await this.jobs.findJobDetailsInOrganization(
       { organizationId: authorization.organizationId },
       id,
       assignedViewerOf(authorization),
+      typeof visitId === 'string' && visitId.trim() !== '' ? visitId : null,
     );
     if (details === null) {
       throw jobNotFound();
@@ -348,7 +531,9 @@ export class JobsController {
     @Body() body: unknown,
   ): Promise<JobDetailsDto> {
     const authorization = authorizationOf(request);
-    if (!authorization.permissions.includes(VISIT_PERMISSIONS.CREATE_SCHEDULE)) {
+    if (
+      !authorization.permissions.includes(VISIT_PERMISSIONS.CREATE_SCHEDULE)
+    ) {
       throw AuthApiError.forbidden();
     }
     const input = parseInput(() => parseFollowUpVisitApprovalDto(body));
@@ -364,6 +549,42 @@ export class JobsController {
   }
 
   /**
+   * The requester answers a request the office returned for clarification (`BR-FV-012`).
+   *
+   * It is the field-side counterpart of the clarification route, and it is authorized by the capability
+   * that raises a request rather than the one that reviews it: the answer is the requester's own business,
+   * not a review. That capability is a session-level answer and not a permission on *this* request — whose
+   * request it is, is the service's check, and a request another member raised is reported as not found so
+   * an id never becomes a way to read or write someone else's request (`BR-007`, `BR-009`, `BR-FV-001`).
+   *
+   * Answering is one operation: the request returns to `PENDING` (the state the office reviews it in) and
+   * the answer joins the request's append-only conversation, in one transaction (`BR-067`, `BR-FV-013`).
+   */
+  @Post(':id/visit-requests/:requestId/reply')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(VISIT_PERMISSIONS.REQUEST_FOLLOW_UP)
+  async replyToVisitRequest(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+    @Body() body: unknown,
+  ): Promise<FollowUpVisitRequestDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseReplyFollowUpVisitRequestDto(body));
+    try {
+      return await this.jobs.replyToFollowUpVisitRequest(
+        { organizationId: authorization.organizationId },
+        id,
+        requestId,
+        authorization.membershipId,
+        input,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  /**
    * One Job's chronological activity, newest first (`BR-080`).
    *
    * The Job read's own guard covers its activity, because the activity is a projection of the same
@@ -372,13 +593,13 @@ export class JobsController {
    * (`BR-001`) and its event vocabulary is the one defined in `job-activity.ts` (`BR-041`).
    *
    * `includeRemovedEvidence=true` asks for the **audit/history context** rather than the ordinary one:
-   * evidence a Manager has removed from ordinary use (`BR-089`) is included, of every kind, which is what
-   * `D6d` requires of the context it stays visible in. That is a read of evidence taken out of use, so it
-   * is authorized by an evidence **removal** capability — the Manager-level capability that governs the
-   * evidence lifecycle — and a caller who may read the activity without one is refused rather than
-   * quietly answered with the ordinary projection (`BR-007`, `BR-089`). Either kind's removal capability
-   * is enough, because the flag asks one question about one read rather than one question per kind
-   * (`ADR-018` A7).
+   * evidence or comments a Manager has removed from ordinary use are included, which is what `D6d`
+   * requires of the context they stay visible in. That is an audit/history read, so it is authorized by
+   * the Manager's Job update capability or by an evidence **removal** capability — the Manager-level
+   * capability that governs evidence lifecycle. A caller who may read ordinary activity without one is
+   * refused rather than quietly answered with the ordinary projection (`BR-007`, `BR-089`). Either
+   * evidence kind's removal capability is enough, because the flag asks one question about one read
+   * rather than one question per kind (`ADR-018` A7).
    */
   @Get(':id/activity')
   @RequireAnyPermission(
@@ -394,6 +615,7 @@ export class JobsController {
     const options = parseInput(() => parseJobActivityOptions(query));
     if (
       options.includeRemovedEvidence === true &&
+      !authorization.permissions.includes(JOB_PERMISSIONS.UPDATE) &&
       !authorization.permissions.includes(EVIDENCE_PERMISSIONS.PHOTO_REMOVE) &&
       !authorization.permissions.includes(EVIDENCE_PERMISSIONS.AUDIO_REMOVE)
     ) {
@@ -415,9 +637,9 @@ export class JobsController {
    * Moves a Job through its lifecycle (`BR-058`).
    *
    * `BR-058`'s permitted transitions are the validation contract, so a status the Job cannot move to
-   * is refused and answered with the transitions it may make instead. `BR-061`'s entry conditions are
-   * checked before `PENDING_REVIEW`, and the change is recorded as an append-only history row
-   * (`BR-067`).
+   * is refused and answered with the transitions it may make instead. `BR-062`'s open-Visit invariant is
+   * checked before `COMPLETED`, a cancellation cascades to the Job's open Visits, and the change is
+   * recorded as an append-only history row (`BR-067`).
    */
   @Patch(':id/status')
   @HttpCode(HttpStatus.OK)
@@ -501,10 +723,11 @@ export class JobsController {
    * Advances one Visit through its field lifecycle (`BR-074`, `BR-075`, `BR-077`, `BR-093`; `ADR-019`
    * D3, D4, D5, D7).
    *
-   * The route applies `BR-074`'s transitions and `BR-075`'s one correction; `CANCELED` and `NO_SHOW` are
-   * refused because `BR-066` makes them dispatch actions and no capability authorizes one today
-   * (`BR-042`, `BR-076`). A destination the lifecycle does not permit is answered with the destinations
-   * the Visit has, as the Job status route already does.
+   * The route applies `BR-074`'s free movement between the working statuses and `BR-075`'s one named
+   * correction; `CANCELED` is refused because `BR-066` makes it a dispatch action and no capability
+   * authorizes one today (`BR-042`, `BR-076`), and `COMPLETED` is the explicit completion operation
+   * (`POST .../completion`, `BR-077`). A destination the lifecycle does not permit is answered with the
+   * destinations the Visit has, as the Job status route already does.
    *
    * **Two authorizations reach it, and `BR-093` keeps them distinct.** `VISIT_UPDATE_ASSIGNED_STATUS` is
    * the capability `BR-009` gives the technician for their own assigned work, and the caller's scope is
@@ -529,18 +752,6 @@ export class JobsController {
   ): Promise<JobDetailsDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseChangeVisitStatusDto(body));
-    // Completing a Visit records the outcome `BR-077` requires, which the catalogue keeps as its own
-    // capability (`BR-009`). A route declares either an all-of requirement or an any-of one and never
-    // both (`ADR-019` D1), so the second question is asked here, in its own place — exactly as the
-    // activity read asks the question its `includeRemovedEvidence` flag raises. `BR-093` requires it of
-    // **every** caller: the office capability admits a member to the route, but the completion's own
-    // capability is what authorizes the outcome, the office included.
-    if (
-      input.status === 'COMPLETED' &&
-      !authorization.permissions.includes(VISIT_PERMISSIONS.RECORD_OUTCOME)
-    ) {
-      throw AuthApiError.forbidden();
-    }
     return this.action(authorization, () =>
       this.jobs.changeVisitStatus(
         { organizationId: authorization.organizationId },
@@ -550,6 +761,35 @@ export class JobsController {
         // The scope follows the capability that admitted the caller (`BR-093`): the office's
         // `JOB_UPDATE` addresses the organization's Visits, a field capability keeps the caller bounded
         // by their own current crew (`ADR-019` D2, D3).
+        visitWriterOf(authorization),
+        input,
+      ),
+    );
+  }
+
+  @Post(':id/visits/:visitId/completion')
+  @HttpCode(HttpStatus.OK)
+  @RequireAnyPermission(
+    JOB_PERMISSIONS.UPDATE,
+    VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS,
+  )
+  async completeVisit(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('visitId') visitId: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    if (!authorization.permissions.includes(VISIT_PERMISSIONS.RECORD_OUTCOME)) {
+      throw AuthApiError.forbidden();
+    }
+    const input = parseInput(() => parseCompleteVisitDto(body));
+    return this.action(authorization, () =>
+      this.jobs.completeVisit(
+        { organizationId: authorization.organizationId },
+        id,
+        visitId,
+        authorization.membershipId,
         visitWriterOf(authorization),
         input,
       ),
@@ -584,6 +824,57 @@ export class JobsController {
         { organizationId: authorization.organizationId },
         id,
         visitId,
+        authorization.membershipId,
+        input,
+        visitWriterOf(authorization),
+      );
+      return toJobActivityDto(id, events);
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Patch(':id/visits/notes/:noteId')
+  @RequireAnyPermission(JOB_PERMISSIONS.UPDATE, VISIT_PERMISSIONS.ADD_NOTE)
+  async editNote(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('noteId') noteId: string,
+    @Body() body: unknown,
+  ): Promise<JobActivityDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseEditVisitNoteDto(body));
+    try {
+      const events = await this.jobs.editVisitNote(
+        { organizationId: authorization.organizationId },
+        id,
+        noteId,
+        authorization.membershipId,
+        input,
+        visitWriterOf(authorization),
+      );
+      return toJobActivityDto(id, events);
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Post(':id/visits/notes/:noteId/removal')
+  @HttpCode(HttpStatus.CREATED)
+  @RequireAnyPermission(JOB_PERMISSIONS.UPDATE, VISIT_PERMISSIONS.ADD_NOTE)
+  async removeNote(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('noteId') noteId: string,
+    @Body() body: unknown,
+  ): Promise<JobActivityDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseRemoveVisitNoteDto(body));
+    try {
+      const events = await this.jobs.removeVisitNote(
+        { organizationId: authorization.organizationId },
+        id,
+        noteId,
         authorization.membershipId,
         input,
         visitWriterOf(authorization),
@@ -692,7 +983,10 @@ export class JobsController {
    */
   @Post(':id/photos/:photoId/removal')
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermissions(EVIDENCE_PERMISSIONS.PHOTO_REMOVE)
+  @RequireAnyPermission(
+    EVIDENCE_PERMISSIONS.PHOTO_REMOVE,
+    EVIDENCE_PERMISSIONS.PHOTO_ADD,
+  )
   async removePhoto(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -812,7 +1106,10 @@ export class JobsController {
    */
   @Post(':id/audio-notes/:audioNoteId/removal')
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermissions(EVIDENCE_PERMISSIONS.AUDIO_REMOVE)
+  @RequireAnyPermission(
+    EVIDENCE_PERMISSIONS.AUDIO_REMOVE,
+    EVIDENCE_PERMISSIONS.AUDIO_ADD,
+  )
   async removeAudioNote(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -966,6 +1263,27 @@ function assignedViewerOf(
 }
 
 /**
+ * Which Customers a reporter may discover on the ad-hoc work report form (`BR-AH-009`, `BR-092`).
+ *
+ * `customers.view` widens the search to the whole organization; `customers.view_assigned` narrows it
+ * to the Customers of Jobs the caller's own current crew includes; a caller holding neither can
+ * identify no Customer and the form's unknown-customer path is their only way to state who the work
+ * was for. The scope is decided from the capabilities that admitted the caller, never a role name
+ * (`BR-004`, `BR-006`, `BR-007`).
+ */
+function adHocReportCustomerScopeOf(
+  authorization: ReturnType<typeof authorizationOf>,
+): AdHocReportCustomerScope {
+  if (authorization.permissions.includes(CUSTOMER_PERMISSIONS.VIEW)) {
+    return { kind: 'ORGANIZATION' };
+  }
+  if (authorization.permissions.includes(CUSTOMER_PERMISSIONS.VIEW_ASSIGNED)) {
+    return { kind: 'ASSIGNED', membershipId: authorization.membershipId };
+  }
+  return { kind: 'NONE' };
+}
+
+/**
  * The Job read's other authorization questions: what the projection may include and what the caller may
  * do on the Visit it reports (`BR-092`, `BR-093`; `ADR-021` D1, D2; `ADR-019` D3, D7).
  *
@@ -993,12 +1311,19 @@ function jobDetailsReadOptionsOf(
     // Beside the crew, `BR-093` gives the question a second answer for the office caller: the capability
     // that reaches Visit writes authorizes any Visit of the organization without crew membership, which
     // is how a manager completes a Visit from Job Details (`ADR-019` D7).
-    officeVisitWriter: authorization.permissions.includes(JOB_PERMISSIONS.UPDATE),
+    officeVisitWriter: authorization.permissions.includes(
+      JOB_PERMISSIONS.UPDATE,
+    ),
     // The completion keeps its own capability for **every** caller, the office included, so the
     // projection exposes the `COMPLETED` destination only when the caller holds it (`BR-009`, `BR-077`,
     // `BR-093`).
     recordsVisitOutcome: authorization.permissions.includes(
       VISIT_PERMISSIONS.RECORD_OUTCOME,
+    ),
+    // The Job-level scheduling capability (`BR-071`), answered here so the projection reports
+    // `canScheduleVisit` from the backend's own authorization (`BR-006`, `BR-007`).
+    canCreateSchedule: authorization.permissions.includes(
+      VISIT_PERMISSIONS.CREATE_SCHEDULE,
     ),
   };
 }
@@ -1046,6 +1371,14 @@ function mapPhotoError(error: unknown): unknown {
   if (error instanceof JobNotFoundError) {
     return jobNotFound();
   }
+  if (error instanceof VisitNotFoundError) {
+    // The Visit the photo names is not on this Job in this organization: the evidence would be filed
+    // where its own Activity read never reports it, so it is refused (`BR-042`).
+    return visitNotFound();
+  }
+  if (error instanceof JobClosedForFieldWorkError) {
+    return jobClosedForFieldWork();
+  }
   if (error instanceof JobPhotoNotFoundError) {
     return photoNotFound();
   }
@@ -1061,6 +1394,9 @@ function mapPhotoError(error: unknown): unknown {
   }
   if (error instanceof JobPhotoAlreadyRemovedError) {
     return photoAlreadyRemoved();
+  }
+  if (error instanceof JobPhotoRemovalForbiddenError) {
+    return AuthApiError.forbidden();
   }
   if (error instanceof ObjectStorageError) {
     // The evidence was not stored, so the request did not succeed. Answering with a success status
@@ -1117,6 +1453,14 @@ function mapAudioError(error: unknown): unknown {
   if (error instanceof JobNotFoundError) {
     return jobNotFound();
   }
+  if (error instanceof VisitNotFoundError) {
+    // The Visit the recording names is not on this Job in this organization — the same refusal the
+    // photo route gives, for the same reason (`BR-042`).
+    return visitNotFound();
+  }
+  if (error instanceof JobClosedForFieldWorkError) {
+    return jobClosedForFieldWork();
+  }
   if (error instanceof JobAudioNoteNotFoundError) {
     return audioNoteNotFound();
   }
@@ -1132,6 +1476,9 @@ function mapAudioError(error: unknown): unknown {
   }
   if (error instanceof JobAudioNoteAlreadyRemovedError) {
     return audioNoteAlreadyRemoved();
+  }
+  if (error instanceof JobAudioNoteRemovalForbiddenError) {
+    return AuthApiError.forbidden();
   }
   if (error instanceof ObjectStorageError) {
     // The evidence was not stored, so the request did not succeed. Answering with a success status
@@ -1189,6 +1536,9 @@ function mapActionError(error: unknown): unknown {
   if (error instanceof JobCustomerInactiveError) {
     return customerInactive();
   }
+  if (error instanceof CustomerNotFoundError) {
+    return customerNotFound();
+  }
   if (error instanceof PropertyNotFoundError) {
     return propertyNotFound();
   }
@@ -1207,6 +1557,21 @@ function mapActionError(error: unknown): unknown {
   if (error instanceof FollowUpVisitRequestNotReviewableError) {
     return followUpVisitRequestNotReviewable(error);
   }
+  if (error instanceof FollowUpVisitRequestNotAwaitingReplyError) {
+    return followUpVisitRequestNotAwaitingReply(error);
+  }
+  if (error instanceof AdHocWorkReportNotFoundError) {
+    return adHocWorkReportNotFound();
+  }
+  if (error instanceof AdHocWorkReportConflictError) {
+    return adHocWorkReportConflict(error);
+  }
+  if (error instanceof AdHocWorkReportNotReviewableError) {
+    return adHocWorkReportNotReviewable(error);
+  }
+  if (error instanceof AdHocWorkReportLocationRequiredError) {
+    return adHocWorkReportLocationRequired();
+  }
   if (error instanceof JobStatusTransitionNotAllowedError) {
     return transitionNotAllowed(error);
   }
@@ -1219,6 +1584,9 @@ function mapActionError(error: unknown): unknown {
   if (error instanceof JobClosedForFieldWorkError) {
     return jobClosedForFieldWork();
   }
+  if (error instanceof VisitNoteForbiddenError) {
+    return AuthApiError.forbidden();
+  }
   if (error instanceof VisitOperationReusedError) {
     return new HttpException(
       {
@@ -1228,12 +1596,6 @@ function mapActionError(error: unknown): unknown {
       },
       HttpStatus.CONFLICT,
     );
-  }
-  if (error instanceof JobCancellationUnavailableError) {
-    return cancellationUnavailable();
-  }
-  if (error instanceof JobReviewConditionNotMetError) {
-    return reviewConditionNotMet(error);
   }
   if (error instanceof JobCompletionBlockedError) {
     return completionBlocked();
@@ -1278,6 +1640,60 @@ function followUpVisitRequestNotFound(): HttpException {
   );
 }
 
+function adHocWorkReportNotFound(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.NOT_FOUND,
+      code: 'AD_HOC_WORK_REPORT_NOT_FOUND',
+      message: 'Ad-hoc work report was not found.',
+    },
+    HttpStatus.NOT_FOUND,
+  );
+}
+
+function adHocWorkReportConflict(
+  error: AdHocWorkReportConflictError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'AD_HOC_WORK_REPORT_CONFLICT',
+      message: 'The ad-hoc work report changed since it was read.',
+      details: {
+        currentStatus: error.currentStatus,
+        currentVersion: error.currentVersion,
+      },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+function adHocWorkReportNotReviewable(
+  error: AdHocWorkReportNotReviewableError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'AD_HOC_WORK_REPORT_NOT_REVIEWABLE',
+      message: `An ad-hoc work report in ${error.status} cannot be reviewed.`,
+      details: { status: error.status },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+function adHocWorkReportLocationRequired(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'AD_HOC_WORK_REPORT_LOCATION_REQUIRED',
+      message:
+        'A customer and property are required to create a new job from the report.',
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
 function followUpVisitRequestConflict(
   error: FollowUpVisitRequestConflictError,
 ): HttpException {
@@ -1309,6 +1725,26 @@ function followUpVisitRequestNotReviewable(
   );
 }
 
+/**
+ * `BR-FV-012`: only a request the office returned for clarification is awaiting an answer.
+ *
+ * The refusal carries its own code rather than reusing the review refusal, because the caller is not
+ * deciding anything: the request simply was not returned to them, and a client can say which happened.
+ */
+function followUpVisitRequestNotAwaitingReply(
+  error: FollowUpVisitRequestNotAwaitingReplyError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'FOLLOW_UP_VISIT_REQUEST_NOT_AWAITING_REPLY',
+      message: `A follow-up visit request in ${error.status} is not awaiting an answer.`,
+      details: { status: error.status },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
 function transitionNotAllowed(
   error: JobStatusTransitionNotAllowedError,
 ): HttpException {
@@ -1318,39 +1754,6 @@ function transitionNotAllowed(
       code: 'JOB_STATUS_TRANSITION_NOT_ALLOWED',
       message: `A job in ${error.from} cannot move to ${error.to}.`,
       details: { from: error.from, to: error.to, allowed: [...error.allowed] },
-    },
-    HttpStatus.CONFLICT,
-  );
-}
-
-/**
- * `BR-064` requires a structured cancellation reason whose catalogue product ownership has not
- * defined, so the API refuses the cancellation instead of inventing the vocabulary (`BR-042`).
- */
-function cancellationUnavailable(): HttpException {
-  return new HttpException(
-    {
-      statusCode: HttpStatus.CONFLICT,
-      code: 'JOB_CANCELLATION_UNAVAILABLE',
-      message:
-        'Cancelling a job is not available yet: the cancellation reason catalogue is not defined.',
-    },
-    HttpStatus.CONFLICT,
-  );
-}
-
-function reviewConditionNotMet(
-  error: JobReviewConditionNotMetError,
-): HttpException {
-  return new HttpException(
-    {
-      statusCode: HttpStatus.CONFLICT,
-      code: 'JOB_REVIEW_CONDITION_NOT_MET',
-      message:
-        error.reason === 'ACTIVE_VISIT'
-          ? 'The job still has an active visit.'
-          : 'The latest completed visit does not resolve the job.',
-      details: { reason: error.reason },
     },
     HttpStatus.CONFLICT,
   );

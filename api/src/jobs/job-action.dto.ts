@@ -10,10 +10,10 @@ import {
   ASSIGNMENT_ROLE_CODES,
   JOB_STATUSES,
   VISIT_OUTCOME_CODES,
+  type VisitOutcomeCode,
   VISIT_STATUSES,
   type AssignmentRoleCode,
   type JobStatus,
-  type VisitOutcomeCode,
   type VisitStatus,
 } from './job.types.js';
 
@@ -180,11 +180,7 @@ export interface AssignVisitTechniciansDto {
 export interface ChangeVisitStatusDto {
   /** The destination `BR-074` permits for the Visit's current status (`VISIT_STATUS_TRANSITIONS`). */
   readonly status: VisitStatus;
-  /**
-   * The outcome the completion records (`BR-077`, `BR-078`). It is required exactly when the
-   * destination is `COMPLETED`, because a Visit cannot be completed without recording what resulted
-   * from the field attempt, and it is refused on any other destination because nothing else stores one.
-   */
+  /** Outcomes belong to the explicit completion operation, not the ordinary status route. */
   readonly outcomeCode: VisitOutcomeCode | null;
   readonly outcomeSummary: string | null;
   /**
@@ -211,17 +207,24 @@ export interface ChangeVisitStatusDto {
   readonly confirmConflicts: boolean;
 }
 
+/** The fields a caller supplies for the explicit Visit completion operation (`BR-077`, `BR-078`). */
+export interface CompleteVisitDto {
+  readonly outcomeCode: VisitOutcomeCode;
+  readonly outcomeSummary: string;
+  readonly clientOperationId: string | null;
+  readonly capturedAt: Date | null;
+  readonly expectedVersion: number | null;
+}
+
 /** The longest outcome summary the API accepts, in characters. */
 export const MAX_VISIT_OUTCOME_SUMMARY_LENGTH = 2000;
 
 /**
  * Validates untrusted input into a `ChangeVisitStatusDto`.
  *
- * The outcome is a **pair or nothing**, and it is required for `COMPLETED` only: `BR-077` requires an
- * outcome before a Visit may be completed, and no other destination stores one (`docs/domain/job-visit-
- * domain-model.md` §11.2 — a DRAFT outcome is not modelled). Supplying one for any other destination is
- * refused rather than silently dropped, because the client would otherwise be told an outcome was
- * recorded when nothing was.
+ * Outcomes are refused here because completion is its own business operation. Supplying one on the
+ * ordinary status route would otherwise tell the caller an outcome was recorded by a route that no
+ * longer records one.
  */
 export function parseChangeVisitStatusDto(
   input: unknown,
@@ -238,11 +241,8 @@ export function parseChangeVisitStatusDto(
     MAX_VISIT_OUTCOME_SUMMARY_LENGTH,
   );
 
-  if (status === 'COMPLETED' && (outcomeCode === null || outcomeSummary === null)) {
-    fail('outcome', 'is required when the visit is completed');
-  }
-  if (status !== 'COMPLETED' && (outcomeCode !== null || outcomeSummary !== null)) {
-    fail('outcome', 'is only accepted when the visit is completed');
+  if (outcomeCode !== null || outcomeSummary !== null) {
+    fail('outcome', 'is only accepted by the visit completion operation');
   }
 
   return {
@@ -259,6 +259,41 @@ export function parseChangeVisitStatusDto(
       'expectedVersion',
     ),
     confirmConflicts: source.confirmConflicts === true,
+  };
+}
+
+/** Validates untrusted input into a `CompleteVisitDto`. */
+export function parseCompleteVisitDto(input: unknown): CompleteVisitDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const outcomeCode = requireEnum(
+    source.outcomeCode,
+    VISIT_OUTCOME_CODES,
+    'outcomeCode',
+  );
+  const outcomeSummary = optionalText(
+    source.outcomeSummary,
+    'outcomeSummary',
+    MAX_VISIT_OUTCOME_SUMMARY_LENGTH,
+  );
+  if (outcomeSummary === null) {
+    fail(
+      outcomeCode === 'UNABLE_TO_COMPLETE' ? 'reason' : 'outcomeSummary',
+      'is required',
+    );
+  }
+
+  return {
+    outcomeCode,
+    outcomeSummary,
+    clientOperationId: optionalUuid(
+      source.clientOperationId,
+      'clientOperationId',
+    ),
+    capturedAt: toInstant(source.capturedAt, 'capturedAt'),
+    expectedVersion: optionalPositiveInteger(
+      source.expectedVersion,
+      'expectedVersion',
+    ),
   };
 }
 
@@ -292,6 +327,33 @@ export function parseAddVisitNoteDto(input: unknown): AddVisitNoteDto {
     ),
     capturedAt: toInstant(source.capturedAt, 'capturedAt'),
   };
+}
+
+
+export interface EditVisitNoteDto {
+  readonly body: string;
+}
+
+export function parseEditVisitNoteDto(input: unknown): EditVisitNoteDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const body = optionalText(source.body, 'body', 2000);
+  if (body === null) {
+    fail('body', 'is required');
+  }
+  return { body };
+}
+
+export interface RemoveVisitNoteDto {
+  readonly reason: string;
+}
+
+export function parseRemoveVisitNoteDto(input: unknown): RemoveVisitNoteDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const reason = optionalText(source.reason, 'reason', 2000);
+  if (reason === null) {
+    fail('reason', 'is required');
+  }
+  return { reason };
 }
 
 /** Validates untrusted input into an `AssignVisitTechniciansDto`. */

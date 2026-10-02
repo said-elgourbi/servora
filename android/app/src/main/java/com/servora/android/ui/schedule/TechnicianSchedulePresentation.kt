@@ -1,8 +1,15 @@
 package com.servora.android.ui.schedule
 
+import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.ScheduleVisit
 import com.servora.android.domain.model.VisitStatus
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import java.time.format.FormatStyle
+import java.util.Locale
 
 /*
  * The technician schedule's own presentation decisions, kept out of the composables so they can be
@@ -13,6 +20,86 @@ import java.time.LocalDate
  * and whether one is overdue are the API's own answers (`BR-001`, `BR-042`); these are only ways of
  * drawing the day the screen was handed (`BR-041`).
  */
+
+/**
+ * What the follow-up request details destination draws for one of the caller's own requests.
+ *
+ * The destination shows one request out of the list the API answers the caller with, so "nothing has
+ * answered yet", "the read failed" and "the list does not hold it" are three different things and are
+ * stated as three rather than collapsed into one empty screen (`BR-042`, `BR-013`). Which one of them
+ * it is, is the state's own answer — nothing here decides anything about the request (`BR-001`).
+ */
+internal sealed interface RequestDetailsContent {
+    /** The request the destination was opened for, as the backend holds it. */
+    data class Request(val request: FollowUpVisitRequest) : RequestDetailsContent
+
+    /** Nothing has answered for the caller's own requests yet. */
+    data object Reading : RequestDetailsContent
+
+    /** The caller's own requests could not be read, so this one could not be resolved. */
+    data object Failed : RequestDetailsContent
+
+    /**
+     * The read answered and this request is not one of the caller's own.
+     *
+     * It is reached by a screen restored from a back stack the requests view no longer backs — the
+     * caller reads their own requests (`BR-FV-001`, `BR-009`) — so it is reported as the read's own
+     * answer rather than as a request with nothing in it (`BR-042`).
+     */
+    data object Unavailable : RequestDetailsContent
+}
+
+/**
+ * The request [requestId] as [state] holds it, or the state of the read that would answer for it.
+ *
+ * A request is looked up in the list the API answered with rather than read again: the requester's own
+ * read is the one route that answers with their rows (`BR-009`, `BR-FV-001`), and it is online-only, so
+ * a request the list does not hold is never fetched from the device's memory of an older answer
+ * (`BR-001`, `BR-014`).
+ */
+internal fun requestDetailsContent(
+    state: TechnicianScheduleUiState,
+    requestId: String,
+): RequestDetailsContent {
+    state.requests.firstOrNull { request -> request.id == requestId }?.let { request ->
+        return RequestDetailsContent.Request(request)
+    }
+    return when {
+        state.showsRequestsFailure -> RequestDetailsContent.Failed
+        state.requestsRead -> RequestDetailsContent.Unavailable
+        else -> RequestDetailsContent.Reading
+    }
+}
+/**
+ * A request's proposed window with its calendar date, in the schedule's zone and device language.
+ *
+ * The date is always present because a time by itself cannot identify a proposed visit. A proposal
+ * crossing midnight names both dates; an unreadable instant is omitted rather than guessed.
+ */
+internal fun formatRequestWindow(
+    start: String,
+    end: String?,
+    zone: ZoneId,
+    locale: Locale,
+): String? =
+    try {
+        val from = Instant.parse(start).atZone(zone)
+        val to = end?.let { Instant.parse(it).atZone(zone) }
+        val dateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale)
+        val timeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale)
+        val fromDate = from.format(dateFormatter)
+        val fromTime = from.format(timeFormatter)
+        when {
+            to == null -> "$fromDate · $fromTime"
+            to.toLocalDate() == from.toLocalDate() ->
+                "$fromDate · $fromTime – ${to.format(timeFormatter)}"
+            else ->
+                "$fromDate $fromTime – ${to.format(dateFormatter)} ${to.format(timeFormatter)}"
+        }
+    } catch (unreadable: DateTimeParseException) {
+        null
+    }
+
 
 /**
  * The crew of a Visit as the technician's card states it (`BR-068`).

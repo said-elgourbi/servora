@@ -370,7 +370,11 @@ stack's cache**), **playing an accepted recording this device has never read** (
 accepts no client-generated idempotency key and no conflict policy is decided for it, so it is never
 queued — `BR-089`, tracker 029 Phase 6b), **removing an accepted audio note**
 (`POST /jobs/:id/audio-notes/:audioNoteId/removal`: the same route shape and the same reason,
-`ADR-018` A10), technician assignment, scheduling and rescheduling, Customer and Property writes, and
+`ADR-018` A10), **submitting a follow-up Visit request**
+(`POST /jobs/:id/visit-requests`: the same route shape — it accepts no client-generated idempotency key
+and no conflict policy is decided for it, so a technician's proposal is never queued and is reported as
+not sent when the API cannot be reached — `BR-FV-001`, tracker 050 Phase 3), technician assignment,
+scheduling and rescheduling, Customer and Property writes, and
 every form. Their routes accept no idempotency key yet, or their mutation conflict policy is undecided
 (§8, §11.1), so they must not be queued or invented. The **Visit field transition and the Visit note**
 are no longer on this list: tracker 037 Phase 3 gave their routes a `clientOperationId` and the

@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
   CUSTOMER_PERMISSIONS,
+  JOB_PERMISSIONS,
   VISIT_PERMISSIONS,
   type PermissionCode,
 } from '../src/auth/permissions.js';
@@ -236,7 +237,7 @@ describe('job activity (e2e)', () => {
       organizationId,
       jobId: job.id,
       fromStatus: 'NEW',
-      toStatus: 'SCHEDULED',
+      toStatus: 'ACTIVE',
       actorMembershipId: actor.id,
       recordedAt: new Date(base),
     });
@@ -250,15 +251,15 @@ describe('job activity (e2e)', () => {
       recordedAt: new Date(base + 1_000),
     });
 
-    await database.db.insert(visitNotes).values({
+    const [note] = await database.db.insert(visitNotes).values({
       organizationId,
       visitId: secondVisit.id,
       authorMembershipId: actor.id,
       body: 'Found a damaged capacitor.',
       recordedAt: new Date(base + 2_000),
-    });
+    }).returning();
 
-    return { job, firstVisit, secondVisit };
+    return { job, firstVisit, secondVisit, note };
   }
   it('refuses an unauthenticated caller with 401', async () => {
     const fixture = await activityFixture();
@@ -382,7 +383,69 @@ describe('job activity (e2e)', () => {
     expect(jobStatus.kind).toBe('JOB_STATUS_CHANGED');
     expect(jobStatus.visitSequence).toBeNull();
     expect(jobStatus.fromStatus).toBe('NEW');
-    expect(jobStatus.toStatus).toBe('SCHEDULED');
+    expect(jobStatus.toStatus).toBe('ACTIVE');
+  });
+
+  it('lets a manager correct a visit note and reports the edited marker', async () => {
+    const fixture = await activityFixture();
+    const session = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      JOB_PERMISSIONS.UPDATE,
+    ]);
+
+    const response = await request(app.getHttpServer())
+      .patch(`/jobs/${fixture.job.id}/visits/notes/${fixture.note.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ body: 'Found a damaged blower capacitor.' })
+      .expect(200);
+
+    const note = response.body.events.find((event: { id: string }) => event.id === fixture.note.id);
+    expect(note).toMatchObject({
+      kind: 'VISIT_NOTE_ADDED',
+      body: 'Found a damaged blower capacitor.',
+      noteRemovedAt: null,
+      noteRemovalReason: null,
+    });
+    expect(note.noteEditedAt).toEqual(expect.any(String));
+  });
+
+  it('soft-deletes a visit note from ordinary activity but keeps it in the manager audit read', async () => {
+    const fixture = await activityFixture();
+    const session = await signInFor([
+      CUSTOMER_PERMISSIONS.VIEW,
+      JOB_PERMISSIONS.UPDATE,
+    ]);
+
+    const removal = await request(app.getHttpServer())
+      .post(`/jobs/${fixture.job.id}/visits/notes/${fixture.note.id}/removal`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ reason: 'Duplicate note entered by mistake.' })
+      .expect(201);
+
+    expect(
+      removal.body.events.some((event: { id: string }) => event.id === fixture.note.id),
+    ).toBe(false);
+
+    const ordinary = await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}/activity`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(
+      ordinary.body.events.some((event: { id: string }) => event.id === fixture.note.id),
+    ).toBe(false);
+
+    const audit = await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}/activity?includeRemovedEvidence=true`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    const note = audit.body.events.find((event: { id: string }) => event.id === fixture.note.id);
+    expect(note).toMatchObject({
+      kind: 'VISIT_NOTE_ADDED',
+      body: 'Found a damaged capacitor.',
+      noteRemovalReason: 'Duplicate note entered by mistake.',
+    });
+    expect(note.noteRemovedAt).toEqual(expect.any(String));
   });
 
   it('answers an empty activity for a Job that has no history', async () => {

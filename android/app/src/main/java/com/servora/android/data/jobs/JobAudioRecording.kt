@@ -39,4 +39,13 @@ enum class JobAudioRefusal {
 
     /** The recording's bytes could not be read back, so no draft was written. */
     NOT_STORED,
+
+    /**
+     * The screen no longer represents the Visit the recording would belong to (`BR-047`, `BR-081`).
+     *
+     * A recording is evidence of a field attempt, so one that finishes after the screen stopped
+     * representing a Visit has nothing to belong to: nothing is recorded and the bytes are released
+     * rather than filed under an invented attribution (`BR-042`, `BR-014`).
+     */
+    NO_VISIT,
 }

@@ -95,6 +95,12 @@ export interface JobActivityEventDto {
   outcomeSummary: string | null;
   /** The note's text (`VISIT_NOTE_ADDED`, or a photo's optional note for `JOB_PHOTO_ADDED`). */
   body: string | null;
+  /** When a Visit note was edited (`VISIT_NOTE_ADDED`), or `null`. */
+  noteEditedAt: string | null;
+  /** When a Visit note was removed (`VISIT_NOTE_ADDED` in audit reads), or `null`. */
+  noteRemovedAt: string | null;
+  /** Why a Visit note was removed (`VISIT_NOTE_ADDED` in audit reads), or `null`. */
+  noteRemovalReason: string | null;
   /**
    * The photo's identifier (`JOB_PHOTO_ADDED`, `JOB_PHOTO_REMOVED`), which is also the idempotency
    * key the device generated. A client asks `GET /jobs/:id/photos/:photoId/content` for its bytes
@@ -157,6 +163,9 @@ interface RawEvent {
   outcomeCode: string | null;
   outcomeSummary: string | null;
   body: string | null;
+  noteEditedAt?: Date | null;
+  noteRemovedAt?: Date | null;
+  noteRemovalReason?: string | null;
   /**
    * The photo's id and phase, carried only by `JOB_PHOTO_ADDED`.
    *
@@ -332,11 +341,15 @@ export async function readJobActivity(
       visitId: visitNotes.visitId,
       authorMembershipId: visitNotes.authorMembershipId,
       body: visitNotes.body,
+      editedAt: visitNotes.editedAt,
+      removedAt: visitNotes.removedAt,
+      removalReason: visitNotes.removalReason,
       recordedAt: visitNotes.recordedAt,
     }),
     db
       .select({
         id: jobPhotos.id,
+        visitId: jobPhotos.visitId,
         uploaderMembershipId: jobPhotos.uploaderMembershipId,
         phase: jobPhotos.phase,
         note: jobPhotos.note,
@@ -355,6 +368,9 @@ export async function readJobActivity(
       .select({
         id: jobPhotoRemovals.id,
         jobPhotoId: jobPhotoRemovals.jobPhotoId,
+        // The Visit of the photo it removes, so the removal is read beside the evidence it belongs to
+        // (`BR-080`, `BR-089`).
+        visitId: jobPhotos.visitId,
         actorMembershipId: jobPhotoRemovals.actorMembershipId,
         reason: jobPhotoRemovals.reason,
         recordedAt: jobPhotoRemovals.recordedAt,
@@ -372,6 +388,7 @@ export async function readJobActivity(
     db
       .select({
         id: jobAudioNotes.id,
+        visitId: jobAudioNotes.visitId,
         uploaderMembershipId: jobAudioNotes.uploaderMembershipId,
         phase: jobAudioNotes.phase,
         note: jobAudioNotes.note,
@@ -389,6 +406,7 @@ export async function readJobActivity(
       .select({
         id: jobAudioNoteRemovals.id,
         jobAudioNoteId: jobAudioNoteRemovals.jobAudioNoteId,
+        visitId: jobAudioNotes.visitId,
         actorMembershipId: jobAudioNoteRemovals.actorMembershipId,
         reason: jobAudioNoteRemovals.reason,
         recordedAt: jobAudioNoteRemovals.recordedAt,
@@ -520,26 +538,32 @@ export async function readJobActivity(
       outcomeSummary: row.outcomeSummary,
       body: null,
     })),
-    ...noteRows.map((row): RawEvent => ({
-      id: row.id,
-      kind: 'VISIT_NOTE_ADDED',
-      recordedAt: row.recordedAt as Date,
-      actorMembershipId: row.authorMembershipId,
-      visitId: row.visitId,
-      fromStatus: null,
-      toStatus: null,
-      technicianMembershipId: null,
-      roleCode: null,
-      previousRoleCode: null,
-      outcomeCode: null,
-      outcomeSummary: null,
-      body: row.body,
-    })),
-    // A photo is Job-level evidence (`BR-015`, `BR-027`): it carries no Visit, its actor is the
-    // member who uploaded it, and its optional note travels in `body`, which is the field a client
-    // already renders as an entry's own text (`BR-080`). A photo that has been removed is left out of
-    // an ordinary read — the evidence is out of use (`BR-089`) — and included when the caller asks for
-    // the audit/history context (`D6d`).
+    ...noteRows
+      .filter((row) => options.includeRemovedEvidence === true || row.removedAt === null)
+      .map((row): RawEvent => ({
+        id: row.id,
+        kind: 'VISIT_NOTE_ADDED',
+        recordedAt: row.recordedAt as Date,
+        actorMembershipId: row.authorMembershipId,
+        visitId: row.visitId,
+        fromStatus: null,
+        toStatus: null,
+        technicianMembershipId: null,
+        roleCode: null,
+        previousRoleCode: null,
+        outcomeCode: null,
+        outcomeSummary: null,
+        body: row.body,
+        noteEditedAt: row.editedAt as Date | null,
+        noteRemovedAt: row.removedAt as Date | null,
+        noteRemovalReason: row.removalReason,
+      })),
+    // A photo is evidence recorded on the Visit the technician was working (`BR-015`, `BR-027`,
+    // `BR-047`): it carries that Visit, so its entry is read with that Visit's account (`BR-080`) — the
+    // same association a text note has. Its actor is the member who uploaded it, and its optional note
+    // travels in `body`, which is the field a client already renders as an entry's own text. A photo that
+    // has been removed is left out of an ordinary read — the evidence is out of use (`BR-089`) — and
+    // included when the caller asks for the audit/history context (`D6d`).
     ...photoRows
       .filter(
         (row) =>
@@ -551,7 +575,8 @@ export async function readJobActivity(
         kind: 'JOB_PHOTO_ADDED',
         recordedAt: row.recordedAt as Date,
         actorMembershipId: row.uploaderMembershipId,
-        visitId: null,
+        // `null` only for evidence recorded before the link existed; every write sets it (`BR-042`).
+        visitId: row.visitId,
         fromStatus: null,
         toStatus: null,
         technicianMembershipId: null,
@@ -571,7 +596,9 @@ export async function readJobActivity(
       kind: 'JOB_PHOTO_REMOVED',
       recordedAt: row.recordedAt as Date,
       actorMembershipId: row.actorMembershipId,
-      visitId: null,
+      // The removal is read with the evidence it took out of use, so it states that Visit's account and
+      // never appears against another one (`BR-080`, `BR-089`).
+      visitId: row.visitId,
       fromStatus: null,
       toStatus: null,
       technicianMembershipId: null,
@@ -583,11 +610,11 @@ export async function readJobActivity(
       photoId: row.jobPhotoId,
       photoRemovalReason: row.reason,
     })),
-    // An audio note is Job-level evidence of its own kind, projected exactly as a photo is: its actor is
-    // the member who recorded it, its optional note travels in `body`, and its length is carried so a
-    // client can draw the recording without opening it (`BR-080`, `BR-091`, `ADR-018` A6). A recording
-    // that has been removed is left out of an ordinary read — it is out of use (`BR-089`) — and included
-    // when the caller asks for the audit/history context (`D6d`).
+    // An audio note is evidence of its own kind, projected exactly as a photo is: it carries the Visit it
+    // was recorded on, its actor is the member who recorded it, its optional note travels in `body`, and
+    // its length is carried so a client can draw the recording without opening it (`BR-080`, `BR-091`,
+    // `ADR-018` A6). A recording that has been removed is left out of an ordinary read — it is out of use
+    // (`BR-089`) — and included when the caller asks for the audit/history context (`D6d`).
     ...audioNoteRows
       .filter(
         (row) =>
@@ -599,7 +626,8 @@ export async function readJobActivity(
         kind: 'JOB_AUDIO_ADDED',
         recordedAt: row.recordedAt as Date,
         actorMembershipId: row.uploaderMembershipId,
-        visitId: null,
+        // `null` only for evidence recorded before the link existed; every write sets it (`BR-042`).
+        visitId: row.visitId,
         fromStatus: null,
         toStatus: null,
         technicianMembershipId: null,
@@ -619,7 +647,7 @@ export async function readJobActivity(
       kind: 'JOB_AUDIO_REMOVED',
       recordedAt: row.recordedAt as Date,
       actorMembershipId: row.actorMembershipId,
-      visitId: null,
+      visitId: row.visitId,
       fromStatus: null,
       toStatus: null,
       technicianMembershipId: null,
@@ -669,6 +697,9 @@ export async function readJobActivity(
     outcomeCode: event.outcomeCode,
     outcomeSummary: event.outcomeSummary,
     body: event.body,
+    noteEditedAt: event.noteEditedAt?.toISOString() ?? null,
+    noteRemovedAt: event.noteRemovedAt?.toISOString() ?? null,
+    noteRemovalReason: event.noteRemovalReason ?? null,
     photoId: event.photoId ?? null,
     photoPhase: event.photoPhase ?? null,
     photoRemovalReason: event.photoRemovalReason ?? null,

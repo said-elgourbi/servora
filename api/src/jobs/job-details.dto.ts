@@ -5,6 +5,7 @@ import {
 import type { CustomerContact } from '../customers/customer.types.js';
 import type {
   AssignmentRoleCode,
+  FollowUpVisitRequestStatus,
   Job,
   JobStatus,
   VisitOutcomeCode,
@@ -13,8 +14,10 @@ import type {
 import {
   applicableJobStatusTransitions,
   applicableVisitStatusTransitions,
+  expectsFollowUpVisit,
   isReschedulableVisitStatus,
 } from './job.types.js';
+import { deriveJobAttention, type JobAttention } from './job-attention.js';
 import type { AssignedTechnician, SelectedVisit } from './visit-assignment.js';
 
 /**
@@ -108,6 +111,18 @@ export interface JobDetailsVisitDto {
    */
   reschedulable: boolean;
   /**
+   * Whether this Visit admits a follow-up Visit request (`BR-FV-001`, `BR-078`).
+   *
+   * A request is the technician's own proposal that more on-site work is required, and it names the
+   * field attempt it grew from (`BR-FV-008`), so the action is offered only for an attempt that is
+   * over and whose recorded outcome expects a follow-up: `COMPLETED` with `NEEDS_FOLLOW_UP`,
+   * `NEEDS_PARTS` or `UNABLE_TO_COMPLETE` (`BR-078`). A `RESOLVED` attempt expects none, so it is
+   * reported `false` and the request action is not offered for it. The capability the session holds
+   * stays the client's own gate and the request route's guard (`BR-006`, `BR-007`), exactly as it is
+   * for the Visit's other actions.
+   */
+  requestFollowUpAllowed: boolean;
+  /**
    * The statuses **this caller** may move this Visit to in its field lifecycle (`BR-074`, `BR-075`,
    * `BR-093`).
    *
@@ -121,17 +136,22 @@ export interface JobDetailsVisitDto {
    *   present a refusal as an action that failed.
    * - **`COMPLETED` omitted** unless the caller holds `VISIT_RECORD_OUTCOME`. The completion's own
    *   capability is required of **every** caller, the office included (`BR-009`, `BR-093`), so the
-   *   destination is simply absent rather than offered and then refused with `403`.
+   *   completion is not offered to a caller who would be refused with `403`. Completing a Visit is the
+   *   explicit completion operation (`docs/api/job-actions.md` §7.6), so `COMPLETED` is never a
+   *   destination of this list; `completionAllowed` reports the answer instead.
    * - `BR-074` permits free movement between the working statuses in either direction, so a working
-   *   Visit is offered every other working status and a `COMPLETED` Visit is offered the five working
-   *   ones — which is how the reopen reaches the menu. `CANCELED` and `NO_SHOW` are absent because they
-   *   are dispatch actions no capability authorizes (`BR-066`).
+   *   Visit is offered every other working status. `CANCELED` is absent because it is a dispatch action
+   *   no capability authorizes (`BR-066`).
    *
    * Where the list is **not** filtered is **eligibility**, deliberately: `BR-072`'s conditions for
    * becoming `SCHEDULED` and `BR-070`'s conflicts are runtime questions answered when the action is
    * performed, and `BR-074` forbids expressing them by removing a structurally valid destination.
    */
   allowedStatusTransitions: VisitStatus[];
+  /** Whether this caller may use the explicit Visit completion operation for this Visit. */
+  completionAllowed: boolean;
+  /** Whether this caller may add a field update to this Visit. */
+  addUpdateAllowed: boolean;
   /**
    * Whether **this caller** is authorized to drive the Visit's field lifecycle right now (`BR-074`,
    * `BR-066`, `BR-093`).
@@ -219,15 +239,16 @@ export interface JobDetailsDto {
   description: string | null;
   typeCode: string | null;
   status: JobStatus;
+  /** Why field-facing Job actions are read-only, or `null` while the Job remains open. */
+  readOnlyReason: 'JOB_COMPLETED' | 'JOB_CANCELED' | null;
+  /** Derived office attention signals for this Job/Visit state. */
+  attention: JobAttention[];
   /**
    * The statuses this Job may move to (`BR-058`).
    *
    * The list is **structural**: the destinations `BR-058` permits for the Job's current status, from
    * which the client draws its status actions rather than holding a second copy of the lifecycle
-   * (`BR-041`). Whether the Job qualifies for one of them *now* is its own rule's answer — `BR-061`
-   * for `PENDING_REVIEW` and `BR-062` for `COMPLETED` — so those destinations stay listed and the API
-   * refuses an attempt the Job does not support with that rule's error. `CANCELED` is absent while
-   * `BR-064`'s cancellation-reason catalogue remains an open question.
+   * (`BR-041`). Operational attention is projected separately and never added to this lifecycle.
    */
   allowedStatusTransitions: JobStatus[];
   /** The Job's version, echoed back when its status changes (`BR-086`). */
@@ -261,6 +282,36 @@ export interface JobDetailsDto {
    * which Visit represents a Job is already `selectedVisit`'s answer (`BR-081`, `BR-041`).
    */
   visits: JobDetailsVisitSummaryDto[];
+  /**
+   * The newest follow-up Visit request for this Job, or `null` when none exists.
+   *
+   * It is a request's own status, not a Visit status: the technician can see what the office did with
+   * their proposal without returning to the schedule request list (`BR-FV-002`, `BR-FV-012`).
+   */
+  followUpVisitRequest: JobDetailsFollowUpVisitRequestDto | null;
+  /**
+   * Whether **this caller** may schedule a new Visit on this Job right now (`BR-062`, `BR-071`,
+   * `BR-072`).
+   *
+   * It is the backend's own answer to the Job-level scheduling question, so a client draws its
+   * **Schedule a visit** action from it rather than holding a second copy of the rule (`BR-041`,
+   * `BR-007`). It is `true` only when the caller holds `visits.create_schedule`, the Job is open
+   * (`NEW` or `ACTIVE`), and the Job's Visit shape admits a new field attempt: no scheduled Visit, or
+   * a represented Visit that is `COMPLETED` with a follow-up outcome (`BR-078`). The Property
+   * requirement stays a runtime refusal on the write itself (`BR-072`), never a reason to hide the
+   * action.
+   */
+  canScheduleVisit: boolean;
+}
+
+export interface JobDetailsFollowUpVisitRequestDto {
+  id: string;
+  jobId: string;
+  sourceVisitId: string | null;
+  createdVisitId: string | null;
+  requestingTechnicianMembershipId: string;
+  status: FollowUpVisitRequestStatus;
+  version: number;
 }
 
 /** The Customer's own contact details a Job Details read may have been asked for (`BR-092`). */
@@ -334,6 +385,15 @@ export interface JobDetailsReadOptions {
    * working destination the Visit offers.
    */
   readonly recordsVisitOutcome?: boolean;
+  /**
+   * Whether the caller holds `visits.create_schedule`, the capability the direct schedule route
+   * requires (`BR-071`, `BR-006`).
+   *
+   * The projection uses it to answer the Job-level `canScheduleVisit` question beside the Visit's own
+   * answers. It is asked here, like the others, so every route that returns a Job answers it the same
+   * way (`BR-041`).
+   */
+  readonly canCreateSchedule?: boolean;
 }
 
 /**
@@ -376,6 +436,7 @@ export interface JobDetails {
    * shape does not depend on which route built it.
    */
   readonly visits?: readonly JobVisitSummary[];
+  readonly followUpVisitRequest?: JobDetailsFollowUpVisitRequestDto | null;
 }
 
 /** One technician on the wire, which every crew in this projection is reported through (`BR-068`). */
@@ -424,6 +485,31 @@ export function toJobDetailsDto(
       details.technicians.some(
         (technician) => technician.membershipId === options.callerMembershipId,
       ));
+  // The Job-level scheduling answer (`BR-062`, `BR-071`, `BR-072`): the caller holds the schedule
+  // capability, the Job is open, and the Visit shape admits a new attempt — no scheduled Visit, or a
+  // represented Visit that is `COMPLETED` with a follow-up outcome. The represented Visit's outcome
+  // is read from the Visit list that already resolves it, so this answer never disagrees with
+  // `attention` (`BR-041`).
+  const selectedOutcomeCode =
+    details.selectedVisit === null
+      ? null
+      : ((details.visits ?? []).find(
+            (visit) => visit.visitId === details.selectedVisit?.visitId,
+          )?.outcomeCode ?? null);
+  // Whether the represented Visit admits a follow-up Visit request (`BR-FV-001`, `BR-078`): the
+  // attempt is over (`COMPLETED`) and its recorded outcome expects a follow-up. A `RESOLVED` attempt
+  // expects none, so the request action is not offered for it. The capability the session holds stays
+  // the client's own gate and the request route's guard (`BR-006`, `BR-007`).
+  const requestFollowUpAllowed =
+    details.selectedVisit !== null &&
+    details.selectedVisit.status === 'COMPLETED' &&
+    expectsFollowUpVisit(selectedOutcomeCode);
+  const canScheduleVisit =
+    options.canCreateSchedule === true &&
+    (status === 'NEW' || status === 'ACTIVE') &&
+    (details.selectedVisit === null ||
+      (details.selectedVisit.status === 'COMPLETED' &&
+        expectsFollowUpVisit(selectedOutcomeCode)));
   return {
     id: job.id,
     jobNumber: job.jobNumber,
@@ -431,6 +517,21 @@ export function toJobDetailsDto(
     description: job.description,
     typeCode: job.typeCode,
     status,
+    readOnlyReason:
+      status === 'COMPLETED'
+        ? 'JOB_COMPLETED'
+        : status === 'CANCELED'
+          ? 'JOB_CANCELED'
+          : null,
+    attention: deriveJobAttention({
+      jobStatus: status,
+      visits: (details.visits ?? []).map((visit) => ({
+        visitId: visit.visitId,
+        sequence: visit.sequence,
+        status: visit.status,
+        outcomeCode: visit.outcomeCode,
+      })),
+    }),
     allowedStatusTransitions: [...applicableJobStatusTransitions(status)],
     version: job.version,
     customerId: details.customerId,
@@ -459,20 +560,32 @@ export function toJobDetailsDto(
             reschedulable: isReschedulableVisitStatus(
               details.selectedVisit.status,
             ),
+            requestFollowUpAllowed,
             // The destinations **this caller** may execute (`BR-093`): the Visit's structural table
             // (`BR-074`) minus the completion unless the caller holds the capability a completion
             // requires of every caller (`BR-009`, `BR-077`), and nothing at all when the caller may not
             // drive this Visit. Eligibility is deliberately not filtered: `BR-072`'s conditions and
             // `BR-070`'s conflicts stay runtime answers (`BR-074`).
             allowedStatusTransitions: drivesSelectedVisit
-              ? applicableVisitStatusTransitions(
-                  details.selectedVisit.status,
-                ).filter(
-                  (destination) =>
-                    destination !== 'COMPLETED' ||
-                    options.recordsVisitOutcome === true,
-                )
+              ? [
+                  ...applicableVisitStatusTransitions(
+                    details.selectedVisit.status,
+                  ),
+                ]
               : [],
+            completionAllowed:
+              drivesSelectedVisit &&
+              options.recordsVisitOutcome === true &&
+              status !== 'COMPLETED' &&
+              status !== 'CANCELED' &&
+              details.selectedVisit.status !== 'COMPLETED' &&
+              details.selectedVisit.status !== 'CANCELED',
+            addUpdateAllowed:
+              drivesSelectedVisit &&
+              status !== 'COMPLETED' &&
+              status !== 'CANCELED' &&
+              details.selectedVisit.status !== 'COMPLETED' &&
+              details.selectedVisit.status !== 'CANCELED',
             fieldActionable: drivesSelectedVisit,
           },
     technicians: details.technicians.map(toTechnicianDto),
@@ -490,5 +603,7 @@ export function toJobDetailsDto(
       version: visit.version,
       technicians: visit.technicians.map(toTechnicianDto),
     })),
+    followUpVisitRequest: details.followUpVisitRequest ?? null,
+    canScheduleVisit,
   };
 }

@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { and, eq } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -98,9 +99,8 @@ const PERMISSION_TEMPLATES = [
     // The technician's read of the customer behind an assigned Job (`BR-092`; `ADR-021` D1). It is a
     // capability of its own rather than an inference from the Visit capabilities, so a company can
     // withdraw a member's customer visibility without withdrawing their field work. The Technician
-    // template below lists its capabilities explicitly and holds it; the Manager template grants the
-    // whole catalogue, as it already does for the field codes, and needs nothing extra — a manager
-    // reads the same customer through `customers.view`.
+    // template below lists its capabilities explicitly and holds it; the Manager template excludes it,
+    // because a manager reads the same customer through `customers.view`.
     code: 'customers.view_assigned',
     nameEn: 'View assigned customers',
     nameFr: 'Voir les clients assignes',
@@ -112,8 +112,8 @@ const PERMISSION_TEMPLATES = [
     // Contact-person writes are a capability set of their own rather than `customers.edit`
     // (`BR-095`; `ADR-022` D4): `BR-085`'s Property position applied to a different asset, because a
     // role may legitimately maintain a customer without being trusted to change or delete the people
-    // the organization calls. The Manager template below grants the whole catalogue; the Technician
-    // template lists its capabilities explicitly and holds none of these.
+    // the organization calls. The Manager template below holds all three; the Technician template
+    // lists its capabilities explicitly and holds none of these.
     code: 'customers.contacts.create',
     nameEn: 'Create customer contacts',
     nameFr: 'Creer des contacts client',
@@ -282,6 +282,22 @@ const PERMISSION_TEMPLATES = [
       'Approuver, clarifier ou refuser les demandes de visite de suivi.',
   },
   {
+    code: 'visits.report_ad_hoc_work',
+    nameEn: 'Report ad-hoc work',
+    nameFr: 'Signaler du travail non planifie',
+    descriptionEn: 'Report field work performed without a recorded Visit.',
+    descriptionFr:
+      'Signaler du travail terrain effectue sans visite enregistree.',
+  },
+  {
+    code: 'visits.review_ad_hoc_work',
+    nameEn: 'Review ad-hoc work reports',
+    nameFr: 'Examiner les rapports de travail non planifie',
+    descriptionEn: 'Review and reconcile ad-hoc work reports into Jobs and Visits.',
+    descriptionFr:
+      'Examiner et rapprocher les rapports de travail non planifie en travaux et visites.',
+  },
+  {
     code: 'VISIT_UPDATE_ASSIGNED_STATUS',
     nameEn: 'Update assigned visit status',
     nameFr: 'Modifier le statut des visites assignees',
@@ -320,9 +336,8 @@ const PERMISSION_TEMPLATES = [
   },
   {
     // Removing accepted evidence is a Manager capability, not a field one (`BR-089`; tracker 029
-    // Phase 6b). It is in this template so the default Manager role holds it — the role template
-    // below grants the whole catalogue — while the Technician template lists its capabilities
-    // explicitly and does not include it.
+    // Phase 6b). It is in this template so the default Manager role holds it, while the Technician
+    // template lists its capabilities explicitly and does not include it.
     code: 'evidence.photo.remove',
     nameEn: 'Remove photo evidence',
     nameFr: 'Retirer des preuves photo',
@@ -349,14 +364,30 @@ const PERMISSION_TEMPLATES = [
   },
 ] as const;
 
-const ROLE_TEMPLATES = {
+/**
+ * Capabilities the default Technician role holds and the default Manager role does not.
+ *
+ * The development seed grants the Manager the office catalogue, not the field-only capabilities the
+ * migrations reserve for the Technician role: `visits.request_follow_up` (migration `0015`),
+ * `visits.report_ad_hoc_work` (migration `0020`) and `customers.view_assigned` (migration `0013`). A Manager reads the Customer through `customers.view`
+ * and reviews a follow-up request through `visits.review_requests`, so neither field capability is
+ * part of the office grant (`BR-006`, `BR-092`).
+ */
+export const TECHNICIAN_ONLY_PERMISSION_CODES: readonly string[] = [
+  'visits.request_follow_up',
+  'visits.report_ad_hoc_work',
+  'customers.view_assigned',
+];
+
+export const ROLE_TEMPLATES = {
   MANAGER: {
     nameEn: 'Manager',
     nameFr: 'Gestionnaire',
     descriptionEn: 'Default management role with core CRUD permissions.',
     descriptionFr:
       'Role de gestion par defaut avec les permissions CRUD principales.',
-    permissionCodes: PERMISSION_TEMPLATES.map((permission) => permission.code),
+    permissionCodes: PERMISSION_TEMPLATES.map((permission) => permission.code)
+      .filter((code) => !TECHNICIAN_ONLY_PERMISSION_CODES.includes(code)),
   },
   TECHNICIAN: {
     nameEn: 'Technician',
@@ -369,6 +400,7 @@ const ROLE_TEMPLATES = {
       'VISIT_ADD_NOTE',
       'VISIT_RECORD_OUTCOME',
       'visits.request_follow_up',
+      'visits.report_ad_hoc_work',
       // The customer of a Job the technician is assigned to, view-only (`BR-092`; `ADR-021` D1). It is
       // the default field role that holds it, which is what "by default" means here: a technician in
       // the field has to be able to reach the customer they are working for.
@@ -1256,8 +1288,7 @@ async function insertVisitStatusHistory(
     const isCancellation = to === 'CANCELED';
     // Scheduling and the dispatch pair are office actions (`BR-066`, `BR-074`); the field statuses are
     // recorded by the crew's Lead, so the history names the member who really acted (`BR-033`, `BR-093`).
-    const isOfficeAction =
-      to === 'SCHEDULED' || to === 'CANCELED' || to === 'NO_SHOW';
+    const isOfficeAction = to === 'SCHEDULED' || to === 'CANCELED';
     await db.insert(visitStatusHistory).values({
       organizationId: input.organizationId,
       visitId: input.visitId,
@@ -1269,9 +1300,7 @@ async function insertVisitStatusHistory(
           transition.cancellationReasonCode ??
           null)
         : null,
-      note: isCancellation
-        ? (input.visit.plan.cancellation?.note ?? null)
-        : null,
+      note: isCancellation ? (input.visit.plan.cancellation?.note ?? null) : null,
       actorMembershipId: isOfficeAction
         ? input.managerMembershipId
         : input.leadMembershipId,
@@ -1417,8 +1446,14 @@ function report(
   console.log('These accounts sign in through POST /auth/sign-in.');
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Development seeding failed: ${message}`);
-  process.exitCode = 1;
-});
+const isEntryPoint =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isEntryPoint) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Development seeding failed: ${message}`);
+    process.exitCode = 1;
+  });
+}

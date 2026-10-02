@@ -12,6 +12,14 @@ Supersedes, for the activity presentation only: `docs/tracker/044-job-details-jo
 Design reference: none — the redesigned page has no Figma screen, so the established Servora Material 3
 visual language and its disclosure convention are followed (`docs/design/android-design-system.md`)
 
+**Amended by `docs/tracker/052-android-technician-job-details-redesign.md` (2026-09-20).** The grouping,
+the folding rule and the API's own `visitSequence` ownership this tracker established are unchanged. Two
+things it added did not survive that slice: the **folded heading** now states the Visit's status and outcome
+in words (`Completed · Needs follow-up`) instead of a status pill beside the crew, because the crew belongs
+to the Visit section (`BR-047`, `BR-012`); and the **General job updates** group now starts **folded**,
+since a technician's own updates are Visit-scoped (`tracker 051`) and what that group holds is office-level
+history.
+
 ## What this slice changes
 
 The redesigned page presented one Job Activity read in three places: the represented Visit's activity

@@ -57,11 +57,15 @@ import com.servora.android.domain.model.CustomerType
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PropertyStatus
 import com.servora.android.ui.components.ContactPrimaryBadge
+import com.servora.android.ui.components.CustomerContactLine
 import com.servora.android.ui.components.InfoCard
 import com.servora.android.ui.components.JobStatusPill
 import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
 import com.servora.android.ui.components.addressLine
+import com.servora.android.ui.components.dialIntent
+import com.servora.android.ui.components.mailIntent
+import com.servora.android.ui.components.startContactIntent
 import com.servora.android.ui.theme.stateColors
 
 const val CustomerDetailTag = "customer-detail"
@@ -138,6 +142,7 @@ fun CustomerDetailScreen(
     onContactRemoved: () -> Unit,
     onRetry: () -> Unit,
     onOpenProperty: (propertyId: String) -> Unit = {},
+    onOpenJob: (jobId: String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val detail = state.detail
@@ -174,6 +179,7 @@ fun CustomerDetailScreen(
                     onAddProperty = onAddProperty,
                     onSeeAllJobs = onSeeAllJobs,
                     onOpenProperty = onOpenProperty,
+                    onOpenJob = onOpenJob,
                     onAddContact = onAddContact,
                     onEditContact = onEditContact,
                     onRequestRemoveContact = { contactId -> confirmRemoveContactId = contactId },
@@ -244,6 +250,7 @@ private fun CustomerDetailContent(
     onAddProperty: () -> Unit,
     onSeeAllJobs: () -> Unit,
     onOpenProperty: (propertyId: String) -> Unit,
+    onOpenJob: (jobId: String) -> Unit,
     onAddContact: () -> Unit,
     onEditContact: (contactId: String) -> Unit,
     onRequestRemoveContact: (contactId: String) -> Unit,
@@ -314,7 +321,13 @@ private fun CustomerDetailContent(
         detail.customer.notes?.takeIf { it.isNotBlank() }?.let { notes ->
             item { CustomerNotesCard(notes) }
         }
-        item { CustomerJobsSection(detail.jobs, onSeeAllJobs = onSeeAllJobs) }
+        item {
+            CustomerJobsSection(
+                jobs = detail.jobs,
+                onSeeAllJobs = onSeeAllJobs,
+                onOpenJob = onOpenJob,
+            )
+        }
     }
 }
 
@@ -938,7 +951,11 @@ internal fun lastServiceLabel(lastServiceAt: String?): String {
 
 /** The customer's Jobs, previewed as designed, with the full history a tap away (`BR-081`). */
 @Composable
-private fun CustomerJobsSection(jobs: List<CustomerJob>, onSeeAllJobs: () -> Unit) {
+private fun CustomerJobsSection(
+    jobs: List<CustomerJob>,
+    onSeeAllJobs: () -> Unit,
+    onOpenJob: (jobId: String) -> Unit,
+) {
     val preview = jobs.take(CustomerDetailJobPreviewLimit)
     Column(
         modifier = Modifier
@@ -963,7 +980,7 @@ private fun CustomerJobsSection(jobs: List<CustomerJob>, onSeeAllJobs: () -> Uni
                     if (index > 0) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
-                    CustomerJobRow(job)
+                    CustomerJobRow(job = job, onClick = { onOpenJob(job.id) })
                 }
             }
             if (jobs.size > preview.size) {
@@ -983,7 +1000,7 @@ private fun CustomerJobsSection(jobs: List<CustomerJob>, onSeeAllJobs: () -> Uni
 }
 
 @Composable
-private fun CustomerJobRow(job: CustomerJob) {
+private fun CustomerJobRow(job: CustomerJob, onClick: () -> Unit) {
     val separator = stringResource(R.string.customers_counts_separator)
     val meta = listOfNotNull(
         job.address?.let { addressLine(it) }?.takeIf { it.isNotBlank() },
@@ -994,6 +1011,8 @@ private fun CustomerJobRow(job: CustomerJob) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
             .padding(vertical = 4.dp)
             .testTag(customerDetailJobTag(job.id)),
         verticalAlignment = Alignment.Top,
@@ -1036,6 +1055,7 @@ private fun CustomerJobRow(job: CustomerJob) {
 internal fun CustomerJobHistoryScreen(
     state: CustomerDetailUiState,
     onRetry: () -> Unit,
+    onOpenJob: (jobId: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val detail = state.detail
@@ -1043,7 +1063,7 @@ internal fun CustomerJobHistoryScreen(
     // contextual top bar.
     Box(modifier = modifier.fillMaxSize().testTag(CustomerDetailAllJobsTag)) {
         when {
-            detail != null -> CustomerJobHistoryList(detail.jobs)
+            detail != null -> CustomerJobHistoryList(detail.jobs, onOpenJob = onOpenJob)
             state.failureReason != null -> CustomersError(onRetry = onRetry)
             else -> CustomersLoading()
         }
@@ -1051,7 +1071,7 @@ internal fun CustomerJobHistoryScreen(
 }
 
 @Composable
-private fun CustomerJobHistoryList(jobs: List<CustomerJob>) {
+private fun CustomerJobHistoryList(jobs: List<CustomerJob>, onOpenJob: (jobId: String) -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -1085,7 +1105,7 @@ private fun CustomerJobHistoryList(jobs: List<CustomerJob>) {
             }
         } else {
             items(jobs, key = { it.id }) { job ->
-                CustomerJobRow(job)
+                CustomerJobRow(job = job, onClick = { onOpenJob(job.id) })
                 HorizontalDivider(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
                 )

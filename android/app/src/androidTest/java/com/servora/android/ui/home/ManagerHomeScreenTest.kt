@@ -93,11 +93,38 @@ class ManagerHomeScreenTest {
             .assertDoesNotExist()
     }
 
-    private fun render(attentionCount: Int) {
+    @Test
+    fun namesEachOutcomeDerivedConditionTheBackendReports() {
+        // The three conditions a completed Visit's outcome derives (`BR-078`) are named in plain
+        // business language like the others (`BR-012`), and each card keeps its own Job number.
+        render(
+            attentionCount = 3,
+            kinds = listOf(
+                ManagerAttentionKind.FOLLOW_UP_NEEDS_SCHEDULING,
+                ManagerAttentionKind.PARTS_REQUIRED,
+                ManagerAttentionKind.UNABLE_TO_COMPLETE,
+            ),
+        )
+
+        composeTestRule
+            .onNodeWithText(string(R.string.home_attention_follow_up_title, 1041))
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.home_attention_parts_title, 1042))
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.home_attention_unable_to_complete_title, 1043))
+            .assertIsDisplayed()
+    }
+
+    private fun render(
+        attentionCount: Int,
+        kinds: List<ManagerAttentionKind> = emptyList(),
+    ) {
         composeTestRule.setContent {
             ServoraTheme {
                 ManagerHomeScreen(
-                    state = ManagerHomeUiState(home = home(attentionCount)),
+                    state = ManagerHomeUiState(home = home(attentionCount, kinds)),
                     onOpenJob = {},
                     onOpenSchedule = {},
                     onRetry = {},
@@ -106,21 +133,32 @@ class ManagerHomeScreenTest {
         }
     }
 
-    private fun home(attentionCount: Int) = ManagerHome(
+    private fun home(
+        attentionCount: Int,
+        kinds: List<ManagerAttentionKind> = emptyList(),
+    ) = ManagerHome(
         displayName = "Sarah Tremblay",
-        attention = (1..attentionCount).map { index -> attentionItem(index) },
+        attention = (1..attentionCount).map { index ->
+            attentionItem(
+                index = index,
+                kind = kinds.getOrElse(index - 1) { ManagerAttentionKind.VISIT_OVERDUE },
+            )
+        },
         // The API caps the list it returns; the count is every matching condition (`attentionTotal`).
         attentionTotal = attentionCount,
         today = ManagerHomeTodaySummary(total = 8, completed = 6, inProgress = 1, upcoming = 1),
         visits = emptyList(),
     )
 
-    private fun attentionItem(index: Int) = ManagerAttentionItem(
-        kind = ManagerAttentionKind.VISIT_OVERDUE,
+    private fun attentionItem(
+        index: Int,
+        kind: ManagerAttentionKind = ManagerAttentionKind.VISIT_OVERDUE,
+    ) = ManagerAttentionItem(
+        kind = kind,
         jobId = jobId(index),
         jobNumber = 1040 + index,
         jobTitle = "Furnace repair",
-        jobStatus = JobStatus.IN_PROGRESS,
+        jobStatus = JobStatus.ACTIVE,
         customerId = "customer-$index",
         customerName = "ABC Property Management",
         visitId = "visit-$index",
@@ -134,6 +172,9 @@ class ManagerHomeScreenTest {
 
     private fun string(resId: Int): String =
         ApplicationProvider.getApplicationContext<Context>().getString(resId)
+
+    private fun string(resId: Int, formatArg: Int): String =
+        ApplicationProvider.getApplicationContext<Context>().getString(resId, formatArg)
 
     private fun sectionCount(labelResId: Int, count: Int): String =
         ApplicationProvider.getApplicationContext<Context>()

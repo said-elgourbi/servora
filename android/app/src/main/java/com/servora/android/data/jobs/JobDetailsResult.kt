@@ -3,6 +3,7 @@ package com.servora.android.data.jobs
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AssignableTechnician
+import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.JobActivityEvent
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.ScheduleConflict
@@ -163,6 +164,26 @@ sealed interface JobActionResult {
     data class Failure(val reason: JobActionFailure) : JobActionResult
 }
 
+/**
+ * Outcome of submitting a follow-up Visit request (`BR-FV-001`, `BR-FV-003`).
+ *
+ * The answer is the **request**, not the Job, because a request changes no Job and schedules no Visit
+ * (`BR-FV-002`): it is one operational decision record, and it is the record's own status a client
+ * presents (`BR-FV-012`). It is therefore its own result rather than a [JobActionResult] — reporting a
+ * Job here would say the Job answered when it did not (`BR-001`, `BR-041`).
+ *
+ * The write is **online-only**: the route carries no client-generated idempotency key and no conflict
+ * policy is decided for it, so it is never queued on the device
+ * (`offline-first-architecture.md` §13.2, `BR-013`, `BR-032`).
+ */
+sealed interface VisitRequestSubmitResult {
+    /** The backend recorded the request, awaiting the office's review (`BR-FV-002`). */
+    data class Success(val request: FollowUpVisitRequest) : VisitRequestSubmitResult
+
+    /** The request was not recorded; [reason] decides what the screen reports. */
+    data class Failure(val reason: JobActionFailure) : VisitRequestSubmitResult
+}
+
 /** Outcome of reading the technicians a Job's Visit may be assigned to (`BR-024`, `BR-068`). */
 sealed interface AssignableTechniciansResult {
     /** The backend answered with the organization's technicians. */
@@ -204,9 +225,6 @@ enum class JobActionFailure {
     /** `BR-058` does not permit that Job status transition. */
     JOB_TRANSITION_NOT_ALLOWED,
 
-    /** `BR-061`'s entry conditions for `PENDING_REVIEW` are not met. */
-    JOB_REVIEW_CONDITION_NOT_MET,
-
     /**
      * `BR-062` does not allow the Job to be completed while it has an open Visit.
      *
@@ -215,12 +233,6 @@ enum class JobActionFailure {
      * (`BR-074`).
      */
     JOB_COMPLETION_BLOCKED,
-
-    /**
-     * `BR-064` requires a structured cancellation reason whose catalogue product ownership has not
-     * defined, so the API does not cancel a Job yet.
-     */
-    JOB_CANCELLATION_UNAVAILABLE,
 
     /**
      * The photo has already been removed from ordinary use (`BR-089`).
@@ -243,6 +255,26 @@ enum class JobActionFailure {
 
     /** `BR-073` only permits rescheduling a Visit that is `SCHEDULED`. */
     VISIT_NOT_RESCHEDULABLE,
+
+    /**
+     * The follow-up request moved on since it was read (`docs/api/visit-requests.md`).
+     *
+     * The approval carries the request's own status and version, so the API refuses it rather than
+     * applying a decision about a request the reviewer no longer holds (`BR-086`, `BR-032`). The
+     * client's answer is to refresh: the request on screen is not the request the office is deciding
+     * about.
+     */
+    VISIT_REQUEST_CHANGED,
+
+    /**
+     * The follow-up request is no longer open for review (`BR-FV-012`).
+     *
+     * A request that is already `APPROVED` or `REJECTED` cannot be reviewed again, so the refusal is
+     * the request's own state rather than a bad payload. It is reported separately from
+     * [VISIT_REQUEST_CHANGED] because the two tell the reviewer different things: one asks them to
+     * refresh before deciding, the other says the decision has already been made.
+     */
+    VISIT_REQUEST_NOT_REVIEWABLE,
 
     /**
      * `BR-074` does not permit that Visit status transition from the status the Visit holds.

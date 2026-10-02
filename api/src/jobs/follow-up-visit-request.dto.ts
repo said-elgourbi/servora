@@ -1,3 +1,4 @@
+import type { AddressSnapshot } from '../address/address-snapshot.js';
 import {
   DomainValidationError,
   optionalBoolean,
@@ -12,6 +13,7 @@ import {
   ASSIGNMENT_ROLE_CODES,
   FOLLOW_UP_VISIT_REQUEST_STATUSES,
   type AssignmentRoleCode,
+  type FollowUpVisitRequestMessageAuthorKind,
   type FollowUpVisitRequestStatus,
 } from './job.types.js';
 
@@ -27,10 +29,32 @@ function requireInstant(value: unknown, field: string): Date {
   return new Date(instant);
 }
 
+/**
+ * One message of a request's clarification conversation (`BR-FV-012`).
+ *
+ * `authorKind` is the side that wrote it, derived by the API from the request's own requester, so a
+ * client presents "the office" and "you" from the API's answer (`BR-041`). The conversation is
+ * append-only, so a message has no updated or removed counterpart (`BR-067`).
+ */
+export interface FollowUpVisitRequestMessageDto {
+  id: string;
+  authorMembershipId: string;
+  authorKind: FollowUpVisitRequestMessageAuthorKind;
+  body: string;
+  recordedAt: string;
+}
+
 export interface FollowUpVisitRequestDto {
   id: string;
   jobId: string;
+  jobNumber: number;
+  jobTitle: string;
+  customerName: string;
+  address: AddressSnapshot | null;
   sourceVisitId: string | null;
+  sourceVisitScheduledStart: string | null;
+  sourceVisitStatus: string | null;
+  sourceVisitOutcomeCode: string | null;
   requestingTechnicianMembershipId: string;
   proposedStart: string;
   proposedEnd: string;
@@ -44,6 +68,14 @@ export interface FollowUpVisitRequestDto {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /**
+   * The request's clarification conversation, oldest first (`BR-FV-012`).
+   *
+   * It is part of every projection of the request — the office's review read and the requester's own
+   * read alike — because the exchange is the request's business history, not a separate resource
+   * (`BR-FV-013`). A request that was never returned for clarification carries an empty list.
+   */
+  messages: readonly FollowUpVisitRequestMessageDto[];
 }
 
 export interface SubmitFollowUpVisitRequestDto {
@@ -56,6 +88,19 @@ export interface SubmitFollowUpVisitRequestDto {
 
 export interface FollowUpVisitReviewDto {
   readonly note: string | null;
+  readonly expectedStatus: FollowUpVisitRequestStatus | null;
+  readonly expectedVersion: number | null;
+}
+
+/**
+ * The requester's answer to a request the office returned for clarification (`BR-FV-012`).
+ *
+ * The body is **required**: the office returned the request because it asked something, and an answer
+ * that says nothing is not an answer. `expectedStatus`/`expectedVersion` are the same optimistic
+ * concurrency guard every other write to a request carries, so a caller answers the state it read.
+ */
+export interface ReplyFollowUpVisitRequestDto {
+  readonly body: string;
   readonly expectedStatus: FollowUpVisitRequestStatus | null;
   readonly expectedVersion: number | null;
 }
@@ -161,6 +206,20 @@ export function parseDirectCreateVisitDto(input: unknown): DirectCreateVisitDto 
   };
 }
 
+export function parseReplyFollowUpVisitRequestDto(
+  input: unknown,
+): ReplyFollowUpVisitRequestDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  return {
+    body: requireText(source.body, 'body', 2000),
+    expectedStatus: optionalFollowUpStatus(source.expectedStatus),
+    expectedVersion: optionalPositiveInteger(
+      source.expectedVersion,
+      'expectedVersion',
+    ),
+  };
+}
+
 function optionalFollowUpStatus(
   value: unknown,
 ): FollowUpVisitRequestStatus | null {
@@ -210,11 +269,21 @@ function parseRequestedTechnicians(
 
 export function toFollowUpVisitRequestDto(
   request: FollowUpVisitRequestRecord,
+  context: FollowUpVisitRequestContext,
+  messages: readonly FollowUpVisitRequestMessageRecord[] = [],
 ): FollowUpVisitRequestDto {
   return {
     id: request.id,
     jobId: request.jobId,
+    jobNumber: context.jobNumber,
+    jobTitle: context.jobTitle,
+    customerName: context.customerName,
+    address: context.address,
     sourceVisitId: request.sourceVisitId,
+    sourceVisitScheduledStart:
+      context.sourceVisitScheduledStart?.toISOString() ?? null,
+    sourceVisitStatus: context.sourceVisitStatus,
+    sourceVisitOutcomeCode: context.sourceVisitOutcomeCode,
     requestingTechnicianMembershipId: request.requestingTechnicianMembershipId,
     proposedStart: request.proposedStart.toISOString(),
     proposedEnd: request.proposedEnd.toISOString(),
@@ -228,8 +297,44 @@ export function toFollowUpVisitRequestDto(
     version: request.version,
     createdAt: request.createdAt.toISOString(),
     updatedAt: request.updatedAt.toISOString(),
+    messages: messages.map((message) =>
+      toFollowUpVisitRequestMessageDto(
+        message,
+        request.requestingTechnicianMembershipId,
+      ),
+    ),
   };
 }
+
+/**
+ * One conversation message, with the side that wrote it **derived** from the request's own requester.
+ *
+ * Nothing stores the side: the member who raised the request is its requester, and everyone else who
+ * writes on it is the office answering (`BR-FV-012`). Deriving it here keeps the projection honest when
+ * a member's role changes, and gives every client the same answer (`BR-041`).
+ */
+function toFollowUpVisitRequestMessageDto(
+  message: FollowUpVisitRequestMessageRecord,
+  requesterMembershipId: string,
+): FollowUpVisitRequestMessageDto {
+  return {
+    id: message.id,
+    authorMembershipId: message.authorMembershipId,
+    authorKind:
+      message.authorMembershipId === requesterMembershipId
+        ? 'REQUESTER'
+        : 'OFFICE',
+    body: message.body,
+    recordedAt: message.recordedAt.toISOString(),
+  };
+}
+
+type FollowUpVisitRequestMessageRecord = {
+  readonly id: string;
+  readonly authorMembershipId: string;
+  readonly body: string;
+  readonly recordedAt: Date;
+};
 
 type FollowUpVisitRequestRecord = {
   readonly id: string;
@@ -249,3 +354,13 @@ type FollowUpVisitRequestRecord = {
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
+
+export interface FollowUpVisitRequestContext {
+  readonly jobNumber: number;
+  readonly jobTitle: string;
+  readonly customerName: string;
+  readonly address: AddressSnapshot | null;
+  readonly sourceVisitScheduledStart: Date | null;
+  readonly sourceVisitStatus: string | null;
+  readonly sourceVisitOutcomeCode: string | null;
+}

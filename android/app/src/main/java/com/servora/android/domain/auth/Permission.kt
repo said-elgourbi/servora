@@ -73,6 +73,8 @@ enum class Permission(val code: String, val aliases: Set<String> = emptySet()) {
     VISIT_ASSIGN_TECHNICIANS("visits.assign_technicians"),
     VISIT_REQUEST_FOLLOW_UP("visits.request_follow_up"),
     VISIT_REVIEW_REQUESTS("visits.review_requests"),
+    VISIT_REPORT_AD_HOC_WORK("visits.report_ad_hoc_work"),
+    VISIT_REVIEW_AD_HOC_WORK("visits.review_ad_hoc_work"),
     // Driving an assigned Visit through its field lifecycle (`BR-074`, `BR-075`) is the first of the
     // three field capabilities the Job Details field action draws on (`BR-009`, `ADR-019` D1). The
     // API enforces it on `PATCH /jobs/:id/visits/:visitId/status` and scopes the route to the

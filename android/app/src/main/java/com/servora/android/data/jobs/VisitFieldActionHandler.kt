@@ -52,24 +52,39 @@ internal class VisitFieldActionHandler @Inject constructor(
             else -> ReplayOutcome.Rejected(OutboxFailureReason.UNEXPECTED)
         }
 
-    /** Applies one queued status transition, with its outcome when it is a completion. */
+    /** Applies one queued Visit field action: a working transition, or a completion with its outcome. */
     private suspend fun replayChangeStatus(operation: OutboxOperation): ReplayOutcome {
         val payload = decode(VisitFieldOperationPayload.serializer(), operation.payload)
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.UNEXPECTED)
         val destination = VisitStatus.entries.firstOrNull { it.name == payload.status }
             ?: return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
 
-        // `BR-077` requires the outcome with the completion, and the API refuses a completion without
-        // one. A queued completion whose outcome this build cannot read is therefore refused here
-        // rather than sent as something the API would answer with a validation failure (`BR-078`).
-        val outcome = visitOutcomeOrNull(payload.outcomeCode)
-        val summary = payload.outcomeSummary?.takeIf { it.isNotBlank() }
-        if (destination == VisitStatus.COMPLETED && (outcome == null || summary == null)) {
-            return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
-        }
-
         val accessToken = sessionAuthenticator.accessToken()
             ?: return ReplayOutcome.Unauthenticated
+
+        // The device's own row says what the technician chose; which API route carries it is the API's
+        // shape. A completion records the outcome `BR-077` requires and is refused without one, so a
+        // queued completion whose outcome this build cannot read is refused here rather than sent as
+        // something the API would answer with a validation failure (`BR-078`).
+        if (destination == VisitStatus.COMPLETED) {
+            val outcome = visitOutcomeOrNull(payload.outcomeCode)
+            val summary = payload.outcomeSummary?.takeIf { it.isNotBlank() }
+            if (outcome == null || summary == null) {
+                return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
+            }
+            return sendCompletion(
+                accessToken = accessToken,
+                jobId = operation.targetId,
+                visitId = payload.visitId,
+                request = CompleteVisitRequestDto(
+                    outcomeCode = outcome.name,
+                    outcomeSummary = summary,
+                    clientOperationId = operation.operationId,
+                    capturedAt = operation.capturedAt,
+                    expectedVersion = operation.expectedVersion,
+                ),
+            )
+        }
 
         return send(
             accessToken = accessToken,
@@ -77,8 +92,6 @@ internal class VisitFieldActionHandler @Inject constructor(
             visitId = payload.visitId,
             request = ChangeVisitStatusRequestDto(
                 status = destination.name,
-                outcomeCode = outcome?.name,
-                outcomeSummary = summary,
                 clientOperationId = operation.operationId,
                 capturedAt = operation.capturedAt,
                 expectedVersion = operation.expectedVersion,
@@ -166,6 +179,30 @@ internal class VisitFieldActionHandler @Inject constructor(
             ReplayOutcome.Rejected(OutboxFailureReason.UNEXPECTED)
         }
 
+    /** Sends one queued completion, which the API records with the outcome it carries (`BR-077`). */
+    private suspend fun sendCompletion(
+        accessToken: String,
+        jobId: String,
+        visitId: String,
+        request: CompleteVisitRequestDto,
+    ): ReplayOutcome =
+        try {
+            api.completeVisit("Bearer $accessToken", jobId, visitId, request)
+            ReplayOutcome.Applied
+        } catch (failure: HttpException) {
+            if (failure.code() == HTTP_UNAUTHORIZED) {
+                renewAndRetry(accessToken) { token ->
+                    sendCompletion(token, jobId, visitId, request)
+                }
+            } else {
+                failure.toReplayOutcome(json)
+            }
+        } catch (failure: IOException) {
+            ReplayOutcome.Retryable(OutboxFailureReason.NETWORK)
+        } catch (failure: SerializationException) {
+            ReplayOutcome.Rejected(OutboxFailureReason.UNEXPECTED)
+        }
+
     /** Renews the session once and retries the cancelled attempt, or reports why it could not. */
     private suspend fun renewAndRetry(
         rejectedToken: String,
@@ -194,14 +231,19 @@ internal class VisitFieldActionHandler @Inject constructor(
  *
  * A server fault and a request that never reached the backend may both succeed later, so they are
  * retried; everything else is the backend's answer and is retained for the user rather than re-applied
- * (`BR-032`).
+ * (`BR-032`). The reason is read from the API's **stable code** where the refusal has one, because a
+ * closed Job and a moved-on Visit are both `409` yet mean different things to the technician
+ * (`BR-041`): [uploadFailureReason] decides between them.
  */
 private fun HttpException.toReplayOutcome(json: Json): ReplayOutcome {
-    val code = errorEnvelopeCode(json)
+    val code = apiErrorCode(json)
     if (code == CODE_VISIT_OPERATION_REUSED) {
         return ReplayOutcome.Rejected(OutboxFailureReason.INVALID)
     }
-    return uploadFailureReason(code()).toReplayOutcome()
+    // A `409 JOB_CLOSED_FOR_FIELD_WORK` is its own reason rather than a stale version to retry against:
+    // the Job was canceled or completed while this action waited, and nothing the technician can do
+    // makes the action apply (`BR-062`, `BR-079`, `ADR-019` D4).
+    return uploadFailureReason(code(), code).toReplayOutcome()
 }
 
 private fun OutboxFailureReason.toReplayOutcome(): ReplayOutcome =
@@ -210,18 +252,6 @@ private fun OutboxFailureReason.toReplayOutcome(): ReplayOutcome =
         OutboxFailureReason.UNAUTHENTICATED -> ReplayOutcome.Unauthenticated
         else -> ReplayOutcome.Rejected(this)
     }
-
-/**
- * Reads the API's stable error code from a refused response, best-effort.
- *
- * The classification is already known from the HTTP status, so a body this build cannot read means the
- * refusal is reported without its code — never that it is reported as something it was not.
- */
-private fun HttpException.errorEnvelopeCode(json: Json): String? =
-    runCatching {
-        val body = response()?.errorBody()?.string()
-        if (body.isNullOrBlank()) null else json.decodeFromString<ApiErrorDto>(body).code
-    }.getOrNull()
 
 private const val HTTP_UNAUTHORIZED = 401
 

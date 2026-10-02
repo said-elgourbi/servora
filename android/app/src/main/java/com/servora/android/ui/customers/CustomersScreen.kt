@@ -1,9 +1,6 @@
 package com.servora.android.ui.customers
 
-import android.content.ActivityNotFoundException
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -14,7 +11,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -74,6 +73,7 @@ import com.servora.android.domain.model.CustomerJobFilter
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerStatusFilter
 import com.servora.android.R
+import com.servora.android.ui.components.CustomerContactLine
 import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.ServoraTopBar
 import com.servora.android.ui.components.ServoraTopBarState
@@ -89,6 +89,7 @@ import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.navigation.ServoraNavHost
 import com.servora.android.ui.navigation.ServoraRoutes
 import com.servora.android.ui.navigation.servoraTopBarState
+import com.servora.android.ui.schedule.ManagerWorkScreen
 import com.servora.android.ui.schedule.ScheduleScreen
 import com.servora.android.ui.schedule.ScheduleViewModel
 import com.servora.android.ui.schedule.TechnicianScheduleScreen
@@ -143,7 +144,6 @@ fun customersFilterStatusTag(filter: CustomerStatusFilter): String =
 fun customersFilterJobTag(filter: CustomerJobFilter): String =
     "customers-filter-job-${filter.name}"
 
-private const val CustomerContactLogTag = "CustomersContact"
 private const val CustomerSinceLogTag = "CustomersSince"
 
 /*
@@ -160,11 +160,10 @@ private val CustomerFieldHeight = 52.dp
 private val CustomerRowGutter = 8.dp
 private val CustomerSearchIconSize = 18.dp
 private val CustomerBusinessIconSize = 14.dp
-private val CustomerContactIconSize = 12.dp
 private val CustomerCountIconSize = 12.dp
 private val CustomerChevronIconSize = 18.dp
 
-private enum class DashboardTab { HOME, SCHEDULE, CUSTOMERS, SETTINGS }
+private enum class DashboardTab { HOME, WORK, SCHEDULE, CUSTOMERS, SETTINGS }
 
 @Composable
 fun ServoraHomeScreen(
@@ -203,15 +202,15 @@ fun ServoraHomeScreen(
             customersViewModel.load()
         }
     }
-    var selected by rememberSaveable {
-        mutableStateOf(if (permissions.canOpenCustomers) DashboardTab.CUSTOMERS.name else DashboardTab.HOME.name)
-    }
+    var selected by rememberSaveable { mutableStateOf(DashboardTab.HOME.name) }
     // A tab a session cannot use is never shown, and a restored selection must not land on one
     // either: a member who signed out as a manager and back in as a technician returns to their
     // home rather than to a destination their capabilities do not open (`BR-010`, `BR-011`,
     // `BR-042`).
     val selectedTab = DashboardTab.valueOf(selected).let { tab ->
-        if (tab == DashboardTab.SCHEDULE && !canOpenSchedule) {
+        if (tab == DashboardTab.WORK && !permissions.canOpenCustomers) {
+            DashboardTab.HOME
+        } else if (tab == DashboardTab.SCHEDULE && !canOpenSchedule) {
             DashboardTab.HOME
         } else {
             tab
@@ -225,34 +224,47 @@ fun ServoraHomeScreen(
     val timeZoneId = remember { ZoneId.systemDefault().id }
     val firstWeekDay = firstDayOfWeek(deviceLocale())
     val today = remember(timeZoneId) { LocalDate.now(ZoneId.of(timeZoneId)) }
+    // Which home a member has is decided by their capabilities, never by a role name (`BR-011`,
+    // `ADR-019` D6): the office read capability opens the operation’s day, the field capability opens
+    // the caller’s own. A member holding both keeps the office day, which is the home they already had.
+    // It is one read of one day, so the same read is asked for wherever Home is entered: choosing the
+    // tab and coming back to it from a drill-down are the same question (`BR-001`).
+    val readHome: () -> Unit = {
+        if (permissions.canOpenCustomers) {
+            managerHomeViewModel.load(timeZoneId)
+        } else if (permissions.canViewAssignedWork) {
+            technicianHomeViewModel.load(timeZoneId)
+        }
+    }
+    // Which schedule a member has is decided by their capabilities, exactly as their home is
+    // (`BR-006`, `BR-011`): the office capability opens the operation's day and the field capability
+    // the caller's own assigned work. Entering the destination by choosing its tab and entering it
+    // again by coming back from a Job are the same question, so both ask the same read (`BR-001`).
+    val readSchedule: () -> Unit = {
+        if (permissions.canOpenCustomers) {
+            scheduleViewModel.start(
+                today = today,
+                timeZoneId = timeZoneId,
+                firstDayOfWeek = firstWeekDay,
+            )
+        } else if (permissions.canViewAssignedWork) {
+            technicianScheduleViewModel.start(
+                today = today,
+                timeZoneId = timeZoneId,
+                firstDayOfWeek = firstWeekDay,
+            )
+        }
+    }
     LaunchedEffect(selectedTab) {
-        if (selectedTab == DashboardTab.HOME) {
-            // Which home a member has is decided by their capabilities, never by a role name
-            // (`BR-011`, `ADR-019` D6): the office read capability opens the operation’s day,
-            // the field capability opens the caller’s own. A member holding both keeps the
-            // office day, which is the home they already had.
-            if (permissions.canOpenCustomers) {
-                managerHomeViewModel.load(timeZoneId)
-            } else if (permissions.canViewAssignedWork) {
-                technicianHomeViewModel.load(timeZoneId)
-            }
-        } else if (selectedTab == DashboardTab.SCHEDULE && canOpenSchedule) {
+        when {
+            selectedTab == DashboardTab.HOME -> readHome()
+
             // The schedule is read by the capability that opened it, never by a role name
             // (`BR-006`, `BR-011`): the office capability reads the operation's day, the field
             // capability the caller's own assigned work.
-            if (permissions.canOpenCustomers) {
-                scheduleViewModel.start(
-                    today = today,
-                    timeZoneId = timeZoneId,
-                    firstDayOfWeek = firstWeekDay,
-                )
-            } else {
-                technicianScheduleViewModel.start(
-                    today = today,
-                    timeZoneId = timeZoneId,
-                    firstDayOfWeek = firstWeekDay,
-                )
-            }
+            selectedTab == DashboardTab.WORK && permissions.canOpenCustomers -> readSchedule()
+
+            selectedTab == DashboardTab.SCHEDULE && canOpenSchedule -> readSchedule()
         }
     }
 
@@ -286,6 +298,7 @@ fun ServoraHomeScreen(
         DashboardTab.HOME -> homeHeader.title
         // The schedule names itself for the audience that is reading it: the office reads the
         // operation's schedule, a technician reads their own (`BR-010`, `BR-012`).
+        DashboardTab.WORK -> stringResource(R.string.nav_work)
         DashboardTab.SCHEDULE -> stringResource(
             if (permissions.canOpenCustomers) R.string.nav_schedule else R.string.nav_my_schedule,
         )
@@ -348,14 +361,36 @@ fun ServoraHomeScreen(
             removeContactViewModel = removeContactViewModel,
             jobDetailsViewModel = jobDetailsViewModel,
             createJobViewModel = createJobViewModel,
+            scheduleViewModel = scheduleViewModel,
+            technicianScheduleViewModel = technicianScheduleViewModel,
             permissions = permissions,
             customerName = customerName,
             // The bottom-navigation area is the graph's root destination; the drill-down screens are
             // pushed on top of it.
             rootContent = {
-                // Re-entering the bottom-navigation area means a drill-down screen was left behind,
-                // so the customer it showed is released rather than kept alive behind the list.
-                LaunchedEffect(Unit) { customersViewModel.closeCustomerDetail() }
+                // Re-entering the bottom-navigation area means a drill-down screen was left behind, so
+                // the customer it showed is released rather than kept alive behind the list. The
+                // drill-down may also have changed what the destination on screen reports — a Visit
+                // moved through its field status, a Visit completed, or the office acting on the Job
+                // (`BR-058`, `BR-074`) — and that change is the backend's record, never this
+                // device's (`BR-001`). What the destination holds is therefore read again instead of
+                // being left as it stood before the drill-down; what is already known stays on screen
+                // while the read is in flight (`BR-013`).
+                LaunchedEffect(Unit) {
+                    customersViewModel.closeCustomerDetail()
+                    when (selectedTab) {
+                        DashboardTab.HOME -> readHome()
+
+                        // The Visit a Job drill-down changed is on the schedule as much as it is on
+                        // the day: coming back to it must not state a field attempt in a status the
+                        // field has already left (`BR-072`, `BR-074`, `BR-001`).
+                        DashboardTab.WORK, DashboardTab.SCHEDULE -> if (canOpenSchedule) {
+                            readSchedule()
+                        }
+
+                        else -> Unit
+                    }
+                }
                 when (selectedTab) {
                     DashboardTab.CUSTOMERS ->
                         CustomersScreen(
@@ -392,10 +427,43 @@ fun ServoraHomeScreen(
                             // `BR-010`, `ADR-019` D6).
                             TechnicianHomeScreen(
                                 state = technicianHome,
-                                onOpenJob = { jobId ->
-                                    navController.navigate(ServoraRoutes.jobDetail(jobId))
+                                onOpenJob = { jobId, visitId ->
+                                    navController.navigate(ServoraRoutes.jobDetail(jobId, visitId))
                                 },
                                 onRetry = { technicianHomeViewModel.retry(timeZoneId) },
+                            )
+                        }
+
+                    DashboardTab.WORK ->
+                        if (permissions.canOpenCustomers) {
+                            ManagerWorkScreen(
+                                state = schedule,
+                                canApproveVisitRequests = permissions.canReviewVisitRequests &&
+                                    permissions.canScheduleVisit,
+                                onOpenJob = { jobId, visitId ->
+                                    navController.navigate(ServoraRoutes.jobDetail(jobId, visitId))
+                                },
+                                onOpenRequest = { requestId ->
+                                    navController.navigate(ServoraRoutes.requestDetail(requestId))
+                                },
+                                onClarifyRequest = scheduleViewModel::askForClarification,
+                                onRejectRequest = scheduleViewModel::rejectRequest,
+                                onStartApproval = scheduleViewModel::beginApproval,
+                                onDismissApproval = scheduleViewModel::dismissApproval,
+                                onApproveRequest = { request, start, end, assignments ->
+                                    scheduleViewModel.approveRequest(
+                                        request = request,
+                                        scheduledStart = start,
+                                        scheduledEnd = end,
+                                        assignments = assignments,
+                                    )
+                                },
+                                onConfirmApproval = scheduleViewModel::confirmApproval,
+                                onDismissApprovalConflicts =
+                                    scheduleViewModel::dismissApprovalConflicts,
+                                onAcknowledgeApproval = scheduleViewModel::acknowledgeApproval,
+                                onAcknowledgeReview = scheduleViewModel::acknowledgeReview,
+                                onRetry = scheduleViewModel::retry,
                             )
                         }
 
@@ -403,6 +471,11 @@ fun ServoraHomeScreen(
                         if (permissions.canOpenCustomers) {
                             ScheduleScreen(
                                 state = schedule,
+                                // Approving a request creates a Visit, and the API asks for both of those
+                                // capabilities on that route (`BR-FV-004`, `BR-FV-005`): a session holding
+                                // only one is offered no action it could not complete (`BR-007`).
+                                canApproveVisitRequests = permissions.canReviewVisitRequests &&
+                                    permissions.canScheduleVisit,
                                 onSelectDate = { date ->
                                     scheduleViewModel.selectDate(date, firstWeekDay)
                                 },
@@ -411,11 +484,31 @@ fun ServoraHomeScreen(
                                 onApplyTechnicians = scheduleViewModel::selectTechnicians,
                                 // A card opens the Job the Visit belongs to, which is where the
                                 // manager acts on it (`BR-012`).
-                                onOpenJob = { jobId ->
-                                    navController.navigate(ServoraRoutes.jobDetail(jobId))
+                                onOpenJob = { jobId, visitId ->
+                                    navController.navigate(ServoraRoutes.jobDetail(jobId, visitId))
+                                },
+                                // A request opens its own review surface; the Job remains one action
+                                // away from there, matching the technician side of the workflow.
+                                onOpenRequest = { requestId ->
+                                    navController.navigate(ServoraRoutes.requestDetail(requestId))
                                 },
                                 onClarifyRequest = scheduleViewModel::askForClarification,
                                 onRejectRequest = scheduleViewModel::rejectRequest,
+                                onStartApproval = scheduleViewModel::beginApproval,
+                                onDismissApproval = scheduleViewModel::dismissApproval,
+                                onApproveRequest = { request, start, end, assignments ->
+                                    scheduleViewModel.approveRequest(
+                                        request = request,
+                                        scheduledStart = start,
+                                        scheduledEnd = end,
+                                        assignments = assignments,
+                                    )
+                                },
+                                onConfirmApproval = scheduleViewModel::confirmApproval,
+                                onDismissApprovalConflicts =
+                                    scheduleViewModel::dismissApprovalConflicts,
+                                onAcknowledgeApproval = scheduleViewModel::acknowledgeApproval,
+                                onAcknowledgeReview = scheduleViewModel::acknowledgeReview,
                                 onRetry = scheduleViewModel::retry,
                             )
                         } else {
@@ -425,6 +518,13 @@ fun ServoraHomeScreen(
                             // `ADR-019` D2).
                             TechnicianScheduleScreen(
                                 state = technicianSchedule,
+                                // The requests view reads the capability the API accepts for it
+                                // (`BR-FV-001`, `BR-011`): a session that may not ask for a follow-up
+                                // visit has no own request to read, so it is offered no view for them.
+                                canRequestFollowUpVisit = permissions.canRequestFollowUpVisit,
+                                canReportAdHocWork = permissions.canReportAdHocWork ||
+                                    permissions.canViewAssignedWork,
+                                onSelectTab = technicianScheduleViewModel::selectTab,
                                 onSelectDate = { date ->
                                     technicianScheduleViewModel.selectDate(date, firstWeekDay)
                                 },
@@ -432,9 +532,49 @@ fun ServoraHomeScreen(
                                 onShowToday = {
                                     technicianScheduleViewModel.showToday(today, firstWeekDay)
                                 },
-                                onOpenJob = { jobId ->
-                                    navController.navigate(ServoraRoutes.jobDetail(jobId))
+                                onOpenJob = { jobId, visitId ->
+                                    navController.navigate(ServoraRoutes.jobDetail(jobId, visitId))
                                 },
+                                // A request's own row opens the request, not the Job: a request is a
+                                // proposal about another field attempt rather than the work itself
+                                // (`BR-FV-002`), and the Job is one action away from its details.
+                                onOpenRequest = { requestId ->
+                                    navController.navigate(ServoraRoutes.requestDetail(requestId))
+                                },
+                                onReplyToRequest = technicianScheduleViewModel::replyToRequest,
+                                onAcknowledgeReply = technicianScheduleViewModel::acknowledgeReply,
+                                onOpenAdHocReport = technicianScheduleViewModel::openAdHocReport,
+                                onDismissAdHocReport = technicianScheduleViewModel::dismissAdHocReport,
+                                onAdHocReportCustomerQueryChange =
+                                    technicianScheduleViewModel::updateAdHocReportCustomerQuery,
+                                onAdHocReportSelectCustomer =
+                                    technicianScheduleViewModel::selectAdHocReportCustomer,
+                                onAdHocReportSelectProperty =
+                                    technicianScheduleViewModel::selectAdHocReportProperty,
+                                onAdHocReportSelectJob =
+                                    technicianScheduleViewModel::selectAdHocReportJob,
+                                onAdHocReportWorkStartedAtChange =
+                                    technicianScheduleViewModel::updateAdHocReportWorkStartedAt,
+                                onAdHocReportWorkEndedAtChange =
+                                    technicianScheduleViewModel::updateAdHocReportWorkEndedAt,
+                                onAdHocReportOutcomeChange =
+                                    technicianScheduleViewModel::updateAdHocReportOutcome,
+                                onAdHocReportSummaryChange =
+                                    technicianScheduleViewModel::updateAdHocReportSummary,
+                                onAdHocReportNotesChange =
+                                    technicianScheduleViewModel::updateAdHocReportNotes,
+                                onAdHocReportUnknownCustomerChange =
+                                    technicianScheduleViewModel::setAdHocReportUnknownCustomer,
+                                onAdHocReportReportedCustomerNameChange =
+                                    technicianScheduleViewModel::updateReportedCustomerName,
+                                onAdHocReportReportedCustomerPhoneChange =
+                                    technicianScheduleViewModel::updateReportedCustomerPhone,
+                                onAdHocReportReportedCustomerAddressChange =
+                                    technicianScheduleViewModel::updateReportedCustomerAddress,
+                                onSubmitAdHocWorkReport =
+                                    technicianScheduleViewModel::submitAdHocWorkReport,
+                                onAcknowledgeAdHocWorkReport =
+                                    technicianScheduleViewModel::acknowledgeAdHocReportResult,
                                 onRetry = technicianScheduleViewModel::retry,
                             )
                         }
@@ -465,7 +605,7 @@ private fun DashboardNavigation(
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(horizontal = 4.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             DashboardNavItem(
                 label = stringResource(R.string.nav_home),
@@ -473,6 +613,14 @@ private fun DashboardNavigation(
                 selected = selected == DashboardTab.HOME,
                 onClick = { onSelect(DashboardTab.HOME) },
             )
+            if (canOpenCustomers) {
+                DashboardNavItem(
+                    label = stringResource(R.string.nav_work),
+                    iconRes = R.drawable.ic_briefcase,
+                    selected = selected == DashboardTab.WORK,
+                    onClick = { onSelect(DashboardTab.WORK) },
+                )
+            }
             // The schedule is offered to whichever capability may read one: the office capability
             // opens the operation's dispatch view, the field capability opens the caller's own
             // assigned work (`BR-009`, `BR-010`, `BR-011`). A session holding neither is offered
@@ -509,7 +657,7 @@ private fun DashboardNavigation(
  * destination is the only one drawn in the brand colour (`Figma/src/screens/Dashboard.tsx`).
  */
 @Composable
-private fun DashboardNavItem(
+private fun RowScope.DashboardNavItem(
     label: String,
     iconRes: Int,
     selected: Boolean,
@@ -524,23 +672,19 @@ private fun DashboardNavItem(
 
     Column(
         modifier = modifier
+            .weight(1f)
+            .defaultMinSize(minHeight = 52.dp)
             .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.Center,
     ) {
         Icon(
             painter = painterResource(iconRes),
-            contentDescription = null,
+            contentDescription = label,
             tint = contentColor,
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = contentColor,
+            modifier = Modifier.size(24.dp),
         )
     }
 }
@@ -1367,48 +1511,8 @@ private fun CustomerRow(customer: CustomerListItem, onClick: () -> Unit) {
 }
 
 /**
- * One contact line under a customer's name: the leading glyph and the value.
- *
- * The line is a link only when [onClick] is supplied — Customer Details passes the `tel:`/`mailto:`
- * action for the phone and the email, while the customers list passes none so that a tap on a
- * contact value opens the customer rather than dialling or composing
- * (`docs/tracker/007-android-customers-list.md`).
+ * The derived "N properties · N jobs" the design shows under the contacts.
  */
-@Composable
-internal fun CustomerContactLine(
-    text: String,
-    glyph: Int,
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
-) {
-    val shape = MaterialTheme.shapes.small
-    val lineModifier = if (onClick == null) {
-        modifier.clip(shape)
-    } else {
-        modifier.clip(shape).clickable(onClick = onClick)
-    }
-    Row(
-        modifier = lineModifier.padding(vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Icon(
-            painter = painterResource(glyph),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(CustomerContactIconSize),
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-/** The derived "N properties · N jobs" the design shows under the contacts. */
 @Composable
 private fun CustomerCountsRow(propertyCount: Int, jobCount: Int) {
     Row(
@@ -1457,29 +1561,6 @@ private fun CustomerCount(glyph: Int, label: String) {
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-/** Opens the dialer with [phone]. `ACTION_DIAL` needs no permission and never places the call. */
-internal fun dialIntent(phone: String): Intent =
-    Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", phone, null))
-
-/** Opens the user's email client addressed to [email]. */
-internal fun mailIntent(email: String): Intent =
-    Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", email, null))
-
-/**
- * Starts an outbound contact intent.
- *
- * A device with no dialer or email client keeps the value visible instead of crashing the screen.
- * The failure is logged rather than rethrown because nothing in the app can recover from a missing
- * platform app; the contact value itself is never logged.
- */
-internal fun Context.startContactIntent(intent: Intent) {
-    try {
-        startActivity(intent)
-    } catch (missing: ActivityNotFoundException) {
-        Log.d(CustomerContactLogTag, "No activity handled an outbound contact intent.", missing)
     }
 }
 

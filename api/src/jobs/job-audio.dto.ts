@@ -79,6 +79,14 @@ export interface CreateJobAudioNoteDto {
    * retry after a timeout stores the same evidence under the same key rather than a second copy.
    */
   readonly clientOperationId: string;
+  /**
+   * The Visit the recording was made during (`BR-047`, `BR-071`, `BR-091`).
+   *
+   * Required, exactly as it is for a photo: a recording is field evidence, it belongs to the field
+   * attempt it was made on, and the Activity read reports it with that Visit's account (`BR-080`). A
+   * request that names no Visit, or one of another Job or organization, is refused (`BR-042`).
+   */
+  readonly visitId: string;
   readonly phase: EvidencePhase;
   readonly note: string | null;
   /** The device instant the recording was made; display and provenance only (`BR-031`). */
@@ -92,10 +100,15 @@ export function parseCreateJobAudioNoteDto(input: unknown): CreateJobAudioNoteDt
   if (clientOperationId === null) {
     fail('clientOperationId', 'is required');
   }
+  const visitId = optionalUuid(source.visitId, 'visitId');
+  if (visitId === null) {
+    fail('visitId', 'is required');
+  }
   const capturedAt = optionalInstant(source.capturedAt, 'capturedAt');
 
   return {
     clientOperationId,
+    visitId,
     phase: requireEnum(source.phase, EVIDENCE_PHASES, 'phase'),
     note: optionalText(source.note, 'note', MAX_JOB_AUDIO_NOTE_LENGTH),
     capturedAt: capturedAt === null ? null : new Date(capturedAt),

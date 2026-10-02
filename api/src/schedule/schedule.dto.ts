@@ -1,5 +1,5 @@
 import type { AddressSnapshot } from '../address/address-snapshot.js';
-import { HISTORICAL_VISIT_STATUSES } from '../jobs/job.types.js';
+import { TERMINAL_VISIT_STATUSES } from '../jobs/job.types.js';
 import type { AssignmentRoleCode, VisitStatus } from '../jobs/job.types.js';
 import type { ScheduleScope, ScheduleScopeKind } from './schedule-scope.js';
 import type { AssignableTechnicianDto } from '../technicians/technician.dto.js';
@@ -27,13 +27,13 @@ export const SCHEDULE_UNASSIGNED_LIMIT = 20;
 /**
  * The Visit statuses that still need a crew.
  *
- * A Visit is unassigned work while it is **open** — anything other than `COMPLETED`, `CANCELED` or
- * `NO_SHOW`, which is exactly `BR-062`'s open-Visit classification and `BR-074`'s historical set —
+ * A Visit is unassigned work while it is **open** — anything other than `COMPLETED` or `CANCELED`,
+ * which is exactly `BR-062`'s open-Visit classification and `BR-074`'s terminal set —
  * and it has no technician assigned to it. That is the absence of an assignment rather than a status
  * (`BR-042`): a Visit whose field attempt is over does not need anybody, and `BR-071`/`BR-072`
  * explicitly allow a Visit to exist with no technicians while it is being arranged.
  */
-export const UNASSIGNED_EXCLUDED_VISIT_STATUSES = HISTORICAL_VISIT_STATUSES;
+export const UNASSIGNED_EXCLUDED_VISIT_STATUSES = TERMINAL_VISIT_STATUSES;
 
 /** One technician currently assigned to a Visit (`BR-068`), Lead first. */
 export interface ScheduleTechnician {

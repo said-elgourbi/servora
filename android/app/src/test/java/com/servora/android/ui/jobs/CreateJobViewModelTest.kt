@@ -28,7 +28,9 @@ import com.servora.android.data.jobs.JobDetailsResult
 import com.servora.android.data.jobs.QueuedVisitFieldAction
 import com.servora.android.data.jobs.QueuedVisitNote
 import com.servora.android.data.jobs.VisitNote
+import com.servora.android.data.jobs.VisitCompletion
 import com.servora.android.data.jobs.VisitStatusChange
+import com.servora.android.data.jobs.VisitRequestSubmitResult
 import com.servora.android.domain.model.Customer
 import com.servora.android.domain.model.CustomerDetail
 import com.servora.android.domain.model.CustomerFilters
@@ -36,6 +38,7 @@ import com.servora.android.domain.model.CustomerProperty
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerStatusFilter
 import com.servora.android.domain.model.CustomerType
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import java.time.Instant
@@ -615,8 +618,22 @@ private class RecordingJobCreator(
 
     override suspend fun addVisitNoteRequest(note: VisitNote): ActivityWriteResult = unreachable()
 
+    override suspend fun editVisitNote(
+        jobId: String,
+        noteId: String,
+        body: String,
+    ): ActivityWriteResult = unreachable()
+
+    override suspend fun removeVisitNote(
+        jobId: String,
+        noteId: String,
+        reason: String,
+    ): ActivityWriteResult = unreachable()
+
     override suspend fun changeVisitStatus(action: VisitStatusChange): JobActionResult =
         unreachable()
+
+    override suspend fun completeVisit(action: VisitCompletion): JobActionResult = unreachable()
 
     override suspend fun queuedVisitAction(jobId: String): QueuedVisitFieldAction? = null
 
@@ -629,6 +646,8 @@ private class RecordingJobCreator(
         unreachable()
 
     override val appliedOperations: Flow<Unit> = emptyFlow()
+
+    override val refusedOperations: Flow<Unit> = emptyFlow()
 
     override suspend fun removeJobPhoto(
         jobId: String,
@@ -666,6 +685,37 @@ private class RecordingJobCreator(
         confirmConflicts: Boolean,
         expectedVersion: Int,
     ): JobActionResult = unreachable()
+
+    /** This fake only creates a Job, so scheduling a Visit is not exercised here. */
+    override suspend fun createVisit(
+        jobId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        confirmConflicts: Boolean,
+    ): JobActionResult = unreachable()
+
+    /** This fake only creates a Job, so approving a request is not exercised here. */
+    override suspend fun approveVisitRequest(
+        jobId: String,
+        requestId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        expectedStatus: FollowUpVisitRequestStatus,
+        expectedVersion: Int,
+        confirmConflicts: Boolean,
+    ): JobActionResult = unreachable()
+
+    /** This fake only creates a Job, so proposing a follow-up Visit is not exercised here. */
+    override suspend fun requestFollowUpVisit(
+        jobId: String,
+        sourceVisitId: String,
+        proposedStart: Instant,
+        proposedEnd: Instant,
+        reason: String,
+        sameTechnicianPreferred: Boolean,
+    ): VisitRequestSubmitResult = unreachable()
 
     override suspend fun loadAssignableTechnicians(): AssignableTechniciansResult = unreachable()
 

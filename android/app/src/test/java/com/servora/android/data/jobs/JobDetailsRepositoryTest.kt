@@ -5,11 +5,13 @@ import com.servora.android.data.offline.InMemoryOutboxStore
 import com.servora.android.data.offline.InMemoryWorkingSetStore
 import com.servora.android.data.offline.OutboxReplayEngine
 import com.servora.android.data.offline.ReadSource
+import com.servora.android.data.schedule.FollowUpVisitRequestDto
 import com.servora.android.data.session.AuthenticatedSubject
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.AssignmentRole
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobContactPerson
@@ -59,7 +61,7 @@ class JobDetailsRepositoryTest {
         assertEquals(JOB_ID, api.lastJobId)
         assertEquals(1042, details.jobNumber)
         assertEquals("Furnace repair", details.title)
-        assertEquals(JobStatus.SCHEDULED, details.status)
+        assertEquals(JobStatus.ACTIVE, details.status)
         assertEquals("Martha Reynolds", details.customerName)
         // This payload carries no customer contact block, which is exactly what the API answers a
         // session it does not admit to the Customer (`BR-092`). The client maps what it was given and
@@ -569,23 +571,23 @@ class JobDetailsRepositoryTest {
 
     @Test
     fun `sends a status change with the version the screen last saw`() = runTest {
-        val api = FakeJobDetailsApi(answer = { jobDetailsDto().copy(status = "IN_PROGRESS") })
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto().copy(status = "COMPLETED") })
         val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
 
         val result = repository.changeJobStatus(
             jobId = JOB_ID,
-            status = JobStatus.IN_PROGRESS,
+            status = JobStatus.COMPLETED,
             note = "  ",
             expectedVersion = 4,
         )
 
         assertEquals("Bearer access-token", api.lastAuthorization)
         assertEquals(
-            ChangeJobStatusRequestDto(status = "IN_PROGRESS", note = null, expectedVersion = 4),
+            ChangeJobStatusRequestDto(status = "COMPLETED", note = null, expectedVersion = 4),
             api.lastStatusRequest,
         )
         val details = assertActionSuccess(result)
-        assertEquals(JobStatus.IN_PROGRESS, details.status)
+        assertEquals(JobStatus.COMPLETED, details.status)
     }
 
     @Test
@@ -631,6 +633,207 @@ class JobDetailsRepositoryTest {
             api.lastAssignmentRequest?.technicians?.map { "${it.membershipId}:${it.roleCode}" },
         )
         assertFalse(api.lastAssignmentRequest?.confirmConflicts == true)
+    }
+
+    @Test
+    fun `schedules a Visit on the Job with the window and the crew it was given`() = runTest {
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.createVisit(
+            jobId = JOB_ID,
+            scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
+            scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
+            assignments = listOf(
+                TechnicianAssignment("member-2", AssignmentRole.LEAD),
+                TechnicianAssignment("member-1", AssignmentRole.TECHNICIAN),
+            ),
+            confirmConflicts = false,
+        )
+
+        // The session, the Job and the whole crew with one Lead travel unchanged (`BR-068`, `BR-071`).
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals(JOB_ID, api.lastJobId)
+        assertEquals("2026-09-15T13:00:00Z", api.lastCreateVisitRequest?.scheduledStart)
+        assertEquals("2026-09-15T15:00:00Z", api.lastCreateVisitRequest?.scheduledEnd)
+        assertEquals(
+            listOf("member-2:LEAD", "member-1:TECHNICIAN"),
+            api.lastCreateVisitRequest?.technicians?.map { "${it.membershipId}:${it.roleCode}" },
+        )
+        assertFalse(api.lastCreateVisitRequest?.confirmConflicts == true)
+        // And the answer is the Job the backend now holds, not a locally assembled copy (`BR-001`).
+        assertTrue(result is JobActionResult.Success)
+    }
+
+    @Test
+    fun `reports the conflicts the API refused a scheduled Visit for`() = runTest {
+        // `BR-070` keeps the conflict a warning rather than a prohibition (`BR-072`), so the refusal is
+        // reported as the question the user has to answer rather than as a failed schedule.
+        val conflict = """
+            {
+              "statusCode": 409,
+              "code": "SCHEDULE_CONFLICT",
+              "message": "The change conflicts with another visit.",
+              "details": {
+                "conflicts": [
+                  {
+                    "visitId": "visit-9",
+                    "jobNumber": 1043,
+                    "technicianName": "Mike Lead",
+                    "scheduledStart": "2026-09-15T13:00:00Z",
+                    "scheduledEnd": "2026-09-15T15:00:00Z"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            failFirstWith = httpFailure(409, conflict),
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.createVisit(
+            jobId = JOB_ID,
+            scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
+            scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
+            assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+            confirmConflicts = false,
+        )
+
+        val conflicts = when (result) {
+            is JobActionResult.Conflicts -> result.conflicts
+            else -> throw AssertionError("expected the conflicts, got $result")
+        }
+        assertEquals(1, conflicts.size)
+        assertEquals("visit-9", conflicts[0].visitId)
+        assertEquals(1043, conflicts[0].jobNumber)
+        assertEquals("Mike Lead", conflicts[0].technicianName)
+    }
+
+    @Test
+    fun `sends an approval with the request's own state and the reviewer's decision`() = runTest {
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        repository.approveVisitRequest(
+            jobId = JOB_ID,
+            requestId = "request-1",
+            scheduledStart = Instant.parse("2026-09-16T13:00:00Z"),
+            scheduledEnd = Instant.parse("2026-09-16T15:00:00Z"),
+            assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+            expectedStatus = FollowUpVisitRequestStatus.PENDING,
+            expectedVersion = 3,
+            confirmConflicts = true,
+        )
+
+        // The decision is the reviewer's own window and crew (`BR-FV-003`, `BR-FV-005`), and the request
+        // is named by the state it was read in, so a request that moved on is refused (`BR-086`).
+        assertEquals(JOB_ID, api.lastJobId)
+        assertEquals("request-1", api.lastApprovedRequestId)
+        assertEquals("PENDING", api.lastApprovalRequest?.expectedStatus)
+        assertEquals(3, api.lastApprovalRequest?.expectedVersion)
+        assertEquals("2026-09-16T13:00:00Z", api.lastApprovalRequest?.scheduledStart)
+        assertEquals("2026-09-16T15:00:00Z", api.lastApprovalRequest?.scheduledEnd)
+        assertEquals(
+            listOf("member-1:LEAD"),
+            api.lastApprovalRequest?.technicians?.map { "${it.membershipId}:${it.roleCode}" },
+        )
+        assertTrue(api.lastApprovalRequest?.confirmConflicts == true)
+    }
+
+    @Test
+    fun `sends a follow-up proposal against the field attempt it grew from`() = runTest {
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.requestFollowUpVisit(
+            jobId = JOB_ID,
+            sourceVisitId = "visit-1",
+            proposedStart = Instant.parse("2026-09-15T13:00:00Z"),
+            proposedEnd = Instant.parse("2026-09-15T15:00:00Z"),
+            reason = "The part has to be ordered.",
+            sameTechnicianPreferred = true,
+        )
+
+        // The session is carried, and the proposal states the Visit it grew from, the window it suggests,
+        // why another attempt is needed and whether the technician wants it (`BR-FV-003`, `BR-FV-008`).
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals(JOB_ID, api.lastJobId)
+        assertEquals("visit-1", api.lastSubmitRequest?.sourceVisitId)
+        assertEquals("2026-09-15T13:00:00Z", api.lastSubmitRequest?.proposedStart)
+        assertEquals("2026-09-15T15:00:00Z", api.lastSubmitRequest?.proposedEnd)
+        assertEquals("The part has to be ordered.", api.lastSubmitRequest?.reason)
+        assertTrue(api.lastSubmitRequest?.sameTechnicianPreferred == true)
+        // The answer is the request itself, because a request is not a Visit and changes no Job
+        // (`BR-FV-002`): it is the request's own state a client presents (`BR-FV-012`).
+        val request = when (result) {
+            is VisitRequestSubmitResult.Success -> result.request
+            is VisitRequestSubmitResult.Failure ->
+                throw AssertionError("expected the recorded request, got $result")
+        }
+        assertEquals("request-1", request.id)
+        assertEquals(FollowUpVisitRequestStatus.PENDING, request.status)
+        assertEquals(1, request.version)
+    }
+
+    @Test
+    fun `reports a refused follow-up proposal as its own answer`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            failFirstWith = httpFailure(403),
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.requestFollowUpVisit(
+            jobId = JOB_ID,
+            sourceVisitId = "visit-1",
+            proposedStart = Instant.parse("2026-09-15T13:00:00Z"),
+            proposedEnd = Instant.parse("2026-09-15T15:00:00Z"),
+            reason = "The part has to be ordered.",
+            sameTechnicianPreferred = false,
+        )
+
+        // A refusal is classified with the vocabulary the screen reports every action with (`BR-041`),
+        // and nothing is presented as a request the office has (`BR-042`).
+        assertEquals(
+            JobActionFailure.FORBIDDEN,
+            (result as VisitRequestSubmitResult.Failure).reason,
+        )
+    }
+
+    @Test
+    fun `reports a request that moved on as its own answer, not a generic conflict`() = runTest {
+        // The approval route answers two different things about the request itself (`BR-FV-012`), and
+        // they ask the reviewer for different actions, so they are classified apart (`BR-041`).
+        val moved = """
+            {
+              "statusCode": 409,
+              "code": "FOLLOW_UP_VISIT_REQUEST_CONFLICT",
+              "message": "The follow-up visit request changed since it was read.",
+              "details": { "currentStatus": "NEEDS_CLARIFICATION", "currentVersion": 4 }
+            }
+        """.trimIndent()
+        val reviewed = """
+            {
+              "statusCode": 409,
+              "code": "FOLLOW_UP_VISIT_REQUEST_NOT_REVIEWABLE",
+              "message": "A follow-up visit request in APPROVED cannot be reviewed.",
+              "details": { "status": "APPROVED" }
+            }
+        """.trimIndent()
+
+        val changed = approvalOf(httpFailure(409, moved))
+        val alreadyReviewed = approvalOf(httpFailure(409, reviewed))
+
+        assertEquals(
+            JobActionFailure.VISIT_REQUEST_CHANGED,
+            (changed as JobActionResult.Failure).reason,
+        )
+        assertEquals(
+            JobActionFailure.VISIT_REQUEST_NOT_REVIEWABLE,
+            (alreadyReviewed as JobActionResult.Failure).reason,
+        )
     }
 
     @Test
@@ -722,12 +925,42 @@ class JobDetailsRepositoryTest {
     }
 
     @Test
+    fun `maps the follow-up request admission the API reports`() = runTest {
+        // The request action is the API's own answer (`BR-078`, `BR-FV-001`): a completed Visit with a
+        // follow-up outcome is reported as admitting a request. This layer carries that answer through
+        // rather than re-deriving it (`BR-041`).
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    selectedVisit = visitDto().copy(
+                        status = "COMPLETED",
+                        requestFollowUpAllowed = true,
+                    ),
+                )
+            },
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        assertEquals(true, assertSuccess(repository.loadJobDetails(JOB_ID)).selectedVisit?.requestFollowUpAllowed)
+
+        // A payload that predates the field defaults to false, so no request action is offered
+        // (`BR-042`, `offline-first-architecture.md` §10).
+        val base = assertSuccess(
+            repository(
+                FakeJobDetailsApi(answer = { jobDetailsDto() }),
+                FakeSessionAuthenticator(accessToken = "access-token"),
+            ).loadJobDetails(JOB_ID),
+        )
+        assertEquals(false, base.selectedVisit?.requestFollowUpAllowed)
+    }
+
+    @Test
     fun `applies a Visit transition with the destination, provenance and version the screen saw`() =
         runTest {
             // The field route is the technician's own lifecycle: it carries the destination, the
             // idempotency key, the device instant and the Visit version the screen last saw
             // (`BR-074`, `BR-086`, `ADR-019` D5).
-            val api = FakeJobDetailsApi(answer = { jobDetailsDto().copy(status = "IN_PROGRESS") })
+            val api = FakeJobDetailsApi(answer = { jobDetailsDto().copy(status = "ACTIVE") })
             val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
 
             val result = repository.changeVisitStatus(
@@ -756,28 +989,62 @@ class JobDetailsRepositoryTest {
         }
 
     @Test
-    fun `sends the outcome a completion requires in the same request`() = runTest {
-        // `BR-077` requires the outcome with the completion, so the two are one operation: there is no
-        // request that finishes a Visit without saying what resulted from it.
-        val api = FakeJobDetailsApi(answer = { jobDetailsDto().copy(status = "COMPLETED") })
+    fun `completes the Visit through the completion operation, with the outcome it records`() =
+        runTest {
+            // `BR-077` requires the outcome with the completion, and the API records it on its own route
+            // rather than as a status destination: there is no request that finishes a Visit without
+            // saying what resulted from it, and none that says it on the status route.
+            val api = FakeJobDetailsApi(answer = { jobDetailsDto().copy(status = "COMPLETED") })
+            val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+            val result = repository.completeVisit(
+                VisitCompletion(
+                    jobId = JOB_ID,
+                    visitId = "visit-1",
+                    outcome = VisitOutcome.RESOLVED,
+                    outcomeSummary = "  Replaced the igniter.  ",
+                    operationId = "33333333-3333-4333-8333-333333333333",
+                    capturedAt = TEST_CLOCK.instant(),
+                    expectedVersion = 5,
+                ),
+            )
+
+            assertTrue(result is JobActionResult.Success)
+            assertEquals(
+                CompleteVisitRequestDto(
+                    outcomeCode = "RESOLVED",
+                    outcomeSummary = "Replaced the igniter.",
+                    clientOperationId = "33333333-3333-4333-8333-333333333333",
+                    capturedAt = TEST_CLOCK.instant().toString(),
+                    expectedVersion = 5,
+                ),
+                api.lastVisitCompletionRequest,
+            )
+            // Nothing was sent to the status route: the completion is one operation, on one route.
+            assertNull(api.lastVisitStatusRequest)
+        }
+
+    @Test
+    fun `refuses a completion with no summary before sending it`() = runTest {
+        // The API requires the summary with the outcome, so a completion without one is refused here
+        // rather than sent as something the API would reject (`BR-077`, `BR-042`).
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
         val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
 
-        repository.changeVisitStatus(
-            VisitStatusChange(
+        val result = repository.completeVisit(
+            VisitCompletion(
                 jobId = JOB_ID,
                 visitId = "visit-1",
-                status = VisitStatus.COMPLETED,
-                outcome = VisitOutcome.RESOLVED,
-                outcomeSummary = "  Replaced the igniter.  ",
-                operationId = "33333333-3333-4333-8333-333333333333",
+                outcome = VisitOutcome.UNABLE_TO_COMPLETE,
+                outcomeSummary = "   ",
+                operationId = "66666666-6666-4666-8666-666666666666",
                 capturedAt = TEST_CLOCK.instant(),
                 expectedVersion = 5,
             ),
         )
 
-        assertEquals("COMPLETED", api.lastVisitStatusRequest?.status)
-        assertEquals("RESOLVED", api.lastVisitStatusRequest?.outcomeCode)
-        assertEquals("Replaced the igniter.", api.lastVisitStatusRequest?.outcomeSummary)
+        assertEquals(JobActionFailure.VALIDATION, (result as JobActionResult.Failure).reason)
+        assertNull(api.lastVisitCompletionRequest)
     }
 
     @Test
@@ -1092,7 +1359,7 @@ class JobDetailsRepositoryTest {
             FakeSessionAuthenticator(accessToken = "access-token"),
         )
 
-        val result = repository.changeJobStatus(JOB_ID, JobStatus.IN_PROGRESS, null, 4)
+        val result = repository.changeJobStatus(JOB_ID, JobStatus.COMPLETED, null, 4)
 
         val conflicts = when (result) {
             is JobActionResult.Conflicts -> result.conflicts
@@ -1114,7 +1381,7 @@ class JobDetailsRepositoryTest {
                     failFirstWith = httpFailure(status, body),
                 ),
                 FakeSessionAuthenticator(accessToken = "access-token"),
-            ).changeJobStatus(JOB_ID, JobStatus.IN_PROGRESS, null, 4)
+            ).changeJobStatus(JOB_ID, JobStatus.COMPLETED, null, 4)
             return when (result) {
                 is JobActionResult.Failure -> result.reason
                 else -> throw AssertionError("expected a failure, got $result")
@@ -1125,13 +1392,12 @@ class JobDetailsRepositoryTest {
             JobActionFailure.JOB_TRANSITION_NOT_ALLOWED,
             failureFor("JOB_STATUS_TRANSITION_NOT_ALLOWED"),
         )
+        // The field-work answer is its own code, because a closed Job and a Job whose field work is
+        // unfinished mean different things to the technician who has to act on them (`BR-062`,
+        // `BR-079`).
         assertEquals(
-            JobActionFailure.JOB_CANCELLATION_UNAVAILABLE,
-            failureFor("JOB_CANCELLATION_UNAVAILABLE"),
-        )
-        assertEquals(
-            JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET,
-            failureFor("JOB_REVIEW_CONDITION_NOT_MET"),
+            JobActionFailure.JOB_CLOSED_FOR_FIELD_WORK,
+            failureFor("JOB_CLOSED_FOR_FIELD_WORK"),
         )
         assertEquals(
             JobActionFailure.JOB_COMPLETION_BLOCKED,
@@ -1181,7 +1447,7 @@ class JobDetailsRepositoryTest {
             ),
         )
 
-        val result = repository.changeJobStatus(JOB_ID, JobStatus.IN_PROGRESS, null, 4)
+        val result = repository.changeJobStatus(JOB_ID, JobStatus.COMPLETED, null, 4)
 
         assertEquals(2, api.calls)
         assertEquals("Bearer renewed-access-token", api.lastAuthorization)
@@ -1577,6 +1843,22 @@ class JobDetailsRepositoryTest {
         ),
     )
 
+    /** One approval sent against a repository whose route answers [failure] (`BR-FV-005`). */
+    private suspend fun approvalOf(failure: Throwable): JobActionResult =
+        repository(
+            FakeJobDetailsApi(answer = { jobDetailsDto() }, failFirstWith = failure),
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        ).approveVisitRequest(
+            jobId = JOB_ID,
+            requestId = "request-1",
+            scheduledStart = Instant.parse("2026-09-16T13:00:00Z"),
+            scheduledEnd = Instant.parse("2026-09-16T15:00:00Z"),
+            assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+            expectedStatus = FollowUpVisitRequestStatus.PENDING,
+            expectedVersion = 3,
+            confirmConflicts = false,
+        )
+
     private companion object {
         const val JOB_ID = "job-1"
     }
@@ -1594,8 +1876,8 @@ internal fun jobDetailsDto(): JobDetailsDto =
         jobNumber = 1042,
         title = "Furnace repair",
         description = null,
-        status = "SCHEDULED",
-        allowedStatusTransitions = listOf("IN_PROGRESS"),
+        status = "ACTIVE",
+        allowedStatusTransitions = listOf("COMPLETED", "CANCELED"),
         version = 4,
         customerId = "customer-1",
         customerName = "Martha Reynolds",
@@ -1630,9 +1912,11 @@ internal fun visitDto() = JobDetailsVisitDto(
     // The destinations the API reports for a `SCHEDULED` Visit (`BR-074`), so the screen draws its
     // field action from the server's own answer rather than a second copy of the lifecycle.
     allowedStatusTransitions = listOf("EN_ROUTE"),
-    // The API's other answer: the caller's membership is on this Visit's crew, so the action may be
-    // offered (`ADR-019` D3).
+    // The API's other answers: the caller's membership is on this Visit's crew, the completion is
+    // theirs to perform, and the Visit still takes field work (`ADR-019` D3, `BR-077`, `BR-079`).
     fieldActionable = true,
+    completionAllowed = true,
+    addUpdateAllowed = true,
 )
 
 internal fun technicianDto(
@@ -1718,10 +2002,28 @@ internal fun jobActivityEventDto(
 internal fun jobActivityDto(vararg events: JobActivityEventDto) =
     JobActivityDto(jobId = "job-1", events = events.toList())
 
+/** A follow-up request the route recorded, as the API reports it (`BR-FV-001`, `BR-FV-012`). */
+internal fun followUpRequestDto() = FollowUpVisitRequestDto(
+    id = "request-1",
+    jobId = "job-1",
+    sourceVisitId = "visit-1",
+    requestingTechnicianMembershipId = "member-1",
+    proposedStart = "2026-09-15T13:00:00Z",
+    proposedEnd = "2026-09-15T15:00:00Z",
+    reason = "The part has to be ordered.",
+    sameTechnicianPreferred = true,
+    status = "PENDING",
+    version = 1,
+    createdAt = "2026-09-14T18:00:00Z",
+    updatedAt = "2026-09-14T18:00:00Z",
+)
+
 private class FakeJobDetailsApi(
     private val answer: () -> JobDetailsDto,
     private val failFirstWith: Throwable? = null,
     private val activityAnswer: () -> JobActivityDto = { JobActivityDto(jobId = "") },
+    /** What the follow-up request route answers with (`BR-FV-001`). */
+    private val submitAnswer: () -> FollowUpVisitRequestDto = { followUpRequestDto() },
 ) : JobDetailsApi {
 
     /**
@@ -1751,6 +2053,21 @@ private class FakeJobDetailsApi(
     var lastAssignmentRequest: AssignVisitTechniciansRequestDto? = null
         private set
 
+    /** The last Visit this API was asked to schedule on a Job (`BR-071`). */
+    var lastCreateVisitRequest: CreateVisitRequestDto? = null
+        private set
+
+    /** The last approval this API was asked for, and the request it named (`BR-FV-005`). */
+    var lastApprovalRequest: ApproveVisitRequestRequestDto? = null
+        private set
+
+    var lastApprovedRequestId: String? = null
+        private set
+
+    /** The last follow-up proposal this API was asked to record (`BR-FV-001`). */
+    var lastSubmitRequest: SubmitVisitRequestRequestDto? = null
+        private set
+
     var lastNoteRequest: AddVisitNoteRequestDto? = null
         private set
 
@@ -1760,6 +2077,10 @@ private class FakeJobDetailsApi(
 
     /** The last Visit status transition this API was asked to apply (`BR-074`, `BR-075`). */
     var lastVisitStatusRequest: ChangeVisitStatusRequestDto? = null
+        private set
+
+    /** The last Visit completion this API was asked to record (`BR-077`). */
+    var lastVisitCompletionRequest: CompleteVisitRequestDto? = null
         private set
 
     var lastRemovalRequest: RemoveJobPhotoRequestDto? = null
@@ -1866,6 +2187,20 @@ private class FakeJobDetailsApi(
         return activityAnswer()
     }
 
+    override suspend fun editVisitNote(
+        authorization: String,
+        jobId: String,
+        noteId: String,
+        request: EditVisitNoteRequestDto,
+    ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
+
+    override suspend fun removeVisitNote(
+        authorization: String,
+        jobId: String,
+        noteId: String,
+        request: RemoveVisitNoteRequestDto,
+    ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
+
     override suspend fun changeVisitStatus(
         authorization: String,
         jobId: String,
@@ -1877,6 +2212,29 @@ private class FakeJobDetailsApi(
         lastJobId = jobId
         lastVisitId = visitId
         lastVisitStatusRequest = request
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return answer()
+    }
+
+    /**
+     * The Visit completion route (`BR-077`, `BR-078`).
+     *
+     * It is the status route's sibling and answers the same projection, so a test asserts the request
+     * the completion carries and the Job it was answered with.
+     */
+    override suspend fun completeVisit(
+        authorization: String,
+        jobId: String,
+        visitId: String,
+        request: CompleteVisitRequestDto,
+    ): JobDetailsDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastVisitId = visitId
+        lastVisitCompletionRequest = request
         if (calls == 1 && failFirstWith != null) {
             throw failFirstWith
         }
@@ -1897,6 +2255,56 @@ private class FakeJobDetailsApi(
         )
     }
 
+    /** The direct Visit-scheduling route (`BR-071`, `BR-072`). */
+    override suspend fun createVisit(
+        authorization: String,
+        jobId: String,
+        request: CreateVisitRequestDto,
+    ): JobDetailsDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastCreateVisitRequest = request
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return answer()
+    }
+
+    /** The follow-up request submission route (`BR-FV-001`). */
+    override suspend fun submitVisitRequest(
+        authorization: String,
+        jobId: String,
+        request: SubmitVisitRequestRequestDto,
+    ): FollowUpVisitRequestDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastSubmitRequest = request
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return submitAnswer()
+    }
+
+    /** The follow-up request approval route (`BR-FV-005`). */
+    override suspend fun approveVisitRequest(
+        authorization: String,
+        jobId: String,
+        requestId: String,
+        request: ApproveVisitRequestRequestDto,
+    ): JobDetailsDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastApprovedRequestId = requestId
+        lastApprovalRequest = request
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return answer()
+    }
+
     /**
      * The photo route (`BR-015`). These tests are about the Job read and its actions, so the photo
      * endpoints answer the smallest honest thing rather than being exercised here; what the upload
@@ -1906,6 +2314,7 @@ private class FakeJobDetailsApi(
         authorization: String,
         jobId: String,
         clientOperationId: RequestBody,
+        visitId: RequestBody,
         phase: RequestBody,
         note: RequestBody?,
         capturedAt: RequestBody?,
@@ -1991,6 +2400,7 @@ private class FakeJobDetailsApi(
         authorization: String,
         jobId: String,
         clientOperationId: RequestBody,
+        visitId: RequestBody,
         phase: RequestBody,
         note: RequestBody?,
         capturedAt: RequestBody?,

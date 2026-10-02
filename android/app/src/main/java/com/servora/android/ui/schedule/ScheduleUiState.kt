@@ -2,11 +2,16 @@ package com.servora.android.ui.schedule
 
 import androidx.compose.runtime.Immutable
 import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.data.jobs.JobActionFailure
+import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.Schedule
+import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.ScheduleTechnician
+import com.servora.android.domain.model.TechnicianAssignment
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.temporal.WeekFields
 import java.util.Locale
@@ -22,6 +27,22 @@ enum class ScheduleLane {
     /** Follow-up Visit requests awaiting manager review. */
     REQUESTS,
 }
+
+/**
+ * An approval the API refused until the reviewer accepts the conflicts it reported (`BR-070`).
+ *
+ * It holds the request **and** the exact window and crew the reviewer stated, so confirming resends the
+ * same decision rather than asking them to fill the form in again — and so the visit that is created is
+ * the visit they decided on, not a second guess (`BR-FV-005`, `BR-067`).
+ */
+@Immutable
+data class PendingVisitRequestApproval(
+    val requestId: String,
+    val scheduledStart: Instant,
+    val scheduledEnd: Instant,
+    val assignments: List<TechnicianAssignment>,
+    val conflicts: List<ScheduleConflict>,
+)
 
 /**
  * Everything the schedule screen renders.
@@ -63,12 +84,44 @@ data class ScheduleUiState(
     val schedule: Schedule? = null,
     /** Follow-up Visit requests the backend reports for review. */
     val visitRequests: List<FollowUpVisitRequest> = emptyList(),
+    /** Whether a request read is currently in flight. */
+    val isReadingRequests: Boolean = false,
+    /** Whether a request read has answered, successfully or otherwise. */
+    val hasReadRequests: Boolean = false,
     /** Why the last read failed, or `null` when it succeeded. */
     val failureReason: CustomersFailureReason? = null,
-    /** Why the last visit-request read or review failed, without replacing the known schedule. */
-    val requestFailureReason: CustomersFailureReason? = null,
+    /** Why the last read of the requests failed, without replacing the known schedule. */
+    val requestReadFailureReason: CustomersFailureReason? = null,
     /** The request currently being reviewed. */
     val reviewingRequestId: String? = null,
+    /**
+     * The status the last review applied, until the screen has reported it (`BR-FV-013`).
+     *
+     * It is the status the API answered with, never the one that was asked for, so a decision is only
+     * presented as taken once the backend holds it (`BR-001`).
+     */
+    val reviewedRequestStatus: FollowUpVisitRequestStatus? = null,
+    /** Why the last review was not applied, or `null` when it was (`BR-FV-013`). */
+    val reviewFailureReason: CustomersFailureReason? = null,
+    /**
+     * The follow-up request whose approval form is open, or `null` when none is (`BR-FV-005`).
+     *
+     * The form is the screen's own state rather than a fact about the work: it holds which request the
+     * manager decided to schedule and stays open while they state the window and the crew.
+     */
+    val schedulingRequestId: String? = null,
+    /** The technicians the approval form may compose a crew from, or `null` while they are unread. */
+    val assignableTechnicians: List<AssignableTechnician>? = null,
+    /** Why the technicians could not be read, or `null`. */
+    val assignableFailure: JobActionFailure? = null,
+    /** The request whose approval is in flight, or `null` when none is. */
+    val approvingRequestId: String? = null,
+    /** Why the last approval did not complete, or `null`. */
+    val approvalFailure: JobActionFailure? = null,
+    /** An approval waiting for the user to accept the conflicts the API reported (`BR-070`). */
+    val pendingApproval: PendingVisitRequestApproval? = null,
+    /** The request whose approval created a Visit, until the screen has reported it. */
+    val approvedRequestId: String? = null,
 ) {
     /** Nothing has been read: the screen shows its first-load state. */
     val showsInitialLoading: Boolean
@@ -103,13 +156,37 @@ data class ScheduleUiState(
     val unassignedCount: Int
         get() = schedule?.unassignedTotal ?: 0
 
-    /** Pending follow-up requests awaiting review. */
-    val pendingRequests: List<FollowUpVisitRequest>
-        get() = visitRequests.filter { it.status == FollowUpVisitRequestStatus.PENDING }
+    /**
+     * The requests the office still has a decision to make about.
+     *
+     * It is every request the API keeps reviewable: `PENDING`, and a request the office returned for
+     * clarification. `BR-FV-012` says a request returned for clarification "remains unresolved until it
+     * is later approved or rejected", and the review routes accept a decision about a
+     * `NEEDS_CLARIFICATION` request for exactly that reason (`api/src/jobs/jobs.service.ts`,
+     * "reviewable when `PENDING` or `NEEDS_CLARIFICATION`"). A lane that drew only `PENDING` therefore
+     * took the one screen that can decide a request off the request as soon as it was clarified, so the
+     * request was left with no surface that could ever resolve it.
+     */
+    val reviewableRequests: List<FollowUpVisitRequest>
+        get() = visitRequests.filter { it.isAwaitingReview }
+
+    /**
+     * The request whose approval form is open, or `null`.
+     *
+     * It is looked up among the requests the backend reported, so a request the screen no longer holds —
+     * one another reviewer decided about, or the read no longer returns — closes the form instead of
+     * being scheduled from a copy of a list that has moved on (`BR-001`, `BR-FV-013`).
+     */
+    val schedulingRequest: FollowUpVisitRequest?
+        get() = schedulingRequestId?.let { id -> reviewableRequests.firstOrNull { it.id == id } }
+
+    /** Whether an approval is in flight, so the form is not submitted twice (`BR-031`). */
+    val isApproving: Boolean
+        get() = approvingRequestId != null
 
     /** Count shown on the Requests lane badge. */
-    val pendingRequestCount: Int
-        get() = pendingRequests.size
+    val reviewableRequestCount: Int
+        get() = reviewableRequests.size
 
     /** Whether the day is narrowed to technicians rather than showing the whole organization. */
     val hasTechnicianFilter: Boolean
@@ -140,6 +217,27 @@ data class ScheduleUiState(
     fun showsNowCue(today: LocalDate): Boolean =
         lane == ScheduleLane.SCHEDULE && selectedDate != null && selectedDate == today
 }
+
+/**
+ * Whether the office still has a decision to make about this request (`BR-FV-012`).
+ *
+ * `NEEDS_CLARIFICATION` is unresolved rather than closed: the request has been neither approved into a
+ * Visit nor rejected, so the office can still do either (`BR-FV-004`, `BR-FV-005`).
+ */
+val FollowUpVisitRequest.isAwaitingReview: Boolean
+    get() = status == FollowUpVisitRequestStatus.PENDING ||
+        status == FollowUpVisitRequestStatus.NEEDS_CLARIFICATION
+
+/**
+ * Whether the requester owes the office an answer (`BR-FV-012`).
+ *
+ * It is the technician's own move: the office returned the request with what it still needs, and
+ * answering it — which appends the answer and returns the request to the office's review — is what the
+ * requester can do about it. Every other state has nothing to answer: a request awaiting review is the
+ * office's, and an approved or rejected one has been decided.
+ */
+val FollowUpVisitRequest.awaitsAnswer: Boolean
+    get() = status == FollowUpVisitRequestStatus.NEEDS_CLARIFICATION
 
 /**
  * The first day of a week for the language the device is set to.

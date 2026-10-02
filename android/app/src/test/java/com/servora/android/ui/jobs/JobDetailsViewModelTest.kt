@@ -28,8 +28,10 @@ import com.servora.android.data.jobs.PhotoCollaborators
 import com.servora.android.data.jobs.QueuedVisitFieldAction
 import com.servora.android.data.jobs.QueuedVisitNote
 import com.servora.android.data.jobs.TEST_CLOCK
+import com.servora.android.data.jobs.VisitCompletion
 import com.servora.android.data.jobs.VisitNote
 import com.servora.android.data.jobs.VisitStatusChange
+import com.servora.android.data.jobs.VisitRequestSubmitResult
 import com.servora.android.data.jobs.FakeJobPhotoFiles
 import com.servora.android.data.jobs.FakeJobPhotoPickedItems
 import com.servora.android.data.jobs.FakeOfflineSync
@@ -39,6 +41,8 @@ import com.servora.android.data.offline.InMemoryOutboxStore
 import com.servora.android.data.offline.OutboxFailureReason
 import com.servora.android.data.offline.OutboxOperationState
 import com.servora.android.data.offline.ReadSource
+import com.servora.android.domain.model.FollowUpVisitRequest
+import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.domain.model.AssignableTechnician
@@ -50,6 +54,7 @@ import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
 import com.servora.android.domain.model.EvidencePhase
+import com.servora.android.domain.model.JobReadOnlyReason
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
@@ -112,7 +117,7 @@ class JobDetailsViewModelTest {
         assertFalse(state.isLoading)
         assertNull(state.failureReason)
         assertEquals(JOB_ID, state.details?.id)
-        assertEquals(JobStatus.SCHEDULED, state.details?.status)
+        assertEquals(JobStatus.ACTIVE, state.details?.status)
         assertEquals(VisitStatus.EN_ROUTE, state.details?.selectedVisit?.status)
         assertEquals(
             listOf("Mike Lead", "Sarah Moreau"),
@@ -292,10 +297,10 @@ class JobDetailsViewModelTest {
 
         // The version the read reported is what keeps a change from being applied to newer state
         // (`BR-086`).
-        viewModel.changeJobStatus(JobStatus.IN_PROGRESS)
+        viewModel.changeJobStatus(JobStatus.COMPLETED)
         advanceUntilIdle()
 
-        assertEquals(listOf("status:IN_PROGRESS:7"), repository.actions)
+        assertEquals(listOf("status:COMPLETED:7"), repository.actions)
         assertTrue(viewModel.uiState.value.isSubmitting.not())
         assertEquals(JobActionKind.STATUS_CHANGE, viewModel.uiState.value.completedAction)
         assertNull(viewModel.uiState.value.actionFailure)
@@ -347,6 +352,118 @@ class JobDetailsViewModelTest {
         }
 
     @Test
+    fun `schedules a Visit with the window and the whole crew the user stated`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.scheduleVisit(
+            scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
+            scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
+            assignments = listOf(
+                TechnicianAssignment("member-1", AssignmentRole.LEAD),
+                TechnicianAssignment("member-2", AssignmentRole.TECHNICIAN),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                "create-visit:$JOB_ID:2026-09-15T13:00:00Z:2026-09-15T15:00:00Z:" +
+                    "member-1=LEAD, member-2=TECHNICIAN:false",
+            ),
+            repository.actions,
+        )
+        assertFalse(viewModel.uiState.value.isSubmitting)
+        assertEquals(JobActionKind.CREATE_VISIT, viewModel.uiState.value.completedAction)
+        assertNull(viewModel.uiState.value.actionFailure)
+    }
+
+    @Test
+    fun `schedules a Visit on a Job whose represented field attempt is over`() = runTest(dispatcher) {
+        // Addition to a Job's work is another Visit, never a new Job (`BR-047`, `BR-051`), so the action
+        // names no Visit and a Job with none represented can still be given the next one.
+        val repository = RecordingJobDetailsRepository(
+            JobDetailsResult.Success(job().copy(selectedVisit = null, technicians = emptyList())),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.scheduleVisit(
+            scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
+            scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
+            assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+        )
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(
+                "create-visit:$JOB_ID:2026-09-15T13:00:00Z:2026-09-15T15:00:00Z:" +
+                    "member-1=LEAD:false",
+            ),
+            repository.actions,
+        )
+        assertEquals(JobActionKind.CREATE_VISIT, viewModel.uiState.value.completedAction)
+    }
+
+    @Test
+    fun `holds a scheduled Visit until its conflicts are accepted, then resends it confirmed`() =
+        runTest(dispatcher) {
+            val conflicts = listOf(
+                ScheduleConflict(
+                    visitId = "visit-9",
+                    jobNumber = 1043,
+                    technicianName = "Mike Lead",
+                    scheduledStart = "2026-09-15T13:00:00.000Z",
+                    scheduledEnd = "2026-09-15T15:00:00.000Z",
+                ),
+            )
+            val repository = RecordingJobDetailsRepository(
+                result = JobDetailsResult.Success(job().copy(selectedVisit = null)),
+                actionResults = ArrayDeque(
+                    listOf(
+                        JobActionResult.Conflicts(conflicts),
+                        JobActionResult.Success(job()),
+                    ),
+                ),
+            )
+            val viewModel = viewModel(repository)
+            viewModel.start(JOB_ID)
+            advanceUntilIdle()
+
+            viewModel.scheduleVisit(
+                scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
+                scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
+                assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+            )
+            advanceUntilIdle()
+
+            // The conflicts are the question the user answers, and the draft they answer about is held
+            // so confirming resends exactly what they stated (`BR-070`, `BR-067`).
+            val pending = viewModel.uiState.value.pendingConfirmation
+            assertTrue(pending is PendingJobAction.CreateVisit)
+            assertEquals(conflicts, pending?.conflicts)
+            assertNull(viewModel.uiState.value.actionFailure)
+
+            viewModel.confirmPendingAction()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    "create-visit:$JOB_ID:2026-09-15T13:00:00Z:2026-09-15T15:00:00Z:" +
+                        "member-1=LEAD:false",
+                    "create-visit:$JOB_ID:2026-09-15T13:00:00Z:2026-09-15T15:00:00Z:" +
+                        "member-1=LEAD:true",
+                ),
+                repository.actions,
+            )
+            assertNull(viewModel.uiState.value.pendingConfirmation)
+            assertEquals(JobActionKind.CREATE_VISIT, viewModel.uiState.value.completedAction)
+        }
+
+    @Test
     fun `leaves the conflicts unaccepted without sending anything`() = runTest(dispatcher) {
         val repository = RecordingJobDetailsRepository(
             result = JobDetailsResult.Success(job()),
@@ -372,21 +489,21 @@ class JobDetailsViewModelTest {
         val repository = RecordingJobDetailsRepository(
             result = JobDetailsResult.Success(job()),
             actionResults = ArrayDeque(
-                listOf(JobActionResult.Failure(JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET)),
+                listOf(JobActionResult.Failure(JobActionFailure.JOB_COMPLETION_BLOCKED)),
             ),
         )
         val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
-        viewModel.changeJobStatus(JobStatus.PENDING_REVIEW)
+        viewModel.changeJobStatus(JobStatus.COMPLETED)
         advanceUntilIdle()
 
         val state = viewModel.uiState.value
-        assertEquals(JobActionFailure.JOB_REVIEW_CONDITION_NOT_MET, state.actionFailure)
+        assertEquals(JobActionFailure.JOB_COMPLETION_BLOCKED, state.actionFailure)
         assertNull(state.completedAction)
         // The Job on screen is still the one the backend last reported (`BR-001`).
-        assertEquals(JobStatus.SCHEDULED, state.details?.status)
+        assertEquals(JobStatus.ACTIVE, state.details?.status)
     }
 
     @Test
@@ -394,17 +511,17 @@ class JobDetailsViewModelTest {
         val repository = RecordingJobDetailsRepository(
             result = JobDetailsResult.Success(job()),
             actionResults = ArrayDeque(
-                listOf(JobActionResult.Success(job().copy(status = JobStatus.IN_PROGRESS, version = 8))),
+                listOf(JobActionResult.Success(job().copy(status = JobStatus.COMPLETED, version = 8))),
             ),
         )
         val viewModel = viewModel(repository)
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
-        viewModel.changeJobStatus(JobStatus.IN_PROGRESS)
+        viewModel.changeJobStatus(JobStatus.COMPLETED)
         advanceUntilIdle()
 
-        assertEquals(JobStatus.IN_PROGRESS, viewModel.uiState.value.details?.status)
+        assertEquals(JobStatus.COMPLETED, viewModel.uiState.value.details?.status)
         assertEquals(8, viewModel.uiState.value.details?.version)
     }
 
@@ -434,11 +551,11 @@ class JobDetailsViewModelTest {
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
-        viewModel.changeJobStatus(JobStatus.IN_PROGRESS)
-        viewModel.changeJobStatus(JobStatus.IN_PROGRESS)
+        viewModel.changeJobStatus(JobStatus.COMPLETED)
+        viewModel.changeJobStatus(JobStatus.COMPLETED)
         advanceUntilIdle()
 
-        assertEquals(listOf("status:IN_PROGRESS:7"), repository.actions)
+        assertEquals(listOf("status:COMPLETED:7"), repository.actions)
     }
 
     @Test
@@ -594,7 +711,7 @@ class JobDetailsViewModelTest {
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
-        viewModel.changeJobStatus(JobStatus.IN_PROGRESS)
+        viewModel.changeJobStatus(JobStatus.COMPLETED)
         advanceUntilIdle()
 
         // Nothing changed, so there is nothing new to project (`BR-067`): the timeline is not asked
@@ -1581,15 +1698,19 @@ class JobDetailsViewModelTest {
         viewModel.start(JOB_ID)
         advanceUntilIdle()
 
-        viewModel.changeVisitStatus(
-            status = VisitStatus.COMPLETED,
+        // The completion is its own operation, on its own route: the outcome `BR-077` requires travels
+        // with it, and the Visit version the screen saw is the command's expectation.
+        viewModel.completeVisit(
             outcome = VisitOutcome.RESOLVED,
-            outcomeSummary = "Replaced the igniter.",
+            summary = "  Replaced the igniter.  ",
         )
         advanceUntilIdle()
 
-        // `BR-077` requires the outcome with the completion, so the two travel together.
-        assertEquals(listOf("visit-status:COMPLETED:false:2"), repository.actions)
+        assertEquals(
+            listOf("visit-completion:RESOLVED:Replaced the igniter.:2"),
+            repository.actions,
+        )
+        assertEquals(JobActionKind.VISIT_COMPLETION, viewModel.uiState.value.completedAction)
     }
 
     @Test
@@ -1622,7 +1743,7 @@ class JobDetailsViewModelTest {
             assertEquals(true, state.actionQueued)
             assertEquals(queued, state.queuedVisitAction)
             // The Job on screen is the last state the backend reported, not a locally patched copy.
-            assertEquals(JobStatus.SCHEDULED, state.details?.status)
+            assertEquals(JobStatus.ACTIVE, state.details?.status)
         }
 
     @Test
@@ -1690,6 +1811,80 @@ class JobDetailsViewModelTest {
     }
 
     @Test
+    fun `re-reads the Job when the queue reports that work was refused`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+        val readsAfterStart = repository.requestedJobIds.size
+
+        // A refusal is the case the technician has to see: nothing was applied, and the Job may have
+        // been canceled or completed elsewhere while their work waited. The screen therefore re-reads it
+        // rather than continuing to describe the action as saved on this device (`BR-014`, `BR-032`,
+        // §6, §7).
+        repository.refused.emit(Unit)
+        advanceUntilIdle()
+
+        assertEquals(readsAfterStart + 1, repository.requestedJobIds.size)
+    }
+
+    @Test
+    fun `refuses a completion with no summary without sending it`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.completeVisit(outcome = VisitOutcome.RESOLVED, summary = "   ")
+        advanceUntilIdle()
+
+        // `BR-077` requires the summary with the outcome, so nothing is sent and nothing is queued: the
+        // refusal is the API's validation answer, presented rather than the completion being submitted
+        // as something the API would reject (`BR-042`).
+        assertEquals(emptyList<String>(), repository.actions)
+        assertEquals(JobActionFailure.VALIDATION, viewModel.uiState.value.actionFailure)
+    }
+
+    @Test
+    fun `withholds every field action from a Job the office has closed`() = runTest(dispatcher) {
+        val closed = job().copy(
+            status = JobStatus.CANCELED,
+            readOnlyReason = JobReadOnlyReason.JOB_CANCELED,
+            allowedStatusTransitions = listOf(JobStatus.NEW),
+        )
+        val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(closed))
+        val viewModel = viewModel(repository)
+
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        // The API refuses every field write under a closed Job (`BR-062`, `BR-079`), so the screen draws
+        // none of them — the read-only state is the API's answer, not a rule the client decided.
+        assertFalse(state.canChangeVisitStatus)
+        assertFalse(state.canCompleteVisit)
+        assertFalse(state.canAddVisitUpdate)
+    }
+
+    @Test
+    fun `offers the field actions a Visit the API says still takes them`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
+        val viewModel = viewModel(repository)
+
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue(state.canChangeVisitStatus)
+        assertTrue(state.canCompleteVisit)
+        assertTrue(state.canAddVisitUpdate)
+    }
+
+    @Test
     fun `offers the Visit action only when the API says the caller is authorized for that Visit`() =
         runTest(dispatcher) {
             // The API's own answer, not the screen's guess (`BR-093`): a Visit whose crew does not
@@ -1747,7 +1942,117 @@ class JobDetailsViewModelTest {
         assertEquals(listOf("discard:op-1"), repository.actions)
         assertNull(viewModel.uiState.value.queuedVisitAction)
     }
+
+    @Test
+    fun `sends the follow-up request the technician proposed`() = runTest(dispatcher) {
+        val start = Instant.parse("2026-09-15T13:00:00.000Z")
+        val end = Instant.parse("2026-09-15T15:00:00.000Z")
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            requestResults = ArrayDeque(listOf(VisitRequestSubmitResult.Success(request()))),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.requestFollowUpVisit(
+            reason = "  The part has to be ordered.  ",
+            proposedStart = start,
+            proposedEnd = end,
+            sameTechnicianPreferred = true,
+        )
+        advanceUntilIdle()
+
+        // What is sent is the proposal the technician stated, against the field attempt it grew from
+        // (`BR-FV-003`, `BR-FV-008`), with the reason trimmed of whitespace they did not mean.
+        assertEquals(
+            listOf("follow-up-request:$JOB_ID:visit-1:$start:$end:The part has to be ordered.:true"),
+            repository.actions,
+        )
+        // A request is not a Visit and changes no Job (`BR-FV-002`), so nothing is read again and the
+        // screen reports the request itself (`BR-FV-012`).
+        assertEquals(1, repository.requestedJobIds.size)
+        assertEquals(JobActionKind.FOLLOW_UP_REQUEST, viewModel.uiState.value.completedAction)
+        assertNull(viewModel.uiState.value.actionFailure)
+        assertFalse(viewModel.uiState.value.isSubmitting)
+    }
+
+    @Test
+    fun `reports the API's refusal of a follow-up request`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            requestResults = ArrayDeque(
+                listOf(VisitRequestSubmitResult.Failure(JobActionFailure.NETWORK)),
+            ),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.requestFollowUpVisit(
+            reason = "The part has to be ordered.",
+            proposedStart = Instant.parse("2026-09-15T13:00:00.000Z"),
+            proposedEnd = Instant.parse("2026-09-15T15:00:00.000Z"),
+            sameTechnicianPreferred = false,
+        )
+        advanceUntilIdle()
+
+        // A write that could not be sent is reported as not sent rather than as a request waiting on the
+        // device (`BR-013`, `BR-014`): the request route is online-only, so nothing is queued.
+        assertEquals(JobActionFailure.NETWORK, viewModel.uiState.value.actionFailure)
+        assertNull(viewModel.uiState.value.completedAction)
+        assertFalse(viewModel.uiState.value.actionQueued)
+    }
+
+    @Test
+    fun `does not send a follow-up request without a reason`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(
+            result = JobDetailsResult.Success(job()),
+            requestResults = ArrayDeque(listOf(VisitRequestSubmitResult.Success(request()))),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+
+        viewModel.requestFollowUpVisit(
+            reason = "   ",
+            proposedStart = Instant.parse("2026-09-15T13:00:00.000Z"),
+            proposedEnd = Instant.parse("2026-09-15T15:00:00.000Z"),
+            sameTechnicianPreferred = false,
+        )
+        advanceUntilIdle()
+
+        // `BR-FV-003` requires a reason for the proposal, so nothing is sent and the screen says the
+        // values are wrong instead of asking the API a question whose answer it already knows
+        // (`BR-042`).
+        assertEquals(emptyList<String>(), repository.actions)
+        assertEquals(JobActionFailure.VALIDATION, viewModel.uiState.value.actionFailure)
+    }
 }
+
+/**
+ * The request the API recorded for a technician's proposal (`BR-FV-001`).
+ *
+ * It is pending and names the Visit it grew from, which is what the request route answers with.
+ */
+private fun request() = FollowUpVisitRequest(
+    id = "request-1",
+    jobId = JOB_ID,
+    sourceVisitId = "visit-1",
+    requestingTechnicianMembershipId = "member-1",
+    proposedStart = "2026-09-15T13:00:00.000Z",
+    proposedEnd = "2026-09-15T15:00:00.000Z",
+    reason = "The part has to be ordered.",
+    sameTechnicianPreferred = true,
+    status = FollowUpVisitRequestStatus.PENDING,
+    reviewerMembershipId = null,
+    reviewedAt = null,
+    reviewNote = null,
+    createdVisitId = null,
+    version = 1,
+    createdAt = "2026-09-14T18:00:00.000Z",
+    updatedAt = "2026-09-14T18:00:00.000Z",
+)
 
 private const val JOB_ID = "job-1"
 
@@ -1757,8 +2062,8 @@ private fun job() = JobDetails(
     jobNumber = 1042,
     title = "Furnace repair",
     description = null,
-    status = JobStatus.SCHEDULED,
-    allowedStatusTransitions = listOf(JobStatus.IN_PROGRESS),
+    status = JobStatus.ACTIVE,
+    allowedStatusTransitions = listOf(JobStatus.COMPLETED, JobStatus.CANCELED),
     version = 7,
     customerId = "customer-1",
     customerName = "Martha Reynolds",
@@ -1778,11 +2083,14 @@ private fun job() = JobDetails(
         scheduledEnd = "2026-09-14T15:00:00.000Z",
         version = 2,
         reschedulable = true,
-        // What the API reports for an `EN_ROUTE` Visit (`BR-074`): the next step, and `BR-075`'s one
-        // correction back to `SCHEDULED`.
+        // What the API reports for an `EN_ROUTE` Visit (`BR-074`): every other working state, in both
+        // directions, as separate destinations.
         allowedStatusTransitions = listOf(VisitStatus.ON_SITE, VisitStatus.SCHEDULED),
-        // The API's other answer: the caller's membership is on this Visit's crew (`ADR-019` D3).
+        // The API's other answers: the caller's membership is on this Visit's crew, the completion is
+        // theirs to perform, and the Visit still takes field work (`ADR-019` D3, `BR-077`, `BR-079`).
         fieldActionable = true,
+        completionAllowed = true,
+        addUpdateAllowed = true,
     ),
     technicians = listOf(
         JobDetailsTechnician(
@@ -1845,6 +2153,13 @@ private class RecordingJobDetailsRepository(
     private val assignable: List<AssignableTechnician>? = null,
     activityResults: List<JobActivityResult> = listOf(JobActivityResult.Success(emptyList())),
     private val noteResult: ActivityWriteResult = ActivityWriteResult.Success(emptyList()),
+    /**
+     * The answers the follow-up request is given, oldest first (`BR-FV-001`).
+     *
+     * It is separate from [actionResults] because a request answers with the request rather than with
+     * the Job (`BR-FV-002`), so a test scripts it in its own type.
+     */
+    requestResults: ArrayDeque<VisitRequestSubmitResult> = ArrayDeque(),
     private val queuedAction: QueuedVisitFieldAction? = null,
     private val queuedNotes: List<QueuedVisitNote> = emptyList(),
 ) : JobDetailsRepository {
@@ -1867,12 +2182,46 @@ private class RecordingJobDetailsRepository(
 
     override val appliedOperations: Flow<Unit> = applied.asSharedFlow()
 
+    /**
+     * The engine's own "something was refused" answer (`§6`, §7).
+     *
+     * It is held so a test can report that a queued action was refused, which is what makes the screen
+     * stop describing it as saved on the device and re-read the Job the backend actually holds.
+     */
+    val refused = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+
+    override val refusedOperations: Flow<Unit> = refused.asSharedFlow()
+
     /** These tests never create a Job: the form has its own repository fake. */
     override suspend fun createJob(request: CreateJobRequest): JobCreateResult =
         JobCreateResult.Failure(JobCreateFailure.UNEXPECTED)
 
     private val queuedActions = actionResults
     private val queuedActivityResults = ArrayDeque(activityResults)
+    private val queuedRequestResults = requestResults
+
+    /**
+     * Records a follow-up Visit proposal and answers with the scripted result (`BR-FV-001`, `BR-FV-003`).
+     */
+    override suspend fun requestFollowUpVisit(
+        jobId: String,
+        sourceVisitId: String,
+        proposedStart: Instant,
+        proposedEnd: Instant,
+        reason: String,
+        sameTechnicianPreferred: Boolean,
+    ): VisitRequestSubmitResult {
+        actions += "follow-up-request:$jobId:$sourceVisitId:$proposedStart:$proposedEnd:" +
+            "$reason:$sameTechnicianPreferred"
+        return nextRequestResult()
+    }
+
+    private fun nextRequestResult(): VisitRequestSubmitResult =
+        if (queuedRequestResults.isEmpty()) {
+            throw AssertionError("these tests script the request's answer")
+        } else {
+            queuedRequestResults.removeFirst()
+        }
 
     override suspend fun loadJobDetails(jobId: String): JobDetailsResult {
         requestedJobIds += jobId
@@ -1895,8 +2244,67 @@ private class RecordingJobDetailsRepository(
         return noteResult
     }
 
+    override suspend fun editVisitNote(
+        jobId: String,
+        noteId: String,
+        body: String,
+    ): ActivityWriteResult {
+        actions += "note-edit:$noteId:$body"
+        return noteResult
+    }
+
+    override suspend fun removeVisitNote(
+        jobId: String,
+        noteId: String,
+        reason: String,
+    ): ActivityWriteResult {
+        actions += "note-remove:$noteId:$reason"
+        return noteResult
+    }
+
     override suspend fun changeVisitStatus(action: VisitStatusChange): JobActionResult {
         actions += "visit-status:${action.status}:${action.confirmConflicts}:${action.expectedVersion}"
+        return nextAction()
+    }
+
+    override suspend fun completeVisit(action: VisitCompletion): JobActionResult {
+        actions += "visit-completion:${action.outcome}:${action.outcomeSummary}:" +
+            "${action.expectedVersion}"
+        return nextAction()
+    }
+
+    /**
+     * Records a scheduled Visit and answers with the scripted action result (`BR-071`, `BR-072`).
+     *
+     * The action names no Visit — the Visit does not exist until the API creates it — so what is recorded
+     * is the Job, the window and the crew, which is what the API is asked to schedule.
+     */
+    override suspend fun createVisit(
+        jobId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        confirmConflicts: Boolean,
+    ): JobActionResult {
+        actions += "create-visit:$jobId:$scheduledStart:$scheduledEnd:" +
+            "${assignments.joinToString { "${it.membershipId}=${it.role}" }}:$confirmConflicts"
+        return nextAction()
+    }
+
+    /** Records an approval and answers with the scripted action result (`BR-FV-005`). */
+    override suspend fun approveVisitRequest(
+        jobId: String,
+        requestId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        expectedStatus: FollowUpVisitRequestStatus,
+        expectedVersion: Int,
+        confirmConflicts: Boolean,
+    ): JobActionResult {
+        actions += "approve-request:$jobId:$requestId:$expectedStatus:$expectedVersion:" +
+            "$scheduledStart:$scheduledEnd:" +
+            "${assignments.joinToString { "${it.membershipId}=${it.role}" }}:$confirmConflicts"
         return nextAction()
     }
 
@@ -2013,13 +2421,29 @@ private class ScriptedJobDetailsRepository(
 
     override val appliedOperations: Flow<Unit> = MutableSharedFlow()
 
+    override val refusedOperations: Flow<Unit> = MutableSharedFlow()
+
     /** These tests only read a Job. */
     override suspend fun createJob(request: CreateJobRequest): JobCreateResult = unsupported()
 
     override suspend fun addVisitNoteRequest(note: VisitNote): ActivityWriteResult = unsupported()
 
+    override suspend fun editVisitNote(
+        jobId: String,
+        noteId: String,
+        body: String,
+    ): ActivityWriteResult = unsupported()
+
+    override suspend fun removeVisitNote(
+        jobId: String,
+        noteId: String,
+        reason: String,
+    ): ActivityWriteResult = unsupported()
+
     override suspend fun changeVisitStatus(action: VisitStatusChange): JobActionResult =
         unsupported()
+
+    override suspend fun completeVisit(action: VisitCompletion): JobActionResult = unsupported()
 
     override suspend fun queuedVisitAction(jobId: String): QueuedVisitFieldAction? = null
 
@@ -2066,6 +2490,37 @@ private class ScriptedJobDetailsRepository(
         assignments: List<TechnicianAssignment>,
         confirmConflicts: Boolean,
         expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    /** These tests only read a Job, so scheduling one is not exercised here. */
+    override suspend fun createVisit(
+        jobId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        confirmConflicts: Boolean,
+    ): JobActionResult = unsupported()
+
+    /** These tests only read a Job, so proposing a follow-up Visit is not exercised here. */
+    override suspend fun requestFollowUpVisit(
+        jobId: String,
+        sourceVisitId: String,
+        proposedStart: Instant,
+        proposedEnd: Instant,
+        reason: String,
+        sameTechnicianPreferred: Boolean,
+    ): VisitRequestSubmitResult = unsupported()
+
+    /** These tests only read a Job, so approving a request is not exercised here. */
+    override suspend fun approveVisitRequest(
+        jobId: String,
+        requestId: String,
+        scheduledStart: Instant,
+        scheduledEnd: Instant,
+        assignments: List<TechnicianAssignment>,
+        expectedStatus: FollowUpVisitRequestStatus,
+        expectedVersion: Int,
+        confirmConflicts: Boolean,
     ): JobActionResult = unsupported()
 
     override suspend fun loadAssignableTechnicians(): AssignableTechniciansResult =

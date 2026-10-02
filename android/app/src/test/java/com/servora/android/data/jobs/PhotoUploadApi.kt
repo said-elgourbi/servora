@@ -1,5 +1,6 @@
 package com.servora.android.data.jobs
 
+import com.servora.android.data.schedule.FollowUpVisitRequestDto
 import java.io.IOException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -31,6 +32,14 @@ class PhotoUploadApi : JobDetailsApi {
     var lastAuthorization: String? = null
     var lastJobId: String? = null
     var lastClientOperationId: String? = null
+
+    /**
+     * The Visit the last upload named (`BR-047`).
+     *
+     * Evidence is recorded against a Visit, so what the client sends here is part of the contract: a
+     * photo or recording the API has no field attempt for would be refused (`docs/api/job-photos.md`).
+     */
+    var lastVisitId: String? = null
     var lastPhase: String? = null
     var lastNote: String? = null
     var lastCapturedAt: String? = null
@@ -72,10 +81,18 @@ class PhotoUploadApi : JobDetailsApi {
         request: ChangeVisitStatusRequestDto,
     ): JobDetailsDto = throw AssertionError("these tests do not apply a Visit transition")
 
+    override suspend fun completeVisit(
+        authorization: String,
+        jobId: String,
+        visitId: String,
+        request: CompleteVisitRequestDto,
+    ): JobDetailsDto = throw AssertionError("these tests do not complete a Visit")
+
     override suspend fun addJobAudioNote(
         authorization: String,
         jobId: String,
         clientOperationId: RequestBody,
+        visitId: RequestBody,
         phase: RequestBody,
         note: RequestBody?,
         capturedAt: RequestBody?,
@@ -85,6 +102,7 @@ class PhotoUploadApi : JobDetailsApi {
         lastAuthorization = authorization
         lastJobId = jobId
         lastClientOperationId = clientOperationId.multipartText()
+        lastVisitId = visitId.multipartText()
         lastPhase = phase.multipartText()
         lastNote = note?.multipartText()
         lastCapturedAt = capturedAt?.multipartText()
@@ -98,6 +116,7 @@ class PhotoUploadApi : JobDetailsApi {
         authorization: String,
         jobId: String,
         clientOperationId: RequestBody,
+        visitId: RequestBody,
         phase: RequestBody,
         note: RequestBody?,
         capturedAt: RequestBody?,
@@ -107,6 +126,7 @@ class PhotoUploadApi : JobDetailsApi {
         lastAuthorization = authorization
         lastJobId = jobId
         lastClientOperationId = clientOperationId.multipartText()
+        lastVisitId = visitId.multipartText()
         lastPhase = phase.multipartText()
         lastNote = note?.multipartText()
         lastCapturedAt = capturedAt?.multipartText()
@@ -160,6 +180,20 @@ class PhotoUploadApi : JobDetailsApi {
         request: AddVisitNoteRequestDto,
     ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
 
+    override suspend fun editVisitNote(
+        authorization: String,
+        jobId: String,
+        noteId: String,
+        request: EditVisitNoteRequestDto,
+    ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
+
+    override suspend fun removeVisitNote(
+        authorization: String,
+        jobId: String,
+        noteId: String,
+        request: RemoveVisitNoteRequestDto,
+    ): JobActivityDto = throw NotImplementedError("Not used by these tests.")
+
     override suspend fun removeJobPhoto(
         authorization: String,
         jobId: String,
@@ -190,6 +224,28 @@ class PhotoUploadApi : JobDetailsApi {
         authorization: String,
     ): List<AssignableTechnicianDto> =
         throw NotImplementedError("Not used by these tests.")
+
+    /** These tests are about evidence, so nothing here schedules a Visit. */
+    override suspend fun createVisit(
+        authorization: String,
+        jobId: String,
+        request: CreateVisitRequestDto,
+    ): JobDetailsDto = throw NotImplementedError("Not used by these tests.")
+
+    /** These tests are about evidence, so nothing here approves a follow-up request. */
+    override suspend fun approveVisitRequest(
+        authorization: String,
+        jobId: String,
+        requestId: String,
+        request: ApproveVisitRequestRequestDto,
+    ): JobDetailsDto = throw NotImplementedError("Not used by these tests.")
+
+    /** These tests are about evidence, so nothing here submits a follow-up request. */
+    override suspend fun submitVisitRequest(
+        authorization: String,
+        jobId: String,
+        request: SubmitVisitRequestRequestDto,
+    ): FollowUpVisitRequestDto = throw NotImplementedError("Not used by these tests.")
 }
 
 /** The text a multipart part carries, as the API receives it. */

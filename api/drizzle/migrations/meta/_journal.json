@@ -113,6 +113,48 @@
       "when": 1789843440000,
       "tag": "0015_follow_up_visit_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790010000000,
+      "tag": "0016_job_visit_lifecycle_redesign",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790013600000,
+      "tag": "0017_evidence_visit_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790694228959,
+      "tag": "0018_follow_up_visit_request_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790784000000,
+      "tag": "0019_visit_note_edit_removal",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790870400000,
+      "tag": "0020_ad_hoc_work_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790956800000,
+      "tag": "0021_ad_hoc_work_report_lifecycle",
+      "breakpoints": true
     }
   ]
 }

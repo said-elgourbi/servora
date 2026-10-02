@@ -66,6 +66,7 @@ internal class JobPhotoPayloads @Inject constructor(private val json: Json) {
             JobPhotoOperationPayload.serializer(),
             JobPhotoOperationPayload(
                 localPath = photo.localPath,
+                visitId = photo.visitId,
                 phase = evidencePhaseNameOrNull(photo.phase),
                 note = photo.note,
                 capturedAt = photo.capturedAt,
@@ -151,6 +152,7 @@ private fun PendingJobPhotoEntity.toPendingPhoto(): PendingJobPhoto =
     PendingJobPhoto(
         photoId = photoId,
         jobId = jobId,
+        visitId = visitId,
         localPath = localPath,
         phase = evidencePhaseOrNull(phase),
         note = note,
@@ -166,6 +168,7 @@ private fun PendingJobPhoto.toEntity(subjectId: String): PendingJobPhotoEntity =
         photoId = photoId,
         subjectId = subjectId,
         jobId = jobId,
+        visitId = visitId,
         localPath = localPath,
         phase = evidencePhaseNameOrNull(phase),
         note = note,

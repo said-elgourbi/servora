@@ -52,4 +52,13 @@ enum class JobPhotoRefusal {
 
     /** The photo's bytes could not be stored on this device, so no draft was recorded. */
     NOT_STORED,
+
+    /**
+     * The screen no longer represents the Visit the photo would belong to (`BR-047`, `BR-081`).
+     *
+     * Evidence is recorded against a Visit, so a capture that comes back after the screen stopped
+     * representing one has no field attempt to belong to: nothing is recorded and the captured bytes are
+     * released rather than filed under an invented attribution (`BR-042`, `BR-014`).
+     */
+    NO_VISIT,
 }

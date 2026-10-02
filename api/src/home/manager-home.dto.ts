@@ -5,6 +5,7 @@ import type {
   JobStatus,
   VisitStatus,
 } from '../jobs/job.types.js';
+import type { JobAttentionCode } from '../jobs/job-attention.js';
 import type { DayWindow } from './home-day.js';
 import { hasVisitStarted } from './home-visit-conditions.js';
 
@@ -30,15 +31,18 @@ export type { VisitStatus };
  * | Kind                   | Condition                                                                          |
  * | ---------------------- | ---------------------------------------------------------------------------------- |
  * | `VISIT_OVERDUE`        | A Visit still `SCHEDULED` after its scheduled window ended (`BR-072`, `BR-074`).    |
- * | `JOB_PENDING_REVIEW`   | A Job awaiting the office review only an authorized user can close (`BR-061`, `BR-062`). |
  * | `JOB_NEEDS_SCHEDULING` | A Job with no active Visit, so it needs scheduling (`BR-060`).                      |
+ * | outcome-derived codes  | The latest completed Visit outcome requires office action.                          |
  */
 export const MANAGER_ATTENTION_KINDS = [
   'VISIT_OVERDUE',
-  'JOB_PENDING_REVIEW',
   'JOB_NEEDS_SCHEDULING',
+  'FOLLOW_UP_NEEDS_SCHEDULING',
+  'PARTS_REQUIRED',
+  'UNABLE_TO_COMPLETE',
 ] as const;
-export type ManagerAttentionKind = (typeof MANAGER_ATTENTION_KINDS)[number];
+export type ManagerAttentionKind =
+  'VISIT_OVERDUE' | 'JOB_NEEDS_SCHEDULING' | JobAttentionCode;
 
 /**
  * The Visit statuses that count as a Job's active work for the derived scheduling signal
@@ -59,11 +63,10 @@ export const NEEDS_SCHEDULING_ACTIVE_VISIT_STATUSES = [
 /**
  * The Job statuses that can need scheduling (`BR-060`).
  *
- * `NEW` and `IN_PROGRESS` are the two non-terminal statuses whose work is not represented by an
- * active Visit. A `SCHEDULED` Job has a scheduled Visit by definition, and `PENDING_REVIEW`,
- * `COMPLETED` and `CANCELED` are not awaiting a schedule.
+ * `NEW` and `ACTIVE` are the non-terminal statuses whose work may not yet be represented by an
+ * active Visit. `COMPLETED` and `CANCELED` are historical and never awaiting a schedule.
  */
-export const NEEDS_SCHEDULING_JOB_STATUSES = ['NEW', 'IN_PROGRESS'] as const;
+export const NEEDS_SCHEDULING_JOB_STATUSES = ['NEW', 'ACTIVE'] as const;
 
 /*
  * The two derived Visit conditions this read presents — the attempts that did not happen and the
@@ -124,6 +127,7 @@ export interface ManagerAttentionItem {
   readonly customerName: string;
   /** The Visit the condition is about, or `null` for a Job-level condition (`BR-060`). */
   readonly visitId: string | null;
+  readonly reasonCode?: string | null;
   /** The condition Visit's scheduled start, or `null` (`BR-072`). */
   readonly scheduledStart: Date | null;
   readonly scheduledEnd: Date | null;
@@ -154,8 +158,10 @@ export interface ManagerHomeDaySummary {
  */
 const ATTENTION_KIND_RANK: Record<ManagerAttentionKind, number> = {
   VISIT_OVERDUE: 0,
-  JOB_PENDING_REVIEW: 1,
-  JOB_NEEDS_SCHEDULING: 2,
+  FOLLOW_UP_NEEDS_SCHEDULING: 1,
+  PARTS_REQUIRED: 2,
+  UNABLE_TO_COMPLETE: 3,
+  JOB_NEEDS_SCHEDULING: 4,
 };
 
 export function compareAttentionItems(
@@ -248,6 +254,7 @@ export interface ManagerHomeVisitDto {
 }
 
 export interface ManagerAttentionItemDto {
+  code: ManagerAttentionKind;
   kind: ManagerAttentionKind;
   jobId: string;
   jobNumber: number;
@@ -256,6 +263,7 @@ export interface ManagerAttentionItemDto {
   customerId: string;
   customerName: string;
   visitId: string | null;
+  reasonCode: string | null;
   scheduledStart: string | null;
   scheduledEnd: string | null;
 }
@@ -322,6 +330,7 @@ function toManagerAttentionItemDto(
   item: ManagerAttentionItem,
 ): ManagerAttentionItemDto {
   return {
+    code: item.kind,
     kind: item.kind,
     jobId: item.jobId,
     jobNumber: item.jobNumber,
@@ -330,6 +339,7 @@ function toManagerAttentionItemDto(
     customerId: item.customerId,
     customerName: item.customerName,
     visitId: item.visitId,
+    reasonCode: item.reasonCode ?? null,
     scheduledStart: item.scheduledStart?.toISOString() ?? null,
     scheduledEnd: item.scheduledEnd?.toISOString() ?? null,
   };

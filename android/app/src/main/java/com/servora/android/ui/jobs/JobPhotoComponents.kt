@@ -659,6 +659,7 @@ internal fun jobPhotoFailureMessage(failure: JobPhotoFailure): Int =
         JobPhotoFailure.PHOTO_TYPE_NOT_ACCEPTED -> R.string.job_photo_error_type_not_accepted
         JobPhotoFailure.PHOTO_TOO_LARGE -> R.string.job_photo_error_too_large
         JobPhotoFailure.PHOTO_NOT_SAVED -> R.string.job_photo_error_not_saved
+        JobPhotoFailure.NO_VISIT -> R.string.job_photo_error_no_visit
         JobPhotoFailure.PHOTO_NOT_READ -> R.string.job_photo_error_not_read
         JobPhotoFailure.PICKER_UNAVAILABLE -> R.string.job_photo_error_picker_unavailable
         JobPhotoFailure.EXPORT_UNREADABLE -> R.string.job_photo_error_export_unreadable

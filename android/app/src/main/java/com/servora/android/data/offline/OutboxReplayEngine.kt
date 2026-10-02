@@ -68,6 +68,19 @@ class OutboxReplayEngine @Inject constructor(
      */
     val applied: SharedFlow<Unit> = _applied.asSharedFlow()
 
+    private val _refused = MutableSharedFlow<Unit>(extraBufferCapacity = APPLIED_EVENT_BUFFER)
+
+    /**
+     * Emits after a run that left at least one operation **refused**, so a screen showing that work
+     * reports what the backend answered instead of continuing to present it as waiting (§6, §7).
+     *
+     * A refusal is terminal for the row and the row is kept (`BR-014`, `BR-032`); without this signal a
+     * screen already open would keep describing the action as "saved on this device" long after the
+     * backend had refused it — which is exactly the case `BR-014` says must stay visible. Like
+     * [applied] it carries no payload, because the screen re-reads the record.
+     */
+    val refused: SharedFlow<Unit> = _refused.asSharedFlow()
+
     /**
      * Replays the signed-in subject's queue until it is clean, exhausted or blocked.
      *
@@ -153,6 +166,9 @@ class OutboxReplayEngine @Inject constructor(
 
         if (applied > 0) {
             _applied.tryEmit(Unit)
+        }
+        if (rejected > 0) {
+            _refused.tryEmit(Unit)
         }
 
         ReplaySummary(
