@@ -57,6 +57,7 @@ import type {
   AdHocWorkReportReviewDto,
   ConvertAdHocWorkReportDto,
   LinkAdHocWorkReportDto,
+  RejectAdHocWorkReportDto,
   SubmitAdHocWorkReportDto,
 } from './ad-hoc-work-report.dto.js';
 import { toAdHocWorkReportDto } from './ad-hoc-work-report.dto.js';
@@ -110,7 +111,10 @@ import {
   readJobVisits,
   selectVisitsForJobs,
 } from './visit-assignment.js';
-import { jobStatusConsequenceForVisitTransition } from './visit-job-consequence.js';
+import {
+  adHocReconciliationJobConsequence,
+  jobStatusConsequenceForVisitTransition,
+} from './visit-job-consequence.js';
 import {
   readJobActivity,
   type JobActivityEventDto,
@@ -1055,7 +1059,14 @@ export class JobsService {
       await this.assertTechniciansAssignable(scope, [
         report.reportingTechnicianMembershipId,
       ]);
-      const job = await this.requireJobRow(tx, scope, input.jobId);
+      // Historical reconciliation is the privileged exception to the closed-Job prohibition: the office
+      // inserts the completed Visit without a reopen transition (`BR-AH-006`). The Visit still needs the
+      // Job's Property as its location (`BR-056`, `BR-072`).
+      const job = await this.requireJobRowForHistoricalReconciliation(
+        tx,
+        scope,
+        input.jobId,
+      );
       const visitId = await this.insertCompletedVisitFromAdHocReport(
         tx,
         scope,
@@ -1184,6 +1195,34 @@ export class JobsService {
       createdJobId = job.id;
     });
     return this.requireJobDetails(scope, createdJobId);
+  }
+
+  async rejectAdHocWorkReport(
+    scope: OrganizationScope,
+    reportId: string,
+    actorMembershipId: string,
+    input: RejectAdHocWorkReportDto,
+  ): Promise<AdHocWorkReportDto> {
+    const report = await this.db.transaction(async (tx) => {
+      await this.requirePendingAdHocWorkReport(tx, scope, reportId, input);
+      const [updated] = await tx
+        .update(adHocWorkReports)
+        .set({
+          status: 'REJECTED',
+          reviewerMembershipId: actorMembershipId,
+          reviewedAt: new Date(),
+          reviewNote: input.note,
+          version: sql`${adHocWorkReports.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(adHocWorkReports.id, reportId))
+        .returning();
+      return updated;
+    });
+    if (report === undefined) {
+      throw new Error('The ad-hoc report reject returned no row.');
+    }
+    return this.toAdHocWorkReportDto(this.db, scope, report);
   }
 
   /**
@@ -2788,11 +2827,19 @@ export class JobsService {
         capturedAt: report.workEndedAt,
       });
     }
-    if (job.status === 'NEW') {
+    // The reconciled Visit's outcome has its normal Job consequence (`BR-AH-008`). The new Visit is
+    // already `COMPLETED`, so `jobHasOpenVisit` answers about the Job's *other* Visits (`BR-062`).
+    const hasOtherOpenVisit = await this.jobHasOpenVisit(client, scope, job.id);
+    const destination = adHocReconciliationJobConsequence(
+      report.outcomeCode as VisitOutcomeCode,
+      job.status as JobStatus,
+      hasOtherOpenVisit,
+    );
+    if (destination !== null && destination !== job.status) {
       await client
         .update(jobs)
         .set({
-          status: 'ACTIVE',
+          status: destination,
           version: sql`${jobs.version} + 1`,
           updatedAt: new Date(),
         })
@@ -2805,8 +2852,8 @@ export class JobsService {
       await client.insert(jobStatusHistory).values({
         organizationId: scope.organizationId,
         jobId: job.id,
-        fromStatus: 'NEW',
-        toStatus: 'ACTIVE',
+        fromStatus: job.status,
+        toStatus: destination,
         actorMembershipId,
       });
     }
@@ -2936,6 +2983,36 @@ export class JobsService {
     }
     if (job.status === 'COMPLETED' || job.status === 'CANCELED') {
       throw new JobClosedForFieldWorkError();
+    }
+    if (job.propertyId === null || job.propertyAddressSnapshot === null) {
+      throw new VisitSchedulingConditionNotMetError('PROPERTY');
+    }
+    return job;
+  }
+
+  /**
+   * The Job an ad-hoc report is reconciled into, locked for the write (`BR-AH-006`).
+   *
+   * Historical reconciliation is the distinct, privileged office operation that inserts a completed
+   * Visit against a Job **without** the ordinary reopen transition, so it deliberately does not reuse
+   * `requireJobRow`'s closed-Job refusal. The Visit it inserts is normal field work, so the Job must
+   * still have a Property for the Visit's location (`BR-056`, `BR-072`).
+   */
+  private async requireJobRowForHistoricalReconciliation(
+    client: JobMutationClient,
+    scope: OrganizationScope,
+    jobId: string,
+  ): Promise<typeof jobs.$inferSelect> {
+    const [job] = await client
+      .select()
+      .from(jobs)
+      .where(
+        and(eq(jobs.organizationId, scope.organizationId), eq(jobs.id, jobId)),
+      )
+      .for('update')
+      .limit(1);
+    if (job === undefined) {
+      throw new JobNotFoundError();
     }
     if (job.propertyId === null || job.propertyAddressSnapshot === null) {
       throw new VisitSchedulingConditionNotMetError('PROPERTY');

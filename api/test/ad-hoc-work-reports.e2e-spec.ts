@@ -13,6 +13,7 @@ import {
   adHocWorkReports,
   customers,
   jobs,
+  organizationJobNumberCounters,
   organizationMemberPermissions,
   organizationMembers,
   permissions,
@@ -149,6 +150,7 @@ describe('ad-hoc work reports (e2e)', () => {
       province: string;
       postalCode: string;
     },
+    status: 'NEW' | 'ACTIVE' | 'COMPLETED' | 'CANCELED' = 'ACTIVE',
   ) {
     jobNumberSequence += 1;
     const [job] = await database.db
@@ -165,10 +167,28 @@ describe('ad-hoc work reports (e2e)', () => {
           postalCode: property.postalCode,
         },
         title: `Ad-Hoc Job ${jobNumberSequence}`,
-        status: 'ACTIVE',
+        status,
       })
       .returning();
+    // Keep the organization's job-number counter in step with the directly-inserted row so the
+    // convert route's counter-based allocation cannot collide with a job number already in use.
+    await database.db
+      .insert(organizationJobNumberCounters)
+      .values({ organizationId, lastJobNumber: jobNumberSequence })
+      .onConflictDoUpdate({
+        target: organizationJobNumberCounters.organizationId,
+        set: { lastJobNumber: jobNumberSequence, updatedAt: new Date() },
+      });
     return job;
+  }
+
+  async function readJobStatus(jobId: string) {
+    const [job] = await database.db
+      .select({ status: jobs.status })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+    return job?.status;
   }
 
   function submitReport(token: string, body: Record<string, unknown>) {
@@ -388,5 +408,214 @@ describe('ad-hoc work reports (e2e)', () => {
       .get(`/jobs/ad-hoc-work-reports/${own.body.id}`)
       .set('Authorization', `Bearer ${reviewer.accessToken}`)
       .expect(200);
+  });
+
+  it('rejects a pending report as not legitimate work, terminal and audited', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor([VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK]);
+
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody(),
+    ).expect(201);
+
+    const rejected = await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/reject`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({ note: 'Not legitimate Servora work.' })
+      .expect(200);
+
+    expect(rejected.body).toMatchObject({
+      status: 'REJECTED',
+      reviewerMembershipId: reviewer.membershipId,
+      reviewNote: 'Not legitimate Servora work.',
+    });
+    expect(rejected.body.createdVisitId).toBeNull();
+    expect(rejected.body.createdJobId).toBeNull();
+
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/reject`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({})
+      .expect(409);
+  });
+
+  it('refuses a reject from a caller without the review capability', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody(),
+    ).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/reject`)
+      .set('Authorization', `Bearer ${reporter.accessToken}`)
+      .send({ note: 'Not allowed.' })
+      .expect(403);
+  });
+
+  it('links a resolved report into an open Job and closes the Job', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor([VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK]);
+    const customer = await newCustomer('Link Open Customer');
+    const property = await newProperty(customer.id, reviewer.membershipId);
+    const job = await newJob(customer.id, property, 'ACTIVE');
+
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody({
+        customerId: customer.id,
+        propertyId: property.id,
+        outcomeCode: 'RESOLVED',
+      }),
+    ).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/link`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({ jobId: job.id })
+      .expect(201);
+
+    expect(await readJobStatus(job.id)).toBe('COMPLETED');
+
+    const [report] = await database.db
+      .select({
+        status: adHocWorkReports.status,
+        createdVisitId: adHocWorkReports.createdVisitId,
+      })
+      .from(adHocWorkReports)
+      .where(eq(adHocWorkReports.id, created.body.id));
+    expect(report.status).toBe('LINKED');
+    expect(report.createdVisitId).toBeTruthy();
+  });
+
+  it('links a resolved report into a CANCELED Job and moves it to COMPLETED', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor([VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK]);
+    const customer = await newCustomer('Link Canceled Customer');
+    const property = await newProperty(customer.id, reviewer.membershipId);
+    const job = await newJob(customer.id, property, 'CANCELED');
+
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody({ outcomeCode: 'RESOLVED' }),
+    ).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/link`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({ jobId: job.id })
+      .expect(201);
+
+    expect(await readJobStatus(job.id)).toBe('COMPLETED');
+  });
+
+  it('keeps a COMPLETED Job completed on a resolved historical link', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor([VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK]);
+    const customer = await newCustomer('Link Completed Customer');
+    const property = await newProperty(customer.id, reviewer.membershipId);
+    const job = await newJob(customer.id, property, 'COMPLETED');
+
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody({ outcomeCode: 'RESOLVED' }),
+    ).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/link`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({ jobId: job.id })
+      .expect(201);
+
+    expect(await readJobStatus(job.id)).toBe('COMPLETED');
+  });
+
+  it('reopens a COMPLETED Job to ACTIVE on a follow-up historical link', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor([VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK]);
+    const customer = await newCustomer('Link Follow-Up Customer');
+    const property = await newProperty(customer.id, reviewer.membershipId);
+    const job = await newJob(customer.id, property, 'COMPLETED');
+
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody({ outcomeCode: 'NEEDS_PARTS' }),
+    ).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/link`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({ jobId: job.id })
+      .expect(201);
+
+    expect(await readJobStatus(job.id)).toBe('ACTIVE');
+  });
+
+  it('converts a resolved report into a new completed Job', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor([VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK]);
+    const customer = await newCustomer('Convert Resolved Customer');
+    const property = await newProperty(customer.id, reviewer.membershipId);
+
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody({
+        customerId: customer.id,
+        propertyId: property.id,
+        outcomeCode: 'RESOLVED',
+      }),
+    ).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/convert`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({ title: 'Emergency valve replacement' })
+      .expect(201);
+
+    const [report] = await database.db
+      .select({
+        status: adHocWorkReports.status,
+        createdJobId: adHocWorkReports.createdJobId,
+      })
+      .from(adHocWorkReports)
+      .where(eq(adHocWorkReports.id, created.body.id));
+    expect(report.status).toBe('CONVERTED');
+    expect(report.createdJobId).toBeTruthy();
+    expect(await readJobStatus(report.createdJobId as string)).toBe('COMPLETED');
+  });
+
+  it('converts a follow-up report into a new active Job', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor([VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK]);
+    const customer = await newCustomer('Convert Follow-Up Customer');
+    const property = await newProperty(customer.id, reviewer.membershipId);
+
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody({
+        customerId: customer.id,
+        propertyId: property.id,
+        outcomeCode: 'NEEDS_FOLLOW_UP',
+      }),
+    ).expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/convert`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({ title: 'Inspection found more work' })
+      .expect(201);
+
+    const [report] = await database.db
+      .select({
+        status: adHocWorkReports.status,
+        createdJobId: adHocWorkReports.createdJobId,
+      })
+      .from(adHocWorkReports)
+      .where(eq(adHocWorkReports.id, created.body.id));
+    expect(report.status).toBe('CONVERTED');
+    expect(report.createdJobId).toBeTruthy();
+    expect(await readJobStatus(report.createdJobId as string)).toBe('ACTIVE');
   });
 });

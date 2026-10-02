@@ -42,6 +42,7 @@ import { parseCreateJobDto } from './job-create.dto.js';
 import {
   parseConvertAdHocWorkReportDto,
   parseLinkAdHocWorkReportDto,
+  parseRejectAdHocWorkReportDto,
   parseSubmitAdHocWorkReportDto,
   type AdHocWorkReportDto,
 } from './ad-hoc-work-report.dto.js';
@@ -394,6 +395,28 @@ export class JobsController {
         input,
       ),
     );
+  }
+
+  @Post('ad-hoc-work-reports/:reportId/reject')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK)
+  async rejectAdHocWorkReport(
+    @Req() request: PermissionedRequest,
+    @Param('reportId') reportId: string,
+    @Body() body: unknown,
+  ): Promise<AdHocWorkReportDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseRejectAdHocWorkReportDto(body));
+    try {
+      return await this.jobs.rejectAdHocWorkReport(
+        { organizationId: authorization.organizationId },
+        reportId,
+        authorization.membershipId,
+        input,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
   }
 
   /**

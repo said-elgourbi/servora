@@ -1,6 +1,6 @@
 # Tracker 059 - Technician ad-hoc work reporting and office reconciliation
 
-**Status: Phase 0, Phase 1 and Phase 2 complete — decisions AH-D1–AH-D7 recorded (ADR-024, BR-AH-005–BR-AH-009); the API and database foundation is reshaped. Ready for Phase 3.**
+**Status: Phases 0–3 complete and Phase 4's API slice complete — decisions AH-D1–AH-D7 recorded (ADR-024, BR-AH-005–BR-AH-009); the API/database foundation is reshaped; technician Android report creation is in; the reject route, closed-Job historical reconciliation and the reconciled-Visit Job consequence are implemented. Remaining for Phase 4: the Android Manager-side report list/review/reconcile surface.**
 
 Date: 2026-10-01
 
@@ -263,7 +263,7 @@ New files: `api/src/jobs/ad-hoc-work-report-options.dto.ts` (+ `.spec.ts`),
 Docs updated in `docs/api/ad-hoc-work-reports.md` §"Discovery options". Verified: `npm run typecheck`,
 `npm run build`, unit specs (14) and both ad-hoc e2e suites (16) pass.
 
-### Phase 3 — Technician Android report creation (in progress)
+### Phase 3 — Technician Android report creation (complete)
 
 The prototype modal is replaced with the approved Schedule action and a field-friendly form:
 
@@ -287,5 +287,31 @@ Verified: `./gradlew compileDebugKotlin` **PASS**. The JVM and device test sourc
 pre-existing, unrelated breakage in `data/jobs`/`ui/jobs` (evidence, visit-notes, Job Details) noted in
 tracker 057, so the full test/lint/build sweep is Tier B for feature completion.
 
-Next is Phase 4 (office reconciliation of ad-hoc reports): the Manager-side report list, the reconcile
-decision (link/convert) and the reject route (`BR-AH-002`, `BR-AH-005` – `BR-AH-008`).
+### Phase 4 — Office reconciliation: API slice (complete)
+
+The office-reconciliation API is implemented (`BR-AH-002`, `BR-AH-005` – `BR-AH-008`):
+
+- **Reject route.** `POST /jobs/ad-hoc-work-reports/:reportId/reject` (guarded
+  `visits.review_ad_hoc_work`) records the reviewer, timestamp and optional note and moves a `PENDING`
+  report to terminal `REJECTED` (`BR-AH-007`). Rejection reuses the optimistic
+  `expectedStatus`/`expectedVersion` guard, so a stale or non-`PENDING` report is refused.
+- **Closed-Job historical reconciliation.** `link` no longer reuses `requireJobRow`'s closed-Job
+  refusal: a new `requireJobRowForHistoricalReconciliation` locks the Job, still requires its Property
+  for the Visit's location, but admits `COMPLETED`/`CANCELED` Jobs — the distinct privileged operation
+  `BR-AH-006` defines, without a fake reopen transition.
+- **Reconciled-Visit Job consequence.** `insertCompletedVisitFromAdHocReport` now applies the full
+  `BR-AH-008` consequence through a new pure rule `adHocReconciliationJobConsequence`
+  (`visit-job-consequence.ts`): a `RESOLVED` outcome closes an open Job, leaves a `COMPLETED` Job
+  `COMPLETED`, and moves a `CANCELED` Job to `COMPLETED`; a follow-up-required outcome leaves an open
+  Job `ACTIVE` and moves a terminal Job to `ACTIVE`. `convert` therefore yields a `COMPLETED` Job for a
+  resolved report and an `ACTIVE` Job for a follow-up report.
+
+Verified (Tier A): `npm run typecheck`, `npm run build`, unit specs
+(`visit-job-consequence.spec.ts` 13, `ad-hoc-work-report.dto.spec.ts` 8, full `npm test` 579),
+`ad-hoc-work-reports.e2e-spec.ts` (17) all pass. The full e2e sweep passes except four pre-existing
+evidence-removal authorization failures in `job-photos`/`job-audio-notes` (`tracker 056`), unrelated to
+this slice. `permissions.spec.ts` was corrected to pin the two ad-hoc permission codes it had missed.
+
+Next for Phase 4 is the **Android Manager-side surface**: a review list drawn from
+`GET /jobs/ad-hoc-work-reports` (reviewer scope), a report detail, and the link/convert/reject actions
+(`BR-AH-002`, `BR-AH-005` – `BR-AH-008`).

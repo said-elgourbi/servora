@@ -7,7 +7,10 @@ import {
   type VisitOutcomeCode,
   type VisitStatus,
 } from './job.types.js';
-import { jobStatusConsequenceForVisitTransition } from './visit-job-consequence.js';
+import {
+  adHocReconciliationJobConsequence,
+  jobStatusConsequenceForVisitTransition,
+} from './visit-job-consequence.js';
 
 const OPEN_JOB_STATUSES: readonly JobStatus[] = ['NEW', 'ACTIVE'];
 
@@ -123,6 +126,62 @@ describe('the Visit to Job consequence', () => {
             true,
           );
         }
+      }
+    }
+  });
+});
+
+describe('the ad-hoc reconciliation Job consequence (`BR-AH-008`)', () => {
+  const FOLLOW_UP_OUTCOMES: readonly VisitOutcomeCode[] = [
+    'NEEDS_FOLLOW_UP',
+    'NEEDS_PARTS',
+    'UNABLE_TO_COMPLETE',
+  ];
+
+  it('closes an open Job on a resolving outcome with no other Visit open', () => {
+    for (const jobStatus of OPEN_JOB_STATUSES) {
+      expect(
+        adHocReconciliationJobConsequence('RESOLVED', jobStatus, false),
+      ).toBe('COMPLETED');
+    }
+  });
+
+  it('keeps an open Job active when a resolving outcome leaves another Visit open', () => {
+    for (const jobStatus of OPEN_JOB_STATUSES) {
+      expect(
+        adHocReconciliationJobConsequence('RESOLVED', jobStatus, true),
+      ).toBe('ACTIVE');
+    }
+  });
+
+  it('keeps an open Job active for every follow-up-required outcome', () => {
+    for (const jobStatus of OPEN_JOB_STATUSES) {
+      for (const outcomeCode of FOLLOW_UP_OUTCOMES) {
+        expect(
+          adHocReconciliationJobConsequence(outcomeCode, jobStatus, false),
+        ).toBe('ACTIVE');
+      }
+    }
+  });
+
+  it('leaves a COMPLETED Job completed on a resolving outcome', () => {
+    expect(adHocReconciliationJobConsequence('RESOLVED', 'COMPLETED', false)).toBeNull();
+  });
+
+  it('moves a CANCELED Job to COMPLETED on a resolving outcome', () => {
+    // `BR-AH-008`: the work actually happened, so the request was not truly canceled. This is the
+    // privileged exception `BR-AH-006` grants; it is deliberately outside `BR-058`'s transition list.
+    expect(adHocReconciliationJobConsequence('RESOLVED', 'CANCELED', false)).toBe(
+      'COMPLETED',
+    );
+  });
+
+  it('moves a terminal Job to ACTIVE for every follow-up-required outcome', () => {
+    for (const jobStatus of ['COMPLETED', 'CANCELED'] as const) {
+      for (const outcomeCode of FOLLOW_UP_OUTCOMES) {
+        expect(
+          adHocReconciliationJobConsequence(outcomeCode, jobStatus, false),
+        ).toBe('ACTIVE');
       }
     }
   });

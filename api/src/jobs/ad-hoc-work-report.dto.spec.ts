@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DomainValidationError } from '../validation/domain-validation.js';
 import {
+  parseRejectAdHocWorkReportDto,
   parseSubmitAdHocWorkReportDto,
   toAdHocWorkReportDto,
 } from './ad-hoc-work-report.dto.js';
@@ -87,6 +88,28 @@ describe('ad-hoc work report DTOs', () => {
         summary: '   ',
       }),
     ).toThrow(DomainValidationError);
+  });
+
+  it('parses a reject review with an optional note and optimistic guards', () => {
+    const result = parseRejectAdHocWorkReportDto({
+      note: 'Not legitimate Servora work.',
+      expectedStatus: 'PENDING',
+      expectedVersion: 3,
+    });
+
+    expect(result).toEqual({
+      note: 'Not legitimate Servora work.',
+      expectedStatus: 'PENDING',
+      expectedVersion: 3,
+    });
+  });
+
+  it('allows a reject with no note', () => {
+    expect(parseRejectAdHocWorkReportDto({})).toEqual({
+      note: null,
+      expectedStatus: null,
+      expectedVersion: null,
+    });
   });
 
   it('maps provenance and the REJECTED status onto the wire DTO', () => {

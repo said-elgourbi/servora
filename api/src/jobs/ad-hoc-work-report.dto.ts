@@ -95,6 +95,9 @@ export interface ConvertAdHocWorkReportDto extends AdHocWorkReportReviewDto {
   readonly description: string | null;
 }
 
+/** The office's rejection of a report that was not legitimate Servora work (`BR-AH-007`). */
+export type RejectAdHocWorkReportDto = AdHocWorkReportReviewDto;
+
 export function parseSubmitAdHocWorkReportDto(
   input: unknown,
 ): SubmitAdHocWorkReportDto {
@@ -162,6 +165,12 @@ export function parseConvertAdHocWorkReportDto(
     title: requireText(source.title, 'title', 255),
     description: optionalText(source.description, 'description', 4000),
   };
+}
+
+export function parseRejectAdHocWorkReportDto(
+  input: unknown,
+): RejectAdHocWorkReportDto {
+  return parseAdHocWorkReportReviewDto(input);
 }
 
 function parseAdHocWorkReportReviewDto(

@@ -2,10 +2,10 @@
 
 Ad-hoc work reports let a Technician say: “I was asked to perform work, but it is not in Servora.” A report is not a Visit and does not create a Job silently. It waits for office review.
 
-> This document reflects the Phase 2 foundation (`ADR-024`, `BR-AH-005` – `BR-AH-009`). The `REJECTED`
-> status and the unknown-customer provenance fields are now in the schema and wire DTOs. The reject route,
-> closed-Job historical reconciliation and offline/idempotent Android submission are later phases; the
-> submit/list/detail/link/convert routes below are the current contract those phases reshape.
+> This document reflects the API after the office-reconciliation phase (`ADR-024`, `BR-AH-005` –
+> `BR-AH-009`). The `REJECTED` status, the unknown-customer provenance fields, the reject route and
+> closed-Job historical reconciliation are implemented. Offline/idempotent Android submission is the
+> Android client's slice.
 
 ## Permissions
 
@@ -83,8 +83,21 @@ organization report, a reporter reads only their own, and any other report is re
 }
 ```
 
-A `POST /jobs/ad-hoc-work-reports/:reportId/reject` route that records the reviewer, timestamp and reason and
-moves a `PENDING` report to `REJECTED` is Phase 5 work (`BR-AH-007`).
+`POST /jobs/ad-hoc-work-reports/:reportId/reject` rejects a pending report as not legitimate Servora work
+(`BR-AH-007`). It is guarded by `visits.review_ad_hoc_work` and returns the updated report.
+
+```json
+{
+  "note": "Not legitimate Servora work.",
+  "expectedStatus": "PENDING",
+  "expectedVersion": 1
+}
+```
+
+Rejection is terminal and one-way: it records the reviewer, timestamp and the optional note, and a
+`REJECTED` report can never be linked or converted (`BR-AH-005`, `BR-AH-007`). A report that is not
+`PENDING`, or whose `expectedStatus`/`expectedVersion` no longer match, is refused with
+`AD_HOC_WORK_REPORT_NOT_REVIEWABLE` / `AD_HOC_WORK_REPORT_CONFLICT`.
 
 Reconciliation returns the resulting `JobDetailsDto`. The created Visit has normal Visit status `COMPLETED`,
 carries the report's work window as its schedule, records the report outcome, assigns the reporting

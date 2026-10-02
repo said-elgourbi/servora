@@ -129,7 +129,7 @@ describe('customer contact permissions', () => {
  * so a rename would break the API and every client at once (`BR-041`).
  */
 describe('visit permissions', () => {
-  it('pins the field, scheduling, and follow-up codes shared by routes and clients', () => {
+  it('pins the field, scheduling, follow-up, and ad-hoc codes shared by routes and clients', () => {
     expect(VISIT_PERMISSIONS).toEqual({
       VIEW_ASSIGNED: 'VISIT_VIEW_ASSIGNED',
       CREATE_SCHEDULE: 'visits.create_schedule',
@@ -137,6 +137,8 @@ describe('visit permissions', () => {
       ASSIGN_TECHNICIANS: 'visits.assign_technicians',
       REQUEST_FOLLOW_UP: 'visits.request_follow_up',
       REVIEW_REQUESTS: 'visits.review_requests',
+      REPORT_AD_HOC_WORK: 'visits.report_ad_hoc_work',
+      REVIEW_AD_HOC_WORK: 'visits.review_ad_hoc_work',
       UPDATE_ASSIGNED_STATUS: 'VISIT_UPDATE_ASSIGNED_STATUS',
       ADD_NOTE: 'VISIT_ADD_NOTE',
       RECORD_OUTCOME: 'VISIT_RECORD_OUTCOME',
