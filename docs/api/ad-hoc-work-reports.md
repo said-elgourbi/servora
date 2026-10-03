@@ -60,7 +60,7 @@ list.
 `GET /jobs/ad-hoc-work-reports/:reportId` reads one report with the same scoping: a reviewer reads any
 organization report, a reporter reads only their own, and any other report is reported as not found.
 
-`POST /jobs/ad-hoc-work-reports/:reportId/link` links a pending report to an existing Job and creates a normal completed Visit from the reported work facts.
+`POST /jobs/ad-hoc-work-reports/:reportId/link` links a pending report to an existing Job and creates a normal completed Work Visit from the reported work facts. Ad-hoc reports are always `WORK`: they preserve work already performed without a scheduled Visit and are not an assessment workflow.
 
 ```json
 {
@@ -71,7 +71,7 @@ organization report, a reporter reads only their own, and any other report is re
 }
 ```
 
-`POST /jobs/ad-hoc-work-reports/:reportId/convert` creates a new Job from the report's customer/property and then creates the corresponding normal completed Visit.
+`POST /jobs/ad-hoc-work-reports/:reportId/convert` creates a new Job from the report's customer/property and then creates the corresponding normal completed Work Visit.
 
 ```json
 {

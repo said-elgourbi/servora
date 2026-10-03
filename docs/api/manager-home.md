@@ -87,6 +87,7 @@ related reads to build it.
     {
       "visitId": "…",
       "visitStatus": "SCHEDULED",
+      "purposeCode": "WORK",
       "scheduledStart": "2026-09-14T11:00:00.000Z",
       "scheduledEnd": "2026-09-14T12:00:00.000Z",
       "jobId": "…",
@@ -120,7 +121,7 @@ related reads to build it.
 | `generatedAt`        | When the API assembled the answer. The client presents it; it never recomputes a condition from it.                                                                                                                  |
 | `day`                | The half-open window `[start, end)` the day was resolved for, and the zone it was resolved in.                                                                                                                        |
 | `viewer.displayName` | The signed-in member's name for the greeting. `null` when the member has no profile yet, so the client greets without a name rather than inventing one (`BR-020`).                                                     |
-| `attention.items[].code` / `kind` | Stable attention code, never display text (`BR-028`, `BR-041`). Visit conditions use `VISIT_OVERDUE`; generic unscheduled work uses `JOB_NEEDS_SCHEDULING`; outcome-derived Job attention uses `FOLLOW_UP_NEEDS_SCHEDULING`, `PARTS_REQUIRED` or `UNABLE_TO_COMPLETE`. `kind` is the compatibility alias for `code`. |
+| `attention.items[].code` / `kind` | Stable attention code, never display text (`BR-028`, `BR-041`). Visit conditions use `VISIT_OVERDUE`; generic unscheduled work uses `JOB_NEEDS_SCHEDULING`; outcome-derived Job attention uses `FOLLOW_UP_NEEDS_SCHEDULING`, `PARTS_REQUIRED`, `UNABLE_TO_COMPLETE`, `JOB_WORK_RECOMMENDED`, `JOB_QUOTE_REQUIRED` or `JOB_NEEDS_REASSESSMENT`. `kind` is the compatibility alias for `code`. |
 | `attention.items[].reasonCode` | `null` unless the attention condition has an approved structured reason. The current `UNABLE_TO_COMPLETE` write requires a reason as text, but no structured reason catalogue is approved, so the projection does not invent reason subcodes. |
 | `attention.total`    | Every matching condition, including the ones beyond `items` (capped at 20). The section's count comes from here, so a capped list never under-reports the operation.                                                   |
 | `attention.items`    | Ordered: what has gone wrong first, then what awaits the office, then what has to be planned; within a kind by scheduled time, then Job number. `visitId` and the schedule are `null` for a Job-level condition.        |

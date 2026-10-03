@@ -104,6 +104,7 @@ what was asked.
     {
       "visitId": "4f2b…",
       "visitStatus": "SCHEDULED",
+      "purposeCode": "WORK",
       "scheduledStart": "2026-09-07T13:00:00.000Z",
       "scheduledEnd": "2026-09-07T14:30:00.000Z",
       "jobId": "b70e…",
@@ -130,6 +131,7 @@ what was asked.
       {
         "visitId": "77ab…",
         "visitStatus": "DRAFT",
+        "purposeCode": "WORK",
         "scheduledStart": null,
         "scheduledEnd": null,
         "jobId": "c1de…",
@@ -155,6 +157,7 @@ what was asked.
 | `technicians`           | The organization's technicians, for the screen's filter (`BR-024`, `BR-068`). The same list `GET /technicians` returns, carried here so the screen is one request. It is **not** day-scoped. **Empty for a `SELF` scope**: a field caller reads their own work and may not narrow the day to anybody (`BR-009`). |
 | `visits`                | The day's Visits, chronologically by scheduled start and then by Job number (`BR-052`). Every row has a schedule: a Visit with no schedule belongs to no day. For a `SELF` scope they are only the Visits the caller's own membership is currently on.                          |
 | `visits[].visitStatus`  | The **Visit** status (`BR-074`). The Job's status (`BR-058`) is deliberately not carried: they are separate state machines (`BR-059`), and the schedule is about the field attempt.                                                                                             |
+| `visits[].purposeCode`  | The Visit purpose, `WORK` or `ASSESSMENT`, so dispatch can distinguish work from assessment without overloading status. |
 | `visits[].address`      | The Visit's own preserved location, falling back to the Job's preserved address; `null` when neither exists (`BR-056`, `BR-057`).                                                                                                                                               |
 | `visits[].technicians`  | The current assignments, Lead first (`BR-068`); empty when the Visit has none. `name` is `null` when the member has no profile yet (`BR-020`).                                                                                                                                  |
 | `visits[].overdue`      | The derived overdue condition (`BR-072`, `BR-074`): a Visit still `SCHEDULED` after its scheduled window ended, decided by the API from the server clock so a client presents it without comparing schedules against its own clock (`BR-001`).                                  |

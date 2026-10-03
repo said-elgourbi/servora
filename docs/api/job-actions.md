@@ -153,9 +153,10 @@ Moves a Job through its lifecycle (`BR-058`).
   undefined, so `note` is the only explanation the request carries and the catalogue remains an `OPEN
   QUESTION` (`§10`).
 - **Operational attention is never a Job status.** `FOLLOW_UP_NEEDS_SCHEDULING`, `PARTS_REQUIRED`,
-  `UNABLE_TO_COMPLETE`, `JOB_NEEDS_SCHEDULING` and `VISIT_OVERDUE` are **derived** conditions the Job
-  read reports separately (`attention`, `docs/api/job-details.md` §3). None of them is a status and
-  none of them appears in `allowedStatusTransitions`.
+  `UNABLE_TO_COMPLETE`, `JOB_WORK_RECOMMENDED`, `JOB_QUOTE_REQUIRED`, `JOB_NEEDS_REASSESSMENT`,
+  `JOB_NEEDS_SCHEDULING` and `VISIT_OVERDUE` are **derived** conditions the Job read reports separately
+  (`attention`, `docs/api/job-details.md` §3). None of them is a status and none of them appears in
+  `allowedStatusTransitions`.
 - **The eligibility conditions are evaluated inside the transaction that applies the change**, through
   the same client, so a Job is never moved on a picture of its Visits that has already changed
   underneath.
@@ -443,11 +444,13 @@ outcome is stored, and the Job consequence `§7.4` describes is applied — all 
 
 | Field               | Required | Meaning                                                                                                                        |
 | ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `outcomeCode`       | yes      | A code from the Visit outcome vocabulary (`BR-078`): `RESOLVED`, `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE`. A code Servora does not have is `400`. |
+| `outcomeCode`       | yes      | A code from the Visit outcome vocabulary (`BR-078`) valid for the Visit's purpose. Work Visits accept `RESOLVED`, `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE`; Assessment Visits accept `NO_WORK_REQUIRED`, `WORK_RECOMMENDED`, `QUOTE_REQUIRED` or `UNABLE_TO_ASSESS`. A code Servora does not have is `400`, and a known code invalid for the Visit purpose is a domain validation error. |
 | `outcomeSummary`    | yes      | The text `BR-077` requires with the type. For `UNABLE_TO_COMPLETE` it is the **reason** the attempt could not be completed, and the refusal names that field as `reason`. |
 | `clientOperationId` | no       | The device's idempotency key (`§7.3`), so a queued completion replays exactly once.                                             |
 | `capturedAt`        | no       | The device instant the technician completed the Visit; provenance beside the server's own instant.                              |
 | `expectedVersion`   | no       | The Visit's `version` as the client last saw it (`BR-086`).                                                                     |
+
+The request does not carry `purposeCode`: purpose is stored on the Visit and the server validates the outcome against that stored purpose. A client filters the picker from the read model, but the API remains authoritative.
 
 What the API enforces:
 

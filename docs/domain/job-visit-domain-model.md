@@ -680,7 +680,8 @@ code; labels are localized (`BR-028`, `BR-041`).
 | `CANCELED`  | The customer request was canceled rather than resolved         |
 
 Operational attention (`VISIT_OVERDUE`, `JOB_NEEDS_SCHEDULING`, `FOLLOW_UP_NEEDS_SCHEDULING`,
-`PARTS_REQUIRED`, `UNABLE_TO_COMPLETE`) is **not** in this vocabulary: it is a derived condition (§8.4).
+`PARTS_REQUIRED`, `UNABLE_TO_COMPLETE`, `JOB_WORK_RECOMMENDED`, `JOB_QUOTE_REQUIRED`,
+`JOB_NEEDS_REASSESSMENT`) is **not** in this vocabulary: it is a derived condition (§8.4).
 
 Clients must not invent their own Job status vocabulary (`BR-022`, `BR-041`).
 
@@ -1002,6 +1003,9 @@ derived from authoritative records, and the API — not a client — decides whi
 | `FOLLOW_UP_NEEDS_SCHEDULING` | The latest completed Visit reported `NEEDS_FOLLOW_UP` and no later Visit is actionable (`BR-078`). |
 | `PARTS_REQUIRED`             | The latest completed Visit reported `NEEDS_PARTS` (`BR-078`).                      |
 | `UNABLE_TO_COMPLETE`         | The latest completed Visit reported `UNABLE_TO_COMPLETE` (`BR-078`).               |
+| `JOB_WORK_RECOMMENDED`       | The latest completed Assessment Visit reported `WORK_RECOMMENDED`; office/customer action is needed before scheduling is assumed. |
+| `JOB_QUOTE_REQUIRED`         | The latest completed Assessment Visit reported `QUOTE_REQUIRED`; office quoting action may be needed, but no quote subsystem is created. |
+| `JOB_NEEDS_REASSESSMENT`     | The latest completed Assessment Visit reported `UNABLE_TO_ASSESS`; another assessment or office intervention is needed. |
 
 - "Latest completed Visit" means the Job's `COMPLETED` Visit with the greatest completion
   `recorded_at`, and only an `ACTIVE` Job carries attention: a terminal Job's outcomes are immutable
@@ -1011,8 +1015,11 @@ derived from authoritative records, and the API — not a client — decides whi
   requirement (`BR-FV-004`, `BR-FV-007`, `BR-FV-013`).
 - The **shape** of a structured office-attention reason (`reasonCode`) is an **OPEN QUESTION**. The API
   reports `null` for every condition it derives today and no reason vocabulary is invented (`BR-042`, §21).
+- Assessment attention is deliberately separate from work follow-up attention. `WORK_RECOMMENDED` is
+  not `FOLLOW_UP_NEEDS_SCHEDULING`, and `QUOTE_REQUIRED` is not scheduling. Both may eventually lead to
+  a Work Visit, but the model does not skip the office/customer decision that comes first.
 - Attention is evaluated when a Job or Visit event can change whether a Visit is still actionable (a
-  Visit completion, or a working transition of §9.1).
+  Visit completion, a purpose-sensitive outcome, or a working transition of §9.1).
 
 ### 8.5 Closing a Job and reopening it
 
@@ -1091,15 +1098,19 @@ is its single place in the model (`BR-041`):
 | Visit event                                                                       | Job consequence                          | Rule                            |
 | --------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------- |
 | any **working** destination (`SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`)    | `NEW` → `ACTIVE`; an `ACTIVE` Job is not changed | `BR-058`, `BR-074`       |
-| `COMPLETED` with `RESOLVED`, **and no other Visit still open**                     | → `COMPLETED`                            | `BR-062`, `BR-078`              |
-| `COMPLETED` with `RESOLVED` while another Visit is still open                      | stays `ACTIVE`                           | `BR-062`                        |
-| `COMPLETED` with `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE`          | stays `ACTIVE` (or `NEW` → `ACTIVE`)     | `BR-058`, `BR-078`, §8.4        |
+| Work Visit `COMPLETED` with `RESOLVED`, **and no other Visit still open**          | → `COMPLETED`                            | `BR-062`, `BR-078`              |
+| Work Visit `COMPLETED` with `RESOLVED` while another Visit is still open           | stays `ACTIVE`                           | `BR-062`                        |
+| Work Visit `COMPLETED` with `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE` | stays `ACTIVE` (or `NEW` → `ACTIVE`)   | `BR-058`, `BR-078`, §8.4        |
+| Assessment Visit `COMPLETED` with `NO_WORK_REQUIRED`, **and no other Visit still open** | → `COMPLETED`                       | `BR-062`, `BR-078`              |
+| Assessment Visit `COMPLETED` with `NO_WORK_REQUIRED` while another Visit is still open | stays `ACTIVE`                       | `BR-062`                        |
+| Assessment Visit `COMPLETED` with `WORK_RECOMMENDED`, `QUOTE_REQUIRED` or `UNABLE_TO_ASSESS` | stays `ACTIVE` (or `NEW` → `ACTIVE`) | `BR-058`, `BR-078`, §8.4        |
 | `DRAFT`                                                                            | no Job change                            | `BR-042` — a draft does not activate a Job |
 
-- A resolving completion is the **one** place a field event closes a Job; there is no business-review
-  step between the field work and the closure (`BR-062`). It is bounded by `BR-062`'s open-Visit
-  invariant, which the API evaluates for the consequence exactly as it does for the explicit status
-  route, so a resolving completion that leaves another Visit open keeps the Job `ACTIVE`.
+- A resolving Work completion and a no-work-required Assessment completion are the only field events that
+  close a Job; there is no business-review step between those conclusions and the closure (`BR-062`).
+  They are bounded by `BR-062`'s open-Visit invariant, which the API evaluates for the consequence exactly
+  as it does for the explicit status route, so the completion keeps the Job `ACTIVE` when another Visit
+  remains open.
 - A consequence **never** cancels a Job (`BR-064`) and is never applied to a terminal Job
   (`COMPLETED`/`CANCELED` have no destination other than their reopen, `BR-063`).
 - It moves the **Job alone**: no Visit status and no Visit history is written by the consequence, exactly
@@ -1111,9 +1122,35 @@ is its single place in the model (`BR-041`):
 
 ## 9. The Visit
 
-A Visit is **one field attempt** to perform work for a Job (`BR-071`). A Job may have zero, one or
-many Visits; a Visit is never created merely because a Job exists; and a Visit is not a permanent
-representation of the Job (`BR-047`, `BR-051`, `BR-071`).
+A Visit is **one technician attendance** for a Job (`BR-071`). Its purpose says why the technician is
+attending: to assess what is needed, or to perform work. A Job may have zero, one or many Visits; a Visit
+is never created merely because a Job exists; and a Visit is not a permanent representation of the Job
+(`BR-047`, `BR-051`, `BR-071`).
+
+### 9.0 Visit purpose
+
+Visit Purpose is orthogonal to Visit Status:
+
+- **Purpose** answers why the technician is attending.
+- **Status** answers where the Visit is in its lifecycle.
+- **Outcome** answers what resulted from that Visit.
+
+Supported purpose codes:
+
+| Code         | Meaning                                                            |
+| ------------ | ------------------------------------------------------------------ |
+| `WORK`       | The technician attends to perform scheduled service or repair.      |
+| `ASSESSMENT` | The technician attends to inspect, diagnose or determine next steps. |
+
+Every Visit has exactly one purpose. `purpose_code` is a stable machine-readable code, not localized
+text. Existing Visits are historical Work Visits unless a later migration has a deterministic reason to
+classify one otherwise.
+
+Scheduling defaults the selector to `WORK`, because most operational Visits are Work Visits. The selector
+is visible so `ASSESSMENT` remains an intentional override. Purpose may be changed only while the Visit is
+still `SCHEDULED`; once the Visit reaches `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or
+`CANCELED`, purpose is immutable. Changing it after execution starts would invalidate the technician's
+expectation, valid completion outcomes and history semantics.
 
 ### 9.1 Visit status lifecycle (`BR-074`)
 
@@ -1211,6 +1248,7 @@ IN_PROGRESS → CANCELED
 | `property_id`               | `uuid`        | yes   | Operational location; `NULL` while `DRAFT`                        |
 | `location_address_snapshot` | `jsonb`       | yes   | Snapshot taken when the Visit is scheduled / location resolved    |
 | `status`                    | `varchar(20)` | no    | `NOT NULL DEFAULT 'DRAFT'`; CHECK against the `BR-074` vocabulary |
+| `purpose_code`              | `varchar(20)` | no    | `NOT NULL DEFAULT 'WORK'`; CHECK against `WORK`, `ASSESSMENT`     |
 | `scheduled_start`           | `timestamptz` | yes   | **Internal** start — authoritative (`BR-072`)                     |
 | `scheduled_end`             | `timestamptz` | yes   | **Internal** end — authoritative (`BR-072`)                       |
 | `arrival_window_start`      | `timestamptz` | yes   | Optional customer-facing window                                   |
@@ -1222,6 +1260,8 @@ Constraints and indexes:
 
 - `CHECK (status IN ('DRAFT','SCHEDULED','EN_ROUTE','ON_SITE','IN_PROGRESS','COMPLETED',
 'CANCELED'))` — the `BR-074` vocabulary is confirmed and closed.
+- `CHECK (purpose_code IN ('WORK','ASSESSMENT'))` — the Visit Purpose vocabulary is confirmed and
+  closed. Existing rows are migrated to `WORK`.
 - `CHECK ((scheduled_start IS NULL) = (scheduled_end IS NULL))` and
   `CHECK (scheduled_end IS NULL OR scheduled_end > scheduled_start)`.
 - `CHECK ((arrival_window_start IS NULL) = (arrival_window_end IS NULL))` and
@@ -1542,23 +1582,31 @@ AND existing.scheduled_end > new.scheduled_start
 
 ### 11.1 Rules
 
-- A Visit **cannot be completed without an outcome**: before `IN_PROGRESS → COMPLETED` the Technician
-  supplies an outcome type (`BR-078`) and an outcome summary (`BR-077`).
+- A Visit **cannot be completed without an outcome**: before completion the Technician supplies an
+  outcome type valid for the Visit's purpose (`BR-078`) and an outcome summary (`BR-077`).
 - Visit notes/comments are optional but strongly encouraged; photos, audio and files are optional in
   v1 unless a future workflow requires evidence (`BR-077`, §12, §18).
 - The outcome records its **authoring actor and a timestamp** (`BR-077`).
-- Outcome type codes are the closed `BR-078` vocabulary: `RESOLVED`, `NEEDS_FOLLOW_UP`,
-  `NEEDS_PARTS`, `UNABLE_TO_COMPLETE`. They are stable machine-readable
-  codes; labels are localized (`BR-028`, `BR-041`, `BR-078`).
-- **Follow-up expectation is derived from the outcome code** (`RESOLVED` — none expected;
+- Outcome type codes are the closed `BR-078` vocabulary. Work Visit outcomes are `RESOLVED`,
+  `NEEDS_FOLLOW_UP`, `NEEDS_PARTS`, `UNABLE_TO_COMPLETE`. Assessment Visit outcomes are
+  `NO_WORK_REQUIRED`, `WORK_RECOMMENDED`, `QUOTE_REQUIRED`, `UNABLE_TO_ASSESS`. The previously proposed
+  `ASSESSMENT_COMPLETE` outcome is deliberately not modelled: `COMPLETED` already says the assessment
+  Visit finished, and the outcome must state the assessment's conclusion.
+- Purpose determines which outcomes are valid. `ASSESSMENT + WORK_RECOMMENDED` is valid;
+  `ASSESSMENT + RESOLVED` is invalid. `WORK + RESOLVED` is valid; `WORK + QUOTE_REQUIRED` is invalid.
+  The backend enforces this rule; clients may filter choices but are not authoritative.
+- **Follow-up expectation is derived from Work outcome codes only** (`RESOLVED` — none expected;
   `NEEDS_FOLLOW_UP`, `NEEDS_PARTS`, `UNABLE_TO_COMPLETE` — follow-up expected) and is never stored as a
   boolean (`BR-078`).
+- Assessment conclusions are not work follow-up expectations. `WORK_RECOMMENDED` and `QUOTE_REQUIRED`
+  surface office attention; they do not create a follow-up request and do not automatically schedule
+  another Visit.
 - A follow-up expectation is not the same thing as a follow-up request. The expectation is derived
   from the Visit outcome; the request is a separate workflow record created by an assigned
   technician, unless a technician has explicit scheduling permission and creates the follow-up Visit
   directly (`BR-FV-001`, `BR-FV-011`). Job Details offers that direct scheduling path only while the
   Job is open (`NEW` or `ACTIVE`) and its Visit shape admits it: the Job has no scheduled Visit, or
-  the represented Visit is completed and its outcome expects follow-up. A `COMPLETED` or `CANCELED`
+  the represented Work Visit is completed and its outcome expects follow-up. A `COMPLETED` or `CANCELED`
   Job offers no scheduling action until it is reopened (`BR-062`, `BR-063`), and an already scheduled
   or active Visit exposes actions for that Visit instead of a casual parallel Visit create path. The
   API projects this eligibility as `canScheduleVisit` on the Job read, and the write itself refuses a
@@ -1567,9 +1615,11 @@ AND existing.scheduled_end > new.scheduled_start
   remains `ACTIVE` (`BR-059`, `BR-077`). A new **field attempt** is a new Visit, never an edit of a
   completed one. Reopening a completed Visit (`BR-074`) is not a new attempt: it corrects the status of
   the attempt that already exists, and that attempt must record a new outcome at its next completion.
-- **The outcome is what moves the Job** (`BR-058`, `BR-062`, §8.7): the completion is one operation and
-  its outcome decides the consequence. `RESOLVED` closes the Job when no other Visit remains open; every
-  other outcome leaves the Job `ACTIVE` and derives the office attention that outcome implies (§8.4).
+- **The purpose/outcome pair is what moves the Job** (`BR-058`, `BR-062`, §8.7): the completion is one
+  operation and its valid outcome decides the consequence. `WORK + RESOLVED` closes the Job when no other
+  Visit remains open. `ASSESSMENT + NO_WORK_REQUIRED` also closes the Job when no other Visit remains
+  open. Work outcomes that expect more work and Assessment outcomes that require office action leave the
+  Job `ACTIVE` and derive the attention that outcome implies (§8.4).
   An authorized rejection of a follow-up request because no additional Visit is required resolves that
   requirement (`BR-FV-004`, `BR-FV-007`). No client derives or sends this consequence.
 - Corrections (`BR-079`): every outcome change preserves the previous outcome, the new outcome, the
@@ -1592,7 +1642,7 @@ and constraints. Every outcome and every correction is additionally recorded in 
 
 Current outcome columns and constraints on `visits`:
 
-- `outcome_code varchar(30) NULL` — CHECK against the five `BR-078` codes.
+- `outcome_code varchar(30) NULL` — CHECK against the purpose-aware `BR-078` vocabulary.
 - `outcome_summary text NULL` — the required summary of the field attempt.
 - `outcome_recorded_at timestamptz NULL` and
   `outcome_recorded_by_membership_id uuid NULL` (FK → `organization_members.id`, `ON DELETE RESTRICT`) — the
@@ -1629,7 +1679,7 @@ Proposed table — `visit_outcome_history` (append-only):
 
 Checks:
 
-- `CHECK (outcome_code IN (...))` for the five codes.
+- `CHECK (outcome_code IN (...))` for the purpose-aware `BR-078` vocabulary.
 - `CHECK (previous_outcome_code IS NULL OR previous_outcome_code IN (...))`.
 - `CHECK ((previous_outcome_code IS NULL) = (previous_outcome_summary IS NULL))` — a correction
   always preserves the complete previous outcome (`BR-079`). A row whose
@@ -1644,14 +1694,16 @@ Checks:
 
 ### 11.3 Follow-up Visit requests (`BR-FV-001` – `BR-FV-013`)
 
-A follow-up request records that an assigned technician believes another field attempt is needed.
+A follow-up request records that an assigned technician believes another Work Visit is needed.
 It is **not** a Visit, not a schedule and not a confirmed appointment (`BR-FV-002`, `BR-FV-010`).
 It stays on the Job until an authorized decision is made.
 
 Rules:
 
-- Only a technician assigned to the source Visit may submit the request unless they also hold direct
-  scheduling permission and create the follow-up Visit directly (`BR-FV-001`, `BR-FV-011`).
+- Only a technician assigned to the source Work Visit may submit the request unless they also hold direct
+  scheduling permission and create the follow-up Work Visit directly (`BR-FV-001`, `BR-FV-011`).
+- Assessment conclusions never create or expose this request flow. `WORK_RECOMMENDED` is a recommendation
+  for office/customer action, not a technician's statement that a Work Visit failed to finish.
 - Every request references the source Visit, and that Visit must belong to the same Job and
   organization (`BR-FV-008`).
 - Proposed date/time, expected duration, notes and same-technician preference are informational
@@ -1659,7 +1711,7 @@ Rules:
 - Office review is permission-based, never role-name based. A Manager, Dispatcher, Scheduler or
   custom role may act only through the appropriate effective permission (`BR-004`, `BR-006`,
   `BR-FV-004`).
-- Approval creates the new Visit in the same transaction and records the resulting `visit_id`.
+- Approval creates the new Work Visit in the same transaction and records the resulting `visit_id`.
   The new Visit then follows the normal Visit scheduling, assignment and conflict rules (`BR-068`,
   `BR-070`, `BR-072`, `BR-FV-005`).
 - A request returned for clarification remains unresolved; a rejection means no new Visit is created
@@ -2125,7 +2177,7 @@ requires uniqueness and immutability, not a gapless sequence, so no gap-free gua
 
 `ad_hoc_work_reports` records work a technician says was performed without a proper Visit in Servora (`BR-AH-001`). It is deliberately separate from `follow_up_visit_requests`: follow-up requests propose future Visits for existing Jobs, while ad-hoc reports preserve already-performed or initiated work for office reconciliation (`BR-AH-004`).
 
-The report lifecycle is `PENDING` -> `LINKED`, `CONVERTED` or `REJECTED` (`BR-AH-005`). `PENDING` is the actionable state; the other three are terminal and one-way, and a terminal report cannot be reconciled again. No `AD_HOC` Visit status exists (`BR-AH-003`). During reconciliation the office either links to an existing Job or creates a new Job, then creates a normal completed Visit from the reported work window, outcome, summary and technician (`BR-AH-002`); rejection voids the report without creating a Visit (`BR-AH-007`). The report keeps the reviewer, review note, created Job/Visit links and the original technician-submitted facts for audit.
+The report lifecycle is `PENDING` -> `LINKED`, `CONVERTED` or `REJECTED` (`BR-AH-005`). `PENDING` is the actionable state; the other three are terminal and one-way, and a terminal report cannot be reconciled again. No `AD_HOC` Visit status exists (`BR-AH-003`). During reconciliation the office either links to an existing Job or creates a new Job, then creates a normal completed Work Visit from the reported work window, outcome, summary and technician (`BR-AH-002`); rejection voids the report without creating a Visit (`BR-AH-007`). Ad-hoc reconciliation is always purpose `WORK`: it preserves work already performed or initiated and is not an assessment workflow. The report keeps the reviewer, review note, created Job/Visit links and the original technician-submitted facts for audit.
 
 Historical reconciliation against a closed (`COMPLETED` or `CANCELED`) Job is a distinct privileged operation that inserts the historical Visit without a fake reopen transition (`BR-AH-006`), and the reconciled Visit's canonical outcome then has its normal Job-state consequence — a `RESOLVED` outcome leaves a `COMPLETED` Job `COMPLETED` and moves a `CANCELED` Job to `COMPLETED` (`BR-AH-008`). A technician who cannot identify the Customer or Property records reconciliation facts on the report only, never canonical records (`BR-AH-009`).
 

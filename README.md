@@ -238,7 +238,9 @@ Initial supported languages are **English** and **French**. Development rules li
 > **The manager's two Visit-scheduling writes exist on Android** — **Schedule a visit** on Job Details
 > (`POST /jobs/:id/visits`) and **Approve & schedule** on a pending request in the Schedule screen's
 > Requests lane (`POST /jobs/:id/visit-requests/:requestId/approval`) — and they share one form, because
-> both state the same window and crew (`BR-068`, `BR-072`). The form asks for one visit date with a start
+> both state the same window and crew (`BR-068`, `BR-072`). Visit Purpose is now part of the Visit
+> contract: scheduling defaults to `WORK`, with visible `ASSESSMENT` override; an approved work follow-up
+> request always creates a `WORK` Visit. The form asks for one visit date with a start
 > and an end time, because a visit starts and ends on the same day. A crew without exactly one Lead and an
 > end time that is not after the start time cannot be submitted, `BR-070`'s conflicts are shown and require
 > explicit confirmation before the same request is resent confirmed, and a successful approval re-reads
@@ -251,8 +253,10 @@ Initial supported languages are **English** and **French**. Development rules li
 > rather than a consequence of an outcome (`BR-FV-001`, `BR-FV-003`): the form states the window they
 > suggest, why another attempt is needed and whether they would like to carry it out, and it asks for no
 > crew because the office states who performs the Visit when it approves one (`BR-FV-004`). The action is
-> offered only for a **completed** Visit whose outcome expects a follow-up — `NEEDS_FOLLOW_UP`,
-> `NEEDS_PARTS` or `UNABLE_TO_COMPLETE` — never for a `RESOLVED` one (`BR-078`, `BR-FV-001`). Until this
+> offered only for a **completed Work Visit** whose outcome expects a follow-up — `NEEDS_FOLLOW_UP`,
+> `NEEDS_PARTS` or `UNABLE_TO_COMPLETE` — never for a `RESOLVED` one and never for an Assessment
+> recommendation (`BR-078`, `BR-FV-001`). Assessment outcomes such as `WORK_RECOMMENDED`,
+> `QUOTE_REQUIRED` and `UNABLE_TO_ASSESS` surface office attention instead. Until this
 > landed, a `NEEDS_FOLLOW_UP` completion reached the office only as derived attention on Manager Home
 > (`FOLLOW_UP_NEEDS_SCHEDULING`, `BR-078`) and the Schedule screen's Requests lane stayed empty, because
 > nothing wrote a request. It is online-only for the same reason the approval is, and nothing is drawn as a

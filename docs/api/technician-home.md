@@ -74,6 +74,7 @@ coordinates several loosely related reads to build it.
   "nextVisit": {
     "visitId": "…",
     "visitStatus": "EN_ROUTE",
+    "purposeCode": "WORK",
     "scheduledStart": "2026-09-17T13:00:00.000Z",
     "scheduledEnd": "2026-09-17T14:00:00.000Z",
     "jobId": "…",

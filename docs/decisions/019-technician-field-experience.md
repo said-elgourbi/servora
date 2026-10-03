@@ -1,5 +1,10 @@
 # ADR-019 — The technician's field experience: the field read, the Visit lifecycle and its offline posture
 
+> **Amended 2026-10-03 by Visit Purpose Phase 1.** D4's consequence remains centralized in the
+> backend, but consequences are now purpose-aware: `WORK + RESOLVED` and `ASSESSMENT + NO_WORK_REQUIRED`
+> may close the Job when no other Visit remains open; assessment recommendations derive distinct office
+> attention and do not reuse work follow-up semantics.
+>
 > **Amended 2026-09-20 by `docs/tracker/051-job-visit-lifecycle-redesign.md`.** D4's Job-consequence
 > table was written against the six-status Job lifecycle, and the `PENDING_REVIEW` entries in it no longer
 > describe Servora: `PENDING_REVIEW` is removed (`BR-058`) and a resolving Visit completion closes the Job

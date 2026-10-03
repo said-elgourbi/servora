@@ -84,7 +84,7 @@ existing meaning as the **current** decision note (`BR-FV-013`).
 
 | Surface | What it does |
 | ------- | ------------ |
-| Android — Job Details, **Request another visit** | The technician's own submission (`visits.request_follow_up`, `BR-FV-001`). The form states the window the technician proposes, why another attempt is needed and whether they would like to carry it out (`BR-FV-003`), and names the field attempt it grew from (`BR-FV-008`). It asks for no crew: the office states who performs the Visit when it approves one (`BR-FV-004`). |
+| Android — Job Details, **Request another visit** | The technician's own submission (`visits.request_follow_up`, `BR-FV-001`). The form states the window the technician proposes, why another Work attempt is needed and whether they would like to carry it out (`BR-FV-003`), and names the Work Visit it grew from (`BR-FV-008`). Assessment recommendations do not use this flow; they surface office attention. It asks for no crew: the office states who performs the Visit when it approves one (`BR-FV-004`). |
 | Android — Schedule, **Requests** lane | The office's review (`visits.review_requests`): **Approve & schedule**, **Clarify** and **Reject** on the requests the organization still has a decision to make about (`BR-FV-004`, `BR-FV-005`). The lane draws every request the API keeps reviewable — `PENDING` **and** `NEEDS_CLARIFICATION`, because `BR-FV-012` keeps a clarified request unresolved until it is approved or rejected — and a clarified request says so on its card. Clarify and Reject are taken in a confirmation that carries the office's `note`: a rejection is sent with the reason it was refused (`BR-FV-013`), and a clarification is offered the question it needs answered. A decision the API refused is reported, and nothing is presented as decided (`BR-001`). The card also draws the request's **conversation**, so the office decides on the answer it asked for rather than on the same information it already had. |
 | Android — My Schedule, **Requests** tab | The **requester's own** record of what they asked for (`visits.request_follow_up`). The `GET` answers a caller who does not hold `visits.review_requests` with their own requests only, so the tab lists the caller's own rows, newest first, each with its `status` and the office's `note` when it wrote one — which is how a rejection reaches the technician who raised the request and says why it was refused (`BR-FV-012`, `BR-FV-013`). It is a list the technician opens rather than a notification (`BR-029`), it is drawn on the capability the route accepts for it (`BR-011`), and it renders the proposal as a proposal (`BR-FV-002`). A request returned for clarification draws its conversation and offers **Answer**, which opens a composer stating what the office asked; the answer is sent to `reply` and the request returns to the office's review. A row opens the request's own **details** destination rather than the Job (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.12), which reads one request **out of this same list** — no per-request read is added — and leaves the Job one action away. |
 
@@ -93,7 +93,7 @@ existing meaning as the **current** decision note (`BR-FV-013`).
 Every request projection now carries the limited operational identity needed to recognize the work:
 jobNumber, jobTitle, customerName, the Job's preserved address snapshot, and the source Visit's scheduled
 start, status and outcome when there is a source Visit. These fields are present on list, create, reply,
-clarification and rejection responses; approval continues to return the resulting Job.
+clarification and rejection responses; approval continues to return the resulting Job. A Visit created from an approved follow-up request is always purpose `WORK`, because the request originates from a Work Visit whose outcome expected another Work attempt.
 
 The request permission that authorizes a row also authorizes this identity. A requester still receives
 only their own requests, while a reviewer receives the organization's requests; customers.view is not an
@@ -129,12 +129,13 @@ Submit request:
 }
 ```
 
-Approve or directly create:
+Approve or directly create (direct creation may include `purposeCode`; approval creates `WORK`):
 
 ```json
 {
   "scheduledStart": "2026-09-21T14:00:00Z",
   "scheduledEnd": "2026-09-21T16:00:00Z",
+  "purposeCode": "WORK",
   "technicians": [
     { "membershipId": "uuid", "roleCode": "LEAD" }
   ],
@@ -144,6 +145,8 @@ Approve or directly create:
   "note": "Approved."
 }
 ```
+
+For `POST /jobs/:id/visits`, `purposeCode` may be `WORK` or `ASSESSMENT`; when omitted it defaults to `WORK`. For follow-up approval, clients omit `purposeCode` and the created Visit is always `WORK`, because the request originated from a Work Visit outcome that expected another Work attempt.
 
 Answer a request the office returned for clarification:
 
