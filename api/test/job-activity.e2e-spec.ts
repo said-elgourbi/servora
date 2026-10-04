@@ -12,6 +12,9 @@ import {
 } from '../src/auth/permissions.js';
 import {
   customers,
+  jobDocuments,
+  jobQuoteHistory,
+  jobQuoteWorkflows,
   jobStatusHistory,
   jobs,
   organizationMemberPermissions,
@@ -251,15 +254,111 @@ describe('job activity (e2e)', () => {
       recordedAt: new Date(base + 1_000),
     });
 
-    const [note] = await database.db.insert(visitNotes).values({
-      organizationId,
-      visitId: secondVisit.id,
-      authorMembershipId: actor.id,
-      body: 'Found a damaged capacitor.',
-      recordedAt: new Date(base + 2_000),
-    }).returning();
+    const [note] = await database.db
+      .insert(visitNotes)
+      .values({
+        organizationId,
+        visitId: secondVisit.id,
+        authorMembershipId: actor.id,
+        body: 'Found a damaged capacitor.',
+        recordedAt: new Date(base + 2_000),
+      })
+      .returning();
 
     return { job, firstVisit, secondVisit, note };
+  }
+
+  /** A Job with quote workflow history and quote document rows. */
+  async function quoteActivityFixture() {
+    const actor = await newNamedMembership('Quote', 'Manager');
+    const customer = await newCustomer('Quote Activity Co');
+    const property = await newProperty('42 Quote Avenue');
+    await linkProperty(property.id, customer.id, actor.id);
+    const job = await newJob(customer.id, property.id);
+    const base = Date.now();
+    const [assessment] = await database.db
+      .insert(visits)
+      .values({
+        organizationId,
+        jobId: job.id,
+        propertyId: property.id,
+        locationAddressSnapshot: { addressLine1: '42 Quote Avenue' },
+        purposeCode: 'ASSESSMENT',
+        status: 'COMPLETED',
+        outcomeCode: 'QUOTE_REQUIRED',
+        outcomeSummary: 'Customer approval required.',
+        outcomeRecordedAt: new Date(base - 4_000),
+        outcomeRecordedByMembershipId: actor.id,
+        createdAt: new Date(base - 5_000),
+      })
+      .returning();
+    const [workflow] = await database.db
+      .insert(jobQuoteWorkflows)
+      .values({
+        organizationId,
+        jobId: job.id,
+        sourceVisitId: assessment.id,
+        state: 'APPROVED',
+        sentAt: new Date(base + 1_000),
+        sentByMembershipId: actor.id,
+        decidedAt: new Date(base + 2_000),
+        decidedByMembershipId: actor.id,
+      })
+      .returning();
+    await database.db.insert(jobQuoteHistory).values([
+      {
+        organizationId,
+        quoteWorkflowId: workflow.id,
+        jobId: job.id,
+        sourceVisitId: assessment.id,
+        event: 'REQUIRED',
+        fromState: null,
+        toState: 'REQUIRED',
+        actorMembershipId: actor.id,
+        recordedAt: new Date(base),
+      },
+      {
+        organizationId,
+        quoteWorkflowId: workflow.id,
+        jobId: job.id,
+        sourceVisitId: assessment.id,
+        event: 'SENT',
+        fromState: 'REQUIRED',
+        toState: 'SENT',
+        note: 'Sent by email.',
+        actorMembershipId: actor.id,
+        recordedAt: new Date(base + 1_000),
+      },
+      {
+        organizationId,
+        quoteWorkflowId: workflow.id,
+        jobId: job.id,
+        sourceVisitId: assessment.id,
+        event: 'APPROVED',
+        fromState: 'SENT',
+        toState: 'APPROVED',
+        note: 'Approved by phone.',
+        actorMembershipId: actor.id,
+        recordedAt: new Date(base + 3_000),
+      },
+    ]);
+    const [document] = await database.db
+      .insert(jobDocuments)
+      .values({
+        organizationId,
+        jobId: job.id,
+        documentType: 'QUOTE',
+        displayName: 'Assessment quote.pdf',
+        documentVersion: 1,
+        objectKey: `jobs/documents/${organizationId}/${job.id}/quote.pdf`,
+        contentType: 'application/pdf',
+        byteSize: 1234,
+        uploadedByMembershipId: actor.id,
+        recordedAt: new Date(base + 2_000),
+      })
+      .returning();
+
+    return { job, assessment, document };
   }
   it('refuses an unauthenticated caller with 401', async () => {
     const fixture = await activityFixture();
@@ -399,7 +498,9 @@ describe('job activity (e2e)', () => {
       .send({ body: 'Found a damaged blower capacitor.' })
       .expect(200);
 
-    const note = response.body.events.find((event: { id: string }) => event.id === fixture.note.id);
+    const note = response.body.events.find(
+      (event: { id: string }) => event.id === fixture.note.id,
+    );
     expect(note).toMatchObject({
       kind: 'VISIT_NOTE_ADDED',
       body: 'Found a damaged blower capacitor.',
@@ -423,7 +524,9 @@ describe('job activity (e2e)', () => {
       .expect(201);
 
     expect(
-      removal.body.events.some((event: { id: string }) => event.id === fixture.note.id),
+      removal.body.events.some(
+        (event: { id: string }) => event.id === fixture.note.id,
+      ),
     ).toBe(false);
 
     const ordinary = await request(app.getHttpServer())
@@ -431,7 +534,9 @@ describe('job activity (e2e)', () => {
       .set('Authorization', `Bearer ${session.accessToken}`)
       .expect(200);
     expect(
-      ordinary.body.events.some((event: { id: string }) => event.id === fixture.note.id),
+      ordinary.body.events.some(
+        (event: { id: string }) => event.id === fixture.note.id,
+      ),
     ).toBe(false);
 
     const audit = await request(app.getHttpServer())
@@ -439,13 +544,66 @@ describe('job activity (e2e)', () => {
       .set('Authorization', `Bearer ${session.accessToken}`)
       .expect(200);
 
-    const note = audit.body.events.find((event: { id: string }) => event.id === fixture.note.id);
+    const note = audit.body.events.find(
+      (event: { id: string }) => event.id === fixture.note.id,
+    );
     expect(note).toMatchObject({
       kind: 'VISIT_NOTE_ADDED',
       body: 'Found a damaged capacitor.',
       noteRemovalReason: 'Duplicate note entered by mistake.',
     });
     expect(note.noteRemovedAt).toEqual(expect.any(String));
+  });
+
+  it('projects quote workflow and quote document activity', async () => {
+    const fixture = await quoteActivityFixture();
+    const session = await signInFor([CUSTOMER_PERMISSIONS.VIEW]);
+
+    const response = await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}/activity`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    const events = response.body.events as Array<Record<string, unknown>>;
+    expect(events.map((event) => event.kind)).toEqual([
+      'JOB_QUOTE_APPROVED',
+      'JOB_QUOTE_DOCUMENT_UPLOADED',
+      'JOB_QUOTE_SENT',
+      'JOB_QUOTE_REQUIRED',
+    ]);
+
+    expect(events[0]).toMatchObject({
+      kind: 'JOB_QUOTE_APPROVED',
+      actorName: 'Quote Manager',
+      visitSequence: 1,
+      quoteFromState: 'SENT',
+      quoteToState: 'APPROVED',
+      quoteNote: 'Approved by phone.',
+    });
+    expect(events[1]).toMatchObject({
+      kind: 'JOB_QUOTE_DOCUMENT_UPLOADED',
+      actorName: 'Quote Manager',
+      visitSequence: null,
+      quoteDocumentId: fixture.document.id,
+      quoteDocumentDisplayName: 'Assessment quote.pdf',
+      quoteDocumentVersion: 1,
+      quoteDocumentIsCurrent: true,
+      quoteDocumentByteSize: 1234,
+    });
+    expect(events[2]).toMatchObject({
+      kind: 'JOB_QUOTE_SENT',
+      visitSequence: 1,
+      quoteFromState: 'REQUIRED',
+      quoteToState: 'SENT',
+      quoteNote: 'Sent by email.',
+    });
+    expect(events[3]).toMatchObject({
+      kind: 'JOB_QUOTE_REQUIRED',
+      visitSequence: 1,
+      quoteFromState: null,
+      quoteToState: 'REQUIRED',
+      quoteNote: null,
+    });
   });
 
   it('answers an empty activity for a Job that has no history', async () => {

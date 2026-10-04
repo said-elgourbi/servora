@@ -103,6 +103,12 @@ it; the API never returns presentation text (`BR-028`).
 | `JOB_PHOTO_REMOVED`           | Visit | `photoId`, `photoRemovalReason?`                |
 | `JOB_AUDIO_ADDED`             | Visit | `audioNoteId`, `audioPhase?`, `audioDurationSeconds`, `body?` |
 | `JOB_AUDIO_REMOVED`           | Visit | `audioNoteId`, `audioRemovalReason?`            |
+| `JOB_QUOTE_REQUIRED`          | Visit | `quoteFromState?`, `quoteToState`, `quoteNote?` |
+| `JOB_QUOTE_SENT`              | Visit | `quoteFromState`, `quoteToState`, `quoteNote?`  |
+| `JOB_QUOTE_APPROVED`          | Visit | `quoteFromState`, `quoteToState`, `quoteNote?`  |
+| `JOB_QUOTE_REJECTED`          | Visit | `quoteFromState`, `quoteToState`, `quoteNote?`  |
+| `JOB_QUOTE_CORRECTED`         | Visit | `quoteFromState`, `quoteToState`, `quoteNote?`  |
+| `JOB_QUOTE_DOCUMENT_UPLOADED` | Job   | `quoteDocumentId`, `quoteDocumentDisplayName?`, `quoteDocumentVersion`, `quoteDocumentIsCurrent`, `quoteDocumentByteSize` |
 
 `fromStatus`/`toStatus` are the status codes the kind's vocabulary defines (`BR-058` for a Job,
 `BR-074` for a Visit); the kind names which vocabulary the codes belong to.
@@ -136,6 +142,17 @@ same field-work phase vocabulary a photo carries, `audioDurationSeconds` is the 
 the recording's own container (`ADR-018` A3) so a client can draw it without opening the file, and a
 removal's reason travels in `audioRemovalReason` for the same reason a photo's does. Both are Visit-level
 for the same reason a photo's are, and a recording made before the link existed is the only Job-level case.
+
+Quote workflow events project the append-only `job_quote_history` rows. They carry the quote state change
+in `quoteFromState`/`quoteToState`, the optional manager note in `quoteNote`, and the source Assessment
+Visit's sequence. A replaced sent quote that resets the workflow back to `REQUIRED` therefore appears as a
+new `JOB_QUOTE_REQUIRED` event rather than rewriting the earlier `JOB_QUOTE_SENT` event.
+
+`JOB_QUOTE_DOCUMENT_UPLOADED` projects a quote PDF metadata row from `job_documents`. It is Job-level
+because the document belongs to the commercial Job record rather than a technician's field attempt; the
+source Assessment Visit remains visible through the quote workflow events. Replacement uploads appear as
+additional document-upload events, with `quoteDocumentVersion` and `quoteDocumentIsCurrent` stating the
+preserved version metadata.
 
 ### 3.3 The Visit sequence
 

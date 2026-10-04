@@ -3,9 +3,11 @@ import type { DatabaseService } from '../database/database.service.js';
 import {
   jobAudioNoteRemovals,
   jobAudioNotes,
+  jobDocuments,
   jobCustomerHistory,
   jobPhotoRemovals,
   jobPhotos,
+  jobQuoteHistory,
   jobPropertyHistory,
   jobStatusHistory,
   organizationMembers,
@@ -48,6 +50,12 @@ export const JOB_ACTIVITY_KINDS = [
   'JOB_PHOTO_REMOVED',
   'JOB_AUDIO_ADDED',
   'JOB_AUDIO_REMOVED',
+  'JOB_QUOTE_REQUIRED',
+  'JOB_QUOTE_SENT',
+  'JOB_QUOTE_APPROVED',
+  'JOB_QUOTE_REJECTED',
+  'JOB_QUOTE_CORRECTED',
+  'JOB_QUOTE_DOCUMENT_UPLOADED',
   'VISIT_STATUS_CHANGED',
   'VISIT_SCHEDULED',
   'VISIT_RESCHEDULED',
@@ -140,6 +148,22 @@ export interface JobActivityEventDto {
    * client must be able to present one without the other (`BR-028`, `BR-089`).
    */
   audioRemovalReason: string | null;
+  /** The quote workflow state before a quote event, or `null` when not carried. */
+  quoteFromState: string | null;
+  /** The quote workflow state after a quote event, or `null` when not carried. */
+  quoteToState: string | null;
+  /** The manager note recorded with a quote workflow event, or `null`. */
+  quoteNote: string | null;
+  /** The quote document id (`JOB_QUOTE_DOCUMENT_UPLOADED`), or `null`. */
+  quoteDocumentId: string | null;
+  /** The quote document display name (`JOB_QUOTE_DOCUMENT_UPLOADED`), or `null`. */
+  quoteDocumentDisplayName: string | null;
+  /** The quote document version (`JOB_QUOTE_DOCUMENT_UPLOADED`), or `null`. */
+  quoteDocumentVersion: number | null;
+  /** Whether the projected quote document is current, or `null` for non-document events. */
+  quoteDocumentIsCurrent: boolean | null;
+  /** The quote document byte size (`JOB_QUOTE_DOCUMENT_UPLOADED`), or `null`. */
+  quoteDocumentByteSize: number | null;
 }
 
 /** The Job Activity read's response body. */
@@ -189,6 +213,14 @@ interface RawEvent {
   audioDurationSeconds?: number | null;
   /** Set only by `JOB_AUDIO_REMOVED`; normalized to `null` on every other event. */
   audioRemovalReason?: string | null;
+  quoteFromState?: string | null;
+  quoteToState?: string | null;
+  quoteNote?: string | null;
+  quoteDocumentId?: string | null;
+  quoteDocumentDisplayName?: string | null;
+  quoteDocumentVersion?: number | null;
+  quoteDocumentIsCurrent?: boolean | null;
+  quoteDocumentByteSize?: number | null;
 }
 
 /** Wraps the read's events in its response body (`docs/api/job-activity.md`). */
@@ -261,6 +293,8 @@ export async function readJobActivity(
     removalRows,
     audioNoteRows,
     audioRemovalRows,
+    quoteHistoryRows,
+    quoteDocumentRows,
   ] = await Promise.all([
     db
       .select({
@@ -422,6 +456,42 @@ export async function readJobActivity(
           eq(jobAudioNotes.jobId, jobId),
         ),
       ),
+    db
+      .select({
+        id: jobQuoteHistory.id,
+        event: jobQuoteHistory.event,
+        fromState: jobQuoteHistory.fromState,
+        toState: jobQuoteHistory.toState,
+        note: jobQuoteHistory.note,
+        actorMembershipId: jobQuoteHistory.actorMembershipId,
+        sourceVisitId: jobQuoteHistory.sourceVisitId,
+        recordedAt: jobQuoteHistory.recordedAt,
+      })
+      .from(jobQuoteHistory)
+      .where(
+        and(
+          eq(jobQuoteHistory.organizationId, scope.organizationId),
+          eq(jobQuoteHistory.jobId, jobId),
+        ),
+      ),
+    db
+      .select({
+        id: jobDocuments.id,
+        displayName: jobDocuments.displayName,
+        documentVersion: jobDocuments.documentVersion,
+        isCurrent: jobDocuments.isCurrent,
+        byteSize: jobDocuments.byteSize,
+        uploadedByMembershipId: jobDocuments.uploadedByMembershipId,
+        recordedAt: jobDocuments.recordedAt,
+      })
+      .from(jobDocuments)
+      .where(
+        and(
+          eq(jobDocuments.organizationId, scope.organizationId),
+          eq(jobDocuments.jobId, jobId),
+          eq(jobDocuments.documentType, 'QUOTE'),
+        ),
+      ),
   ]);
 
   const removedPhotoIds = new Set(removalRows.map((row) => row.jobPhotoId));
@@ -539,7 +609,10 @@ export async function readJobActivity(
       body: null,
     })),
     ...noteRows
-      .filter((row) => options.includeRemovedEvidence === true || row.removedAt === null)
+      .filter(
+        (row) =>
+          options.includeRemovedEvidence === true || row.removedAt === null,
+      )
       .map((row): RawEvent => ({
         id: row.id,
         kind: 'VISIT_NOTE_ADDED',
@@ -659,6 +732,44 @@ export async function readJobActivity(
       audioNoteId: row.jobAudioNoteId,
       audioRemovalReason: row.reason,
     })),
+    ...quoteHistoryRows.map((row): RawEvent => ({
+      id: row.id,
+      kind: quoteHistoryEventKind(row.event),
+      recordedAt: row.recordedAt as Date,
+      actorMembershipId: row.actorMembershipId,
+      visitId: row.sourceVisitId,
+      fromStatus: null,
+      toStatus: null,
+      technicianMembershipId: null,
+      roleCode: null,
+      previousRoleCode: null,
+      outcomeCode: null,
+      outcomeSummary: null,
+      body: null,
+      quoteFromState: row.fromState,
+      quoteToState: row.toState,
+      quoteNote: row.note,
+    })),
+    ...quoteDocumentRows.map((row): RawEvent => ({
+      id: row.id,
+      kind: 'JOB_QUOTE_DOCUMENT_UPLOADED',
+      recordedAt: row.recordedAt as Date,
+      actorMembershipId: row.uploadedByMembershipId,
+      visitId: null,
+      fromStatus: null,
+      toStatus: null,
+      technicianMembershipId: null,
+      roleCode: null,
+      previousRoleCode: null,
+      outcomeCode: null,
+      outcomeSummary: null,
+      body: null,
+      quoteDocumentId: row.id,
+      quoteDocumentDisplayName: row.displayName,
+      quoteDocumentVersion: row.documentVersion,
+      quoteDocumentIsCurrent: row.isCurrent,
+      quoteDocumentByteSize: row.byteSize,
+    })),
   ];
 
   const membershipIds = new Set<string>();
@@ -707,6 +818,14 @@ export async function readJobActivity(
     audioPhase: event.audioPhase ?? null,
     audioDurationSeconds: event.audioDurationSeconds ?? null,
     audioRemovalReason: event.audioRemovalReason ?? null,
+    quoteFromState: event.quoteFromState ?? null,
+    quoteToState: event.quoteToState ?? null,
+    quoteNote: event.quoteNote ?? null,
+    quoteDocumentId: event.quoteDocumentId ?? null,
+    quoteDocumentDisplayName: event.quoteDocumentDisplayName ?? null,
+    quoteDocumentVersion: event.quoteDocumentVersion ?? null,
+    quoteDocumentIsCurrent: event.quoteDocumentIsCurrent ?? null,
+    quoteDocumentByteSize: event.quoteDocumentByteSize ?? null,
   }));
 }
 
@@ -748,6 +867,24 @@ function technicianEventKind(event: string): JobActivityKind {
       // The schema CHECK closes the vocabulary, so an unknown event is a programming error rather
       // than a value the read must present (`BR-042`).
       throw new Error(`Unknown visit_technician_history event: ${event}`);
+  }
+}
+
+/** Maps `job_quote_history.event` onto the activity kind (`BR-041`, tracker 061 Phase 9). */
+function quoteHistoryEventKind(event: string): JobActivityKind {
+  switch (event) {
+    case 'REQUIRED':
+      return 'JOB_QUOTE_REQUIRED';
+    case 'SENT':
+      return 'JOB_QUOTE_SENT';
+    case 'APPROVED':
+      return 'JOB_QUOTE_APPROVED';
+    case 'REJECTED':
+      return 'JOB_QUOTE_REJECTED';
+    case 'CORRECTED':
+      return 'JOB_QUOTE_CORRECTED';
+    default:
+      throw new Error(`Unknown job_quote_history event: ${event}`);
   }
 }
 
