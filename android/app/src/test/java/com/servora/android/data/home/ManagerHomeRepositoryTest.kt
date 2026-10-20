@@ -28,6 +28,23 @@ import retrofit2.Response
 class ManagerHomeRepositoryTest {
 
     @Test
+    fun `maps unfinished visit attention from the backend`() = runTest {
+        val payload = managerHomeDto().copy(
+            attention = ManagerHomeAttentionDto(
+                total = 1,
+                items = listOf(attentionItemDto().copy(kind = "VISIT_STALE_STARTED")),
+            ),
+        )
+        val repository = DefaultManagerHomeRepository(
+            FakeManagerHomeApi(answer = { payload }),
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val home = assertSuccess(repository.loadManagerHome("America/Toronto"))
+        assertEquals(ManagerAttentionKind.VISIT_STALE_STARTED, home.attention.single().kind)
+    }
+
+    @Test
     fun `sends the session and the device zone and maps the payload onto the domain model`() =
         runTest {
             val api = FakeManagerHomeApi(answer = { managerHomeDto() })
@@ -229,6 +246,77 @@ class ManagerHomeRepositoryTest {
         )
         assertEquals(3, home.attentionTotal)
         assertNull(home.attention[1].visitId)
+    }
+
+    @Test
+    fun `reads the assessment attention codes the API reports`() = runTest {
+        // An Assessment Visit's conclusions surface as office attention rather than as follow-up
+        // expectations (`BR-078`). A kind this build does not know fails the whole read (`BR-042`), so
+        // these three codes being in the vocabulary is what keeps an assessment Job on the screen.
+        val repository = DefaultManagerHomeRepository(
+            FakeManagerHomeApi(
+                answer = {
+                    managerHomeDto().copy(
+                        attention = ManagerHomeAttentionDto(
+                            total = 3,
+                            items = listOf(
+                                attentionItemDto().copy(kind = "JOB_WORK_RECOMMENDED"),
+                                attentionItemDto().copy(kind = "JOB_QUOTE_REQUIRED"),
+                                attentionItemDto().copy(kind = "JOB_NEEDS_REASSESSMENT"),
+                            ),
+                        ),
+                    )
+                },
+            ),
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val home = assertSuccess(repository.loadManagerHome("UTC"))
+
+        assertEquals(
+            listOf(
+                ManagerAttentionKind.JOB_WORK_RECOMMENDED,
+                ManagerAttentionKind.JOB_QUOTE_REQUIRED,
+                ManagerAttentionKind.JOB_NEEDS_REASSESSMENT,
+            ),
+            home.attention.map { it.kind },
+        )
+    }
+
+    @Test
+    fun `reads persisted quote workflow attention codes the API reports`() = runTest {
+        // Quote workflow attention is now derived from persisted quote state rather than directly
+        // from the Assessment Visit outcome. These codes keep Manager Home readable for sent,
+        // approved and rejected quotes (`BR-QUOTE-001`).
+        val repository = DefaultManagerHomeRepository(
+            FakeManagerHomeApi(
+                answer = {
+                    managerHomeDto().copy(
+                        attention = ManagerHomeAttentionDto(
+                            total = 3,
+                            items = listOf(
+                                attentionItemDto().copy(kind = "JOB_CUSTOMER_DECISION_PENDING"),
+                                attentionItemDto().copy(kind = "JOB_WORK_READY_TO_SCHEDULE"),
+                                attentionItemDto().copy(kind = "JOB_CANCELLATION_REQUIRED"),
+                            ),
+                        ),
+                    )
+                },
+            ),
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val home = assertSuccess(repository.loadManagerHome("UTC"))
+
+        assertEquals(
+            listOf(
+                ManagerAttentionKind.JOB_CUSTOMER_DECISION_PENDING,
+                ManagerAttentionKind.JOB_WORK_READY_TO_SCHEDULE,
+                ManagerAttentionKind.JOB_CANCELLATION_REQUIRED,
+            ),
+            home.attention.map { it.kind },
+        )
+        assertEquals(3, home.attentionTotal)
     }
 
     private fun failingWith(failure: Throwable) =

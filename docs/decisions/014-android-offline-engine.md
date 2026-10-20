@@ -5,7 +5,7 @@
 Date: 2026-09-14
 Predecessor: `docs/decisions/012-property-lifecycle-and-permissions.md` (D7 named the standard)
 Standard implemented: `docs/architecture/offline-first-architecture.md`
-Tracker: `docs/tracker/025-android-offline-room-outbox.md`
+Tracker: `docs/tracker/android/025-android-offline-room-outbox.md`
 
 References: `BR-001`, `BR-007`, `BR-013`, `BR-014`, `BR-015`, `BR-031`, `BR-032`, `BR-039`,
 `BR-041`, `BR-042`, `BR-082`, `BR-086`, `Project.md` §13–§15, `dev.md` §4, §6, §10, §18, `qa.md` §7.3.
@@ -135,4 +135,4 @@ Still open and deliberately not decided here:
 
 ## Verification
 
-Recorded in `docs/tracker/025-android-offline-room-outbox.md`.
+Recorded in `docs/tracker/android/025-android-offline-room-outbox.md`.

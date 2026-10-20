@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasScrollAction
@@ -45,6 +46,10 @@ import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
 import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobDetailsVisitSummary
+import com.servora.android.domain.model.JobQuote
+import com.servora.android.domain.model.JobQuoteAction
+import com.servora.android.domain.model.JobQuoteDocument
+import com.servora.android.domain.model.JobQuoteWorkflowState
 import com.servora.android.domain.model.JobReadOnlyReason
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
@@ -58,6 +63,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -113,6 +119,84 @@ class JobDetailsOverviewScreenTest {
     }
 
     @Test
+    fun presentsTheAssessmentQuoteWorkflowAndCurrentPdf() {
+        render(details = overviewJobWithQuote())
+
+        composeTestRule.onNodeWithTag(JobQuoteSectionTag).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.job_details_quote_label)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.job_details_quote_state_sent)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.job_activity_visit_format, 1)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Q-1042").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Assessment quote.pdf · 12.0 KB").assertIsDisplayed()
+        composeTestRule.onNodeWithText("quote-document-1").assertDoesNotExist()
+        composeTestRule
+            .onNodeWithText(string(R.string.job_details_quote_action_view_document))
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.job_details_quote_action_record_decision))
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(string(R.string.job_details_quote_action_mark_approved))
+            .assertDoesNotExist()
+        composeTestRule
+            .onNodeWithText(string(R.string.job_details_quote_action_mark_rejected))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun technicianCanViewApprovedQuoteWithoutManagementActions() {
+        var opened = false
+        val job = overviewJobWithQuote()
+        render(
+            details = job.copy(
+                quote = requireNotNull(job.quote).copy(
+                    state = JobQuoteWorkflowState.APPROVED,
+                    allowedActions = listOf(JobQuoteAction.READ_DOCUMENT),
+                ),
+            ),
+            canUpdateJob = false,
+            canOpenCustomer = false,
+            onOpenQuoteDocument = { opened = true },
+        )
+
+        composeTestRule.onNodeWithText(string(R.string.job_details_quote_action_view_document))
+            .assertIsEnabled()
+            .performClick()
+        composeTestRule.runOnIdle { assertEquals(true, opened) }
+        composeTestRule.onNodeWithText(string(R.string.job_details_quote_action_replace_document))
+            .assertDoesNotExist()
+        composeTestRule.onNodeWithText(string(R.string.job_details_quote_action_schedule_work_visit))
+            .assertDoesNotExist()
+        composeTestRule.onNodeWithText(string(R.string.job_details_quote_action_record_decision))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun technicianCanViewQuoteOnCanceledJob() {
+        var opened = false
+        val job = overviewJobWithQuote()
+        render(
+            details = job.copy(
+                status = JobStatus.CANCELED,
+                readOnlyReason = JobReadOnlyReason.JOB_CANCELED,
+                quote = requireNotNull(job.quote).copy(
+                    state = JobQuoteWorkflowState.REJECTED,
+                    allowedActions = listOf(JobQuoteAction.READ_DOCUMENT),
+                ),
+            ),
+            canUpdateJob = false,
+            onOpenQuoteDocument = { opened = true },
+        )
+
+        composeTestRule.onNodeWithText(string(R.string.job_details_quote_action_view_document))
+            .assertIsEnabled()
+            .performClick()
+        composeTestRule.runOnIdle { assertEquals(true, opened) }
+        composeTestRule.onNodeWithText(string(R.string.job_details_quote_action_cancel_job))
+            .assertDoesNotExist()
+    }
+
+    @Test
     fun keepsFollowUpRequestInASeparateCardBelowThePreviousVisit() {
         val job = overviewJob()
         render(
@@ -123,6 +207,7 @@ class JobDetailsOverviewScreenTest {
                     sourceVisitId = job.selectedVisit?.id,
                     requestingTechnicianMembershipId = "membership-1",
                     status = FollowUpVisitRequestStatus.PENDING,
+                    createdVisitId = null,
                     version = 0,
                 ),
             ),
@@ -149,6 +234,7 @@ class JobDetailsOverviewScreenTest {
                     sourceVisitId = job.selectedVisit?.id,
                     requestingTechnicianMembershipId = "membership-1",
                     status = FollowUpVisitRequestStatus.PENDING,
+                    createdVisitId = null,
                     version = 0,
                 ),
             ),
@@ -187,7 +273,7 @@ class JobDetailsOverviewScreenTest {
     fun keepsTheJobStatusControlForASessionThatMayChangeIt() {
         // The chip that presents the Job's status **is** the control that changes it, so a session that may
         // move the Job keeps it and nothing is drawn beside it
-        // (`docs/tracker/020-android-job-details-status-control.md`).
+        // (`docs/tracker/android/020-android-job-details-status-control.md`).
         render(details = overviewJob(), canUpdateJob = true)
 
         composeTestRule.onNodeWithTag(JobStatusSectionTag).assertIsDisplayed()
@@ -402,6 +488,27 @@ class JobDetailsOverviewScreenTest {
         composeTestRule.onNodeWithTag(jobActivityVisitBodyTag(VISIT_TWO_ID)).assertIsDisplayed()
         composeTestRule.onNodeWithTag(jobActivityVisitBodyTag(VISIT_ONE_ID)).assertDoesNotExist()
         composeTestRule.onNodeWithTag(jobActivityEventTag("visit-2-note")).assertIsDisplayed()
+    }
+
+    @Test
+    fun opensTheVisitNoteEditorBeforeSubmittingAnEdit() {
+        var editSubmitted = false
+        render(
+            details = overviewJob(),
+            canManageVisitNotes = true,
+            onEditVisitNote = { _, _ -> editSubmitted = true },
+        )
+
+        composeTestRule
+            .onNode(
+                hasText(string(R.string.job_activity_note_edit)) and
+                    hasAnyAncestor(hasTestTag(jobActivityEventTag("visit-2-note"))),
+            )
+            .performClick()
+
+        composeTestRule.onNodeWithText(string(R.string.job_activity_note_edit_title)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Found a damaged capacitor.").assertIsDisplayed()
+        assertFalse(editSubmitted)
     }
 
     @Test
@@ -705,7 +812,7 @@ class JobDetailsOverviewScreenTest {
     }
 
     @Test
-    fun saysWhenTheJobHasNoJobWideEventYetWithoutHidingAVisitsOwn() {
+    fun hidesEmptyJobHistoryAndVisitGroupsWithoutHidingAVisitsOwn() {
         render(
             state = JobDetailsUiState(
                 jobId = OVERVIEW_JOB_ID,
@@ -716,14 +823,8 @@ class JobDetailsOverviewScreenTest {
             ),
         )
 
-        // An empty group says so once it is opened, and the Visit's own account is still drawn: an empty
-        // general group is not an empty page (`BR-042`, `BR-080`).
-        composeTestRule.onNodeWithTag(JobActivityGeneralToggleTag).performClick()
-
-        composeTestRule.onNodeWithTag(JobActivityGeneralEmptyTag).assertIsDisplayed()
-        composeTestRule
-            .onNodeWithText(string(R.string.job_details_job_updates_empty))
-            .assertIsDisplayed()
+        composeTestRule.onNodeWithTag(JobActivityGeneralGroupTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(jobActivityVisitToggleTag(VISIT_ONE_ID)).assertDoesNotExist()
         composeTestRule.onNodeWithTag(jobActivityEventTag("visit-2-note")).assertIsDisplayed()
     }
 
@@ -734,6 +835,8 @@ class JobDetailsOverviewScreenTest {
         // Open every Visit so the whole account is on screen, then check that the one timeline the
         // backend reported is drawn once rather than once per group (`BR-080`, `BR-001`).
         composeTestRule.onNodeWithTag(jobActivityVisitToggleTag(VISIT_ONE_ID)).performClick()
+
+        composeTestRule.onNodeWithTag(JobActivityGeneralToggleTag).performClick()
 
         overviewActivity().forEach { event ->
             composeTestRule.onAllNodesWithTag(jobActivityEventTag(event.id)).assertCountEquals(1)
@@ -793,7 +896,7 @@ class JobDetailsOverviewScreenTest {
         composeTestRule.onNodeWithTag(JobDetailsContentTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobHeaderSectionTag).assertIsDisplayed()
         composeTestRule.onNodeWithTag(JobCurrentVisitSectionTag).assertIsDisplayed()
-        composeTestRule.onNodeWithTag(JobActivityGeneralEmptyTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(JobActivityGeneralGroupTag).assertDoesNotExist()
     }
 
     /**
@@ -826,6 +929,27 @@ class JobDetailsOverviewScreenTest {
 
         composeTestRule.onNodeWithTag(JobDetailsScheduleVisitActionTag).assertIsDisplayed().assertIsEnabled()
         composeTestRule.onNodeWithText(string(R.string.job_details_no_selected_visit_detail)).assertIsDisplayed()
+    }
+
+    @Test
+    fun offersThePurposeSelectorWithWorkSelectedByDefault() {
+        // Scheduling defaults to Work, with Assessment as a visible override (`BR-071`), so the form the
+        // action opens states both and leaves Work selected until the office chooses otherwise.
+        render(
+            details = overviewJob().copy(
+                selectedVisit = null,
+                technicians = emptyList(),
+                visits = emptyList(),
+                canScheduleVisit = true,
+            ),
+        )
+
+        composeTestRule.onNodeWithTag(JobDetailsScheduleVisitActionTag).performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag(ScheduleVisitPurposeSelectorTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(scheduleVisitPurposeOptionTag("WORK")).assertIsSelected()
+        composeTestRule.onNodeWithTag(scheduleVisitPurposeOptionTag("ASSESSMENT")).assertIsNotSelected()
     }
 
     @Test
@@ -923,7 +1047,7 @@ class JobDetailsOverviewScreenTest {
      * The reason is typed into, so the keyboard shortens the sheet and the body scrolls: an action inside
      * that scrolling region leaves the screen with the body, and the technician has to dismiss the keyboard
      * to submit the proposal — the defect reported in
-     * `docs/tracker/057-qa-issue-list-visit-workflow.md` §3. The keyboard cannot be shown or hidden from an
+     * `docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §3. The keyboard cannot be shown or hidden from an
      * instrumentation test, so what is asserted is where each part sits
      * (`docs/design/android-design-system.md`, "Keyboard (IME) inset").
      */
@@ -953,6 +1077,9 @@ class JobDetailsOverviewScreenTest {
         canReviewVisitRequests: Boolean = false,
         canRequestFollowUpVisit: Boolean = false,
         canOpenCustomer: Boolean = true,
+        canManageVisitNotes: Boolean = false,
+        onOpenQuoteDocument: () -> Unit = {},
+        onEditVisitNote: (noteId: String, body: String) -> Unit = { _, _ -> },
         onRequestFollowUpVisit: (
             reason: String,
             start: Instant,
@@ -989,15 +1116,23 @@ class JobDetailsOverviewScreenTest {
                     onOpenInMaps = {},
                     onLoadAssignableTechnicians = {},
                     onChangeJobStatus = {},
+                    onMarkQuoteSent = {},
+                    onMarkQuoteRequired = {},
+                    onMarkQuoteApproved = {},
+                    onMarkQuoteRejected = {},
+                    onOpenQuoteDocument = onOpenQuoteDocument,
                     onChangeVisitStatus = {},
                     onCompleteVisit = { _, _ -> },
                     onDiscardQueuedVisitAction = {},
                     onDiscardQueuedVisitNote = {},
                     onAddActivityText = {},
+                    onEditVisitNote = onEditVisitNote,
+                    onRemoveVisitNote = { _, _ -> },
                     onRescheduleVisit = { _, _ -> },
-                    onScheduleVisit = { _, _, _ -> },
+                    onScheduleVisit = { _, _, _, _ -> },
                     onRequestFollowUpVisit = onRequestFollowUpVisit,
                     onOpenRequest = {},
+                    onOpenVisit = {},
                     onAssignTechnicians = {},
                     onConfirmPendingAction = {},
                     onDismissPendingAction = {},
@@ -1016,6 +1151,7 @@ class JobDetailsOverviewScreenTest {
                     onSavePermissionResult = {},
                     canViewEvidence = false,
                     canRemoveEvidence = false,
+                    canManageVisitNotes = canManageVisitNotes,
                     canAddAudio = false,
                     canRemoveAudioEvidence = false,
                     onSelectAudioPhase = {},
@@ -1153,6 +1289,42 @@ private fun overviewJob() = JobDetails(
  * The Job these tests read with its represented Visit completed with a follow-up outcome, so the
  * request action is the API's own answer (`BR-078`, `BR-FV-001`).
  */
+private fun overviewJobWithQuote(): JobDetails = overviewJob().copy(
+    quote = JobQuote(
+        id = "quote-1",
+        state = JobQuoteWorkflowState.SENT,
+        sourceVisitId = VISIT_ONE_ID,
+        sourceVisitSequence = 1,
+        version = 3,
+        sentAt = "2026-09-08T16:00:00.000Z",
+        sentByMembershipId = "manager-1",
+        sentNote = "Sent by email.",
+        externalReference = "Q-1042",
+        decidedAt = null,
+        decidedByMembershipId = null,
+        decisionNote = null,
+        currentDocument = JobQuoteDocument(
+            id = "quote-document-1",
+            displayName = "Assessment quote.pdf",
+            documentVersion = 2,
+            isCurrent = true,
+            contentType = "application/pdf",
+            byteSize = 12_288L,
+            uploadedByMembershipId = "manager-1",
+            supersededAt = null,
+            supersededByJobDocumentId = null,
+            recordedAt = "2026-09-08T15:55:00.000Z",
+        ),
+        allowedActions = listOf(
+            JobQuoteAction.UPLOAD_DOCUMENT,
+            JobQuoteAction.READ_DOCUMENT,
+            JobQuoteAction.MARK_REQUIRED,
+            JobQuoteAction.MARK_APPROVED,
+            JobQuoteAction.MARK_REJECTED,
+        ),
+    ),
+)
+
 private fun overviewJobCompletedWithFollowUp(): JobDetails {
     val base = overviewJob()
     val represented = requireNotNull(base.selectedVisit)
@@ -1271,7 +1443,7 @@ private fun overviewJobWideEvents() = listOf(
  * A field is typed into inside a sheet's body, which shrinks and scrolls while the keyboard is up, and the
  * sheet's decisions are its own foot — drawn under that body rather than inside it, so the keyboard cannot
  * carry them off the screen (`docs/design/android-design-system.md`, "Keyboard (IME) inset";
- * `docs/tracker/057-qa-issue-list-visit-workflow.md` §3). The keyboard itself cannot be shown or hidden from
+ * `docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §3). The keyboard itself cannot be shown or hidden from
  * an instrumentation test, so the contract is asserted in this structural form.
  */
 private fun hasNoScrollableAncestor(): SemanticsMatcher {

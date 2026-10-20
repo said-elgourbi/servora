@@ -1,5 +1,11 @@
 # Servora — Offline-First Architecture Standard (Android)
 
+Angular field persistence has a separate implemented design in
+[ADR-027](../decisions/027-angular-field-offline-workflow.md). Its scoped IndexedDB working set,
+drafts and foreground replay do not alter the Android engine or imply browser cold-start offline
+authentication. Service-worker caching remains shell-only; field business data uses scoped IndexedDB.
+Physical iPhone/PWA acceptance remains pending in tracker 064.
+
 > **Status: IMPLEMENTED for the operations that adopt it.** The store, the outbox, the replay engine
 > and the triggers exist, and seven adopters use them: **Property archive and restore** (`BR-086`), the
 > **Customer Detail read**, the **Customers list read**, the **Job photo upload** (`BR-015`,
@@ -11,14 +17,14 @@
 > Decision records: `docs/decisions/012-property-lifecycle-and-permissions.md` (D7, which defined this
 > standard) and `docs/decisions/014-android-offline-engine.md` (the engine as built).
 >
-> Implementation records: `docs/tracker/025-android-offline-room-outbox.md` (the engine and its first
-> two adopters), `docs/tracker/026-android-offline-customers-list.md` (the list read) and
-> `docs/tracker/027-android-job-photo-updates.md` (the photo upload, and the local draft table it added).
+> Implementation records: `docs/tracker/android/025-android-offline-room-outbox.md` (the engine and its first
+> two adopters), `docs/tracker/android/026-android-offline-customers-list.md` (the list read) and
+> `docs/tracker/android/027-android-job-photo-updates.md` (the photo upload, and the local draft table it added).
 >
 > **Update (2026-09-14).** The client half now exists. The **server** half of the Property contract
 > already did: Property archive and restore accept a client-generated `clientOperationId` and the
 > device `capturedAt`, persist them, and recognise a replay instead of applying it twice
-> (`docs/tracker/013-property-lifecycle.md`, `docs/api/customers.md` §4.2).
+> (`docs/tracker/shared/013-property-lifecycle.md`, `docs/api/customers.md` §4.2).
 >
 > Read together with `Project.md` §13–§15, `dev.md` §10 and the business rules
 > `BR-013`, `BR-014`, `BR-015`, `BR-031`, `BR-032` and `BR-086`.
@@ -223,7 +229,7 @@ Photos, audio and files are business evidence (`BR-015`, `BR-027`).
   attributed to its subject, so no other session replays it. What should happen to that pending work —
   and whether sign-out should ask the user about it — is an **OPEN QUESTION**, recorded rather than
   decided (`docs/decisions/014-android-offline-engine.md` D7,
-  `docs/tracker/025-android-offline-room-outbox.md`).
+  `docs/tracker/android/025-android-offline-room-outbox.md`).
 - Local data is never treated as authoritative when the backend answers. A successful read
   replaces the local copy.
 
@@ -283,7 +289,7 @@ These remain **OPEN QUESTION** and must not be invented:
    backend **permanently refused** is discardable by the technician: the file, the draft row and the
    queued refusal go together, the refusal being terminal and never replayed, while a queued or
    retrying upload stays exactly as it is (`BR-014`). Recorded in
-   `docs/tracker/027-android-job-photo-updates.md` and `docs/tracker/029-photo-evidence-phases.md`.
+   `docs/tracker/android/027-android-job-photo-updates.md` and `docs/tracker/shared/029-photo-evidence-phases.md`.
 5. **The Job Details and Job Activity reads** (`D5`, `BR-013`, `BR-080`) — served from the working set
    when the API cannot be reached, so the Job and the Activity that projects its evidence are readable
    without connectivity: which photos the Job holds, with each one's phase, note and time. They follow
@@ -296,7 +302,7 @@ These remain **OPEN QUESTION** and must not be invented:
    and then read offline does not serve evidence that predates it (`BR-089`, tracker 029 Phase 6b). Photo
    **bytes** are not held here: accepted
    evidence's bytes are the image stack's evictable cache, and a pending upload's bytes are its own
-   app-private file (§9). Recorded in `docs/tracker/029-photo-evidence-phases.md` (Phase 5, Phase 6b).
+   app-private file (§9). Recorded in `docs/tracker/shared/029-photo-evidence-phases.md` (Phase 5, Phase 6b).
 6. **The Job audio note upload** (`BR-091`, `ADR-018`) — offline-capable, carrying a `clientOperationId`,
    applied by `JobAudioUploadHandler` and queued through the same `OutboxStore`. It is the photo adopter's
    shape for evidence of its own kind (`ADR-018` A1): the recording is written into app-private storage by
@@ -306,7 +312,7 @@ These remain **OPEN QUESTION** and must not be invented:
    which is neither a working-set answer nor a queued mutation — and it holds paths and metadata, never
    audio bytes (§9). A take the backend **permanently refused** is discardable by the technician on the same
    terms a refused photo is (`D6c`), and the notice that reports an unaccepted take is where that discard
-   lives. Recorded in `docs/tracker/035-android-audio-evidence.md` (Phase 9b).
+   lives. Recorded in `docs/tracker/android/035-android-audio-evidence.md` (Phase 9b).
 7. **Playing an accepted recording** (`BR-091`, `ADR-018` A9, tracker 035 Phase 9c) — a read, not a
    mutation, so it queues nothing. It is the audio kind's answer to the same question `D5` answered for
    photos: the recording's **metadata** (which recordings the Job holds, each one's phase, length and note)
@@ -336,7 +342,7 @@ These remain **OPEN QUESTION** and must not be invented:
    only when the request could not reach the backend**, because a `BR-070` schedule conflict has to be
    shown and accepted explicitly and a refused outbox row is never re-applied — the Property lifecycle's
    shape for a versioned state-change command, not the uploads'. Recorded in
-   `docs/api/job-actions.md` §7 and `docs/tracker/037-technician-field-experience.md`.
+   `docs/api/job-actions.md` §7 and `docs/tracker/shared/037-technician-field-experience.md`.
 9. **The technician home read** (`GET /home/technician`, `BR-013`; `ADR-019` D6, tracker 037
    Phase 4) — served from the working set when the API cannot be reached, so the answer to
    "what do I need to do next?" survives a loss of connectivity: the next Visit, the day's own
@@ -408,7 +414,7 @@ business behaviour: which operations are offline-capable, and how a conflict is 
    current, and the mark is cleared when the backend answers again (§7).
 4. Where the answer depends on a scope the backend applied — a filter, for example — the row is keyed
    by that scope, so one scope's answer is never served for another
-   (`docs/tracker/026-android-offline-customers-list.md`).
+   (`docs/tracker/android/026-android-offline-customers-list.md`).
 
 **A mutation.** An offline-capable mutation reuses the engine that exists; it does not grow its own
 queue, retry loop or connectivity check.

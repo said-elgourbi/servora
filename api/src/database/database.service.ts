@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -16,7 +17,16 @@ import { loadConfig } from '../config/configuration.js';
 export class DatabaseService implements OnApplicationShutdown {
   private readonly logger = new Logger(DatabaseService.name);
   private readonly client: postgres.Sql;
-  readonly db: PostgresJsDatabase<Record<string, never>>;
+  private readonly pool: PostgresJsDatabase<Record<string, never>>;
+  private readonly fieldTransaction = new AsyncLocalStorage<
+    PostgresJsDatabase<Record<string, never>>
+  >();
+  get db(): PostgresJsDatabase<Record<string, never>> {
+    return this.fieldTransaction.getStore() ?? this.pool;
+  }
+  withFieldTransaction<T>(work: () => Promise<T>): Promise<T> {
+    return this.pool.transaction((tx) => this.fieldTransaction.run(tx, work));
+  }
 
   constructor() {
     const { databaseUrl } = loadConfig();
@@ -27,7 +37,7 @@ export class DatabaseService implements OnApplicationShutdown {
       // postgres.js writing to stdout directly.
       onnotice: () => undefined,
     });
-    this.db = drizzle(this.client);
+    this.pool = drizzle(this.client);
   }
 
   /** Executes `SELECT 1` through Drizzle to verify database connectivity. */

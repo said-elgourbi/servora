@@ -2,7 +2,6 @@ package com.servora.android.ui.jobs
 
 import com.servora.android.domain.model.CustomerJobAddress
 import com.servora.android.domain.model.JobActivityEvent
-import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobContactPerson
 import com.servora.android.domain.model.JobCustomerContact
 import com.servora.android.domain.model.JobDetails
@@ -169,7 +168,7 @@ private fun JobContactPerson.contactPersonName(): String =
  * timeline rather than a re-sorted copy of it (`BR-001`).
  */
 internal data class JobActivityGroups(
-    /** The events that belong to the Job itself (`JOB_*` kinds and anything unattributable). */
+    /** Events with no Visit relationship, including anything unattributable. */
     val jobWide: List<JobActivityEvent>,
     /** Each Visit's own events, keyed by the Visit's identifier. */
     val byVisitId: Map<String, List<JobActivityEvent>>,
@@ -197,52 +196,6 @@ internal fun groupJobActivity(
     return JobActivityGroups(jobWide = jobWide, byVisitId = byVisitId)
 }
 
-/**
- * The primary Job Activity timeline is operational, not an audit log (`BR-080`).
- *
- * A reader opening Job Details needs to know what actually happened in the field: notes, evidence,
- * meaningful field milestones and the outcome. Administrative events remain in the activity data and are
- * available through a secondary history, but they do not dominate the first timeline a reader sees.
- */
-internal fun List<JobActivityEvent>.primaryActivity(): List<JobActivityEvent> =
-    filter { event -> event.isPrimaryActivity() }
-
-/** Administrative/system history kept out of the primary operational timeline. */
-internal fun List<JobActivityEvent>.administrativeActivity(): List<JobActivityEvent> =
-    filterNot { event -> event.isPrimaryActivity() }
-
-internal fun primaryActivityCount(events: List<JobActivityEvent>?): Int =
-    events.orEmpty().count { event -> event.isPrimaryActivity() }
-
-private fun JobActivityEvent.isPrimaryActivity(): Boolean =
-    when (kind) {
-        JobActivityKind.VISIT_NOTE_ADDED,
-        JobActivityKind.JOB_PHOTO_ADDED,
-        JobActivityKind.JOB_AUDIO_ADDED,
-        JobActivityKind.VISIT_OUTCOME_RECORDED,
-        -> true
-        JobActivityKind.VISIT_STATUS_CHANGED -> toStatus in MeaningfulVisitStatusMilestones
-        JobActivityKind.JOB_STATUS_CHANGED,
-        JobActivityKind.JOB_PROPERTY_CHANGED,
-        JobActivityKind.JOB_CUSTOMER_CHANGED,
-        JobActivityKind.VISIT_SCHEDULED,
-        JobActivityKind.VISIT_RESCHEDULED,
-        JobActivityKind.VISIT_TECHNICIAN_ASSIGNED,
-        JobActivityKind.VISIT_TECHNICIAN_REMOVED,
-        JobActivityKind.VISIT_TECHNICIAN_ROLE_CHANGED,
-        JobActivityKind.JOB_PHOTO_REMOVED,
-        JobActivityKind.JOB_AUDIO_REMOVED,
-        -> false
-    }
-
-private val MeaningfulVisitStatusMilestones = setOf(
-    VisitStatus.EN_ROUTE.name,
-    VisitStatus.ON_SITE.name,
-    VisitStatus.IN_PROGRESS.name,
-    VisitStatus.COMPLETED.name,
-    VisitStatus.CANCELED.name,
-)
-
 /** Which scheduling action, if any, Job Details may offer from the Job's current Visit shape. */
 internal enum class JobVisitScheduleAction {
     INITIAL_VISIT,
@@ -255,8 +208,8 @@ internal enum class JobVisitScheduleAction {
  *
  * Whether a session may schedule a new Visit at all is the API's own `canScheduleVisit` answer, which
  * already folds in the capability, the Job's open state and its Visit shape (`BR-041`, `BR-007`). This
- * function only picks the label for that answer: a first field attempt when no Visit is represented, and
- * a follow-up otherwise.
+ * function only picks the label: follow-up for a completed attempt expecting more work, and the
+ * generic schedule label otherwise, including a reopened Job with resolved or canceled history.
  */
 internal fun JobDetails.visitScheduleAction(): JobVisitScheduleAction? {
     if (!canScheduleVisit) return null
@@ -276,7 +229,7 @@ internal fun JobDetails.visitScheduleAction(): JobVisitScheduleAction? {
     ) {
         JobVisitScheduleAction.FOLLOW_UP_VISIT
     } else {
-        null
+        JobVisitScheduleAction.INITIAL_VISIT
     }
 }
 
@@ -299,19 +252,18 @@ internal data class VisitActivityGroup(
     val visit: JobDetailsVisitSummary,
     val activity: List<JobActivityEvent>,
     /**
-     * Whether this is the Visit the screen represents (`BR-081`), which is the one opened by default so
-     * the current field attempt's account is on screen without a tap (`BR-012`).
+     * Whether this is the Visit whose work is current enough to open by default. Completed Visits stay
+     * folded so the activity section leads with the active field attempt (`BR-012`, `BR-080`).
      */
-    val isRepresentedVisit: Boolean,
+    val isCurrentVisit: Boolean,
 )
 
 /**
  * The Job's Visits as activity groups, newest first (`BR-047`, `BR-080`).
  *
- * Every Visit gets a group, because every Visit has its own account of what happened on it and the Job
- * Activity section is where a reader goes to find which update belongs to which field attempt. A Visit
- * with no events keeps its group and states that nothing has been recorded on it, so a missing account
- * is read as an empty one rather than as a Visit the page never mentions (`BR-042`).
+ * Every Visit with activity gets a group, because the Job Activity section is where a reader goes to find
+ * which update belongs to which field attempt. A Visit with no events is left out of this section, so the
+ * reader scans only recorded history rather than empty placeholders (`BR-042`, `BR-080`).
  *
  * A Visit with a schedule is ordered by that schedule, most recent first, because that is what its
  * section states; a Visit that has not been scheduled yet has no date to order by, so it follows the
@@ -329,11 +281,13 @@ internal fun visitActivityGroups(
                 visitStart(visit.scheduledStart)?.toEpochMilli() ?: Long.MIN_VALUE
             }.thenByDescending { visit -> visit.sequence },
         )
-        .map { visit ->
+        .mapNotNull { visit ->
+            val activity = groups.activityFor(visit.id)
+            if (activity.isEmpty()) return@mapNotNull null
             VisitActivityGroup(
                 visit = visit,
-                activity = groups.activityFor(visit.id),
-                isRepresentedVisit = visit.id == representedVisitId,
+                activity = activity,
+                isCurrentVisit = visit.id == representedVisitId && visit.status != VisitStatus.COMPLETED,
             )
         }
 

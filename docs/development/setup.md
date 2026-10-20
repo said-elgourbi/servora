@@ -6,7 +6,7 @@ How to bring up the foundation, **seed test data**, and run a client against a l
 repository's own `Makefile` targets; the `Makefile` remains authoritative if they ever change.
 
 References: `dev.md` §5 (configuration and secrets), `dev.md` §6 (database), `qa.md` §3
-(verification commands), `docs/api/authentication.md`, `docs/tracker/001-foundation.md`.
+(verification commands), `docs/api/authentication.md`, `docs/tracker/api/001-foundation.md`.
 
 ## 1. Prerequisites
 
@@ -21,7 +21,7 @@ References: `dev.md` §5 (configuration and secrets), `dev.md` §6 (database), `
 ```bash
 cp .env.example .env          # gitignored; docker compose reads it automatically
 openssl rand -base64 48       # put the result in JWT_SECRET (≥ 32 characters, no fallback)
-make up                       # build + start PostgreSQL and the API
+make up                       # build + start Angular, API, PostgreSQL and MinIO
 make migrate                  # apply pending Drizzle migrations (host tooling)
 curl http://localhost:3000/health
 ```
@@ -162,7 +162,7 @@ typing a seeded credential. It is development tooling, not product behaviour (`B
 | Which accounts?                   | The two `make seed` accounts above, with the passwords from your git-ignored `.env`                                                                             |
 | The seed generated a password     | `make seed` printed the generated value once when `SEED_*_PASSWORD` was empty — paste that into `DevSignInAccounts.kt`                                            |
 | Does it bypass authentication?    | No. A button prefills the form and submits the real credentials to the real `POST /auth/sign-in` (`BR-018`, `BR-007`)                                           |
-| How is it removed?                | `docs/tracker/049-android-dev-sign-in-buttons.md` lists the exact files to delete                                                                               |
+| How is it removed?                | `docs/tracker/android/049-android-dev-sign-in-buttons.md` lists the exact files to delete                                                                               |
 
 Those passwords are local-only and belong to reserved `.test` accounts, but they **are** in git: this is
 the one deliberate exception to `dev.md` §5 recorded in the tracker entry above. Never put a real
@@ -238,7 +238,8 @@ Notes:
 
 | Command                                                | Purpose                                          |
 | ------------------------------------------------------ | ------------------------------------------------ |
-| `make up` / `make down` / `make down-v`                | Start / stop / stop + delete the database and storage volumes |
+| `make up` / `make down` / `make down-v`                | Build/start the local stack including Angular / stop / stop + delete data volumes |
+| `make reboot`                                        | Rebuild API/Angular images and recreate the local stack, retaining stored data |
 | `make logs` / `make ps`                                | Follow logs / show service status                |
 | `make migrate`                                         | Apply migrations (host tooling)                  |
 | `make migration NAME=<name>`                           | Generate a migration from the Drizzle schema     |
@@ -292,7 +293,7 @@ EMAIL_PROVIDER=resend \
 
 Verifying the sending domain with Resend is an operational step, not code. Without a provider
 account, keep the defaults and use the development file sink instead (run the API on the host and
-set `PASSWORD_RESET_DELIVERY=file`); `docs/tracker/004-authentication-domain-model.md` has the
+set `PASSWORD_RESET_DELIVERY=file`); `docs/tracker/shared/004-authentication-domain-model.md` has the
 step-by-step reset checklist, and `.env.example` documents every variable.
 
 A provider rejection never changes the API response: the reset request answers `202` either way
@@ -402,3 +403,24 @@ Notes:
 | A presigned URL returns `SignatureDoesNotMatch` (once presigning exists)        | SigV4 covers the `Host` header, so the URL was signed for another host | Sign for exactly the host the client calls; see `ADR-013` D7 and `S3_PUBLIC_ENDPOINT`                             |
 | The machine becomes sluggish and `free -m` shows several GB held by `java`      | Gradle/Kotlin daemons from earlier Android builds are still idling   | `make tidy` (§8)                                                                                                 |
 | A change to `android/gradle.properties` seems to have no effect                 | The running daemon still uses the JVM arguments it started with       | `make android-stop`, then run the build again (§8)                                                               |
+
+
+## 9. Angular office client
+
+The workspace is `web/`; use [web setup, architecture and hosting](../../web/README.md).
+Run `make up` and open http://localhost:4200. `make reboot` rebuilds the API and Angular images
+and recreates the containers; refresh the browser and accept the PWA Reload prompt when offered.
+`make down` stops the stack while retaining database and storage volumes. The Make commands use
+`docker-compose.local.yml` alongside the base Compose file: a built Angular PWA is served by Nginx,
+API requests are proxied on the same origin, and the API uses development-mode browser cookies.
+`WEB_PORT` changes the local browser port and default WEB_ORIGIN together. Stop any separate host
+Angular server on that port before using the container workflow. Production defaults in the base
+Compose file are unchanged and still require an explicit HTTPS WEB_ORIGIN for browser auth.
+The browser adapter uses HttpOnly refresh cookies and an in-memory access token. For live reload,
+the optional host workflow is documented in the web README.
+No seed/reset or database migration is required for the web slice.
+
+`make web-install`, `web-start`, `web-lint`, `web-typecheck`, `web-test`, `web-build` and
+`web-test-e2e` provide the web commands. Build before browser E2E; install Playwright Chromium once
+as documented in the web README. Shared contracts are file dependencies, so keep `packages/`
+beside `api/` and `web/` when installing or building from a checkout.

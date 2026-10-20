@@ -6,7 +6,7 @@
 `POST /auth/password-reset/complete`, `POST /auth/sms/request` and `POST /auth/sms/verify`.
 Items listed in §3.5 are
 still decisions, not behaviour. This is the slice named in
-`docs/tracker/004-authentication-domain-model.md` §Next ("`/auth` endpoints … built against
+`docs/tracker/shared/004-authentication-domain-model.md` §Next ("`/auth` endpoints … built against
 these tables, with `401`/`403`/authorization coverage at the API boundary") and required by
 `docs/decisions/004-authentication-domain-model.md` ("the next slice must define the `/auth`
 contracts against these tables").
@@ -395,3 +395,39 @@ is no longer the only one.
 | Approved limits | reset request 3/15 min and 10/24 h per identity; OTP request 3/15 min and 10/24 h per number; OTP resend cooldown 60 s. All are configuration (`AUTH_RATE_LIMIT_*`, `SMS_OTP_RESEND_COOLDOWN`, `PASSWORD_RESET_MAX_ATTEMPTS`, `SMS_OTP_LIFETIME`, `SMS_OTP_MAX_ATTEMPTS`) |
 | Attempt limits  | 5 failed verifications per reset credential (`PASSWORD_RESET_MAX_ATTEMPTS`) and per OTP (`SMS_OTP_MAX_ATTEMPTS`); the counters are persisted, not in memory                                                                                                               |
 | Enumeration     | An unknown identity is still counted by the rate limiter, so a `429` discloses nothing (`BR-044`)                                                                                                                                                                         |
+
+
+## Browser cookie adapter (Angular; ADR-026)
+
+Existing JSON/Bearer endpoints above retain their Android contract. Angular uses these additional
+same-origin POST endpoints, backed by the same services, sessions and database:
+
+| Endpoint | Body | Success |
+| --- | --- | --- |
+| `/auth/web/sign-in` | Existing email/password/device shape; platform must be WEB | 200 browser access response + refresh cookie |
+| `/auth/web/sms/request` | `{ phone }` | Generic 202; same eligibility/rate-limit rules |
+| `/auth/web/sms/verify` | Existing phone/code/device shape; platform must be WEB | 200 browser access response + refresh cookie |
+| `/auth/web/refresh` | `{}`; refresh credential comes only from cookie | 200 rotated cookie + browser access response |
+| `/auth/web/sign-out` | `{}`; no access token required | 204 after cookie-session revocation and cookie clearing |
+
+The browser access response contains only `accessToken`, `accessTokenExpiresAt`, `sessionId`;
+refresh tokens and permissions are excluded. Read identity/effective permissions from existing
+`GET /auth/me` using Bearer authentication. Shared TypeScript declarations and recognized permission
+codes live in `packages/shared-types/`; Android's public response shape is unchanged.
+
+Every adapter POST requires exact configured WEB_ORIGIN as its Origin header and X-Servora-Web: 1.
+Foreign/missing origins and missing headers return 403 FORBIDDEN before authentication. Production
+requires HTTPS; an unset WEB_ORIGIN disables the browser adapter. No permissive CORS is introduced.
+
+Production refresh cookie: __Secure-servora-refresh, Secure, HttpOnly, SameSite=Strict, host-only,
+Path=/auth/web. Development localhost HTTP uses servora-refresh without Secure. Cookie expiry
+follows configured session lifetime; backend expiry/revocation remains authoritative. Adapter
+responses and /auth/me use Cache-Control: no-store. Invalid refresh returns 401 and clears the cookie;
+transient failures preserve it for retry. Sign-out revokes by the hashed refresh-credential lookup,
+so expired access tokens cannot prevent logout; unknown/no cookie is an idempotent 204. Database
+failure preserves the cookie for revocation retry and does not report success.
+
+Browser tabs must serialize cookie mutations (Angular uses Web Locks). Refresh rotation remains
+single use; a network-ambiguous lost refresh response can require signing in again. See
+[ADR-026](../decisions/026-angular-foundation-and-browser-sessions.md) for startup, logout races,
+cross-tab behavior, storage constraints and PWA cache policy.

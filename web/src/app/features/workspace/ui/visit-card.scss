@@ -1,0 +1,113 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.visit-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--mat-sys-on-surface-variant);
+}
+p {
+  line-height: 1.65;
+}
+h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 21px 0 12px;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.45;
+  letter-spacing: -0.02em;
+}
+h3 app-icon {
+  width: 16px;
+  height: 16px;
+  margin-top: 4px;
+  color: var(--mat-sys-on-surface-variant);
+}
+.visit-card p,
+.visit-meta {
+  color: var(--mat-sys-on-surface-variant);
+}
+.visit-card {
+  display: block;
+  height: 100%;
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: 12px;
+  padding: 22px;
+  text-decoration: none;
+  color: var(--mat-sys-on-surface);
+  background: var(--mat-sys-surface);
+  overflow-wrap: anywhere;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+  box-shadow: 0 2px 3px rgb(0 0 0 / 2%);
+}
+.visit-card:hover {
+  border-color: color-mix(in srgb, var(--mat-sys-primary) 55%, var(--mat-sys-outline-variant));
+  box-shadow: 0 4px 16px rgb(0 0 0 / 5%);
+}
+.visit-card p {
+  margin: 6px 0;
+  font-size: 12px;
+}
+.visit-meta {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.visit-meta > span:first-child {
+  font-weight: 550;
+}
+.card-customer,
+.card-address,
+.card-crew {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.card-customer app-icon,
+.card-address app-icon,
+.card-crew app-icon {
+  align-self: flex-start;
+  margin-top: 2px;
+  width: 14px;
+  height: 14px;
+}
+.job-number {
+  margin-left: auto;
+  font-size: 11px;
+}
+.visit-card .property-name {
+  margin: 18px 0 4px;
+  color: var(--mat-sys-on-surface);
+  font-weight: 550;
+}
+.card-address {
+  margin-bottom: 18px !important;
+}
+.visit-card > .visit-meta:not(:first-child) {
+  border-top: 1px solid var(--mat-sys-outline-variant);
+  padding-top: 14px;
+  margin-top: 18px;
+}
+.card-crew {
+  margin-top: 10px !important;
+}
+.condition {
+  color: var(--mat-sys-error);
+  font-size: 11px;
+}
+.visit-card {
+  padding: 20px;
+}
+@media (max-width: 480px) {
+  .visit-card {
+    padding: 20px;
+  }
+}

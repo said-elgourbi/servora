@@ -134,9 +134,10 @@ not communicated by colour alone (`docs/design/android-design-system.md`). Both 
   (`libs.versions.toml`, `appcompat = "1.8.0"`).
 * `Theme.Servora` descends from `Theme.AppCompat.DayNight.NoActionBar` in both `values/` and
   `values-night/`; the dark variant still owns the true-black window background.
-* Changing the language recreates the activity, because the platform reloads resources. This is
-  platform behaviour, and it is acceptable here: the control sits on the sign-in screen, before any
-  work is in progress.
+* `MainActivity` handles `locale|layoutDirection` configuration changes in place. Compose observes
+  the updated configuration and reloads translated resources without recreating the activity,
+  avoiding a window flash and preserving the current screen and form state. This applies to both
+  the sign-in and profile controls; AppCompat still owns locale application and persistence.
 * `ServoraTheme`'s `isSystemInDarkTheme()` default reports the night mode the delegate applies, so
   Compose colours and `-night` resources follow one value. Because the platform's default system bar
   content follows the *device* setting and this theme sets no `windowLightStatusBar`, `ServoraTheme`
@@ -151,4 +152,3 @@ not communicated by colour alone (`docs/design/android-design-system.md`). Both 
 * An appearance that follows the **user account** across devices: needs a profile preference
   (`BR-039`, still open).
 * Offering the same control in the Angular console: Angular owns its own language handling.
-

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DomainValidationError } from '../validation/domain-validation.js';
 import {
   parseRejectAdHocWorkReportDto,
+  parseResolveAdHocWorkReportLocationDto,
   parseSubmitAdHocWorkReportDto,
   toAdHocWorkReportDto,
 } from './ad-hoc-work-report.dto.js';
@@ -11,8 +12,59 @@ const PROPERTY_ID = '00000000-0000-4000-8000-000000000002';
 const JOB_ID = '00000000-0000-4000-8000-000000000003';
 
 describe('ad-hoc work report DTOs', () => {
-  it('parses a minimal report and defaults provenance to null', () => {
+  const resolution = {
+    existingCustomerId: CUSTOMER_ID,
+    existingPropertyId: PROPERTY_ID,
+    expectedStatus: 'PENDING',
+    expectedVersion: 1,
+  };
+  it.each([
+    { expectedVersion: undefined },
+    { expectedStatus: undefined },
+    { expectedStatus: 'CONVERTED' },
+    { existingCustomerId: undefined },
+    { existingPropertyId: undefined },
+    { newCustomer: { type: 'COMPANY' } },
+    { newProperty: { addressLine1: 'Street' } },
+    {
+      existingCustomerId: undefined,
+      newCustomer: {
+        type: 'COMPANY',
+        displayName: 'Company',
+        company: { legalName: 'Company' },
+      },
+    },
+  ])('rejects ambiguous or unguarded resolution %j', (override) => {
+    expect(() =>
+      parseResolveAdHocWorkReportLocationDto({ ...resolution, ...override }),
+    ).toThrow(DomainValidationError);
+  });
+
+  it('reuses customer and property create validation for resolution', () => {
+    const parsed = parseResolveAdHocWorkReportLocationDto({
+      expectedStatus: 'PENDING',
+      expectedVersion: 2,
+      newCustomer: {
+        type: 'INDIVIDUAL',
+        displayName: ' Pat Smith ',
+        phone: ' 6135550123 ',
+        individual: { firstName: 'Pat', lastName: 'Smith' },
+      },
+      newProperty: {
+        addressLine1: ' Street ',
+        city: ' Ottawa ',
+        province: 'ON',
+        postalCode: 'K1P 5B4',
+      },
+    });
+    expect(parsed.newCustomer?.displayName).toBe('Pat Smith');
+    expect(parsed.newCustomer?.phone).toBe('6135550123');
+    expect(parsed.newProperty?.addressLine1).toBe('Street');
+  });
+
+  it('parses a selected customer and defaults provenance to null', () => {
     const result = parseSubmitAdHocWorkReportDto({
+      customerId: CUSTOMER_ID,
       workStartedAt: '2026-10-01T13:00:00.000Z',
       workEndedAt: '2026-10-01T15:00:00.000Z',
       outcomeCode: 'RESOLVED',
@@ -20,7 +72,7 @@ describe('ad-hoc work report DTOs', () => {
     });
 
     expect(result).toEqual({
-      customerId: null,
+      customerId: CUSTOMER_ID,
       propertyId: null,
       knownJobId: null,
       workStartedAt: new Date('2026-10-01T13:00:00.000Z'),
@@ -82,12 +134,49 @@ describe('ad-hoc work report DTOs', () => {
   it('rejects a blank summary', () => {
     expect(() =>
       parseSubmitAdHocWorkReportDto({
+        customerId: CUSTOMER_ID,
         workStartedAt: '2026-10-01T13:00:00.000Z',
         workEndedAt: '2026-10-01T15:00:00.000Z',
         outcomeCode: 'RESOLVED',
         summary: '   ',
       }),
     ).toThrow(DomainValidationError);
+  });
+
+  it.each([undefined, null, '', '   '])(
+    'rejects missing customer identity (%s)',
+    (value) => {
+      expect(() =>
+        parseSubmitAdHocWorkReportDto({
+          workStartedAt: '2026-10-01T13:00:00.000Z',
+          workEndedAt: '2026-10-01T15:00:00.000Z',
+          outcomeCode: 'RESOLVED',
+          summary: 'Replaced the leaking valve.',
+          reportedCustomerName: value,
+          reportedCustomerPhone: value,
+          reportedCustomerAddress: value,
+        }),
+      ).toThrow(DomainValidationError);
+    },
+  );
+
+  it.each([
+    'reportedCustomerName',
+    'reportedCustomerPhone',
+    'reportedCustomerAddress',
+  ])('requires %s when no customer is selected', (field) => {
+    expect(() =>
+      parseSubmitAdHocWorkReportDto({
+        workStartedAt: '2026-10-01T13:00:00.000Z',
+        workEndedAt: '2026-10-01T15:00:00.000Z',
+        outcomeCode: 'RESOLVED',
+        summary: 'Replaced the leaking valve.',
+        reportedCustomerName: 'Maple Leaf Bakery',
+        reportedCustomerPhone: '+16135550123',
+        reportedCustomerAddress: '210 Sparks Street, Ottawa',
+        [field]: '   ',
+      }),
+    ).toThrow(`${field} is required`);
   });
 
   it('parses a reject review with an optional note and optimistic guards', () => {

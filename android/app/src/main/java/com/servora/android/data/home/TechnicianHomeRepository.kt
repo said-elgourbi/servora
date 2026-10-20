@@ -221,6 +221,7 @@ private fun TechnicianHomeVisitDto.toVisit(): TechnicianHomeVisit? {
             )
         },
         isOverdue = overdue,
+        isStaleStarted = staleStarted,
     )
 }
 
@@ -234,4 +235,3 @@ private fun TechnicianHomeAddressDto.toAddress(): TechnicianHomeAddress =
         postalCode = postalCode,
         country = country,
     )
-

@@ -35,6 +35,26 @@ import retrofit2.Response
 class TechnicianHomeRepositoryTest {
 
     @Test
+    fun `maps stale started work and its attention code from the backend`() = runTest {
+        val payload = technicianHomeDto().copy(
+            nextVisit = nextVisitDto().copy(staleStarted = true),
+            attention = TechnicianHomeAttentionDto(
+                total = 1,
+                items = listOf(technicianAttentionItemDto().copy(kind = "VISIT_STALE_STARTED")),
+            ),
+        )
+        val api = FakeTechnicianHomeApi(answer = { payload })
+        val repository = repository(
+            api = api,
+            sessionAuthenticator = FakeTechnicianSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val home = assertSuccess(repository.loadTechnicianHome("America/Toronto")).home
+        assertTrue(home.nextVisit?.isStaleStarted == true)
+        assertEquals(TechnicianAttentionKind.VISIT_STALE_STARTED, home.attention.single().kind)
+    }
+
+    @Test
     fun `sends the session and the device zone and maps the payload onto the domain model`() =
         runTest {
             val api = FakeTechnicianHomeApi(answer = { technicianHomeDto() })
@@ -420,4 +440,3 @@ private class FakeTechnicianSessionAuthenticator(
 
     override suspend fun renew(rejectedToken: String): SessionRenewal = renewal
 }
-

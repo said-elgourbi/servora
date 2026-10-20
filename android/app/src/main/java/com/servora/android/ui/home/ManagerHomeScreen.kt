@@ -403,7 +403,7 @@ private fun AttentionSectionHeader(
  *
  * The whole card is the touch target and it always goes somewhere: a condition the manager could not
  * act on from would be a dead end (`BR-012`). It opens the **Job** the condition is about, which is
- * the Job Details destination — the product target `docs/tracker/016-android-manager-home.md`
+ * the Job Details destination — the product target `docs/tracker/android/016-android-manager-home.md`
  * recorded and deferred until that destination existed.
  */
 @Composable
@@ -449,7 +449,7 @@ private fun AttentionCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 item.scheduledStart?.let { scheduledStart ->
-                    formatScheduledTime(scheduledStart, deviceLocale())?.let { time ->
+                    formatScheduledDateTime(scheduledStart, deviceLocale())?.let { time ->
                         Text(
                             text = stringResource(R.string.home_attention_scheduled, time),
                             style = MaterialTheme.typography.bodySmall,
@@ -477,10 +477,20 @@ private fun AttentionCard(
 private fun attentionTitle(item: ManagerAttentionItem): Int =
     when (item.kind) {
         ManagerAttentionKind.VISIT_OVERDUE -> R.string.home_attention_overdue_title
+        ManagerAttentionKind.VISIT_STALE_STARTED -> R.string.home_attention_stale_started_title
         ManagerAttentionKind.JOB_NEEDS_SCHEDULING -> R.string.home_attention_scheduling_title
         ManagerAttentionKind.FOLLOW_UP_NEEDS_SCHEDULING -> R.string.home_attention_follow_up_title
         ManagerAttentionKind.PARTS_REQUIRED -> R.string.home_attention_parts_title
         ManagerAttentionKind.UNABLE_TO_COMPLETE -> R.string.home_attention_unable_to_complete_title
+        ManagerAttentionKind.JOB_WORK_RECOMMENDED -> R.string.home_attention_work_recommended_title
+        ManagerAttentionKind.JOB_QUOTE_REQUIRED -> R.string.home_attention_quote_required_title
+        ManagerAttentionKind.JOB_CUSTOMER_DECISION_PENDING ->
+            R.string.home_attention_customer_decision_pending_title
+        ManagerAttentionKind.JOB_WORK_READY_TO_SCHEDULE ->
+            R.string.home_attention_work_ready_to_schedule_title
+        ManagerAttentionKind.JOB_CANCELLATION_REQUIRED ->
+            R.string.home_attention_cancellation_required_title
+        ManagerAttentionKind.JOB_NEEDS_REASSESSMENT -> R.string.home_attention_reassessment_title
     }
 
 /**
@@ -659,4 +669,3 @@ private fun VisitCard(
         }
     }
 }
-

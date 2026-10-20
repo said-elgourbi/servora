@@ -10,7 +10,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * The bytes of a photo the technician chose in the device's own photo picker
- * (`docs/tracker/029-photo-evidence-phases.md` D3).
+ * (`docs/tracker/shared/029-photo-evidence-phases.md` D3).
  *
  * The picker hands over an item's address, not its bytes: a content URI belongs to whoever serves
  * it, so reading it is a device concern that sits behind this port, exactly as [JobPhotoFiles] and

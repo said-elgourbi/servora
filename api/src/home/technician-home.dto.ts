@@ -1,7 +1,9 @@
+import type { TechnicianHomeResponse } from '@servora/shared-types';
 import type { AddressSnapshot } from '../address/address-snapshot.js';
 import type {
   AssignmentRoleCode,
   JobStatus,
+  VisitPurposeCode,
   VisitStatus,
 } from '../jobs/job.types.js';
 import type { DayWindow } from './home-day.js';
@@ -32,6 +34,7 @@ import { hasVisitStarted } from './home-visit-conditions.js';
  * | Kind            | Condition                                                                        |
  * | --------------- | -------------------------------------------------------------------------------- |
  * | `VISIT_OVERDUE` | An assigned Visit still `SCHEDULED` after its window ended (`BR-072`, `BR-074`). |
+ * | `VISIT_STALE_STARTED` | Assigned started work still open after the local day of its scheduled end. |
  *
  * A kind is reported for a Visit the screen does not already state: a Visit the read offers as
  * `nextVisit`, or a row of today's `visits`, presents its own derived condition where it is presented,
@@ -43,8 +46,12 @@ import { hasVisitStarted } from './home-visit-conditions.js';
  * first is a device-local fact the API cannot see, and the second belongs to the follow-up feature
  * that has not been built (`BR-FV-001` – `BR-FV-013`, `BR-042`).
  */
-export const TECHNICIAN_ATTENTION_KINDS = ['VISIT_OVERDUE'] as const;
-export type TechnicianAttentionKind = (typeof TECHNICIAN_ATTENTION_KINDS)[number];
+export const TECHNICIAN_ATTENTION_KINDS = [
+  'VISIT_OVERDUE',
+  'VISIT_STALE_STARTED',
+] as const;
+export type TechnicianAttentionKind =
+  (typeof TECHNICIAN_ATTENTION_KINDS)[number];
 
 /**
  * How many of the technician's upcoming Visits the preview carries.
@@ -71,6 +78,7 @@ export interface TechnicianHomeTechnician {
 export interface TechnicianHomeVisit {
   readonly visitId: string;
   readonly visitStatus: VisitStatus;
+  readonly purposeCode: VisitPurposeCode;
   readonly scheduledStart: Date;
   readonly scheduledEnd: Date;
   readonly jobId: string;
@@ -85,6 +93,8 @@ export interface TechnicianHomeVisit {
   readonly technicians: readonly TechnicianHomeTechnician[];
   /** Whether the Visit is overdue, decided by the API from the server clock (`BR-072`). */
   readonly overdue: boolean;
+  /** Started work still open after the local day of its scheduled end. */
+  readonly staleStarted: boolean;
 }
 
 /** One condition on the technician's own work. */
@@ -126,6 +136,7 @@ export type TechnicianHomeAddressDto = AddressSnapshot;
 export interface TechnicianHomeVisitDto {
   visitId: string;
   visitStatus: VisitStatus;
+  purposeCode: VisitPurposeCode;
   scheduledStart: string;
   scheduledEnd: string;
   jobId: string;
@@ -137,6 +148,7 @@ export interface TechnicianHomeVisitDto {
   address: TechnicianHomeAddressDto | null;
   technicians: TechnicianHomeTechnicianDto[];
   overdue: boolean;
+  staleStarted: boolean;
 }
 
 export interface TechnicianAttentionItemDto {
@@ -165,7 +177,7 @@ export interface TechnicianHomeDayDto {
  * records (`BR-001`, `BR-080`). Stable codes travel, never display text (`BR-028`, `BR-041`), and
  * every instant is ISO-8601 UTC (`Project.md` §15).
  */
-export interface TechnicianHomeDto {
+export interface TechnicianHomeDto extends TechnicianHomeResponse {
   generatedAt: string;
   day: TechnicianHomeDayDto;
   /**
@@ -189,8 +201,6 @@ export interface TechnicianHomeDto {
     items: TechnicianAttentionItemDto[];
   };
 }
-
-
 
 export function toTechnicianHomeDto(input: {
   readonly generatedAt: Date;
@@ -236,6 +246,7 @@ function toTechnicianHomeVisitDto(
   return {
     visitId: visit.visitId,
     visitStatus: visit.visitStatus,
+    purposeCode: visit.purposeCode,
     scheduledStart: visit.scheduledStart.toISOString(),
     scheduledEnd: visit.scheduledEnd.toISOString(),
     jobId: visit.jobId,
@@ -251,6 +262,7 @@ function toTechnicianHomeVisitDto(
       roleCode: technician.roleCode,
     })),
     overdue: visit.overdue,
+    staleStarted: visit.staleStarted,
   };
 }
 
@@ -358,4 +370,3 @@ function startedWorkFirst(
   }
   return compareChronologically(left, right);
 }
-

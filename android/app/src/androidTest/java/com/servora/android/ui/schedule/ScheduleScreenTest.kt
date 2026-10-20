@@ -603,7 +603,7 @@ private fun ScheduleScreenTest.render(
                 onShowWeek = {},
                 onSelectLane = onSelectLane,
                 onApplyTechnicians = onApplyTechnicians,
-                onOpenJob = onOpenJob,
+                onOpenJob = { jobId, _ -> onOpenJob(jobId) },
                 onOpenRequest = onOpenRequest,
                 onClarifyRequest = onClarifyRequest,
                 onRejectRequest = onRejectRequest,

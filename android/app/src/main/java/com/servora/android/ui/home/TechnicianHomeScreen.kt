@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
 import com.servora.android.domain.model.TechnicianAttentionItem
+import com.servora.android.domain.model.TechnicianAttentionKind
 import com.servora.android.domain.model.TechnicianHome
 import com.servora.android.domain.model.TechnicianHomeAddress
 import com.servora.android.domain.model.TechnicianHomeVisit
@@ -378,6 +379,10 @@ private fun NextVisitCard(
                     isOverdue = visit.isOverdue,
                     modifier = Modifier.align(Alignment.Start),
                 )
+                if (visit.isStaleStarted) {
+                    Spacer(Modifier.height(8.dp))
+                    StaleStartedNotice()
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = formatScheduledDateTime(visit.scheduledStart, deviceLocale())
@@ -459,6 +464,10 @@ private fun VisitRow(
                 isOverdue = visit.isOverdue,
                 modifier = Modifier.align(Alignment.Start),
             )
+            if (visit.isStaleStarted) {
+                Spacer(Modifier.height(6.dp))
+                StaleStartedNotice()
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 text = formatScheduledDateTime(visit.scheduledStart, deviceLocale())
@@ -542,7 +551,13 @@ private fun AttentionCard(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(R.string.home_attention_overdue_title, item.jobNumber),
+                    text = stringResource(
+                        when (item.kind) {
+                            TechnicianAttentionKind.VISIT_OVERDUE -> R.string.home_attention_overdue_title
+                            TechnicianAttentionKind.VISIT_STALE_STARTED -> R.string.home_attention_stale_started_title
+                        },
+                        item.jobNumber,
+                    ),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -553,7 +568,7 @@ private fun AttentionCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                formatScheduledTime(item.scheduledStart, deviceLocale())?.let { time ->
+                formatScheduledDateTime(item.scheduledStart, deviceLocale())?.let { time ->
                     Text(
                         text = stringResource(R.string.home_attention_scheduled, time),
                         style = MaterialTheme.typography.bodySmall,
@@ -568,6 +583,26 @@ private fun AttentionCard(
                 modifier = Modifier.height(HomeChevronSize),
             )
         }
+    }
+}
+
+@Composable
+private fun StaleStartedNotice() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            painter = painterResource(R.drawable.ic_alert_circle),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.height(HomeAttentionIconSize),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = stringResource(R.string.home_visit_stale_started),
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.error,
+        )
     }
 }
 
@@ -604,4 +639,3 @@ private fun addressLine(address: TechnicianHomeAddress?): String? =
             postalCode = it.postalCode,
         )
     }
-

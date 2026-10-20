@@ -18,9 +18,9 @@ References: `BR-001`, `BR-007`, `BR-023`, `BR-048`, `BR-050`, `BR-056`, `BR-058`
 `BR-081`, `BR-082`, `BR-083`, `BR-084`, `BR-085`, `BR-086`, **`BR-087`**, **`BR-095`**, `dev.md` §7,
 `dev.md` §8, `docs/decisions/012-property-lifecycle-and-permissions.md`,
 **`docs/decisions/022-customer-contact-persons.md`**,
-`docs/tracker/010-customer-detail.md`, `docs/tracker/012-property-permissions-and-lifecycle-schema.md`,
-`docs/tracker/013-property-lifecycle.md`, `docs/tracker/015-android-edit-customer.md`,
-`docs/tracker/047-customer-contact-persons.md`.
+`docs/tracker/shared/010-customer-detail.md`, `docs/tracker/shared/012-property-permissions-and-lifecycle-schema.md`,
+`docs/tracker/shared/013-property-lifecycle.md`, `docs/tracker/android/015-android-edit-customer.md`,
+`docs/tracker/shared/047-customer-contact-persons.md`.
 
 ## 1. Conventions
 
@@ -72,8 +72,15 @@ Property capabilities are independent of the customer capabilities and are never
 
 ### 3.1 `GET /customers`
 
-The organization's customers, newest first, each with the derived `propertyCount` and `jobCount`.
-Optional `status` and `jobs` filters; see `docs/tracker/008-android-customers-filter.md`.
+The organization's customers, newest first, each with derived counts:
+
+- `propertyCount`: active properties with a current customer relationship.
+- `jobCount`: all jobs belonging to this customer.
+- `openJobCount`: jobs in `NEW` or `ACTIVE`, matching the open-work filter.
+- `overdueVisitCount`: `SCHEDULED` visits whose scheduled end is before the database's current time, matching the overdue filter. Visits already in progress or terminal are excluded.
+
+The two operational counts are additive list fields. They are tenant-scoped, calculated in the list query, and need no per-customer detail requests. Detail responses retain their existing contract.
+Optional `status` and `jobs` filters; see `docs/tracker/android/008-android-customers-filter.md`.
 
 ### 3.2 `GET /customers/:id`
 

@@ -3,6 +3,7 @@ package com.servora.android.ui.jobs
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +47,7 @@ internal fun EvidenceRemovalDialog(
 
     AlertDialog(
         onDismissRequest = { if (!isRemoving) onDismiss() },
+        modifier = Modifier.imePadding(),
         title = {
             Text(
                 text = stringResource(copy.title),

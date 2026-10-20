@@ -1,0 +1,390 @@
+@if (loading()) {
+  <p role="status">{{ i18n.text('busy') }}</p>
+}
+@if (error(); as message) {
+  <div role="alert" class="notice">
+    <p>{{ i18n.text(message) }}</p>
+    @if (!job()) {
+      <button type="button" (click)="load()">{{ i18n.text('retry') }}</button>
+    }
+  </div>
+}
+@if (preparing()) {
+  <p role="status">{{ i18n.text('busy') }}</p>
+}
+@if (store.failure()) {
+  <p role="alert" class="notice">{{ i18n.text('fieldStorageFailure') }}</p>
+}
+@if (job(); as item) {
+  <header>
+    <div>
+      <p>{{ i18n.text('job') }} #{{ item.jobNumber }} · {{ item.customerName }}</p>
+      <h1>{{ item.title }}</h1>
+      <app-work-status [code]="item.status" />
+    </div>
+    <button
+      type="button"
+      (click)="load()"
+      [disabled]="loading() || busy() || recording() || preparing()"
+    >
+      {{ i18n.text('refresh') }}
+    </button>
+  </header>
+  @if (fetchedAt(); as time) {
+    <p role="status">
+      {{ i18n.text(stale() ? 'fieldStale' : 'updatedAt') }}
+      {{ time | date: 'medium' : undefined : i18n.language() }}
+    </p>
+  }
+  <p>{{ item.description }}</p>
+  <div class="columns">
+    <section>
+      <h2>{{ i18n.text('visits') }}</h2>
+      @if (!hasRequestedVisit()) {
+        <p role="status">{{ i18n.text('visitUnavailable') }}</p>
+      }
+      @for (visit of item.visits; track visit.id) {
+        <app-job-visit [value]="visit" [selected]="selected()?.id === visit.id" />
+        <a [routerLink]="['/work/jobs', item.id]" [queryParams]="{ view: 'field', visit: visit.id }"
+          >{{ i18n.text('fieldOpenVisit') }} {{ visit.sequence }}</a
+        >
+      } @empty {
+        <p>{{ i18n.text('noJobVisits') }}</p>
+      }
+    </section>
+    <aside>
+      @if (item.address; as address) {
+        @if (directions(address); as url) {
+          <a [href]="url" target="_blank" rel="noopener noreferrer">{{
+            i18n.text('directions')
+          }}</a>
+        }
+        <h2>{{ i18n.text('location') }}</h2>
+        <p>
+          {{ address.propertyName }} {{ address.addressLine1 }} {{ address.addressLine2 }}
+          {{ address.city }} {{ address.province }} {{ address.postalCode }}
+        </p>
+      } @else {
+        <h2>{{ i18n.text('location') }}</h2>
+        <p>{{ i18n.text('noAddress') }}</p>
+      }
+      @if (item.customerContactDetails; as contact) {
+        <app-job-contact [value]="contact" [customer]="item.customerName" />
+      }
+    </aside>
+  </div>
+  @if (selected(); as visit) {
+    @if (session.context() && visit.fieldActionable) {
+      <section class="panel">
+        <h2>{{ i18n.text('fieldVisitActions') }}</h2>
+        <div class="actions">
+          @for (status of visit.allowedStatusTransitions; track status) {
+            @if (auth.hasPermission('VISIT_UPDATE_ASSIGNED_STATUS')) {
+              <button
+                type="button"
+                (click)="submit('status', status)"
+                [disabled]="busy() || unresolved() || recording()"
+              >
+                {{ status | workLabel }}
+              </button>
+            }
+          }
+        </div>
+        @if (visit.addUpdateAllowed) {
+          <form [formGroup]="form" (ngSubmit)="submit('note')">
+            <fieldset [disabled]="loading() || busy() || preparing()">
+              @if (auth.hasPermission('VISIT_ADD_NOTE')) {
+                <label for="field-note">{{ i18n.text('fieldNote') }}</label
+                ><textarea
+                  id="field-note"
+                  formControlName="note"
+                  maxlength="2000"
+                  rows="4"
+                ></textarea>
+              }
+              <div class="actions">
+                @if (auth.hasPermission('evidence.photo.add')) {
+                  <label class="file"
+                    >{{ i18n.text('fieldCamera')
+                    }}<input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      capture="environment"
+                      (change)="choose($event, 'photo')"
+                  /></label>
+                  <label class="file"
+                    >{{ i18n.text('fieldPhoto')
+                    }}<input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      multiple
+                      (change)="choose($event, 'photo')"
+                  /></label>
+                }
+                @if (auth.hasPermission('evidence.audio.add')) {
+                  <label class="file"
+                    >{{ i18n.text('fieldAudioFile')
+                    }}<input type="file" accept="audio/mp4,.m4a" (change)="choose($event, 'audio')"
+                  /></label>
+                  @if (canRecord) {
+                    <button type="button" (click)="recording() ? stopRecording() : record()">
+                      {{ i18n.text(recording() ? 'fieldStopRecording' : 'fieldRecord') }}
+                    </button>
+                  } @else {
+                    <p>{{ i18n.text('fieldAudioUnsupported') }}</p>
+                  }
+                }
+              </div>
+              <div class="attachments">
+                @for (attachment of attachments(); track attachment.id) {
+                  <article>
+                    @if (attachment.kind === 'photo') {
+                      <img
+                        [src]="preview(attachment.id, attachment.blob)"
+                        [alt]="i18n.text('fieldPendingPhoto')"
+                      />
+                    } @else {
+                      <audio controls [src]="preview(attachment.id, attachment.blob)"></audio>
+                    }
+                    <label [for]="'phase-' + attachment.id">{{ i18n.text('fieldPhase') }}</label>
+                    <select
+                      [id]="'phase-' + attachment.id"
+                      [value]="attachment.phase"
+                      (change)="phase(attachment.id, $event)"
+                    >
+                      <option value="BEFORE_WORK">{{ i18n.text('fieldBefore') }}</option>
+                      <option value="DURING_WORK">{{ i18n.text('fieldDuring') }}</option>
+                      <option value="AFTER_WORK">{{ i18n.text('fieldAfter') }}</option>
+                    </select>
+                    <button type="button" (click)="removeAttachment(attachment.id)">
+                      {{ i18n.text('fieldRemoveDraft') }}
+                    </button>
+                  </article>
+                }
+              </div>
+              @if (visit.completionAllowed && auth.hasPermission('VISIT_RECORD_OUTCOME')) {
+                <label for="field-outcome">{{ i18n.text('fieldOutcome') }}</label
+                ><select id="field-outcome" formControlName="outcome">
+                  <option value="">{{ i18n.text('fieldChooseOutcome') }}</option>
+                  @for (outcome of outcomes(); track outcome) {
+                    <option [value]="outcome">{{ outcome | workLabel }}</option>
+                  }
+                </select>
+                <label for="field-summary">{{ i18n.text('fieldSummary') }}</label
+                ><textarea
+                  id="field-summary"
+                  formControlName="summary"
+                  maxlength="2000"
+                  rows="3"
+                ></textarea>
+              }
+              <p role="status">{{ i18n.text(saved() ? 'fieldSaved' : 'fieldDraft') }}</p>
+              <p class="muted">{{ i18n.text('fieldStorageNotice') }}</p>
+              <div class="actions">
+                <button
+                  type="submit"
+                  [disabled]="
+                    busy() ||
+                    recording() ||
+                    form.invalid ||
+                    (!form.controls.note.value.trim() && !attachments().length)
+                  "
+                >
+                  {{ i18n.text('fieldSubmitUpdate') }}
+                </button>
+                @if (visit.completionAllowed && auth.hasPermission('VISIT_RECORD_OUTCOME')) {
+                  <button
+                    type="button"
+                    (click)="submit('completion')"
+                    [disabled]="
+                      busy() ||
+                      recording() ||
+                      unresolved() ||
+                      !form.controls.outcome.value ||
+                      !form.controls.summary.value.trim()
+                    "
+                  >
+                    {{ i18n.text('fieldComplete') }}
+                  </button>
+                }
+                <button type="button" (click)="discardDraft()" [disabled]="busy() || recording()">
+                  {{ i18n.text('fieldDiscard') }}
+                </button>
+              </div>
+            </fieldset>
+          </form>
+        }
+      </section>
+    }
+    @if (
+      session.context() &&
+      visit.requestFollowUpAllowed &&
+      auth.hasPermission('visits.request_follow_up')
+    ) {
+      <section class="panel">
+        <h2>{{ i18n.text('fieldFollowUp') }}</h2>
+        <p>{{ i18n.text('fieldOnlineOnly') }}</p>
+        <form [formGroup]="follow" (ngSubmit)="requestFollowUp()">
+          <label for="follow-start">{{ i18n.text('fieldStart') }}</label
+          ><input id="follow-start" type="datetime-local" formControlName="start" /><label
+            for="follow-end"
+            >{{ i18n.text('fieldEnd') }}</label
+          ><input id="follow-end" type="datetime-local" formControlName="end" /><label
+            for="follow-reason"
+            >{{ i18n.text('fieldReason') }}</label
+          ><textarea id="follow-reason" formControlName="reason"></textarea
+          ><button type="submit" [disabled]="busy() || follow.invalid">
+            {{ i18n.text('fieldSendRequest') }}
+          </button>
+        </form>
+      </section>
+    }
+  }
+
+  @for (request of requests(); track request.id) {
+    <section class="panel">
+      <h2>{{ i18n.text('fieldFollowUp') }}</h2>
+      <p>{{ request.status | workLabel }}</p>
+      <p>{{ request.reason }}</p>
+      <p>{{ request.reviewNote }}</p>
+      @for (message of request.messages; track message.id) {
+        <blockquote>
+          {{ message.body
+          }}<small>{{ message.recordedAt | date: 'medium' : undefined : i18n.language() }}</small>
+        </blockquote>
+      }
+      @if (request.status === 'NEEDS_CLARIFICATION') {
+        <label [for]="'reply-' + request.id">{{ i18n.text('fieldReply') }}</label
+        ><textarea [id]="'reply-' + request.id" [formControl]="replyFor(request.id)"></textarea
+        ><button
+          type="button"
+          (click)="sendReply(request)"
+          [disabled]="busy() || replyFor(request.id).invalid"
+        >
+          {{ i18n.text('fieldSendReply') }}
+        </button>
+      }
+    </section>
+  }
+  <section class="panel">
+    <h2>{{ i18n.text('fieldActivity') }}</h2>
+    <p>{{ i18n.text('fieldAcceptedMediaOnline') }}</p>
+    @for (event of activity()?.events; track event.id) {
+      <article class="activity">
+        <h3>{{ event.kind | fieldActivityLabel }}</h3>
+        @if (event.technicianName) {
+          <p>{{ event.technicianName }}</p>
+        }
+        <p>
+          {{ event.actorName }} ·
+          {{ event.recordedAt | date: 'medium' : undefined : i18n.language() }}
+          @if (event.visitSequence) {
+            · {{ i18n.text('visit') }} {{ event.visitSequence }}
+          }
+        </p>
+        @if (event.toStatus) {
+          <p>{{ event.toStatus | workLabel }}</p>
+        }
+        @if (event.outcomeCode) {
+          <p>{{ event.outcomeCode | workLabel }}</p>
+        }
+        <p>{{ event.body || event.outcomeSummary }}</p>
+        @if (event.photoId; as id) {
+          <button type="button" (click)="openMedia(id, false)">
+            {{ i18n.text('fieldViewPhoto') }}
+          </button>
+        }
+        @if (event.audioNoteId; as id) {
+          <button type="button" (click)="openMedia(id, true)">
+            {{ i18n.text('fieldPlayAudio') }} ({{ event.audioDurationSeconds }} s)
+          </button>
+        }
+        @if (media(); as content) {
+          @if (content.id === event.photoId || content.id === event.audioNoteId) {
+            @if (content.audio) {
+              <audio controls [src]="content.url"></audio>
+            } @else {
+              <img [src]="content.url" [alt]="i18n.text('fieldAcceptedPhoto')" />
+            }
+          }
+        }
+      </article>
+    } @empty {
+      <p>{{ i18n.text('fieldNoActivity') }}</p>
+    }
+  </section>
+}
+
+@if (session.context()) {
+  <section class="panel">
+    <h2>{{ i18n.text('fieldPending') }}</h2>
+    <button type="button" (click)="queue.replay()" [disabled]="queue.busy()">
+      {{ i18n.text('retry') }}
+    </button>
+    @for (command of commands(); track command.operationId) {
+      <article class="queue-entry">
+        <p>
+          {{
+            i18n.text(
+              command.state === 'accepted'
+                ? 'fieldAccepted'
+                : command.reviewed
+                  ? 'fieldReviewed'
+                  : command.state === 'attention'
+                    ? 'fieldNeedsAttention'
+                    : command.state === 'uploading'
+                      ? 'fieldUploading'
+                      : 'fieldPending'
+            )
+          }}
+          · {{ command.savedAt | date: 'short' : undefined : i18n.language() }}
+        </p>
+        @if (command.error) {
+          <p>
+            {{
+              i18n.text(
+                command.error === 'STATUS_RESULT_REVIEW'
+                  ? 'fieldStatusReview'
+                  : command.retryable || command.error === 'CONNECTION_RETRY'
+                    ? 'connectionError'
+                    : 'fieldRefusalReview'
+              )
+            }}
+          </p>
+        }
+        @if (command.blob; as blob) {
+          @if (command.operation === 'photo') {
+            <img
+              [src]="preview(command.operationId, blob)"
+              [alt]="i18n.text('fieldPendingPhoto')"
+            />
+          } @else {
+            <audio controls [src]="preview(command.operationId, blob)"></audio>
+          }
+        }
+        @if (command.payload['status']; as status) {
+          <p>{{ '' + status | workLabel }}</p>
+        }
+        @if (command.payload['outcomeCode']; as outcome) {
+          <p>{{ '' + outcome | workLabel }}</p>
+        }
+        @if (command.payload['body']; as body) {
+          <p>{{ body }}</p>
+        }
+        @if (command.payload['outcomeSummary']; as summary) {
+          <p>{{ summary }}</p>
+        }
+        @if (command.state === 'attention' && !command.reviewed) {
+          <button type="button" (click)="review(command)" [disabled]="busy()">
+            {{ i18n.text('fieldReviewCurrent') }}
+          </button>
+        }
+        @if (command.retryable || command.error === 'CONNECTION_RETRY') {
+          <button type="button" (click)="queue.retry(command)">{{ i18n.text('retry') }}</button>
+        }
+      </article>
+    } @empty {
+      <p>{{ i18n.text('fieldNoPending') }}</p>
+    }
+  </section>
+}

@@ -16,6 +16,7 @@ function visit(overrides: Partial<ScheduleVisit> = {}): ScheduleVisit {
   return {
     visitId: 'visit-1',
     visitStatus: 'SCHEDULED',
+    purposeCode: 'WORK',
     scheduledStart: new Date('2026-09-07T13:00:00.000Z'),
     scheduledEnd: new Date('2026-09-07T14:00:00.000Z'),
     jobId: 'job-1',
@@ -56,14 +57,20 @@ describe('compareScheduleVisits', () => {
     });
     const timed = visit({ visitId: 'timed' });
 
-    expect([noTime, timed].sort(compareScheduleVisits)).toEqual([timed, noTime]);
+    expect([noTime, timed].sort(compareScheduleVisits)).toEqual([
+      timed,
+      noTime,
+    ]);
   });
 
   it('breaks a tie between two Visits at the same minute by Job number', () => {
     const second = visit({ visitId: 'second', jobNumber: 1043 });
     const first = visit({ visitId: 'first', jobNumber: 1042 });
 
-    expect([second, first].sort(compareScheduleVisits)).toEqual([first, second]);
+    expect([second, first].sort(compareScheduleVisits)).toEqual([
+      first,
+      second,
+    ]);
   });
 });
 
@@ -92,7 +99,16 @@ describe('toScheduleDto', () => {
       },
       technicians: [{ membershipId: 'member-1', name: 'Mike Johnson' }],
       visits: [visit()],
-      unassigned: { total: 3, items: [visit({ visitId: 'visit-9', scheduledStart: null, scheduledEnd: null })] },
+      unassigned: {
+        total: 3,
+        items: [
+          visit({
+            visitId: 'visit-9',
+            scheduledStart: null,
+            scheduledEnd: null,
+          }),
+        ],
+      },
       scope: { kind: 'ORGANIZATION', membershipId: 'member-1' },
     });
 

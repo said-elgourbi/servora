@@ -1,0 +1,160 @@
+<div class="auth-page">
+  <header class="auth-header">
+    <a class="wordmark" href="/" aria-label="Servora">Servora<span aria-hidden="true">.</span></a
+    ><app-preferences />
+  </header>
+  <main id="main-content" class="auth-main" tabindex="-1">
+    <aside class="brand-panel" aria-hidden="true">
+      <span class="brand-symbol">S</span>
+      <p>{{ i18n.text('brandDescription') }}</p>
+    </aside>
+    <section class="auth-card" aria-labelledby="sign-in-title">
+      <p class="eyebrow">{{ i18n.text('workspace') }}</p>
+      <h1 id="sign-in-title" [appPageTitle]="i18n.text('welcome')">{{ i18n.text('welcome') }}</h1>
+      <p class="intro">{{ i18n.text('intro') }}</p>
+      <div class="methods" [attr.aria-label]="i18n.text('signIn')" role="group">
+        <button
+          type="button"
+          [attr.aria-pressed]="method() === 'email'"
+          [disabled]="busy()"
+          (click)="choose('email')"
+        >
+          {{ i18n.text('emailMethod') }}
+        </button>
+        <button
+          type="button"
+          [attr.aria-pressed]="method() === 'phone'"
+          [disabled]="busy()"
+          (click)="choose('phone')"
+        >
+          {{ i18n.text('phoneMethod') }}
+        </button>
+      </div>
+      @if (error(); as key) {
+        <p class="form-error" role="alert">{{ i18n.text(key) }}</p>
+      }
+      @if (method() === 'email') {
+        <form [formGroup]="emailForm" (ngSubmit)="emailSignIn()" [attr.aria-busy]="busy()">
+          <mat-form-field appearance="outline"
+            ><mat-label>{{ i18n.text('email') }}</mat-label>
+            <input
+              [readonly]="busy()"
+              matInput
+              formControlName="email"
+              type="email"
+              autocomplete="username"
+              maxlength="320"
+              required
+            />
+            <mat-error>{{
+              i18n.text(emailForm.controls.email.hasError('required') ? 'required' : 'emailInvalid')
+            }}</mat-error>
+          </mat-form-field>
+          <mat-form-field appearance="outline"
+            ><mat-label>{{ i18n.text('password') }}</mat-label>
+            <input
+              [readonly]="busy()"
+              matInput
+              formControlName="password"
+              [type]="visiblePassword() ? 'text' : 'password'"
+              autocomplete="current-password"
+              maxlength="1024"
+              required
+            />
+            <button
+              mat-icon-button
+              matSuffix
+              type="button"
+              [attr.aria-label]="i18n.text(visiblePassword() ? 'hidePassword' : 'showPassword')"
+              [attr.aria-pressed]="visiblePassword()"
+              (click)="visiblePassword.set(!visiblePassword())"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="24"
+                height="24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                <circle cx="12" cy="12" r="3" />
+                @if (visiblePassword()) {
+                  <path d="m3 3 18 18" />
+                }
+              </svg>
+            </button>
+            <mat-error>{{ i18n.text('required') }}</mat-error>
+          </mat-form-field>
+          <button mat-flat-button type="submit" [disabled]="busy() || session.loggingOut()">
+            {{ i18n.text(busy() ? 'busy' : 'signIn') }}
+          </button>
+        </form>
+      } @else if (!codeStep()) {
+        <form [formGroup]="phoneForm" (ngSubmit)="requestCode()" [attr.aria-busy]="busy()">
+          <mat-form-field appearance="outline"
+            ><mat-label>{{ i18n.text('phone') }}</mat-label>
+            <input
+              [readonly]="busy()"
+              matInput
+              formControlName="phone"
+              type="tel"
+              autocomplete="tel"
+              placeholder="+15145551234"
+              maxlength="16"
+              required
+            />
+            <mat-hint>{{ i18n.text('phoneHint') }}</mat-hint
+            ><mat-error>{{ i18n.text('phoneInvalid') }}</mat-error>
+          </mat-form-field>
+          <button mat-flat-button type="submit" [disabled]="busy() || session.loggingOut()">
+            {{ i18n.text(busy() ? 'busy' : 'sendCode') }}
+          </button>
+        </form>
+      } @else {
+        <p role="status">{{ i18n.text('smsNotice') }}</p>
+        <p class="phone-summary">{{ phoneForm.controls.phone.value }}</p>
+        <form [formGroup]="codeForm" (ngSubmit)="verifyCode()" [attr.aria-busy]="busy()">
+          <mat-form-field appearance="outline"
+            ><mat-label>{{ i18n.text('code') }}</mat-label>
+            <input
+              [readonly]="busy()"
+              matInput
+              formControlName="code"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="6"
+              required
+            />
+            <mat-hint>{{ i18n.text('codeHint') }}</mat-hint
+            ><mat-error>{{ i18n.text('codeInvalid') }}</mat-error>
+          </mat-form-field>
+          <button mat-flat-button type="submit" [disabled]="busy() || session.loggingOut()">
+            {{ i18n.text(busy() ? 'busy' : 'verify') }}
+          </button>
+        </form>
+        <div class="code-actions">
+          <button
+            mat-button
+            type="button"
+            [disabled]="busy() || remaining() > 0"
+            (click)="requestCode()"
+          >
+            {{ i18n.text('resend') }}
+          </button>
+          <button mat-button type="button" [disabled]="busy()" (click)="changeNumber()">
+            {{ i18n.text('changeNumber') }}
+          </button>
+        </div>
+        @if (remaining() > 0) {
+          <p class="cooldown">
+            {{ i18n.text('cooldown') }} {{ remaining() }} {{ i18n.text('seconds') }}.
+          </p>
+        }
+      }
+    </section>
+  </main>
+</div>

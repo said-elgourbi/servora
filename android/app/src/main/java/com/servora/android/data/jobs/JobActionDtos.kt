@@ -22,6 +22,30 @@ data class ChangeJobStatusRequestDto(
     val expectedVersion: Int? = null,
 )
 
+/** Request body that records an Assessment quote as sent to the customer (`BR-QUOTE-001`). */
+@Serializable
+data class MarkQuoteSentRequestDto(
+    val note: String? = null,
+    val externalReference: String? = null,
+    /** The quote workflow version the client last saw, so a stale decision is refused (`BR-086`). */
+    val expectedVersion: Int? = null,
+)
+
+/** Request body that records the customer's quote decision (`BR-QUOTE-001`). */
+@Serializable
+data class MarkQuoteDecisionRequestDto(
+    val note: String? = null,
+    /** The quote workflow version the client last saw, so a stale decision is refused (`BR-086`). */
+    val expectedVersion: Int? = null,
+)
+
+/** Request body that corrects an accidentally recorded sent quote back to required. */
+@Serializable
+data class CorrectQuoteToRequiredRequestDto(
+    val note: String? = null,
+    val expectedVersion: Int? = null,
+)
+
 /** Request body of a Visit reschedule (`BR-072`, `BR-073`). */
 @Serializable
 data class RescheduleVisitRequestDto(
@@ -145,6 +169,8 @@ data class CreateVisitRequestDto(
     val scheduledStart: String,
     val scheduledEnd: String,
     val technicians: List<TechnicianAssignmentRequestDto>,
+    /** Why the technician is attending; `WORK` unless the office chose an `ASSESSMENT` (`BR-071`). */
+    val purposeCode: String = "WORK",
     val confirmConflicts: Boolean = false,
 )
 

@@ -1,0 +1,102 @@
+@if (!compact()) {
+  <div
+    class="table-scroll"
+    role="region"
+    [attr.aria-label]="i18n.text('scheduleListView')"
+    tabindex="0"
+  >
+    <table>
+      <caption class="visually-hidden">
+        {{
+          i18n.text('scheduleListView')
+        }}
+      </caption>
+      <thead>
+        <tr>
+          @for (key of headings; track key) {
+            <th scope="col">{{ i18n.text(key) }}</th>
+          }
+        </tr>
+      </thead>
+      <tbody>
+        @for (visit of rows(); track visit.visitId) {
+          <tr [class.needs-attention]="visit.overdue || overlaps().has(visit.visitId)">
+            <td class="time">
+              {{ visit.timeLabel || i18n.text('unscheduled') }}
+            </td>
+            <td class="job">
+              <a
+                [routerLink]="['/work/jobs', visit.jobId]"
+                [queryParams]="{ visit: visit.visitId, view: 'office' }"
+                ><h2>
+                  {{ visit.jobTitle }} <span>#{{ visit.jobNumber }}</span>
+                </h2></a
+              >
+              @if (visit.overdue) {
+                <span class="warning">{{ i18n.text('overdue') }}</span>
+              }
+              @if (overlaps().has(visit.visitId)) {
+                <span class="warning">{{ i18n.text('scheduleOverlap') }}</span>
+              }
+            </td>
+            <td>{{ visit.customerName }}</td>
+            <td class="location">{{ address(visit.address) || i18n.text('noAddress') }}</td>
+            <td>
+              <div class="crew">
+                @for (member of visit.technicians; track member.membershipId) {
+                  <span
+                    >{{ member.name || i18n.text('unnamedMember') }}
+                    @if (member.roleCode === 'LEAD') {
+                      <small>{{ i18n.text('jobRoleLead') }}</small>
+                    }
+                  </span>
+                } @empty {
+                  {{ i18n.text('noCrew') }}
+                }
+              </div>
+            </td>
+            <td>{{ visit.purposeCode | workLabel }}</td>
+            <td><app-work-status [code]="visit.visitStatus" /></td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+} @else {
+  <div class="agenda">
+    @for (visit of rows(); track visit.visitId) {
+      <a
+        class="agenda-row"
+        [routerLink]="['/work/jobs', visit.jobId]"
+        [queryParams]="{ visit: visit.visitId, view: 'office' }"
+      >
+        <div class="agenda-time">
+          {{ visit.timeLabel || i18n.text('unscheduled') }}
+        </div>
+        <h2>
+          {{ visit.jobTitle }} <span>#{{ visit.jobNumber }}</span>
+        </h2>
+        <p>{{ visit.customerName }} · {{ address(visit.address) || i18n.text('noAddress') }}</p>
+        <p class="crew">
+          {{ i18n.text('crew') }}:
+          @for (member of visit.technicians; track member.membershipId; let last = $last) {
+            {{ member.name || i18n.text('unnamedMember') }}{{ last ? '' : ', ' }}
+          } @empty {
+            {{ i18n.text('noCrew') }}
+          }
+        </p>
+        <div class="tags">
+          <app-work-status [code]="visit.visitStatus" /><span>{{
+            visit.purposeCode | workLabel
+          }}</span>
+          @if (visit.overdue) {
+            <strong class="warning">{{ i18n.text('overdue') }}</strong>
+          }
+          @if (overlaps().has(visit.visitId)) {
+            <strong class="warning">{{ i18n.text('scheduleOverlap') }}</strong>
+          }
+        </div>
+      </a>
+    }
+  </div>
+}

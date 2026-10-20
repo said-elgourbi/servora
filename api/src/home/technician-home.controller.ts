@@ -1,3 +1,4 @@
+import { FieldScoped } from '../auth/field-scope.js';
 import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthApiError } from '../auth/auth-error.js';
 import { AuthGuard } from '../auth/auth.guard.js';
@@ -32,6 +33,7 @@ import { TechnicianHomeService } from './technician-home.service.js';
 export class TechnicianHomeController {
   constructor(private readonly technicianHome: TechnicianHomeService) {}
 
+  @FieldScoped()
   @Get('technician')
   @RequirePermissions(VISIT_PERMISSIONS.VIEW_ASSIGNED)
   async read(

@@ -1,3 +1,10 @@
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { FieldScopeInterceptor } from './field-scope.interceptor.js';
+import { FieldContextController } from './field-context.controller.js';
+import { FieldContextService } from './field-context.service.js';
+import { BrowserAuthController } from './browser-auth.controller.js';
+import { BrowserOriginGuard } from './browser-origin.guard.js';
+import { browserAuthConfigProvider } from './browser-auth.config.js';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module.js';
 import { NotificationsModule } from '../notifications/notifications.module.js';
@@ -14,9 +21,13 @@ import { SmsOtpService } from './sms-otp.service.js';
 
 @Module({
   imports: [DatabaseModule, SmsModule, NotificationsModule],
-  controllers: [AuthController],
+  controllers: [AuthController, BrowserAuthController, FieldContextController],
   providers: [
+    FieldContextService,
+    { provide: APP_INTERCEPTOR, useClass: FieldScopeInterceptor },
     authConfigProvider,
+    browserAuthConfigProvider,
+    BrowserOriginGuard,
     AuthService,
     AuthGuard,
     AuthorizationService,
@@ -32,6 +43,7 @@ import { SmsOtpService } from './sms-otp.service.js';
     AuthGuard,
     AuthorizationService,
     PermissionsGuard,
+    FieldContextService,
     AUTH_CONFIG,
   ],
 })

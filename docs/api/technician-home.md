@@ -12,7 +12,7 @@ screen answers *what do I need to do next?*), `BR-009` (the capability that auth
 References: `BR-001`, `BR-004`, `BR-006`, `BR-007`, `BR-009`, `BR-010`, `BR-012`, `BR-013`, `BR-023`,
 `BR-028`, `BR-041`, `BR-042`, `BR-060`, `BR-062`, `BR-068`, `BR-072`, `BR-074`, `BR-080`, `dev.md`
 §7, `Project.md` §15, `docs/domain/job-visit-domain-model.md` §8.5,
-`docs/tracker/037-technician-field-experience.md`.
+`docs/tracker/shared/037-technician-field-experience.md`.
 
 ## 1. Conventions
 
@@ -96,7 +96,8 @@ coordinates several loosely related reads to build it.
       { "membershipId": "…", "name": "Mike Johnson", "roleCode": "LEAD" },
       { "membershipId": "…", "name": "John Smith", "roleCode": "TECHNICIAN" }
     ],
-    "overdue": false
+    "overdue": false,
+    "staleStarted": false
   },
   "visits": [],
   "upcoming": [],
@@ -117,23 +118,28 @@ coordinates several loosely related reads to build it.
 | `upcoming`            | A **preview** of the assigned Visits whose scheduled start is at or after `day.end`: their status is not `CANCELED` or `COMPLETED`. Capped at five.                                                                                                                                                       |
 | `upcomingTotal`       | How many assigned Visits are after today, so a capped preview never under-reports the caller's workload. It is the manager home's `attention.total` shape, applied to the same problem.                                                                                                                  |
 | `attention.total`     | How many conditions the section holds, including any beyond `items` (capped at 20). It counts the same set `items` holds, so the heading and the list can never disagree.                                                                                                                                |
-| `attention.items`     | `kind` is a code, never display text (`BR-028`, `BR-041`). `VISIT_OVERDUE` is the only kind today: an assigned Visit still `SCHEDULED` after its window ended. It is not restricted to the requested day, because an attempt that never happened yesterday is still work the technician has to resolve — but it never repeats what the screen already states, and it is ordered by urgency (below). |
+| `attention.items`     | `kind` is a code, never display text (`BR-028`, `BR-041`). `VISIT_OVERDUE` means assigned work still `SCHEDULED` after its window ended. `VISIT_STALE_STARTED` means assigned started work still open after the local day of its scheduled end. Both include earlier days, exclude Visits already presented as current work or today's rows, and are ordered by scheduled start then Job number. |
 | `visits[].address`    | The Visit's own preserved location, falling back to the Job's preserved address; `null` when neither exists (`BR-056`, `BR-057`).                                                                                                                                                                        |
 | `visits[].technicians`| The current assignments, Lead first (`BR-068`); empty when the Visit has none. `name` is `null` when the member has no profile yet.                                                                                                                                                                       |
 | `visits[].overdue`    | The derived overdue condition, decided by the API from the server clock, so a client presents it without comparing schedules against its own clock (`BR-001`).                                                                                                                                           |
+| `visits[].staleStarted` | `true` for `EN_ROUTE`, `ON_SITE`, or `IN_PROGRESS` with `scheduledEnd < day.start`. Also included on `nextVisit` and `upcoming` rows. The client displays an unfinished-visit warning while preserving the working status. |
 
 Nothing here is a business state of its own: `nextVisit`, the day's membership, the preview and the
-overdue condition are all derived from authoritative records (`BR-060`, `BR-072`, `BR-074`).
+overdue and stale-started conditions are all derived from authoritative records (`BR-060`, `BR-072`, `BR-074`).
+
+Started work becomes attention at midnight after the local calendar day of its scheduled end, using
+the request's time zone and the API's resolved day window. Same-day overruns are allowed; overnight
+work uses the day of its end. Completed and canceled visits never qualify. Status is not changed.
 
 **What the attention section states and how it is ordered.** The technician's screen answers one
 question (`BR-012`), so a Visit is described once. A Visit this read already presents — as
-`nextVisit`, whose own card carries the derived overdue condition, or as a row of today's `visits`,
+`nextVisit`, whose own card carries its derived conditions, or as a row of today's `visits`,
 whose own row carries it — is therefore **not** repeated in `attention`. The section holds the caller's
 late work the screen says nowhere else: an attempt from an earlier day that neither leads the screen
 nor falls inside today's list. That is why the section can be absent while the caller still has
-something overdue — the day on screen is already saying it (`BR-041`). Its items are ordered by
-urgency, the Visit that has been overdue longest first (then the Job number), which is the order the
-manager home applies within the same condition, so one Visit is never presented in two orders.
+something overdue or stale — the current card or day row already says so (`BR-041`). Its items are
+ordered by scheduled start (oldest first), then Job number. Each card shows the original scheduled
+date and time, including work from earlier days.
 
 ### 3.4 What the read never includes
 
@@ -166,7 +172,7 @@ that is an honest answer rather than a refusal (`BR-042`).
 
 ## 5. Open questions
 
-Recorded rather than guessed (`BR-042`); `docs/tracker/037-technician-field-experience.md` carries the
+Recorded rather than guessed (`BR-042`); `docs/tracker/shared/037-technician-field-experience.md` carries the
 same list with what each one blocks.
 
 1. **The full schedule surface.** `upcoming` is a capped preview because the Schedule destination is
@@ -183,4 +189,3 @@ same list with what each one blocks.
 6. **The `jobs.*` capability set** (`BR-006`, `BR-008`): this read guards with the field capability
    `BR-009` already names, so nothing new was invented; it is re-reviewed when the Jobs feature
    defines its own set.
-

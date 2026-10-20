@@ -1,3 +1,4 @@
+import type { CustomerContact as PublicCustomerContact } from '@servora/shared-types';
 import {
   optionalBoolean,
   optionalEmail,
@@ -13,7 +14,7 @@ import type { CustomerContact } from './customer.types.js';
  * `version` is the optimistic-concurrency token: the edit and removal routes take it back as
  * `expectedVersion`, so a client must be able to read it (`ADR-022` D9).
  */
-export interface CustomerContactDto {
+export interface CustomerContactDto extends PublicCustomerContact {
   id: string;
   customerId: string;
   firstName: string;

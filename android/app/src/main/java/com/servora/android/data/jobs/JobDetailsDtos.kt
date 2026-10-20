@@ -57,6 +57,14 @@ data class JobDetailsDto(
     val visits: List<JobDetailsVisitSummaryDto> = emptyList(),
     val followUpVisitRequest: JobDetailsFollowUpVisitRequestDto? = null,
     /**
+     * The current Assessment quote workflow, when the API included one.
+     *
+     * It defaults to `null` so a cached Job Details payload from an earlier build remains readable
+     * (`BR-042`, `offline-first-architecture.md` §10). Quote state is not Job status and is not inferred
+     * from a Visit outcome or document presence.
+     */
+    val quote: JobDetailsQuoteDto? = null,
+    /**
      * Whether the API answered that this caller may schedule a new Visit on the Job right now
      * (`BR-062`, `BR-071`, `BR-072`).
      *
@@ -78,11 +86,51 @@ data class JobDetailsFollowUpVisitRequestDto(
     val version: Int = 0,
 )
 
+@Serializable
+data class JobDetailsQuoteDto(
+    val id: String,
+    val state: String,
+    val sourceVisitId: String,
+    val sourceVisitSequence: Int? = null,
+    val version: Int,
+    val sentAt: String? = null,
+    val sentByMembershipId: String? = null,
+    val sentNote: String? = null,
+    val externalReference: String? = null,
+    val decidedAt: String? = null,
+    val decidedByMembershipId: String? = null,
+    val decisionNote: String? = null,
+    val currentDocument: JobDetailsQuoteDocumentDto? = null,
+    val allowedActions: List<String> = emptyList(),
+)
+
+@Serializable
+data class JobDetailsQuoteDocumentDto(
+    val id: String,
+    val displayName: String? = null,
+    val documentVersion: Int,
+    val isCurrent: Boolean,
+    val contentType: String,
+    val byteSize: Long,
+    val uploadedByMembershipId: String,
+    val supersededAt: String? = null,
+    val supersededByJobDocumentId: String? = null,
+    val recordedAt: String,
+)
+
 /** The Visit the Job is represented by, with the schedule it carries (`BR-072`). */
 @Serializable
 data class JobDetailsVisitDto(
     val id: String,
     val status: String,
+    /**
+     * Why the technician is attending this Visit (`BR-071`, `BR-078`), as the API reported it.
+     *
+     * It defaults to `null` so an answer that predates the field — a cached response from an earlier
+     * build — is read as a Work Visit rather than failing the read (`BR-042`,
+     * `offline-first-architecture.md` §10).
+     */
+    val purposeCode: String? = null,
     val scheduledStart: String,
     val scheduledEnd: String,
     val version: Int = 0,
@@ -156,6 +204,13 @@ data class JobDetailsVisitSummaryDto(
     val sequence: Int,
     val status: String,
     /**
+     * Why the technician is attending this Visit (`BR-071`, `BR-078`), as the API reported it.
+     *
+     * It defaults to `null` so an answer that predates the field is read as a Work Visit rather than
+     * failing the read (`BR-042`, `offline-first-architecture.md` §10).
+     */
+    val purposeCode: String? = null,
+    /**
      * The Visit's own **current** outcome (`BR-077`, `BR-078`), or absent when it holds none.
      *
      * It carries no outcome history: a Visit that was reopened holds no current outcome until it is
@@ -168,6 +223,13 @@ data class JobDetailsVisitSummaryDto(
     val scheduledStart: String? = null,
     val scheduledEnd: String? = null,
     val version: Int = 0,
+    /**
+     * Whether this Visit was created from a reconciled ad-hoc work report (`BR-AH-003`, `BR-AH-006`).
+     *
+     * It is a stored fact the API reports rather than a client inference, and it defaults to `false`
+     * so a payload that predates the field is read as a normally scheduled Visit (`BR-042`).
+     */
+    val isAdHocWork: Boolean = false,
     /** The technicians currently assigned to **this** Visit, Lead first (`BR-068`). */
     val technicians: List<JobDetailsTechnicianDto> = emptyList(),
 )

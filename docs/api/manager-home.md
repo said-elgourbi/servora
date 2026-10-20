@@ -11,7 +11,7 @@ Visit, Customer and membership records and stores nothing. The derivation is def
 References: `BR-001`, `BR-006`, `BR-007`, `BR-008`, `BR-010`, `BR-012`, `BR-023`, `BR-028`,
 `BR-041`, `BR-042`, `BR-060`, `BR-061`, `BR-062`, `BR-068`, `BR-072`, `BR-074`, `BR-080`, `dev.md`
 §7, `Project.md` §15, `docs/domain/job-visit-domain-model.md` §8.4,
-`docs/tracker/016-android-manager-home.md`.
+`docs/tracker/android/016-android-manager-home.md`.
 
 ## 1. Conventions
 
@@ -27,7 +27,7 @@ is presented as `Authorization: Bearer <accessToken>`. Route paths carry no vers
 
 **Why `customers.view` and not a `jobs.*` capability.** The read returns the organization's Jobs and
 Visits, and `customers.view` is already the capability the API uses for exactly that data:
-`GET /customers/:id/jobs` is guarded by it (`docs/tracker/010-customer-detail.md`), so a caller who
+`GET /customers/:id/jobs` is guarded by it (`docs/tracker/shared/010-customer-detail.md`), so a caller who
 can open the manager home can already reach every Job and Visit it returns. The catalogue has **no**
 `jobs.view` capability, and introducing one would be inventing a permission the Jobs feature has not
 defined (`BR-006`, `BR-042`).
@@ -35,7 +35,7 @@ defined (`BR-006`, `BR-042`).
 > **OPEN QUESTION (product ownership).** When the Jobs feature lands with its own capability set
 > (`BR-008` names create/view/update/delete jobs as Manager defaults), this route — and
 > `GET /customers/:id/jobs` — must be re-reviewed and guarded by whatever that feature defines.
-> Recorded in `docs/tracker/016-android-manager-home.md` rather than guessed.
+> Recorded in `docs/tracker/android/016-android-manager-home.md` rather than guessed.
 
 The backend is the authorization authority; a client that hides a section is not authorization
 (`BR-007`).
@@ -121,7 +121,7 @@ related reads to build it.
 | `generatedAt`        | When the API assembled the answer. The client presents it; it never recomputes a condition from it.                                                                                                                  |
 | `day`                | The half-open window `[start, end)` the day was resolved for, and the zone it was resolved in.                                                                                                                        |
 | `viewer.displayName` | The signed-in member's name for the greeting. `null` when the member has no profile yet, so the client greets without a name rather than inventing one (`BR-020`).                                                     |
-| `attention.items[].code` / `kind` | Stable attention code, never display text (`BR-028`, `BR-041`). Visit conditions use `VISIT_OVERDUE`; generic unscheduled work uses `JOB_NEEDS_SCHEDULING`; outcome-derived Job attention uses `FOLLOW_UP_NEEDS_SCHEDULING`, `PARTS_REQUIRED`, `UNABLE_TO_COMPLETE`, `JOB_WORK_RECOMMENDED`, `JOB_QUOTE_REQUIRED` or `JOB_NEEDS_REASSESSMENT`. `kind` is the compatibility alias for `code`. |
+| `attention.items[].code` / `kind` | Stable attention code, never display text (`BR-028`, `BR-041`). Visit conditions use `VISIT_OVERDUE` and `VISIT_STALE_STARTED`; generic unscheduled work uses `JOB_NEEDS_SCHEDULING`; outcome-derived Job attention uses `FOLLOW_UP_NEEDS_SCHEDULING`, `PARTS_REQUIRED`, `UNABLE_TO_COMPLETE`, `JOB_WORK_RECOMMENDED`, `JOB_QUOTE_REQUIRED` or `JOB_NEEDS_REASSESSMENT`. `kind` is the compatibility alias for `code`. |
 | `attention.items[].reasonCode` | `null` unless the attention condition has an approved structured reason. The current `UNABLE_TO_COMPLETE` write requires a reason as text, but no structured reason catalogue is approved, so the projection does not invent reason subcodes. |
 | `attention.total`    | Every matching condition, including the ones beyond `items` (capped at 20). The section's count comes from here, so a capped list never under-reports the operation.                                                   |
 | `attention.items`    | Ordered: what has gone wrong first, then what awaits the office, then what has to be planned; within a kind by scheduled time, then Job number. `visitId` and the schedule are `null` for a Job-level condition.        |
@@ -130,6 +130,13 @@ related reads to build it.
 | `visits[].address`   | The Visit's own preserved location, falling back to the Job's preserved address; `null` when neither exists (`BR-056`, `BR-057`).                                                                                     |
 | `visits[].technicians` | The current assignments, Lead first (`BR-068`); empty when the Visit has none. `name` is `null` when the member has no profile yet.                                                                                  |
 | `visits[].overdue`   | The derived overdue condition, decided by the API from the server clock, so a client presents it without comparing schedules against its own clock (`BR-001`).                                                          |
+
+`VISIT_STALE_STARTED` means a Visit is still `EN_ROUTE`, `ON_SITE`, or `IN_PROGRESS` and
+`scheduledEnd < day.start`. It becomes attention at midnight after the local day of its scheduled
+end, using the request's time zone. Same-day overruns and overnight work whose end falls today are
+allowed; completed and canceled visits never qualify. Earlier days remain visible in attention.
+The list ranks overdue scheduled visits first, stale started visits next, then office conditions.
+The client presents the original scheduled date and time and opens the affected Visit on its Job.
 
 ### 3.4 What the read never includes
 
@@ -151,12 +158,12 @@ related reads to build it.
 
 ## 5. Open questions
 
-Recorded rather than guessed (`BR-042`); `docs/tracker/016-android-manager-home.md` carries the same
+Recorded rather than guessed (`BR-042`); `docs/tracker/android/016-android-manager-home.md` carries the same
 list with what each one blocks.
 
 1. **"Technician running late"** has no definition. The read produces no such condition and no ETA;
-   the overdue-Visit condition is the only time-based exception it derives, and it needs no travel or
-   location data. Defining "running late" needs a travel/GPS decision (`BR-038`, `BR-070`).
+   the overdue and stale-started Visit conditions need no travel or location data. Defining
+   "running late" needs a travel/GPS decision (`BR-038`, `BR-070`).
 2. **A Visit cancelled today** produces no attention condition: `visits` carries no cancellation
    instant of its own, and what "today" means for a cancellation is undefined.
 3. **A manager-home capability of its own**: the read reuses `customers.view` until the Jobs feature

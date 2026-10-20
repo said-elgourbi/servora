@@ -1,3 +1,4 @@
+import type { AuthErrorCode, AuthErrorBody } from '@servora/shared-types';
 import { HttpException, HttpStatus } from '@nestjs/common';
 
 /**
@@ -23,23 +24,9 @@ export const AUTH_ERROR_CODES = {
   OTP_CODE_INVALID: 'OTP_CODE_INVALID',
   /** An authentication attempt exceeded a configured limit (`BR-045`). */
   TOO_MANY_REQUESTS: 'TOO_MANY_REQUESTS',
-} as const;
+} as const satisfies { [K in AuthErrorCode]: K };
 
-export type AuthErrorCode =
-  (typeof AUTH_ERROR_CODES)[keyof typeof AUTH_ERROR_CODES];
-
-/**
- * Error envelope shared by every `/auth` failure (`docs/api/authentication.md` §2 C1).
- *
- * It keeps Nest's shape (`statusCode`, `message`) and adds the stable `code` the
- * clients need. No other field is added, so the envelope stays small enough to
- * mirror in the Angular and Android clients.
- */
-export interface AuthErrorBody {
-  readonly statusCode: number;
-  readonly code: AuthErrorCode;
-  readonly message: string;
-}
+export type { AuthErrorCode, AuthErrorBody } from '@servora/shared-types';
 
 /**
  * The single exception type for authentication failures.

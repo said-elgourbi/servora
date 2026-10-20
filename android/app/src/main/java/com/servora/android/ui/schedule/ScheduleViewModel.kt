@@ -6,11 +6,21 @@ import com.servora.android.data.jobs.AssignableTechniciansResult
 import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.data.jobs.JobActionResult
 import com.servora.android.data.jobs.JobDetailsRepository
+import com.servora.android.data.customers.CustomersFailureReason
+import com.servora.android.data.schedule.AdHocReportJobOptionsResult
+import com.servora.android.data.schedule.AdHocReviewDataResult
+import com.servora.android.data.schedule.ResolveAdHocLocationRequestDto
+import com.servora.android.data.schedule.AdHocWorkReportReconcileResult
+import com.servora.android.data.schedule.AdHocWorkReportRejectResult
+import com.servora.android.data.schedule.AdHocWorkReportsRepository
+import com.servora.android.data.schedule.AdHocWorkReportsResult
 import com.servora.android.data.schedule.ScheduleRepository
 import com.servora.android.data.schedule.ScheduleResult
 import com.servora.android.data.schedule.VisitRequestReviewResult
 import com.servora.android.data.schedule.VisitRequestsRepository
 import com.servora.android.data.schedule.VisitRequestsResult
+import com.servora.android.domain.model.AdHocWorkReport
+import com.servora.android.domain.model.AdHocWorkReportStatus
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.ScheduleTechnician
 import com.servora.android.domain.model.TechnicianAssignment
@@ -61,6 +71,7 @@ class ScheduleViewModel @Inject constructor(
      * (`BR-041`).
      */
     private val jobDetailsRepository: JobDetailsRepository,
+    private val adHocWorkReportsRepository: AdHocWorkReportsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ScheduleUiState())
@@ -90,6 +101,7 @@ class ScheduleViewModel @Inject constructor(
         if (hadADate) {
             read()
             readRequests()
+            readAdHocReports()
         } else {
             selectDate(today, firstDayOfWeek)
         }
@@ -99,12 +111,19 @@ class ScheduleViewModel @Inject constructor(
     fun retry() {
         read()
         readRequests()
+        readAdHocReports()
     }
 
     /** Reads requests for a manager request-details destination opened outside Schedule. */
     fun openRequests(timeZoneId: String) {
         _uiState.update { it.copy(timeZoneId = timeZoneId) }
         readRequests()
+    }
+
+    /** Reads ad-hoc reports for a manager report-details destination opened outside Schedule. */
+    fun openAdHocReports(timeZoneId: String) {
+        _uiState.update { it.copy(timeZoneId = timeZoneId) }
+        readAdHocReports()
     }
 
 
@@ -130,6 +149,7 @@ class ScheduleViewModel @Inject constructor(
         }
         read()
         readRequests()
+        readAdHocReports()
     }
 
     /**
@@ -289,6 +309,222 @@ class ScheduleViewModel @Inject constructor(
     fun acknowledgeReview() {
         _uiState.update {
             it.copy(reviewedRequestStatus = null, reviewFailureReason = null)
+        }
+    }
+
+    private var locationOptionsJob: kotlinx.coroutines.Job? = null
+
+    fun openAdHocLocation() {
+        locationOptionsJob?.cancel()
+        _uiState.update { it.copy(adHocLocationCustomers = emptyList(), adHocLocationProperties = emptyList(), adHocLocationLoading = false, adHocLocationFailure = null) }
+    }
+
+    fun searchAdHocLocationCustomers(query: String) {
+        locationOptionsJob?.cancel()
+        _uiState.update { it.copy(adHocLocationCustomers = emptyList(), adHocLocationLoading = query.trim().length >= 2, adHocLocationFailure = null) }
+        if (query.trim().length < 2) return
+        locationOptionsJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(250)
+            when (val result = adHocWorkReportsRepository.searchReviewCustomers(query.trim())) {
+                is AdHocReviewDataResult.Success -> _uiState.update { it.copy(adHocLocationCustomers = result.value, adHocLocationLoading = false) }
+                is AdHocReviewDataResult.Failure -> _uiState.update { it.copy(adHocLocationFailure = result.reason, adHocLocationLoading = false) }
+            }
+        }
+    }
+
+    fun loadAdHocLocationProperties(customerId: String) {
+        locationOptionsJob?.cancel()
+        _uiState.update { it.copy(adHocLocationProperties = emptyList(), adHocLocationLoading = true, adHocLocationFailure = null) }
+        locationOptionsJob = viewModelScope.launch {
+            when (val result = adHocWorkReportsRepository.listReviewProperties(customerId)) {
+                is AdHocReviewDataResult.Success -> _uiState.update { it.copy(adHocLocationProperties = result.value, adHocLocationLoading = false) }
+                is AdHocReviewDataResult.Failure -> _uiState.update { it.copy(adHocLocationFailure = result.reason, adHocLocationLoading = false) }
+            }
+        }
+    }
+
+    fun resolveAdHocLocation(report: AdHocWorkReport, request: ResolveAdHocLocationRequestDto) {
+        if (_uiState.value.reviewingAdHocReportId != null) return
+        _uiState.update { it.copy(reviewingAdHocReportId = report.id, adHocLocationFailure = null) }
+        viewModelScope.launch {
+            when (val result = adHocWorkReportsRepository.resolveLocation(report, request)) {
+                is AdHocReviewDataResult.Success -> _uiState.update { current -> current.copy(
+                    reviewingAdHocReportId = null,
+                    adHocReports = current.adHocReports.map { if (it.id == report.id) result.value else it },
+                ) }
+                is AdHocReviewDataResult.Failure -> {
+                    _uiState.update { it.copy(reviewingAdHocReportId = null, adHocLocationFailure = result.reason) }
+                    if (result.reason == CustomersFailureReason.VERSION_CONFLICT || result.reason == CustomersFailureReason.NETWORK) readAdHocReports()
+                }
+            }
+        }
+    }
+
+    /** Voids [report] as not legitimate Servora work, recording [note] as why (`BR-AH-007`). */
+    fun rejectAdHocReport(report: AdHocWorkReport, note: String) {
+        reviewAdHoc(report) {
+            when (val result = adHocWorkReportsRepository.reject(it, note)) {
+                is AdHocWorkReportRejectResult.Success -> AdHocReviewRead.Rejected(result.report)
+                is AdHocWorkReportRejectResult.Failure -> AdHocReviewRead.Failed(result.reason)
+            }
+        }
+    }
+
+    /**
+     * Reconciles [report] into the existing Job [jobId], recording [note] (`BR-AH-002`, `BR-AH-006`).
+     */
+    fun linkAdHocReport(report: AdHocWorkReport, jobId: String, note: String) {
+        reviewAdHoc(report) {
+            when (val result = adHocWorkReportsRepository.link(it, jobId, note)) {
+                is AdHocWorkReportReconcileResult.Success ->
+                    AdHocReviewRead.Reconciled(AdHocWorkReportStatus.LINKED, result.jobId)
+
+                is AdHocWorkReportReconcileResult.Failure -> AdHocReviewRead.Failed(result.reason)
+            }
+        }
+    }
+
+    /**
+     * Reconciles [report] into a new Job with [title], recording [note] (`BR-AH-002`).
+     */
+    fun convertAdHocReport(
+        report: AdHocWorkReport,
+        title: String,
+        description: String?,
+        note: String,
+    ) {
+        reviewAdHoc(report) {
+            when (val result = adHocWorkReportsRepository.convert(it, title, description, note)) {
+                is AdHocWorkReportReconcileResult.Success ->
+                    AdHocReviewRead.Reconciled(AdHocWorkReportStatus.CONVERTED, result.jobId)
+
+                is AdHocWorkReportReconcileResult.Failure -> AdHocReviewRead.Failed(result.reason)
+            }
+        }
+    }
+
+    /**
+     * Opens the link dialog for [report], defaulting to the technician's `knownJobId` but not binding
+     * the office to it (`BR-AH-002`). The Job options are read again so the dialog lists the Jobs the
+     * backend offers rather than a cached copy (`BR-001`).
+     */
+    fun openAdHocLink(report: AdHocWorkReport) {
+        _uiState.update {
+            it.copy(
+                adHocReviewSelectedJobId = report.knownJobId,
+                adHocReviewJobQuery = "",
+                adHocReviewJobOptions = emptyList(),
+                adHocReviewJobOptionsFailureReason = null,
+            )
+        }
+        loadAdHocReviewJobOptions(report.customerId, null)
+    }
+
+    /** Narrows the link dialog's whole-organization Job search (`BR-AH-002`). */
+    fun searchAdHocReviewJobs(report: AdHocWorkReport, query: String) {
+        _uiState.update { it.copy(adHocReviewJobQuery = query) }
+        loadAdHocReviewJobOptions(
+            report.customerId,
+            query.trim().takeIf { it.isNotEmpty() },
+        )
+    }
+
+    /** Selects the Job the report is linked to (`BR-AH-002`). */
+    fun selectAdHocReviewJob(jobId: String) {
+        _uiState.update { it.copy(adHocReviewSelectedJobId = jobId) }
+    }
+
+    private fun loadAdHocReviewJobOptions(customerId: String?, query: String?) {
+        _uiState.update {
+            it.copy(
+                isReadingAdHocReviewJobOptions = true,
+                adHocReviewJobOptionsFailureReason = null,
+            )
+        }
+        viewModelScope.launch {
+            when (val result = adHocWorkReportsRepository.listReviewJobs(customerId, query)) {
+                is AdHocReportJobOptionsResult.Success ->
+                    _uiState.update {
+                        it.copy(
+                            isReadingAdHocReviewJobOptions = false,
+                            adHocReviewJobOptions = result.jobs,
+                            adHocReviewJobOptionsFailureReason = null,
+                        )
+                    }
+
+                is AdHocReportJobOptionsResult.Failure ->
+                    _uiState.update {
+                        it.copy(
+                            isReadingAdHocReviewJobOptions = false,
+                            adHocReviewJobOptionsFailureReason = result.reason,
+                        )
+                    }
+            }
+        }
+    }
+
+    /** Acknowledges the ad-hoc review the screen has reported, so it is not reported twice. */
+    fun acknowledgeAdHocReview() {
+        _uiState.update {
+            it.copy(adHocReviewOutcome = null, adHocReviewFailureReason = null)
+        }
+    }
+
+    /** Acknowledges a reconciled Job the screen has navigated to. */
+    fun acknowledgeAdHocReconciliation() {
+        _uiState.update { it.copy(reconciledAdHocJobId = null) }
+    }
+
+    private fun reviewAdHoc(
+        report: AdHocWorkReport,
+        action: suspend (AdHocWorkReport) -> AdHocReviewRead,
+    ) {
+        if (_uiState.value.reviewingAdHocReportId != null) {
+            return
+        }
+        _uiState.update {
+            it.copy(
+                reviewingAdHocReportId = report.id,
+                adHocReviewOutcome = null,
+                adHocReviewFailureReason = null,
+            )
+        }
+        viewModelScope.launch {
+            when (val result = action(report)) {
+                is AdHocReviewRead.Rejected ->
+                    _uiState.update { current ->
+                        current.copy(
+                            reviewingAdHocReportId = null,
+                            adHocReviewFailureReason = null,
+                            adHocReviewOutcome = result.report.status,
+                            adHocReports = current.adHocReports.map { existing ->
+                                if (existing.id == result.report.id) result.report else existing
+                            },
+                        )
+                    }
+
+                is AdHocReviewRead.Reconciled ->
+                    _uiState.update { current ->
+                        current.copy(
+                            reviewingAdHocReportId = null,
+                            adHocReviewFailureReason = null,
+                            adHocReviewOutcome = result.status,
+                            reconciledAdHocJobId = result.jobId,
+                            adHocReports = current.adHocReports.filterNot { it.id == report.id },
+                        )
+                    }
+
+                is AdHocReviewRead.Failed -> {
+                    _uiState.update {
+                        it.copy(
+                            reviewingAdHocReportId = null,
+                            adHocReviewOutcome = null,
+                            adHocReviewFailureReason = result.reason,
+                        )
+                    }
+                    if (result.reason == CustomersFailureReason.VERSION_CONFLICT || result.reason == CustomersFailureReason.NETWORK) readAdHocReports()
+                }
+            }
         }
     }
 
@@ -466,6 +702,32 @@ class ScheduleViewModel @Inject constructor(
         }
     }
 
+    private fun readAdHocReports() {
+        _uiState.update { it.copy(isReadingAdHocReports = true, adHocReportReadFailureReason = null) }
+        viewModelScope.launch {
+            when (val result = adHocWorkReportsRepository.loadReports()) {
+                is AdHocWorkReportsResult.Success ->
+                    _uiState.update {
+                        it.copy(
+                            adHocReports = result.reports,
+                            isReadingAdHocReports = false,
+                            hasReadAdHocReports = true,
+                            adHocReportReadFailureReason = null,
+                        )
+                    }
+
+                is AdHocWorkReportsResult.Failure ->
+                    _uiState.update {
+                        it.copy(
+                            isReadingAdHocReports = false,
+                            hasReadAdHocReports = true,
+                            adHocReportReadFailureReason = result.reason,
+                        )
+                    }
+            }
+        }
+    }
+
     private fun review(
         request: FollowUpVisitRequest,
         action: suspend (FollowUpVisitRequest) -> VisitRequestReviewResult,
@@ -509,4 +771,16 @@ class ScheduleViewModel @Inject constructor(
             }
         }
     }
+}
+
+/** What an ad-hoc review returned, unified so the three actions share one state update. */
+private sealed interface AdHocReviewRead {
+    /** The report was rejected and returned its new terminal state (`BR-AH-007`). */
+    data class Rejected(val report: AdHocWorkReport) : AdHocReviewRead
+
+    /** The report was reconciled and returned the Job the Visit now belongs to (`BR-AH-008`). */
+    data class Reconciled(val status: AdHocWorkReportStatus, val jobId: String) : AdHocReviewRead
+
+    /** The decision was not applied. */
+    data class Failed(val reason: CustomersFailureReason) : AdHocReviewRead
 }

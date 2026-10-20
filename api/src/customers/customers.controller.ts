@@ -33,7 +33,7 @@ import {
   toCustomerSummaryDto,
   toIndividualCustomerDto,
 } from './customer.dto.js';
-import type { CustomerDto, CustomerSummaryDto } from './customer.dto.js';
+import type { CustomerDto, CustomerListSummaryDto } from './customer.dto.js';
 import {
   toCustomerDetailDto,
   toCustomerJobDto,
@@ -74,13 +74,17 @@ export class CustomersController {
   async list(
     @Req() request: PermissionedRequest,
     @Query() query: unknown,
-  ): Promise<CustomerSummaryDto[]> {
+  ): Promise<CustomerListSummaryDto[]> {
     const scope = requireAuthorization(request);
     const filters = parseInput(() => parseCustomerListFilters(query));
     const rows = await this.customers.listCustomersInOrganization(scope, {
       filters,
     });
-    return rows.map((row) => toCustomerSummaryDto(row.customer, row));
+    return rows.map((row) => ({
+      ...toCustomerSummaryDto(row.customer, row),
+      openJobCount: row.openJobCount,
+      overdueVisitCount: row.overdueVisitCount,
+    }));
   }
 
   @Get(':id')

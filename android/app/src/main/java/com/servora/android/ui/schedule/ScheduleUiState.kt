@@ -3,6 +3,9 @@ package com.servora.android.ui.schedule
 import androidx.compose.runtime.Immutable
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.jobs.JobActionFailure
+import com.servora.android.domain.model.AdHocReportJobOption
+import com.servora.android.domain.model.AdHocWorkReport
+import com.servora.android.domain.model.AdHocWorkReportStatus
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.FollowUpVisitRequestStatus
@@ -10,6 +13,7 @@ import com.servora.android.domain.model.Schedule
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.ScheduleTechnician
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.isPending
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -59,6 +63,10 @@ data class PendingVisitRequestApproval(
  */
 @Immutable
 data class ScheduleUiState(
+    val adHocLocationCustomers: List<com.servora.android.domain.model.AdHocReportCustomerOption> = emptyList(),
+    val adHocLocationProperties: List<com.servora.android.domain.model.AdHocReportPropertyOption> = emptyList(),
+    val adHocLocationLoading: Boolean = false,
+    val adHocLocationFailure: CustomersFailureReason? = null,
     /** The IANA zone the device renders in, named on every read. */
     val timeZoneId: String = "",
     /** The first day of a week for the device's language (`BR-028`). */
@@ -122,6 +130,42 @@ data class ScheduleUiState(
     val pendingApproval: PendingVisitRequestApproval? = null,
     /** The request whose approval created a Visit, until the screen has reported it. */
     val approvedRequestId: String? = null,
+    /** Ad-hoc work reports the backend reports for office reconciliation (`BR-AH-002`). */
+    val adHocReports: List<AdHocWorkReport> = emptyList(),
+    /** Whether an ad-hoc report read is currently in flight. */
+    val isReadingAdHocReports: Boolean = false,
+    /** Whether an ad-hoc report read has answered, successfully or otherwise. */
+    val hasReadAdHocReports: Boolean = false,
+    /** Why the last ad-hoc report read failed, without replacing the known schedule. */
+    val adHocReportReadFailureReason: CustomersFailureReason? = null,
+    /** The ad-hoc report currently being reviewed. */
+    val reviewingAdHocReportId: String? = null,
+    /** The Jobs the link dialog offers for the report being linked (`BR-AH-002`). */
+    val adHocReviewJobOptions: List<AdHocReportJobOption> = emptyList(),
+    /** Whether the link dialog's Job options are being read. */
+    val isReadingAdHocReviewJobOptions: Boolean = false,
+    /** Why the link dialog's Job options could not be read, or `null`. */
+    val adHocReviewJobOptionsFailureReason: CustomersFailureReason? = null,
+    /** The search text for the whole-organization Job search when no Customer is known. */
+    val adHocReviewJobQuery: String = "",
+    /** The Job currently selected in the link dialog, defaulting to the report's `knownJobId`. */
+    val adHocReviewSelectedJobId: String? = null,
+    /** Why the last ad-hoc review was not applied, or `null` when it was (`BR-AH-005`). */
+    val adHocReviewFailureReason: CustomersFailureReason? = null,
+    /**
+     * The status the last ad-hoc review applied, until the screen has reported it (`BR-AH-005`).
+     *
+     * It is the outcome the backend holds — `LINKED`, `CONVERTED` or `REJECTED` — never the one the
+     * office asked for (`BR-001`).
+     */
+    val adHocReviewOutcome: AdHocWorkReportStatus? = null,
+    /**
+     * The Job a successful link or convert produced, until the screen has navigated to it.
+     *
+     * Reconciliation returns the Job the Visit now belongs to (`BR-AH-005`, `BR-AH-008`), and the
+     * screen opens that Job rather than leaving the reviewer in the now-empty report list.
+     */
+    val reconciledAdHocJobId: String? = null,
 ) {
     /** Nothing has been read: the screen shows its first-load state. */
     val showsInitialLoading: Boolean
@@ -187,6 +231,14 @@ data class ScheduleUiState(
     /** Count shown on the Requests lane badge. */
     val reviewableRequestCount: Int
         get() = reviewableRequests.size
+
+    /** The ad-hoc reports the office still has a decision to make about (`BR-AH-005`). */
+    val reviewableAdHocReports: List<AdHocWorkReport>
+        get() = adHocReports.filter { it.isPending }
+
+    /** Count shown on the Ad-hoc reports lane badge. */
+    val reviewableAdHocReportCount: Int
+        get() = reviewableAdHocReports.size
 
     /** Whether the day is narrowed to technicians rather than showing the whole organization. */
     val hasTechnicianFilter: Boolean

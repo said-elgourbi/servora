@@ -22,7 +22,7 @@ import org.junit.runner.RunWith
 
 /**
  * The temporary development sign-in shortcut on the sign-in screen
- * (`docs/tracker/049-android-dev-sign-in-buttons.md`).
+ * (`docs/tracker/android/049-android-dev-sign-in-buttons.md`).
  *
  * The accounts are supplied through the screen's `devAccounts` parameter rather than read from the
  * build, so the rendering rules are driven directly: an account list draws the section, an empty

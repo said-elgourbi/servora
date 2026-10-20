@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="ad_hoc_resolve_location">Resolve customer and property</string>
+    <string name="ad_hoc_new_customer">Create customer</string>
+    <string name="ad_hoc_existing_customer">Existing customer</string>
+    <string name="ad_hoc_individual">Individual</string>
+    <string name="ad_hoc_company">Company</string>
+    <string name="ad_hoc_customer_name">Customer name</string>
+    <string name="ad_hoc_first_name">First name</string>
+    <string name="ad_hoc_last_name">Last name</string>
+    <string name="ad_hoc_existing_property">Existing property</string>
+    <string name="ad_hoc_new_property">Create property</string>
+    <string name="ad_hoc_street">Reported address / street</string>
+    <string name="ad_hoc_unit">Unit</string>
+    <string name="ad_hoc_city">City</string>
+    <string name="ad_hoc_postal_code">Postal code</string>
+    <string name="ad_hoc_location_cancel">Cancel</string>
+    <string name="ad_hoc_location_retry">Retry</string>
+    <string name="ad_hoc_customer_search">Customer name or phone</string>
     <!--
       English sign-in strings.
 
@@ -122,7 +139,23 @@
       reader (`BR-028`). It says where the control goes, not that it is decorative.
     -->
     <string name="nav_back">Back</string>
+    <string name="settings_profile_initials" translatable="false">SV</string>
+    <string name="settings_profile_name">Servora account</string>
+    <string name="settings_profile_subtitle">Profile and preferences</string>
+    <string name="settings_appearance_title">Appearance</string>
+    <string name="settings_account_title">Account</string>
+    <string name="settings_notifications_title">Notifications</string>
+    <string name="notification_channel_assignments">Visit assignments</string>
+    <string name="notification_permission_available">Android notifications are allowed on this device.</string>
+    <string name="notification_permission_unavailable">Android notifications are blocked or permission has not been granted.</string>
+    <string name="notification_permission_action">Allow notifications on this device</string>
+    <string name="notification_permission_explanation">Allow Servora to alert you about Visit assignments on this device. You can change Android permission and your Servora preference separately at any time.</string>
+    <string name="notification_permission_continue">Continue</string>
+    <string name="notification_permission_later">Later</string>
+    <string name="settings_notifications_on">On</string>
+    <string name="settings_notifications_off">Off</string>
     <string name="settings_sign_out">Sign out</string>
+    <string name="settings_version" translatable="false">Servora</string>
 
     <!--
       Manager home. The greeting, today's summary, the schedule and the conditions that need the
@@ -139,10 +172,18 @@
     <string name="home_attention_all_clear_title">You\'re all caught up</string>
     <string name="home_attention_all_clear_detail">Nothing needs your attention right now.</string>
     <string name="home_attention_overdue_title">Job #%1$d is overdue</string>
+    <string name="home_attention_stale_started_title">Job #%1$d has an unfinished visit</string>
+    <string name="home_visit_stale_started">Needs attention: visit still open from a previous day</string>
     <string name="home_attention_scheduling_title">Job #%1$d needs scheduling</string>
     <string name="home_attention_follow_up_title">Job #%1$d needs a follow-up visit</string>
     <string name="home_attention_parts_title">Job #%1$d is waiting on parts</string>
     <string name="home_attention_unable_to_complete_title">Job #%1$d could not be completed</string>
+    <string name="home_attention_work_recommended_title">Job #%1$d has recommended work</string>
+    <string name="home_attention_quote_required_title">Job #%1$d needs a quote</string>
+    <string name="home_attention_customer_decision_pending_title">Job #%1$d is waiting on quote approval</string>
+    <string name="home_attention_work_ready_to_schedule_title">Job #%1$d is ready for work scheduling</string>
+    <string name="home_attention_cancellation_required_title">Job #%1$d needs cancellation review</string>
+    <string name="home_attention_reassessment_title">Job #%1$d needs another assessment</string>
     <string name="home_attention_detail_format">%1$s · %2$s</string>
     <string name="home_attention_scheduled">Scheduled %1$s</string>
     <string name="home_attention_open">Open the job</string>
@@ -324,11 +365,17 @@
     -->
     <string name="technician_schedule_tab_schedule">Schedule</string>
     <string name="technician_schedule_tab_requests">Visit requests</string>
+    <string name="technician_schedule_tab_ad_hoc_reports">Ad-hoc reports</string>
     <string name="technician_requests_loading">Loading your requests…</string>
     <string name="technician_requests_error_title">Couldn\'t load your requests</string>
     <string name="technician_requests_unrefreshed">Couldn\'t refresh your requests.</string>
     <string name="technician_requests_empty_title">No requests</string>
     <string name="technician_requests_empty_detail">You have not asked for another visit.</string>
+    <string name="technician_ad_hoc_reports_section">Ad-hoc work reports</string>
+    <string name="technician_ad_hoc_reports_error_title">Couldn\'t load your reports</string>
+    <string name="technician_ad_hoc_reports_unrefreshed">Couldn\'t refresh your reports.</string>
+    <string name="technician_ad_hoc_reports_empty_title">No reports</string>
+    <string name="technician_ad_hoc_reports_empty_detail">You have not reported any ad-hoc work.</string>
     <string name="technician_requests_proposed">You proposed · %1$s</string>
     <string name="technician_requests_proposed_none">You proposed no time</string>
     <string name="technician_request_job">Job #%1$d · %2$s</string>
@@ -661,6 +708,7 @@
     -->
     <string name="assignment_role_lead">Lead</string>
     <string name="assignment_role_technician">Technician</string>
+    <string name="assignment_role_unknown">Unspecified role</string>
 
     <!--
       Job Details (`BR-021`, `BR-058`, `BR-068`, `BR-081`).
@@ -699,6 +747,49 @@
       among the Job's metadata.
     -->
     <string name="job_details_location_label">Location</string>
+    <string name="job_details_quote_label">Quote</string>
+    <string name="job_details_quote_status_label">Quote status</string>
+    <string name="job_details_quote_source_visit_label">Assessment visit</string>
+    <string name="job_details_quote_sent_label">Sent</string>
+    <string name="job_details_quote_reference_label">Reference</string>
+    <string name="job_details_quote_decision_label">Decision recorded</string>
+    <string name="job_details_quote_document_label">Current PDF</string>
+    <string name="job_details_quote_document_default_name">Quote PDF</string>
+    <string name="job_details_quote_document_version_label">PDF version</string>
+    <string name="job_details_quote_document_version_format">Version %1$d</string>
+    <string name="job_details_quote_document_size_label">PDF size</string>
+    <string name="job_details_quote_no_document">No quote PDF attached.</string>
+    <string name="job_details_quote_allowed_actions_label">Available actions</string>
+    <string name="job_details_quote_state_required">Quote required</string>
+    <string name="job_details_quote_state_sent">Waiting for customer decision</string>
+    <string name="job_details_quote_state_approved">Quote approved</string>
+    <string name="job_details_quote_state_rejected">Quote rejected</string>
+    <string name="job_details_quote_action_upload_document">Upload PDF</string>
+    <string name="job_details_quote_action_attach_document">Attach PDF</string>
+    <string name="job_details_quote_action_replace_document">Replace</string>
+    <string name="job_details_quote_action_view_document">View Quote</string>
+    <string name="job_details_quote_action_record_decision">Record decision</string>
+    <string name="job_details_quote_action_undo_sent">Undo quote sent</string>
+    <string name="job_details_quote_action_schedule_work_visit">Schedule work visit</string>
+    <string name="job_details_quote_action_cancel_job">Cancel job</string>
+    <string name="job_details_quote_action_more">More</string>
+    <string name="job_details_quote_decision_approved">Approved</string>
+    <string name="job_details_quote_decision_rejected">Rejected</string>
+    <string name="job_details_quote_document_summary_format">%1$s · %2$s</string>
+    <string name="job_details_quote_action_read_document">Open PDF</string>
+    <string name="job_details_quote_action_mark_sent">Record quote as sent</string>
+    <string name="job_details_quote_action_mark_approved">Mark approved</string>
+    <string name="job_quote_document_uploaded">Quote PDF uploaded.</string>
+    <string name="job_quote_document_opened">Quote PDF opened.</string>
+    <string name="job_quote_document_error_not_allowed">Your role cannot manage quote PDFs for this job.</string>
+    <string name="job_quote_document_error_not_pdf">Choose a PDF document.</string>
+    <string name="job_quote_document_error_not_read">That PDF could not be read from this device.</string>
+    <string name="job_quote_document_error_not_available">No current quote PDF is available.</string>
+    <string name="job_quote_document_error_unreachable">Quote PDFs need the server. Connect and try again.</string>
+    <string name="job_quote_document_error_open_failed">The quote PDF could not be opened.</string>
+    <string name="job_quote_document_error_no_viewer">No app on this device can open PDFs.</string>
+    <string name="job_quote_document_error_failed">The quote PDF action could not be completed.</string>
+    <string name="job_details_quote_action_mark_rejected">Mark rejected</string>
     <string name="job_details_contacts_label">Contacts</string>
     <!--
       The Customer's other ways of being reached on the Job card (`BR-095`): the disclosure holding them
@@ -737,8 +828,8 @@
     <string name="job_details_no_selected_visit_detail">This job has no visit with a schedule yet.</string>
     <string name="job_details_visit_activity_label">Visit activity</string>
     <string name="job_details_visit_activity_empty">Nothing has been recorded on this visit yet.</string>
-    <string name="job_details_job_updates_label">General job updates</string>
-    <string name="job_details_job_updates_empty">No job-wide updates yet.</string>
+    <string name="job_details_job_updates_label">Job history</string>
+    <string name="job_details_job_updates_empty">No job history yet.</string>
 
     <!--
       Job Activity (`BR-080`): the Job's unified, chronological timeline, newest first. A Job-level
@@ -754,6 +845,7 @@
       and the date is what the group was for (`BR-052`, `BR-072`).
     -->
     <string name="job_activity_visit_title_format">Visit %1$d · %2$s</string>
+    <string name="job_activity_visit_ad_hoc_badge">Ad-hoc completed work</string>
     <!--
       What a folded Visit group states under its heading: where the field attempt ended up and what it
       resulted in — `Completed · Needs follow-up` (`BR-074`, `BR-078`, `BR-080`). The status is the
@@ -764,11 +856,8 @@
     <string name="job_activity_visit_expand_label">Expand visit %1$d</string>
     <string name="job_activity_visit_collapse_label">Collapse visit %1$d</string>
     <!-- The group holding the updates that belong to the Job and to no Visit (`BR-080`). -->
-    <string name="job_activity_general_expand_label">Expand general job updates</string>
-    <string name="job_activity_general_collapse_label">Collapse general job updates</string>
-    <string name="job_activity_admin_label">Administrative history · %1$d</string>
-    <string name="job_activity_admin_expand_label">Expand administrative history</string>
-    <string name="job_activity_admin_collapse_label">Collapse administrative history</string>
+    <string name="job_activity_general_expand_label">Expand job history</string>
+    <string name="job_activity_general_collapse_label">Collapse job history</string>
     <!-- The state a collapsed or expanded group reports to a screen reader (`BR-028`). -->
     <string name="job_activity_group_expanded">Expanded</string>
     <string name="job_activity_group_collapsed">Collapsed</string>
@@ -830,6 +919,18 @@
     <string name="job_activity_outcome_needs_parts">Needs parts</string>
     <string name="job_activity_outcome_needs_follow_up">Needs follow-up</string>
     <string name="job_activity_outcome_unable_to_complete">Unable to complete</string>
+    <string name="job_activity_outcome_no_work_required">No work required</string>
+    <string name="job_activity_outcome_work_recommended">Work recommended</string>
+    <string name="job_activity_outcome_quote_required">Quote required</string>
+    <string name="job_activity_outcome_unable_to_assess">Unable to assess</string>
+    <string name="job_activity_quote_required">Quote required</string>
+    <string name="job_activity_quote_sent">Quote sent</string>
+    <string name="job_activity_quote_approved">Quote approved</string>
+    <string name="job_activity_quote_rejected">Quote rejected</string>
+    <string name="job_activity_quote_corrected">Quote decision corrected</string>
+    <string name="job_activity_quote_updated">Quote updated</string>
+    <string name="job_activity_quote_document_uploaded">Quote PDF uploaded</string>
+    <string name="job_activity_quote_document_uploaded_detail">%1$s · version %2$d</string>
 
     <!--
       Job photo evidence (`BR-015`, `BR-027`). The phase codes are stable domain values; only these
@@ -975,6 +1076,7 @@
     <string name="job_action_done_assignment">Visit crew updated successfully</string>
     <string name="job_action_done_activity_text">Update added successfully</string>
     <string name="job_action_done_activity_text_edit">Update corrected successfully</string>
+    <string name="job_action_done_quote_workflow">Quote updated successfully</string>
     <string name="job_action_done_activity_text_remove">Update removed from the timeline</string>
     <string name="job_action_error_unauthenticated">Your session has ended. Sign in again.</string>
     <string name="job_action_error_forbidden">You do not have permission to change jobs.</string>
@@ -1019,12 +1121,18 @@
     <string name="job_visit_complete_outcome_needs_followup_support">Another visit is needed to finish the work.</string>
     <string name="job_visit_complete_outcome_needs_parts_support">The work needs parts before it can be finished.</string>
     <string name="job_visit_complete_outcome_unable_support">The work could not be done. Say why.</string>
+    <string name="job_visit_complete_outcome_no_work_required_support">Nothing needs to be done.</string>
+    <string name="job_visit_complete_outcome_work_recommended_support">Work is recommended; the office will decide what happens next.</string>
+    <string name="job_visit_complete_outcome_quote_required_support">A quote is needed before work can proceed.</string>
+    <string name="job_visit_complete_outcome_unable_to_assess_support">The assessment could not be done. Say why.</string>
     <string name="job_visit_complete_summary_label">Summary</string>
     <string name="job_visit_complete_summary_placeholder">What happened on site?</string>
     <string name="job_visit_complete_summary_required">Required: state what resulted from the visit.</string>
     <string name="job_visit_complete_reason_label">Reason</string>
     <string name="job_visit_complete_reason_placeholder">Why couldn\'t the work be completed?</string>
+    <string name="job_visit_complete_unable_to_assess_placeholder">Why couldn\'t the assessment be done?</string>
     <string name="job_visit_complete_reason_required">Required: state why the work could not be completed.</string>
+    <string name="job_visit_complete_unable_to_assess_required">Required: state why the assessment could not be done.</string>
     <string name="job_visit_complete_confirm">Complete visit</string>
     <string name="job_visit_pending_title">Waiting to sync</string>
     <string name="job_visit_pending_action">Visit → %1$s</string>
@@ -1083,6 +1191,9 @@
     <string name="schedule_visit_problem_end">The end time must be after the start time.</string>
     <string name="schedule_visit_problem_crew">Choose at least one technician.</string>
     <string name="schedule_visit_problem_lead">Choose which technician leads the visit.</string>
+    <string name="schedule_visit_purpose_label">Purpose</string>
+    <string name="visit_purpose_work">Work</string>
+    <string name="visit_purpose_assessment">Assessment</string>
 
     <!--
       Proposing a follow-up Visit (`BR-FV-001`, `BR-FV-003`). The form asks for the window the
@@ -1214,7 +1325,7 @@
 
     <string name="technician_ad_hoc_report_action">Report ad-hoc work</string>
     <string name="technician_ad_hoc_report_title">Report ad-hoc work</string>
-    <string name="technician_ad_hoc_report_customer">Customer, if known</string>
+    <string name="technician_ad_hoc_report_customer">Customer</string>
     <string name="technician_ad_hoc_report_property">Property, if known</string>
     <string name="technician_ad_hoc_report_known_work">Known work record, if any</string>
     <string name="technician_ad_hoc_report_started">Started at</string>
@@ -1227,6 +1338,8 @@
     <string name="technician_ad_hoc_report_failed">Report could not be sent.</string>
     <string name="technician_ad_hoc_report_queued">Report saved. It will be sent when you are back online.</string>
     <string name="technician_ad_hoc_report_problem_summary">Describe what happened before submitting.</string>
+    <string name="technician_ad_hoc_report_problem_customer">Choose a customer or select “I can’t find the customer”.</string>
+    <string name="technician_ad_hoc_report_problem_customer_details">Enter the customer’s name, phone, and address.</string>
     <string name="technician_ad_hoc_report_work_window">When the work happened</string>
     <string name="technician_ad_hoc_report_unknown_customer">I can’t find the customer</string>
     <string name="technician_ad_hoc_report_use_customer_search">Search for the customer instead</string>
@@ -1237,4 +1350,56 @@
     <string name="technician_ad_hoc_report_property_unnamed">Unnamed property</string>
     <string name="technician_ad_hoc_report_related_work">Related work, if any</string>
     <string name="technician_ad_hoc_report_no_related_work">No related work is listed for this customer.</string>
+
+    <!-- Ad-hoc work report review: the manager Work view lane and its review surface (`BR-AH-002`). -->
+    <string name="work_tab_ad_hoc_reports_count">Reports · %1$d</string>
+    <string name="schedule_empty_ad_hoc_reports_title">No reports to review</string>
+    <string name="schedule_empty_ad_hoc_reports_detail">Field work reported without a recorded visit appears here for reconciliation.</string>
+    <string name="ad_hoc_report_unknown_customer">Unknown customer</string>
+    <string name="ad_hoc_report_unknown_location">Unknown location</string>
+    <string name="ad_hoc_report_detail_title">Ad-hoc work report</string>
+    <string name="ad_hoc_report_status_label">Status</string>
+    <string name="ad_hoc_report_status_pending">Pending review</string>
+    <string name="ad_hoc_report_status_linked">Linked to a job</string>
+    <string name="ad_hoc_report_status_converted">Created a job</string>
+    <string name="ad_hoc_report_status_rejected">Rejected</string>
+    <string name="ad_hoc_report_location_label">Location</string>
+    <string name="ad_hoc_report_known_job_label">Related work</string>
+    <string name="ad_hoc_report_known_job_value">Job #%1$d · %2$s</string>
+    <string name="ad_hoc_report_known_job_number_only">Job #%1$d</string>
+    <string name="ad_hoc_report_window_label">When the work happened</string>
+    <string name="ad_hoc_report_outcome_label">Outcome</string>
+    <string name="ad_hoc_report_summary_label">What happened</string>
+    <string name="ad_hoc_report_notes_label">Notes</string>
+    <string name="ad_hoc_report_reported_phone_label">Reported phone</string>
+    <string name="ad_hoc_report_review_note_label">Review note</string>
+    <string name="ad_hoc_report_open_job">Open job</string>
+    <string name="ad_hoc_report_link_action">Link to a job</string>
+    <string name="ad_hoc_report_convert_action">Create a job</string>
+    <string name="ad_hoc_report_reject_action">Reject the report</string>
+    <string name="ad_hoc_report_cancel">Cancel</string>
+    <string name="ad_hoc_report_reject_title">Reject the report</string>
+    <string name="ad_hoc_report_reject_message">No job or visit is created and the report is closed. What you write is recorded as why it was refused.</string>
+    <string name="ad_hoc_report_reject_note">Why is it rejected?</string>
+    <string name="ad_hoc_report_reject_confirm">Reject</string>
+    <string name="ad_hoc_report_link_title">Link to the job</string>
+    <string name="ad_hoc_report_link_message">This report is linked to Job #%1$d · %2$s and its completed visit is recorded from the reported work.</string>
+    <string name="ad_hoc_report_link_message_number_only">This report is linked to Job #%1$d and its completed visit is recorded from the reported work.</string>
+    <string name="ad_hoc_report_link_note">Note (optional)</string>
+    <string name="ad_hoc_report_link_confirm">Link</string>
+    <string name="ad_hoc_report_link_search_label">Search by job number or title</string>
+    <string name="ad_hoc_report_link_jobs_failed">Jobs could not be loaded.</string>
+    <string name="ad_hoc_report_link_no_jobs">No jobs to link to.</string>
+    <string name="ad_hoc_report_convert_title">Create a job</string>
+    <string name="ad_hoc_report_convert_message">A new job is created for the reported customer and property, and its completed visit is recorded from the reported work.</string>
+    <string name="ad_hoc_report_convert_title_label">Job title</string>
+    <string name="ad_hoc_report_convert_description_label">Description (optional)</string>
+    <string name="ad_hoc_report_convert_note_label">Note (optional)</string>
+    <string name="ad_hoc_report_convert_confirm">Create job</string>
+    <string name="ad_hoc_report_review_failed">The decision was not recorded — the report is unchanged.</string>
+    <string name="ad_hoc_report_rejected">Report rejected.</string>
+    <string name="ad_hoc_report_detail_failed_title">The report could not be read.</string>
+    <string name="ad_hoc_report_detail_unavailable">This report is not available.</string>
+    <string name="notification_assignment_title">New Visit assignment</string>
+    <string name="notification_assignment_body">You have been assigned to a Visit. Open Servora to view it.</string>
 </resources>

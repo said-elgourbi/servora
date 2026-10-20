@@ -18,6 +18,8 @@ import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.AdHocReportCustomerOption
 import com.servora.android.domain.model.AdHocReportJobOption
 import com.servora.android.domain.model.AdHocReportPropertyOption
+import com.servora.android.domain.model.AdHocWorkReport
+import com.servora.android.domain.model.AdHocWorkReportStatus
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.FollowUpVisitRequestMessage
 import com.servora.android.domain.model.FollowUpVisitRequestMessageAuthorKind
@@ -35,6 +37,7 @@ import com.servora.android.ui.theme.ServoraTheme
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -176,6 +179,82 @@ class TechnicianScheduleScreenTest {
         composeTestRule.onNodeWithTag(TechnicianScheduleTabRequestsTag).performClick()
 
         assertEquals(TechnicianScheduleTab.REQUESTS, chosen)
+    }
+
+    @Test
+    fun showsTheCallersOwnAdHocReportsInTheirOwnTabWithTheWorkDate() {
+        render(
+            state = technicianState(
+                tab = TechnicianScheduleTab.AD_HOC_REPORTS,
+                requestsRead = true,
+                adHocReportsRead = true,
+                adHocReports = listOf(technicianAdHocReport()),
+            ),
+            canReportAdHocWork = true,
+        )
+
+        composeTestRule.onNodeWithTag(TechnicianAdHocReportsSectionTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(technicianAdHocReportTag("report-1")).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TechnicianRequestsContentTag).assertDoesNotExist()
+        composeTestRule.onNodeWithText(
+            formatRequestWindow(
+                "2026-09-08T13:00:00.000Z",
+                "2026-09-08T14:00:00.000Z",
+                ZoneId.of("America/Toronto"),
+                ApplicationProvider.getApplicationContext<Context>().resources.configuration.locales[0],
+            )!!,
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun doesNotOfferTheReportsSectionToASessionThatMayNotReportWork() {
+        render(
+            state = technicianState(
+                tab = TechnicianScheduleTab.REQUESTS,
+                requestsRead = true,
+                adHocReportsRead = true,
+                adHocReports = listOf(technicianAdHocReport()),
+            ),
+            canReportAdHocWork = false,
+        )
+
+        // The reports read is authorized by the reporting capability (`BR-AH-001`, `BR-011`), so a
+        // session without it is offered no section whose rows it could not fetch (`BR-007`).
+        composeTestRule.onNodeWithTag(TechnicianAdHocReportsSectionTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(TechnicianScheduleTabAdHocReportsTag).assertDoesNotExist()
+    }
+
+    @Test
+    fun visitRequestsTabDoesNotContainAdHocReports() {
+        render(
+            state = technicianState(
+                tab = TechnicianScheduleTab.REQUESTS,
+                requestsRead = true,
+                requests = listOf(technicianRequest()),
+                adHocReportsRead = true,
+                adHocReports = listOf(technicianAdHocReport()),
+            ),
+            canReportAdHocWork = true,
+        )
+
+        composeTestRule.onNodeWithTag(technicianRequestTag("request-1")).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(technicianAdHocReportTag("report-1")).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(TechnicianScheduleTabAdHocReportsTag).assertIsDisplayed()
+    }
+
+    @Test
+    fun reportsTabIsAvailableWithoutTheVisitRequestCapability() {
+        var chosen: TechnicianScheduleTab? = null
+        render(
+            state = technicianState(),
+            canRequestFollowUpVisit = false,
+            canReportAdHocWork = true,
+            onSelectTab = { chosen = it },
+        )
+
+        composeTestRule.onNodeWithTag(TechnicianScheduleTabRequestsTag).assertDoesNotExist()
+        composeTestRule.onNodeWithTag(TechnicianScheduleTabAdHocReportsTag).performClick()
+        assertEquals(TechnicianScheduleTab.AD_HOC_REPORTS, chosen)
     }
 
     @Test
@@ -498,6 +577,9 @@ private fun technicianState(
     requests: List<FollowUpVisitRequest> = emptyList(),
     requestsRead: Boolean = false,
     requestsFailureReason: CustomersFailureReason? = null,
+    adHocReports: List<AdHocWorkReport> = emptyList(),
+    adHocReportsRead: Boolean = false,
+    adHocReportsFailureReason: CustomersFailureReason? = null,
 ): TechnicianScheduleUiState = TechnicianScheduleUiState(
     timeZoneId = TECHNICIAN_DEVICE_ZONE,
     firstDayOfWeek = DayOfWeek.MONDAY,
@@ -519,6 +601,9 @@ private fun technicianState(
     requests = requests,
     requestsRead = requestsRead,
     requestsFailureReason = requestsFailureReason,
+    adHocReports = adHocReports,
+    adHocReportsRead = adHocReportsRead,
+    adHocReportsFailureReason = adHocReportsFailureReason,
 )
 
 private fun crewMember(
@@ -585,6 +670,50 @@ private fun technicianRequest(
     createdAt = "2026-09-08T12:00:00.000Z",
     updatedAt = "2026-09-08T12:00:00.000Z",
     messages = messages,
+)
+
+/** One ad-hoc work report as the API answers it for the technician who reported it (`BR-AH-001`). */
+private fun technicianAdHocReport(
+    id: String = "report-1",
+    status: AdHocWorkReportStatus = AdHocWorkReportStatus.PENDING,
+    reviewNote: String? = null,
+): AdHocWorkReport = AdHocWorkReport(
+    id = id,
+    reportingTechnicianMembershipId = VIEWER_MEMBERSHIP_ID,
+    customerId = "customer-1",
+    customerName = "ABC Property Management",
+    propertyId = "property-1",
+    propertyAddress = ScheduleAddress(
+        propertyName = null,
+        addressLine1 = "100 Main St",
+        addressLine2 = null,
+        city = "Toronto",
+        province = "ON",
+        postalCode = "M5V 2T6",
+        country = "CA",
+    ),
+    knownJobId = null,
+    knownJobNumber = null,
+    knownJobTitle = null,
+    workStartedAt = "2026-09-08T13:00:00.000Z",
+    workEndedAt = "2026-09-08T14:00:00.000Z",
+    outcomeCode = VisitOutcome.RESOLVED,
+    summary = "Replaced the leaking valve.",
+    notes = null,
+    reportedCustomerName = null,
+    reportedCustomerPhone = null,
+    reportedCustomerAddress = null,
+    status = status,
+    reviewerMembershipId = null,
+    reviewedAt = null,
+    reviewNote = reviewNote,
+    createdJobId = null,
+    createdJobNumber = null,
+    createdJobTitle = null,
+    createdVisitId = null,
+    version = 1,
+    createdAt = "2026-09-08T14:05:00.000Z",
+    updatedAt = "2026-09-08T14:05:00.000Z",
 )
 
 /** One message of a request's clarification conversation (`BR-FV-012`). */

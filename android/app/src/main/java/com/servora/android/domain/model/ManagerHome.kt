@@ -53,6 +53,9 @@ enum class ManagerAttentionKind {
     /** A Visit still `SCHEDULED` after its scheduled window ended (`BR-072`, `BR-074`). */
     VISIT_OVERDUE,
 
+    /** Started work still open after the local day of its scheduled end. */
+    VISIT_STALE_STARTED,
+
     /** A Job with no active Visit, so it needs scheduling (`BR-060`). */
     JOB_NEEDS_SCHEDULING,
 
@@ -70,6 +73,42 @@ enum class ManagerAttentionKind {
 
     /** The Job's latest completed Visit reported `UNABLE_TO_COMPLETE` (`BR-078`). */
     UNABLE_TO_COMPLETE,
+
+    /**
+     * The Job's latest completed Assessment Visit reported `WORK_RECOMMENDED`: work is recommended and
+     * the office decides what happens next (`BR-078`).
+     */
+    JOB_WORK_RECOMMENDED,
+
+    /**
+     * The current quote workflow is `REQUIRED`: a quote is needed before work can be planned
+     * (`BR-078`, `BR-QUOTE-001`).
+     */
+    JOB_QUOTE_REQUIRED,
+
+    /**
+     * The current quote workflow is `SENT`: the customer has the quote and the office is waiting on a
+     * decision (`BR-QUOTE-001`).
+     */
+    JOB_CUSTOMER_DECISION_PENDING,
+
+    /**
+     * The current quote workflow is `APPROVED`: work can be scheduled without changing the Job's
+     * lifecycle status (`BR-QUOTE-001`).
+     */
+    JOB_WORK_READY_TO_SCHEDULE,
+
+    /**
+     * The current quote workflow is `REJECTED`: the Job stays active until the manager cancels it
+     * through the normal Job cancellation path (`BR-QUOTE-001`).
+     */
+    JOB_CANCELLATION_REQUIRED,
+
+    /**
+     * The Job's latest completed Assessment Visit reported `UNABLE_TO_ASSESS`: another assessment or
+     * office intervention is needed (`BR-078`).
+     */
+    JOB_NEEDS_REASSESSMENT,
 }
 
 /**

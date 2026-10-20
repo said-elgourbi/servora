@@ -15,13 +15,13 @@ import kotlinx.coroutines.withContext
  *
  * The API owns the value; the client mirrors it so a photo can be prepared to fit **before** it is
  * recorded, and it deliberately does not invent a stricter limit of its own
- * (`docs/tracker/029-photo-evidence-phases.md` D3c).
+ * (`docs/tracker/shared/029-photo-evidence-phases.md` D3c).
  */
 const val MAX_JOB_PHOTO_BYTES: Int = 15 * 1024 * 1024
 
 /**
  * The two device-side steps a photo may need before it becomes a draft
- * (`docs/tracker/029-photo-evidence-phases.md` D3b, D3c).
+ * (`docs/tracker/shared/029-photo-evidence-phases.md` D3b, D3c).
  *
  * Both need the Android runtime — `BitmapFactory` to decode and `Bitmap.compress` to encode — so they
  * sit behind this port, and the rules that decide **when** each step runs stay in `JobPhotoSession`,
@@ -184,7 +184,7 @@ class DefaultJobPhotoProcessing @Inject constructor() : JobPhotoProcessing {
  *
  * The list is declared rather than computed so what a resized photo is encoded as stays reviewable:
  * the longest edge it is scaled to and the JPEG quality, strongest first. The values chosen and what
- * they measured are recorded in `docs/tracker/029-photo-evidence-phases.md` (Phase 2).
+ * they measured are recorded in `docs/tracker/shared/029-photo-evidence-phases.md` (Phase 2).
  */
 private data class FitTarget(val maxEdgePx: Int, val quality: Int)
 

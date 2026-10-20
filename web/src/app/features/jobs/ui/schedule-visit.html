@@ -1,0 +1,167 @@
+<h2 mat-dialog-title>{{ i18n.text('jobScheduleVisit') }}</h2>
+<form [formGroup]="form" (ngSubmit)="save()">
+  <mat-dialog-content>
+    <p>#{{ job.jobNumber }} · {{ job.title }}</p>
+    <mat-form-field appearance="outline">
+      <mat-label>{{ i18n.text('jobVisitPurpose') }}</mat-label>
+      <mat-select formControlName="purpose">
+        <mat-option value="WORK">{{ i18n.text('purposeWork') }}</mat-option>
+        <mat-option value="ASSESSMENT">{{ i18n.text('purposeAssessment') }}</mat-option>
+      </mat-select>
+    </mat-form-field>
+    <div class="visit-window">
+      <mat-form-field appearance="outline">
+        <mat-label>{{ i18n.text('jobVisitStartDate') }}</mat-label>
+        <input
+          matInput
+          [matDatepicker]="startDatePicker"
+          formControlName="startDate"
+          readonly
+          required
+          (click)="startDatePicker.open()"
+        />
+        <mat-datepicker-toggle
+          matSuffix
+          [for]="startDatePicker"
+          [aria-label]="i18n.text('jobVisitStartDate')"
+        />
+        <mat-datepicker #startDatePicker />
+        <mat-error>{{ i18n.text('required') }}</mat-error>
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>{{ i18n.text('jobVisitStartTime') }}</mat-label>
+        <input
+          matInput
+          [matTimepicker]="startTimePicker"
+          formControlName="startTime"
+          readonly
+          required
+        />
+        <mat-timepicker-toggle
+          matSuffix
+          [for]="startTimePicker"
+          [aria-label]="i18n.text('jobVisitStartTime')"
+        />
+        <mat-timepicker #startTimePicker interval="15m" />
+        <mat-error>{{ i18n.text('required') }}</mat-error>
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>{{ i18n.text('jobVisitEndDate') }}</mat-label>
+        <input
+          matInput
+          [matDatepicker]="endDatePicker"
+          formControlName="endDate"
+          readonly
+          required
+          (click)="endDatePicker.open()"
+        />
+        <mat-datepicker-toggle
+          matSuffix
+          [for]="endDatePicker"
+          [aria-label]="i18n.text('jobVisitEndDate')"
+        />
+        <mat-datepicker #endDatePicker />
+        <mat-error>{{ i18n.text('required') }}</mat-error>
+      </mat-form-field>
+      <mat-form-field appearance="outline">
+        <mat-label>{{ i18n.text('jobVisitEndTime') }}</mat-label>
+        <input
+          matInput
+          [matTimepicker]="endTimePicker"
+          formControlName="endTime"
+          readonly
+          required
+        />
+        <mat-timepicker-toggle
+          matSuffix
+          [for]="endTimePicker"
+          [aria-label]="i18n.text('jobVisitEndTime')"
+        />
+        <mat-timepicker #endTimePicker interval="15m" />
+        <mat-error>{{ i18n.text('required') }}</mat-error>
+      </mat-form-field>
+    </div>
+    @if (invalidWindow()) {
+      <p role="alert">{{ i18n.text('jobVisitWindowError') }}</p>
+    }
+    @if (loading()) {
+      <p role="status">{{ i18n.text('busy') }}</p>
+    }
+    @if (readError(); as message) {
+      <p role="alert">{{ i18n.text(message) }}</p>
+      <button type="button" mat-button [disabled]="loading()" (click)="loadTechnicians()">
+        {{ i18n.text('retry') }}
+      </button>
+    } @else if (!loading() && !technicians().length) {
+      <p role="status">{{ i18n.text('jobVisitNoTechnicians') }}</p>
+    }
+    <mat-form-field appearance="outline">
+      <mat-label>{{ i18n.text('jobVisitTechnicians') }}</mat-label>
+      <mat-select formControlName="crew" multiple required>
+        @for (member of technicians(); track member.membershipId) {
+          <mat-option [value]="member.membershipId">{{
+            member.name || i18n.text('unnamedMember')
+          }}</mat-option>
+        }
+      </mat-select>
+      <mat-error>{{ i18n.text('required') }}</mat-error>
+    </mat-form-field>
+    <mat-form-field appearance="outline">
+      <mat-label>{{ i18n.text('jobVisitLead') }}</mat-label>
+      <mat-select formControlName="lead" [placeholder]="i18n.text('jobVisitChooseLead')" required>
+        @for (member of crew(); track member.membershipId) {
+          <mat-option [value]="member.membershipId">{{
+            member.name || i18n.text('unnamedMember')
+          }}</mat-option>
+        }
+      </mat-select>
+      <mat-error>{{ i18n.text('required') }}</mat-error>
+    </mat-form-field>
+    @if (
+      form.controls.lead.touched && !form.controls.crew.value.includes(form.controls.lead.value)
+    ) {
+      <p role="alert">{{ i18n.text('jobVisitCrewError') }}</p>
+    }
+    @if (conflicts().length) {
+      <div class="conflicts" role="alert">
+        <p>{{ i18n.text('jobVisitConflicts') }}</p>
+        @for (conflict of conflicts(); track $index) {
+          <p>
+            {{ conflict.technicianName || i18n.text('unnamedMember') }} · {{ i18n.text('job') }} #{{
+              conflict.jobNumber
+            }}
+            · {{ conflict.scheduledStart | date: 'medium' : undefined : i18n.language() }} –
+            {{ conflict.scheduledEnd | date: 'shortTime' : undefined : i18n.language() }}
+          </p>
+        }
+        <button type="button" mat-stroked-button [disabled]="busy()" (click)="save(true)">
+          {{ i18n.text('jobVisitConfirmConflicts') }}
+        </button>
+      </div>
+    }
+    @if (error(); as message) {
+      <p role="alert">{{ i18n.text(message) }}</p>
+    }
+  </mat-dialog-content>
+  <mat-dialog-actions align="end">
+    <button type="button" mat-button [disabled]="busy()" (click)="close()">
+      {{ i18n.text(blocked() ? 'customerReload' : 'cancel') }}
+    </button>
+    <button
+      type="submit"
+      mat-flat-button
+      [disabled]="
+        busy() ||
+        blocked() ||
+        loading() ||
+        !!readError() ||
+        form.invalid ||
+        invalidWindow() ||
+        !form.controls.crew.value.includes(form.controls.lead.value) ||
+        !!conflicts().length
+      "
+    >
+      {{ i18n.text('jobScheduleVisit') }}
+    </button>
+  </mat-dialog-actions>
+</form>

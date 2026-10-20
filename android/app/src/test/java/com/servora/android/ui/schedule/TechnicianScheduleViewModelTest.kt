@@ -6,22 +6,29 @@ import com.servora.android.data.schedule.AdHocReportCustomerOptionsResult
 import com.servora.android.data.schedule.AdHocReportJobOptionsResult
 import com.servora.android.data.schedule.AdHocReportPropertyOptionsResult
 import com.servora.android.data.schedule.AdHocWorkReportDraft
+import com.servora.android.data.schedule.AdHocWorkReportReconcileResult
+import com.servora.android.data.schedule.AdHocWorkReportRejectResult
 import com.servora.android.data.schedule.AdHocWorkReportResult
 import com.servora.android.data.schedule.AdHocWorkReportsRepository
+import com.servora.android.data.schedule.AdHocWorkReportsResult
 import com.servora.android.data.schedule.ScheduleRepository
 import com.servora.android.data.schedule.ScheduleResult
 import com.servora.android.data.schedule.VisitRequestReviewResult
 import com.servora.android.data.schedule.VisitRequestsRepository
 import com.servora.android.data.schedule.VisitRequestsResult
+import com.servora.android.domain.model.AdHocWorkReport
+import com.servora.android.domain.model.AdHocWorkReportStatus
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.FollowUpVisitRequestMessage
 import com.servora.android.domain.model.FollowUpVisitRequestMessageAuthorKind
 import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.Schedule
+import com.servora.android.domain.model.ScheduleAddress
 import com.servora.android.domain.model.ScheduleDay
 import com.servora.android.domain.model.ScheduleScope
 import com.servora.android.domain.model.ScheduleScopeKind
 import com.servora.android.domain.model.ScheduleVisit
+import com.servora.android.domain.model.VisitOutcome
 import com.servora.android.domain.model.VisitStatus
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -668,6 +675,86 @@ class TechnicianScheduleViewModelTest {
         assertEquals(2, requests.reads)
         assertEquals(listOf("request-1"), viewModel.uiState.value.requests.map { it.id })
     }
+
+    @Test
+    fun `reads requests and ad-hoc reports only in their own tabs`() = runTest(dispatcher) {
+        val repository = RecordingTechnicianScheduleRepository(
+            ScheduleResult.Success(technicianDay()),
+        )
+        val requests = RecordingTechnicianRequestsRepository(
+            VisitRequestsResult.Success(listOf(technicianRequest())),
+        )
+        val adHoc = RecordingAdHocWorkReportsRepository(
+            AdHocWorkReportsResult.Success(listOf(technicianAdHocReport())),
+        )
+        val viewModel = scheduleViewModel(repository, requests, adHoc)
+
+        viewModel.selectTab(TechnicianScheduleTab.REQUESTS)
+        advanceUntilIdle()
+
+        assertEquals(1, requests.reads)
+        assertEquals(listOf("request-1"), viewModel.uiState.value.requests.map { it.id })
+        assertEquals(0, adHoc.reads)
+
+        viewModel.selectTab(TechnicianScheduleTab.AD_HOC_REPORTS)
+        advanceUntilIdle()
+
+        assertEquals(1, requests.reads)
+        assertEquals(1, adHoc.reads)
+        assertEquals(listOf("report-1"), viewModel.uiState.value.adHocReports.map { it.id })
+        assertTrue(viewModel.uiState.value.adHocReportsRead)
+    }
+
+    @Test
+    fun `opening request details does not refresh ad-hoc reports`() = runTest(dispatcher) {
+        val repository = RecordingTechnicianScheduleRepository(
+            ScheduleResult.Success(technicianDay()),
+        )
+        val requests = RecordingTechnicianRequestsRepository(
+            VisitRequestsResult.Success(listOf(technicianRequest())),
+        )
+        val adHoc = RecordingAdHocWorkReportsRepository(
+            AdHocWorkReportsResult.Success(listOf(technicianAdHocReport())),
+        )
+        val viewModel = scheduleViewModel(repository, requests, adHoc)
+
+        viewModel.selectTab(TechnicianScheduleTab.AD_HOC_REPORTS)
+        advanceUntilIdle()
+        viewModel.openOwnRequests()
+        advanceUntilIdle()
+
+        assertEquals(1, adHoc.reads)
+    }
+
+    @Test
+    fun `retry and re-entry refresh only the ad-hoc reports tab`() = runTest(dispatcher) {
+        val repository = RecordingTechnicianScheduleRepository(
+            ScheduleResult.Success(technicianDay()),
+        )
+        val requests = RecordingTechnicianRequestsRepository(
+            VisitRequestsResult.Success(emptyList()),
+        )
+        val adHoc = RecordingAdHocWorkReportsRepository(
+            AdHocWorkReportsResult.Failure(CustomersFailureReason.UNEXPECTED),
+            AdHocWorkReportsResult.Success(listOf(technicianAdHocReport())),
+            AdHocWorkReportsResult.Success(emptyList()),
+        )
+        val viewModel = scheduleViewModel(repository, requests, adHoc)
+
+        viewModel.selectTab(TechnicianScheduleTab.AD_HOC_REPORTS)
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.showsAdHocReportsFailure)
+
+        viewModel.retry()
+        advanceUntilIdle()
+        assertEquals(listOf("report-1"), viewModel.uiState.value.adHocReports.map { it.id })
+
+        viewModel.start(TECH_MONDAY, TECH_DEVICE_ZONE, DayOfWeek.MONDAY)
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.showsEmptyAdHocReports)
+        assertEquals(3, adHoc.reads)
+        assertEquals(0, requests.reads)
+    }
 }
 
 private val TECH_MONDAY: LocalDate = LocalDate.parse("2026-09-07")
@@ -813,6 +900,50 @@ private fun technicianRequest(
     messages = messages,
 )
 
+/** One ad-hoc work report as the API answers it for the technician who reported it (`BR-AH-001`). */
+private fun technicianAdHocReport(
+    id: String = "report-1",
+    status: AdHocWorkReportStatus = AdHocWorkReportStatus.PENDING,
+    reviewNote: String? = null,
+): AdHocWorkReport = AdHocWorkReport(
+    id = id,
+    reportingTechnicianMembershipId = "member-7",
+    customerId = "customer-1",
+    customerName = "ABC Property Management",
+    propertyId = "property-1",
+    propertyAddress = ScheduleAddress(
+        propertyName = null,
+        addressLine1 = "100 Main St",
+        addressLine2 = null,
+        city = "Toronto",
+        province = "ON",
+        postalCode = "M5V 2T6",
+        country = "CA",
+    ),
+    knownJobId = null,
+    knownJobNumber = null,
+    knownJobTitle = null,
+    workStartedAt = "2026-09-08T13:00:00.000Z",
+    workEndedAt = "2026-09-08T14:00:00.000Z",
+    outcomeCode = VisitOutcome.RESOLVED,
+    summary = "Replaced the leaking valve.",
+    notes = null,
+    reportedCustomerName = null,
+    reportedCustomerPhone = null,
+    reportedCustomerAddress = null,
+    status = status,
+    reviewerMembershipId = null,
+    reviewedAt = null,
+    reviewNote = reviewNote,
+    createdJobId = null,
+    createdJobNumber = null,
+    createdJobTitle = null,
+    createdVisitId = null,
+    version = 1,
+    createdAt = "2026-09-08T14:05:00.000Z",
+    updatedAt = "2026-09-08T14:05:00.000Z",
+)
+
 /** One message of a request's clarification conversation, as the API answers it (`BR-FV-012`). */
 private fun technicianMessage(
     id: String,
@@ -832,8 +963,33 @@ private fun scheduleViewModel(
 ): TechnicianScheduleViewModel =
     TechnicianScheduleViewModel(repository, requests, RecordingAdHocWorkReportsRepository())
 
+/** Constructs the ViewModel under test with the ad-hoc repository the test scripts. */
+private fun scheduleViewModel(
+    repository: ScheduleRepository,
+    requests: VisitRequestsRepository,
+    adHoc: AdHocWorkReportsRepository,
+): TechnicianScheduleViewModel =
+    TechnicianScheduleViewModel(repository, requests, adHoc)
+
 /** An [AdHocWorkReportsRepository] that answers empty options and a successful submit. */
-private class RecordingAdHocWorkReportsRepository : AdHocWorkReportsRepository {
+private class RecordingAdHocWorkReportsRepository(
+    private vararg val results: AdHocWorkReportsResult,
+) : AdHocWorkReportsRepository {
+    override suspend fun searchReviewCustomers(query: String) = com.servora.android.data.schedule.AdHocReviewDataResult.Success(emptyList<com.servora.android.domain.model.AdHocReportCustomerOption>())
+    override suspend fun listReviewProperties(customerId: String) = com.servora.android.data.schedule.AdHocReviewDataResult.Success(emptyList<com.servora.android.domain.model.AdHocReportPropertyOption>())
+    override suspend fun resolveLocation(report: com.servora.android.domain.model.AdHocWorkReport, request: com.servora.android.data.schedule.ResolveAdHocLocationRequestDto) = com.servora.android.data.schedule.AdHocReviewDataResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    /** A report read a test does not script answers that the caller has no report of their own. */
+    constructor() : this(AdHocWorkReportsResult.Success(emptyList()))
+
+    var reads = 0
+        private set
+
+    override suspend fun loadReports(): AdHocWorkReportsResult {
+        reads += 1
+        return results[(reads - 1).coerceAtMost(results.lastIndex)]
+    }
+
     override suspend fun searchCustomers(query: String): AdHocReportCustomerOptionsResult =
         AdHocReportCustomerOptionsResult.Success(emptyList())
 
@@ -843,7 +999,30 @@ private class RecordingAdHocWorkReportsRepository : AdHocWorkReportsRepository {
     override suspend fun listJobs(customerId: String): AdHocReportJobOptionsResult =
         AdHocReportJobOptionsResult.Success(emptyList())
 
+    override suspend fun listReviewJobs(
+        customerId: String?,
+        query: String?,
+    ): AdHocReportJobOptionsResult =
+        AdHocReportJobOptionsResult.Success(emptyList())
+
     override suspend fun submit(report: AdHocWorkReportDraft): AdHocWorkReportResult =
         AdHocWorkReportResult.Success
-}
 
+    override suspend fun reject(report: AdHocWorkReport, note: String): AdHocWorkReportRejectResult =
+        AdHocWorkReportRejectResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun link(
+        report: AdHocWorkReport,
+        jobId: String,
+        note: String,
+    ): AdHocWorkReportReconcileResult =
+        AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun convert(
+        report: AdHocWorkReport,
+        title: String,
+        description: String?,
+        note: String,
+    ): AdHocWorkReportReconcileResult =
+        AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNEXPECTED)
+}

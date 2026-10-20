@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220">
+  <rect width="320" height="220" fill="#d7dce0"/>
+  <path d="M0 92h114v46H0m320-46H206v46h114" fill="#a77a50" stroke="#6d523b" stroke-width="3"/>
+  <rect x="106" y="80" width="108" height="70" rx="12" fill="#74828a" stroke="#3c4c56" stroke-width="4"/>
+  <path d="M160 82V42m-35 0h70" stroke="#3c4c56" stroke-width="10"/>
+  <circle cx="160" cy="112" r="21" fill="#d6b370" stroke="#6d523b" stroke-width="3"/>
+  <path d="m148 112 8 8 15-16" fill="none" stroke="#6d523b" stroke-width="4"/>
+  <text x="16" y="197" fill="#35444d" font-size="17" font-family="sans-serif">Valve inspection · before repair</text>
+</svg>

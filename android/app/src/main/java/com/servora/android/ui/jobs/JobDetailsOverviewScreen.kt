@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -32,6 +34,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -68,9 +71,14 @@ import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobDetails
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisitSummary
+import com.servora.android.domain.model.JobQuote
+import com.servora.android.domain.model.JobQuoteAction
+import com.servora.android.domain.model.JobQuoteDocument
+import com.servora.android.domain.model.JobQuoteWorkflowState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.ui.components.ContactPrimaryBadge
 import com.servora.android.ui.components.CustomerContactLine
@@ -89,6 +97,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.util.Locale
 
 /**
  * Identifies the Job's own information: its number, title and description (`BR-052`, `BR-053`).
@@ -114,6 +123,9 @@ const val JobDetailsContactPrimaryTag = "job-details-contact-primary"
 
 /** Identifies the section that presents the notes the office recorded (`BR-092`). */
 const val JobNotesSectionTag = "job-details-notes"
+
+/** Identifies the section that presents the Assessment quote workflow (`BR-QUOTE-001`). */
+const val JobQuoteSectionTag = "job-details-quote"
 
 /** Identifies the section that presents the Visit representing the Job (`BR-081`). */
 const val JobCurrentVisitSectionTag = "job-details-current-visit"
@@ -155,6 +167,9 @@ fun jobActivityVisitSummaryTag(visitId: String): String =
 /** Identifies the state shown inside a Visit that has no updates yet. */
 fun jobActivityVisitEmptyTag(visitId: String): String = "job-details-activity-visit-empty-$visitId"
 
+/** Identifies the badge marking a Visit created from a reconciled ad-hoc work report (`BR-AH-003`). */
+fun jobActivityVisitAdHocTag(visitId: String): String = "job-details-activity-visit-ad-hoc-$visitId"
+
 /** Identifies the group holding the updates that belong to the Job and to no Visit (`BR-080`). */
 const val JobActivityGeneralGroupTag = "job-details-activity-general"
 
@@ -163,9 +178,6 @@ const val JobActivityGeneralToggleTag = "job-details-activity-general-toggle"
 
 /** Identifies what the expanded general job updates group reveals. */
 const val JobActivityGeneralBodyTag = "job-details-activity-general-body"
-
-/** Identifies the state shown when the Job has no job-wide update. */
-const val JobActivityGeneralEmptyTag = "job-details-activity-general-empty"
 
 /** Identifies the **Primary** badge on the Customer's phone row of the Job card (`BR-095`). */
 const val JobDetailsCustomerPrimaryBadgeTag = "job-details-customer-primary-badge"
@@ -183,16 +195,16 @@ const val JobDetailsCustomerOtherContactsToggleTag = "job-details-customer-other
  * states what the group holds on fixed lines, so expanding a Visit never reflows the header it was
  * opened from.
  */
-private val OverviewPageGutter = 20.dp
-private val OverviewSectionSpacing = 20.dp
-private val OverviewBottomClearance = 72.dp
+private val OverviewPageGutter = 16.dp
+private val OverviewSectionSpacing = 14.dp
+private val OverviewBottomClearance = 104.dp
 private val OverviewTrayClearance = 260.dp
 private val OverviewReportSpacing = 8.dp
 private val OverviewAvatarSize = 36.dp
 private val OverviewMapAffordanceSize = 18.dp
-private val OverviewActivityHeaderMinHeight = 56.dp
+private val OverviewActivityHeaderMinHeight = 48.dp
 private val OverviewChevronSize = 18.dp
-private val OverviewNestedSpacing = 12.dp
+private val OverviewNestedSpacing = 8.dp
 private val OverviewEvidenceStackSpacing = 8.dp
 
 /**
@@ -244,6 +256,12 @@ fun JobDetailsOverviewScreen(
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
     onLoadAssignableTechnicians: () -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
+    onMarkQuoteSent: () -> Unit,
+    onMarkQuoteRequired: () -> Unit,
+    onMarkQuoteApproved: () -> Unit,
+    onMarkQuoteRejected: () -> Unit,
+    onUploadQuoteDocument: () -> Unit = {},
+    onOpenQuoteDocument: () -> Unit = {},
     onChangeVisitStatus: (status: VisitStatus) -> Unit,
     onCompleteVisit: (outcome: VisitOutcome, summary: String) -> Unit,
     onDiscardQueuedVisitAction: (operationId: String) -> Unit,
@@ -252,7 +270,12 @@ fun JobDetailsOverviewScreen(
     onEditVisitNote: (noteId: String, body: String) -> Unit,
     onRemoveVisitNote: (noteId: String, reason: String) -> Unit,
     onRescheduleVisit: (start: Instant, end: Instant) -> Unit,
-    onScheduleVisit: (start: Instant, end: Instant, assignments: List<TechnicianAssignment>) -> Unit,
+    onScheduleVisit: (
+        start: Instant,
+        end: Instant,
+        assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
+    ) -> Unit,
     /**
      * Submits the technician's follow-up Visit proposal (`BR-FV-001`, `BR-FV-003`).
      *
@@ -299,6 +322,7 @@ fun JobDetailsOverviewScreen(
     onRemoveEvidenceAudioNote: (String, String) -> Unit,
     onMicrophoneDenied: () -> Unit,
     onDismissAudioMessage: () -> Unit,
+    onDismissQuoteDocumentMessage: () -> Unit = {},
     audioProgress: State<JobAudioPlaybackProgress?>,
     // `modifier` leads the optional parameters, as the Compose conventions require: this screen is the
     // one *new* full-screen composable of the redesign, so it is written to the convention even where
@@ -356,6 +380,8 @@ fun JobDetailsOverviewScreen(
     val photoMessage = state.photoMessage
     val audioFailure = state.audioFailure
     val audioMessage = state.audioMessage
+    val quoteDocumentFailure = state.quoteDocumentFailure
+    val quoteDocumentMessage = state.quoteDocumentMessage
     val actionMessage = when {
         actionFailure != null -> stringResource(jobActionFailureMessage(actionFailure))
         completedAction != null -> stringResource(
@@ -382,6 +408,8 @@ fun JobDetailsOverviewScreen(
         photoMessage != null -> stringResource(jobPhotoMessageText(photoMessage))
         audioFailure != null -> stringResource(jobAudioFailureMessage(audioFailure))
         audioMessage != null -> stringResource(jobAudioMessageText(audioMessage))
+        quoteDocumentFailure != null -> stringResource(jobQuoteDocumentFailureMessage(quoteDocumentFailure))
+        quoteDocumentMessage != null -> stringResource(jobQuoteDocumentMessageText(quoteDocumentMessage))
         else -> null
     }
     val dismissLabel = stringResource(R.string.job_action_dismiss)
@@ -390,11 +418,20 @@ fun JobDetailsOverviewScreen(
     // presents the change, so the report is shown and released instead of being left standing in the
     // layout (`BR-001`, `BR-042`). A refusal waits for the user, because nothing on screen reflects a
     // change that did not happen and the refusal is the action's only report.
-    LaunchedEffect(actionMessage, actionFailure != null, photoFailure != null, audioFailure != null) {
+    LaunchedEffect(
+        actionMessage,
+        actionFailure != null,
+        photoFailure != null,
+        audioFailure != null,
+        quoteDocumentFailure != null,
+    ) {
         if (actionMessage == null) {
             return@LaunchedEffect
         }
-        val isFailure = actionFailure != null || photoFailure != null || audioFailure != null
+        val isFailure = actionFailure != null ||
+            photoFailure != null ||
+            audioFailure != null ||
+            quoteDocumentFailure != null
         try {
             snackbarHostState.showSnackbar(
                 visuals = JobActionSnackbarVisuals(
@@ -414,6 +451,7 @@ fun JobDetailsOverviewScreen(
             onDismissActionMessage()
             onDismissPhotoMessage()
             onDismissAudioMessage()
+            onDismissQuoteDocumentMessage()
         }
     }
 
@@ -465,6 +503,12 @@ fun JobDetailsOverviewScreen(
                     onOpenSubmittedFollowUpRequest = onOpenRequest,
                     onOpenSubmittedFollowUpVisit = onOpenVisit,
                     onChangeJobStatus = onChangeJobStatus,
+                    onMarkQuoteSent = onMarkQuoteSent,
+                    onMarkQuoteRequired = onMarkQuoteRequired,
+                    onMarkQuoteApproved = onMarkQuoteApproved,
+                    onMarkQuoteRejected = onMarkQuoteRejected,
+                    onUploadQuoteDocument = onUploadQuoteDocument,
+                    onOpenQuoteDocument = onOpenQuoteDocument,
                     onChangeVisitStatus = onChangeVisitStatus,
                     onOpenVisitCompletion = { showVisitCompletion = true },
                     onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
@@ -500,7 +544,7 @@ fun JobDetailsOverviewScreen(
          * the manager has to read (`BR-042`). The report is drawn by whichever window is on screen: this
          * stack normally, and the photo viewer's own host while its full-screen dialog is open —
          * otherwise a save made from the viewer would report itself behind the viewer
-         * (`docs/tracker/031-android-photo-viewer-ui.md`).
+         * (`docs/tracker/android/031-android-photo-viewer-ui.md`).
          */
         Column(
             modifier = Modifier
@@ -667,15 +711,18 @@ fun JobDetailsOverviewScreen(
     // The Visit's completion: the outcome `BR-077` requires is stated here, and submitting sends the
     // completion operation itself, so the recorded outcome and the Visit's finished state are one
     // recorded fact (`BR-077`, `BR-078`).
-    if (details != null && showVisitCompletion && details.selectedVisit != null) {
-        VisitCompletionSheet(
-            isSubmitting = state.isSubmitting,
-            onConfirm = { outcome, summary ->
-                showVisitCompletion = false
-                onCompleteVisit(outcome, summary)
-            },
-            onDismiss = { showVisitCompletion = false },
-        )
+    if (details != null && showVisitCompletion) {
+        details.selectedVisit?.let { visit ->
+            VisitCompletionSheet(
+                purpose = visit.purpose,
+                isSubmitting = state.isSubmitting,
+                onConfirm = { outcome, summary ->
+                    showVisitCompletion = false
+                    onCompleteVisit(outcome, summary)
+                },
+                onDismiss = { showVisitCompletion = false },
+            )
+        }
     }
 
     // The photo the technician just captured. Dismissing it keeps the photo — it is already recorded on
@@ -720,9 +767,10 @@ fun JobDetailsOverviewScreen(
             crewFailure = state.assignableFailure,
             isSubmitting = state.isSubmitting,
             onRetryCrew = onLoadAssignableTechnicians,
-            onConfirm = { start, end, assignments ->
+            showPurposeSelector = true,
+            onConfirm = { start, end, assignments, purpose ->
                 showSchedule = false
-                onScheduleVisit(start, end, assignments)
+                onScheduleVisit(start, end, assignments, purpose)
             },
             onDismiss = { showSchedule = false },
         )
@@ -892,6 +940,12 @@ private fun JobDetailsOverviewContent(
     onOpenSubmittedFollowUpRequest: (requestId: String) -> Unit,
     onOpenSubmittedFollowUpVisit: (visitId: String) -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
+    onMarkQuoteSent: () -> Unit,
+    onMarkQuoteRequired: () -> Unit,
+    onMarkQuoteApproved: () -> Unit,
+    onMarkQuoteRejected: () -> Unit,
+    onUploadQuoteDocument: () -> Unit,
+    onOpenQuoteDocument: () -> Unit,
     onChangeVisitStatus: (status: VisitStatus) -> Unit,
     onOpenVisitCompletion: () -> Unit,
     onDiscardQueuedVisitAction: (operationId: String) -> Unit,
@@ -977,14 +1031,31 @@ private fun JobDetailsOverviewContent(
         details.readOnlyReason?.let { reason ->
             JobReadOnlyNotice(reason = reason)
         }
-        JobLocationSection(address = overview.address, onOpenInMaps = onOpenInMaps)
-        JobContactsSection(
+        JobSiteContactSection(
+            address = overview.address,
             customerName = overview.customerName,
             contact = overview.customerContact,
             canOpenCustomer = canOpenCustomer,
+            onOpenInMaps = onOpenInMaps,
             onOpenCustomer = { onOpenCustomer(overview.customerId) },
         )
-        JobNotesSection(contact = overview.customerContact)
+        JobQuoteSection(
+            quote = details.quote,
+            canManageWorkflow = canUpdateJob,
+            documentReadEnabled = state.detailsSource == ReadSource.BACKEND &&
+                !state.isQuoteDocumentBusy,
+            actionsEnabled = state.canAct &&
+                state.detailsSource == ReadSource.BACKEND &&
+                !state.isQuoteDocumentBusy,
+            onMarkSent = onMarkQuoteSent,
+            onMarkRequired = onMarkQuoteRequired,
+            onMarkApproved = onMarkQuoteApproved,
+            onMarkRejected = onMarkQuoteRejected,
+            onUploadDocument = onUploadQuoteDocument,
+            onOpenDocument = onOpenQuoteDocument,
+            onScheduleWorkVisit = onOpenSchedule,
+            onCancelJob = { onChangeJobStatus(JobStatus.CANCELED) },
+        )
         CurrentVisitSection(
             details = details,
             // A reschedule edits the represented Visit, so the action exists only when there is one
@@ -1030,13 +1101,79 @@ private fun JobDetailsOverviewContent(
         // than the action it replaces (`Figma/src/screens/JobDetails.tsx`).
         Spacer(
             Modifier.height(
-                if (state.pendingPhotos.isEmpty()) {
-                    OverviewBottomClearance
-                } else {
+                if (state.holdsUnacceptedEvidence) {
                     OverviewTrayClearance
+                } else {
+                    OverviewBottomClearance
                 },
             ),
         )
+    }
+}
+
+/**
+ * The work location, reachable Customer and office notes share one compact card. They are separate
+ * domain facts, but on a phone they answer one field question: where am I going and who can I reach?
+ */
+@Composable
+private fun JobSiteContactSection(
+    address: CustomerJobAddress?,
+    customerName: String,
+    contact: JobCustomerContact?,
+    canOpenCustomer: Boolean,
+    onOpenInMaps: (address: CustomerJobAddress) -> Unit,
+    onOpenCustomer: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.testTag(JobLocationSectionTag),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SectionLabel(label = stringResource(R.string.job_details_location_label), count = null)
+        InfoCard {
+            val addressText = address
+                ?.let { snapshot -> addressLine(snapshot) }
+                ?.takeIf { line -> line.isNotBlank() }
+            val navigableAddress = address?.takeIf { addressText != null }
+            OverviewRow(
+                label = stringResource(R.string.job_details_address_label),
+                value = addressText ?: stringResource(R.string.job_details_no_address),
+                modifier = Modifier.testTag(JobDetailsAddressTag),
+                trailing = navigableAddress?.let { { OverviewMapAffordance() } },
+                onClick = navigableAddress?.let { location -> { onOpenInMaps(location) } },
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Column(
+                modifier = Modifier.testTag(JobContactsSectionTag),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OverviewRow(
+                    label = stringResource(R.string.job_details_customer_label),
+                    value = customerName,
+                    modifier = Modifier.testTag(JobDetailsCustomerTag),
+                    onClick = if (canOpenCustomer) onOpenCustomer else null,
+                )
+                contact?.let { details ->
+                    val summary = details.contactSummary(customerName)
+                    val statesSomething =
+                        !summary.primaryIsCustomer ||
+                            summary.primaryPhone != null ||
+                            summary.primaryEmail != null ||
+                            summary.others.isNotEmpty()
+                    if (statesSomething) {
+                        JobContactsPrimary(summary = summary)
+                    }
+                    details.notes?.takeIf { value -> value.isNotBlank() }?.let { notes ->
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Text(
+                            text = notes,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.testTag(JobDetailsCustomerNotesTag),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1093,7 +1230,7 @@ private fun JobHeaderSection(
  *
  * The chip that presents the status **is** the control that moves it, so the state a user wants to change
  * is the thing they tap and no separate action is drawn beside it
- * (`docs/tracker/020-android-job-details-status-control.md`). A session that may not act on the Job is
+ * (`docs/tracker/android/020-android-job-details-status-control.md`). A session that may not act on the Job is
  * shown no routine status: `ACTIVE` states only that the request is open, which a technician acting on an
  * assigned Visit already knows, and a Job that has *stopped* being open is reported by the notice above
  * instead (`BR-012`, `BR-062`).
@@ -1339,6 +1476,320 @@ private fun JobNotesSection(contact: JobCustomerContact?) {
         }
     }
 }
+
+
+/**
+ * The commercial quote workflow for the Assessment Visit that required customer authorization
+ * (`BR-QUOTE-001`).
+ *
+ * This section presents only what the API reported: the workflow state, the source Assessment Visit, the
+ * optional current PDF metadata, and the workflow actions the caller may take now. It does not infer
+ * state from a document. Document viewing is independent of whether the Job can still be edited.
+ */
+@Composable
+private fun JobQuoteSection(
+    quote: JobQuote?,
+    canManageWorkflow: Boolean,
+    documentReadEnabled: Boolean,
+    actionsEnabled: Boolean,
+    onMarkSent: () -> Unit,
+    onMarkRequired: () -> Unit,
+    onMarkApproved: () -> Unit,
+    onMarkRejected: () -> Unit,
+    onUploadDocument: () -> Unit,
+    onOpenDocument: () -> Unit,
+    onScheduleWorkVisit: () -> Unit,
+    onCancelJob: () -> Unit,
+) {
+    quote ?: return
+    Column(
+        modifier = Modifier.testTag(JobQuoteSectionTag),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SectionLabel(label = stringResource(R.string.job_details_quote_label), count = null)
+        InfoCard {
+            OverviewRow(
+                label = stringResource(R.string.job_details_quote_status_label),
+                value = stringResource(quote.state.labelRes()),
+            )
+            quote.sourceVisitSequence?.let { sequence ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                OverviewRow(
+                    label = stringResource(R.string.job_details_quote_source_visit_label),
+                    value = stringResource(R.string.job_activity_visit_format, sequence),
+                )
+            }
+            quote.sentAt?.let { sentAt ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                OverviewRow(
+                    label = stringResource(R.string.job_details_quote_sent_label),
+                    value = overviewInstantText(sentAt),
+                )
+            }
+            quote.externalReference?.takeIf { it.isNotBlank() }?.let { reference ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                OverviewRow(
+                    label = stringResource(R.string.job_details_quote_reference_label),
+                    value = reference,
+                )
+            }
+            quote.decidedAt?.let { decidedAt ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                OverviewRow(
+                    label = stringResource(R.string.job_details_quote_decision_label),
+                    value = overviewInstantText(decidedAt),
+                )
+            }
+            quote.currentDocument?.let { document ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                QuoteDocumentRows(document = document)
+            } ?: run {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Text(
+                    text = stringResource(R.string.job_details_quote_no_document),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (quote.allowedActions.isNotEmpty()) {
+                QuoteDocumentActions(
+                    allowedActions = quote.allowedActions,
+                    enabled = actionsEnabled,
+                    readEnabled = documentReadEnabled,
+                    hasDocument = quote.currentDocument != null,
+                    onUploadDocument = onUploadDocument,
+                    onOpenDocument = onOpenDocument,
+                )
+                if (canManageWorkflow) QuoteWorkflowActions(
+                    quote = quote,
+                    enabled = actionsEnabled,
+                    onMarkSent = onMarkSent,
+                    onMarkRequired = onMarkRequired,
+                    onMarkApproved = onMarkApproved,
+                    onMarkRejected = onMarkRejected,
+                    onScheduleWorkVisit = onScheduleWorkVisit,
+                    onCancelJob = onCancelJob,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuoteDocumentActions(
+    allowedActions: List<JobQuoteAction>,
+    enabled: Boolean,
+    readEnabled: Boolean,
+    hasDocument: Boolean,
+    onUploadDocument: () -> Unit,
+    onOpenDocument: () -> Unit,
+) {
+    val canUpload = JobQuoteAction.UPLOAD_DOCUMENT in allowedActions
+    val canRead = JobQuoteAction.READ_DOCUMENT in allowedActions && hasDocument
+    if (!canUpload && !canRead) {
+        return
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (canRead) {
+            TextButton(enabled = readEnabled, onClick = onOpenDocument) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_file_text),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(text = stringResource(R.string.job_details_quote_action_view_document))
+            }
+        }
+        if (canUpload) {
+            TextButton(enabled = enabled, onClick = onUploadDocument) {
+                Text(
+                    text = stringResource(
+                        if (hasDocument) {
+                            R.string.job_details_quote_action_replace_document
+                        } else {
+                            R.string.job_details_quote_action_attach_document
+                        },
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuoteWorkflowActions(
+    quote: JobQuote,
+    enabled: Boolean,
+    onMarkSent: () -> Unit,
+    onMarkRequired: () -> Unit,
+    onMarkApproved: () -> Unit,
+    onMarkRejected: () -> Unit,
+    onScheduleWorkVisit: () -> Unit,
+    onCancelJob: () -> Unit,
+) {
+    val primaryAction = quote.primaryWorkflowAction() ?: return
+    var decisionsExpanded by rememberSaveable { mutableStateOf(false) }
+    var correctionExpanded by rememberSaveable { mutableStateOf(false) }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            Button(
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    when (primaryAction) {
+                        QuotePrimaryAction.MARK_SENT -> onMarkSent()
+                        QuotePrimaryAction.RECORD_DECISION -> decisionsExpanded = true
+                        QuotePrimaryAction.SCHEDULE_WORK -> onScheduleWorkVisit()
+                        QuotePrimaryAction.CANCEL_JOB -> onCancelJob()
+                    }
+                },
+            ) {
+                Text(text = stringResource(primaryAction.labelRes))
+            }
+            DropdownMenu(
+                expanded = decisionsExpanded,
+                onDismissRequest = { decisionsExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.job_details_quote_decision_approved)) },
+                    enabled = enabled && JobQuoteAction.MARK_APPROVED in quote.allowedActions,
+                    onClick = {
+                        decisionsExpanded = false
+                        onMarkApproved()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.job_details_quote_decision_rejected)) },
+                    enabled = enabled && JobQuoteAction.MARK_REJECTED in quote.allowedActions,
+                    onClick = {
+                        decisionsExpanded = false
+                        onMarkRejected()
+                    },
+                )
+            }
+        }
+        if (quote.hasCorrectionMenu()) {
+            Box {
+                TextButton(
+                    enabled = enabled,
+                    onClick = { correctionExpanded = true },
+                ) {
+                    Text(text = stringResource(R.string.job_details_quote_action_more))
+                }
+                DropdownMenu(
+                    expanded = correctionExpanded,
+                    onDismissRequest = { correctionExpanded = false },
+                ) {
+                    if (JobQuoteAction.MARK_REQUIRED in quote.allowedActions) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.job_details_quote_action_undo_sent)) },
+                            enabled = enabled,
+                            onClick = {
+                                correctionExpanded = false
+                                onMarkRequired()
+                            },
+                        )
+                    }
+                    val correction = quote.decisionCorrectionAction()
+                    if (correction != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(correction.labelRes())) },
+                            enabled = enabled,
+                            onClick = {
+                                correctionExpanded = false
+                                when (correction) {
+                                    JobQuoteAction.MARK_APPROVED -> onMarkApproved()
+                                    JobQuoteAction.MARK_REJECTED -> onMarkRejected()
+                                    JobQuoteAction.UPLOAD_DOCUMENT,
+                                    JobQuoteAction.READ_DOCUMENT,
+                                    JobQuoteAction.MARK_SENT,
+                                    JobQuoteAction.MARK_REQUIRED -> Unit
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuoteDocumentRows(document: JobQuoteDocument) {
+    val locale = deviceLocale()
+    Text(
+        text = stringResource(
+            R.string.job_details_quote_document_summary_format,
+            document.displayName?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.job_details_quote_document_default_name),
+            quoteDocumentSize(document.byteSize, locale),
+        ),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+}
+
+enum class QuotePrimaryAction(@StringRes val labelRes: Int) {
+    MARK_SENT(R.string.job_details_quote_action_mark_sent),
+    RECORD_DECISION(R.string.job_details_quote_action_record_decision),
+    SCHEDULE_WORK(R.string.job_details_quote_action_schedule_work_visit),
+    CANCEL_JOB(R.string.job_details_quote_action_cancel_job),
+}
+
+private fun JobQuote.primaryWorkflowAction(): QuotePrimaryAction? =
+    when (state) {
+        JobQuoteWorkflowState.REQUIRED ->
+            QuotePrimaryAction.MARK_SENT.takeIf { JobQuoteAction.MARK_SENT in allowedActions }
+
+        JobQuoteWorkflowState.SENT ->
+            QuotePrimaryAction.RECORD_DECISION.takeIf {
+                JobQuoteAction.MARK_APPROVED in allowedActions ||
+                    JobQuoteAction.MARK_REJECTED in allowedActions
+            }
+
+        JobQuoteWorkflowState.APPROVED -> QuotePrimaryAction.SCHEDULE_WORK
+        JobQuoteWorkflowState.REJECTED -> QuotePrimaryAction.CANCEL_JOB
+    }
+
+private fun JobQuote.hasCorrectionMenu(): Boolean =
+    JobQuoteAction.MARK_REQUIRED in allowedActions || decisionCorrectionAction() != null
+
+private fun JobQuote.decisionCorrectionAction(): JobQuoteAction? =
+    when (state) {
+        JobQuoteWorkflowState.APPROVED -> JobQuoteAction.MARK_REJECTED.takeIf { it in allowedActions }
+        JobQuoteWorkflowState.REJECTED -> JobQuoteAction.MARK_APPROVED.takeIf { it in allowedActions }
+        JobQuoteWorkflowState.REQUIRED,
+        JobQuoteWorkflowState.SENT -> null
+    }
+
+private fun JobQuoteWorkflowState.labelRes(): Int =
+    when (this) {
+        JobQuoteWorkflowState.REQUIRED -> R.string.job_details_quote_state_required
+        JobQuoteWorkflowState.SENT -> R.string.job_details_quote_state_sent
+        JobQuoteWorkflowState.APPROVED -> R.string.job_details_quote_state_approved
+        JobQuoteWorkflowState.REJECTED -> R.string.job_details_quote_state_rejected
+    }
+
+private fun JobQuoteAction.labelRes(): Int =
+    when (this) {
+        JobQuoteAction.UPLOAD_DOCUMENT -> R.string.job_details_quote_action_upload_document
+        JobQuoteAction.READ_DOCUMENT -> R.string.job_details_quote_action_read_document
+        JobQuoteAction.MARK_SENT -> R.string.job_details_quote_action_mark_sent
+        JobQuoteAction.MARK_REQUIRED -> R.string.job_details_quote_action_undo_sent
+        JobQuoteAction.MARK_APPROVED -> R.string.job_details_quote_action_mark_approved
+        JobQuoteAction.MARK_REJECTED -> R.string.job_details_quote_action_mark_rejected
+    }
 
 /**
  * The Visit that represents the Job (`BR-081`), with the actions that address it.
@@ -1668,8 +2119,8 @@ private fun FollowUpVisitRequestStatus.isAwaitingManagerReview(): Boolean =
  * the heading already state (`BR-047`, `BR-072`, `BR-077`).
  *
  * The read's own states are reported once, for the section as a whole — loading, and a failure with its
- * retry. Emptiness is reported where it is true: a Visit whose group has no update says so, and the Job's
- * own group says when no job-wide update exists, so nothing is invented and nothing is hidden (`BR-042`).
+ * retry. Empty Visit and Job history groups are omitted; every recorded event remains available
+ * in its corresponding group (`BR-042`, `BR-080`).
  */
 @Composable
 private fun JobActivitySection(
@@ -1685,13 +2136,22 @@ private fun JobActivitySection(
     photoImages: JobPhotoImages,
     audio: JobActivityAudio,
 ) {
+    if (!state.showsActivityLoading && state.activityFailure == null && state.activity?.isEmpty() == true) {
+        return
+    }
+
+    var editNoteId by rememberSaveable(state.jobId) { mutableStateOf<String?>(null) }
+    var editNoteBody by rememberSaveable(state.jobId) { mutableStateOf("") }
+    var removeNoteId by rememberSaveable(state.jobId) { mutableStateOf<String?>(null) }
+    var removeNoteReason by rememberSaveable(state.jobId) { mutableStateOf("") }
+
     Column(
         modifier = Modifier.testTag(JobActivitySectionTag),
         verticalArrangement = Arrangement.spacedBy(OverviewNestedSpacing),
     ) {
         SectionLabel(
             label = stringResource(R.string.job_activity_label),
-            count = primaryActivityCount(state.activity).takeIf { count -> count > 0 },
+            count = null,
         )
         if (state.activitySource == ReadSource.WORKING_SET && state.activity != null) {
             // The entries these groups draw are the last the backend reported: the section says so rather
@@ -1713,25 +2173,73 @@ private fun JobActivitySection(
                             photoImages = photoImages,
                             onOpenPhoto = onOpenPhoto,
                             canManageVisitNotes = canManageVisitNotes,
-                            onEditVisitNote = onEditVisitNote,
-                            onRemoveVisitNote = onRemoveVisitNote,
+                            onEditVisitNote = { noteId, body ->
+                                editNoteId = noteId
+                                editNoteBody = body
+                            },
+                            onRemoveVisitNote = { noteId, _ ->
+                                removeNoteId = noteId
+                                removeNoteReason = ""
+                            },
                             audio = audio,
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
-                GeneralJobUpdatesGroup(
-                    events = jobWide,
-                    jobId = jobId,
-                    photoImages = photoImages,
-                    onOpenPhoto = onOpenPhoto,
-                    canManageVisitNotes = canManageVisitNotes,
-                    onEditVisitNote = onEditVisitNote,
-                    onRemoveVisitNote = onRemoveVisitNote,
-                    audio = audio,
-                )
+                if (jobWide.isNotEmpty()) {
+                    JobHistoryGroup(
+                        events = jobWide,
+                        jobId = jobId,
+                        photoImages = photoImages,
+                        onOpenPhoto = onOpenPhoto,
+                        canManageVisitNotes = canManageVisitNotes,
+                        onEditVisitNote = { noteId, body ->
+                            editNoteId = noteId
+                            editNoteBody = body
+                        },
+                        onRemoveVisitNote = { noteId, _ ->
+                            removeNoteId = noteId
+                            removeNoteReason = ""
+                        },
+                        audio = audio,
+                    )
+                }
             }
         }
+    }
+
+    editNoteId?.let { noteId ->
+        VisitNoteEditDialog(
+            body = editNoteBody,
+            isSubmitting = state.isSubmitting,
+            onBodyChange = { editNoteBody = it },
+            onConfirm = {
+                onEditVisitNote(noteId, editNoteBody)
+                editNoteId = null
+                editNoteBody = ""
+            },
+            onDismiss = {
+                editNoteId = null
+                editNoteBody = ""
+            },
+        )
+    }
+
+    removeNoteId?.let { noteId ->
+        VisitNoteRemovalDialog(
+            reason = removeNoteReason,
+            isSubmitting = state.isSubmitting,
+            onReasonChange = { removeNoteReason = it },
+            onConfirm = {
+                onRemoveVisitNote(noteId, removeNoteReason)
+                removeNoteId = null
+                removeNoteReason = ""
+            },
+            onDismiss = {
+                removeNoteId = null
+                removeNoteReason = ""
+            },
+        )
     }
 }
 
@@ -1747,8 +2255,8 @@ private fun JobActivitySection(
  * were a second statement of what the Visit section already says, and what a group reveals is that Visit's
  * account and its evidence (`BR-080`).
  *
- * The Visit the page represents opens by default, whatever its position, because it is the Visit the page's
- * own section presents (`BR-081`); every other Visit's group starts folded. The folded state is
+ * The represented Visit opens by default when it is not completed (`BR-081`); completed Visits and
+ * every other Visit's group start folded. The folded state is
  * presentation and belongs to the group: it survives recomposition and a configuration change, and it is
  * held per Visit, so two groups open and close independently (`BR-042`).
  *
@@ -1770,7 +2278,7 @@ private fun VisitActivityGroupRow(
     val visit = group.visit
     // The Visit this page represents opens by default, so the current field attempt's account is on
     // screen without a tap; the Job's earlier attempts stay folded until they are asked for (`BR-012`).
-    var expanded by rememberSaveable(visit.id) { mutableStateOf(group.isRepresentedVisit) }
+    var expanded by rememberSaveable(visit.id) { mutableStateOf(group.isCurrentVisit) }
     val toggleLabel = stringResource(
         if (expanded) {
             R.string.job_activity_visit_collapse_label
@@ -1782,12 +2290,12 @@ private fun VisitActivityGroupRow(
     val stateLabel = stringResource(
         if (expanded) R.string.job_activity_group_expanded else R.string.job_activity_group_collapsed,
     )
-    // The heading is `Visit N · date`: the number says which field attempt of the Job it is, which is
-    // what tells two Visits of similar dates apart, and the date is what the group was for (`BR-052`).
+    // The heading is `Visit N · date · time`: the number says which field attempt of the Job it is,
+    // which is what tells two Visits of similar dates apart, and the schedule is what the group was for.
     val title = stringResource(
         R.string.job_activity_visit_title_format,
         visit.sequence,
-        overviewDateText(visit.scheduledStart),
+        overviewScheduleText(visit.scheduledStart),
     )
     Column(modifier = Modifier.fillMaxWidth().testTag(jobActivityVisitGroupTag(visit.id))) {
         Row(
@@ -1817,6 +2325,18 @@ private fun VisitActivityGroupRow(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // A Visit the office reconciled after the fact is labelled as such, so a reader is never
+                // told a higher `Visit N` happened after a lower one just because its sequence number is
+                // later (`BR-AH-003`, `BR-AH-006`, `BR-052`).
+                if (visit.isAdHocWork) {
+                    Text(
+                        text = stringResource(R.string.job_activity_visit_ad_hoc_badge),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.testTag(jobActivityVisitAdHocTag(visit.id)),
+                    )
+                }
                 // Where the field attempt ended up and what it resulted in, in the field's own words —
                 // `Completed · Needs follow-up` — so a folded group answers what happened without being
                 // opened and without a second status badge beside a status already written out
@@ -1883,8 +2403,6 @@ private fun VisitActivityGroupBody(
     audio: JobActivityAudio,
 ) {
     val visit = group.visit
-    val primary = group.activity.primaryActivity()
-    val administrative = group.activity.administrativeActivity()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1893,19 +2411,8 @@ private fun VisitActivityGroupBody(
         verticalArrangement = Arrangement.spacedBy(OverviewNestedSpacing),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel(
-                label = stringResource(R.string.job_details_visit_activity_label),
-                count = primary.size.takeIf { count -> count > 0 },
-            )
-            if (group.activity.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.job_details_visit_activity_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.testTag(jobActivityVisitEmptyTag(visit.id)),
-                )
-            } else {
-                val photos = jobActivityPhotos(primary)
+            if (group.activity.isNotEmpty()) {
+                val photos = jobActivityPhotos(group.activity)
                 if (photos.isNotEmpty()) {
                     JobPhotoGallerySection(
                         photos = photos,
@@ -1914,27 +2421,8 @@ private fun VisitActivityGroupBody(
                         onOpenPhoto = onOpenPhoto,
                     )
                 }
-                if (primary.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.job_details_visit_activity_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.testTag(jobActivityVisitEmptyTag(visit.id)),
-                    )
-                } else {
-                    ActivityTimeline(
-                        events = primary,
-                        jobId = jobId,
-                        photoImages = photoImages,
-                        onOpenPhoto = onOpenPhoto,
-                        canManageVisitNotes = canManageVisitNotes,
-                        onEditVisitNote = onEditVisitNote,
-                        onRemoveVisitNote = onRemoveVisitNote,
-                        audio = audio,
-                    )
-                }
-                AdministrativeActivityGroup(
-                    events = administrative,
+                ActivityTimeline(
+                    events = group.activity,
                     jobId = jobId,
                     photoImages = photoImages,
                     onOpenPhoto = onOpenPhoto,
@@ -1956,14 +2444,11 @@ private fun VisitActivityGroupBody(
  * group is never read as the account of a field attempt, and a field attempt's entries are never read as
  * the Job's.
  *
- * It starts **folded**, because it holds office-level history rather than the technician's own field work:
- * a technician's updates are Visit-scoped (`tracker 051`), so what is here is what the office did to the
- * Job. It stays one tap away rather than being removed, because it is where the Job's own evidence is read
- * from (`BR-015`, `BR-012`). A Job with no job-wide event says so once it is opened rather than reading as
- * a Job nothing happened to (`BR-042`).
+ * It starts folded to keep the Visit activity easy to scan, with every Job-wide event one tap away
+ * (`BR-015`, `BR-012`). A Job with no job-wide events has no history group.
  */
 @Composable
-private fun GeneralJobUpdatesGroup(
+private fun JobHistoryGroup(
     events: List<JobActivityEvent>,
     jobId: String,
     photoImages: JobPhotoImages,
@@ -1973,6 +2458,8 @@ private fun GeneralJobUpdatesGroup(
     onRemoveVisitNote: (String, String) -> Unit,
     audio: JobActivityAudio,
 ) {
+    if (events.isEmpty()) return
+
     var expanded by rememberSaveable { mutableStateOf(false) }
     val toggleLabel = stringResource(
         if (expanded) {
@@ -2022,127 +2509,29 @@ private fun GeneralJobUpdatesGroup(
                     .testTag(JobActivityGeneralBodyTag),
                 verticalArrangement = Arrangement.spacedBy(OverviewNestedSpacing),
             ) {
-                if (events.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.job_details_job_updates_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.testTag(JobActivityGeneralEmptyTag),
-                    )
-                } else {
-                    // The photos the backend accepted, read as a collection above the account of what
-                    // happened (`BR-080`). Photos still held by this device are the tray's, because the
-                    // backend has not accepted them yet (`BR-001`).
-                    val primary = events.primaryActivity()
-                    val administrative = events.administrativeActivity()
-                    val photos = jobActivityPhotos(primary)
-                    if (photos.isNotEmpty()) {
-                        JobPhotoGallerySection(
-                            photos = photos,
-                            jobId = jobId,
-                            photoImages = photoImages,
-                            onOpenPhoto = onOpenPhoto,
-                        )
-                    }
-                    if (primary.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.job_details_job_updates_empty),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.testTag(JobActivityGeneralEmptyTag),
-                        )
-                    } else {
-                        ActivityTimeline(
-                            events = primary,
-                            jobId = jobId,
-                            photoImages = photoImages,
-                            onOpenPhoto = onOpenPhoto,
-                            canManageVisitNotes = canManageVisitNotes,
-                            onEditVisitNote = onEditVisitNote,
-                            onRemoveVisitNote = onRemoveVisitNote,
-                            audio = audio,
-                        )
-                    }
-                    AdministrativeActivityGroup(
-                        events = administrative,
+                // The photos the backend accepted, read as a collection above the account of what
+                // happened (`BR-080`). Photos still held by this device are the tray's, because the
+                // backend has not accepted them yet (`BR-001`).
+                val photos = jobActivityPhotos(events)
+                if (photos.isNotEmpty()) {
+                    JobPhotoGallerySection(
+                        photos = photos,
                         jobId = jobId,
                         photoImages = photoImages,
                         onOpenPhoto = onOpenPhoto,
-                        canManageVisitNotes = canManageVisitNotes,
-                        onEditVisitNote = onEditVisitNote,
-                        onRemoveVisitNote = onRemoveVisitNote,
-                        audio = audio,
                     )
                 }
+                ActivityTimeline(
+                    events = events,
+                    jobId = jobId,
+                    photoImages = photoImages,
+                    onOpenPhoto = onOpenPhoto,
+                    canManageVisitNotes = canManageVisitNotes,
+                    onEditVisitNote = onEditVisitNote,
+                    onRemoveVisitNote = onRemoveVisitNote,
+                    audio = audio,
+                )
             }
-        }
-    }
-}
-
-@Composable
-private fun AdministrativeActivityGroup(
-    events: List<JobActivityEvent>,
-    jobId: String,
-    photoImages: JobPhotoImages,
-    onOpenPhoto: (String) -> Unit,
-    canManageVisitNotes: Boolean,
-    onEditVisitNote: (String, String) -> Unit,
-    onRemoveVisitNote: (String, String) -> Unit,
-    audio: JobActivityAudio,
-) {
-    if (events.isEmpty()) return
-
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val toggleLabel = stringResource(
-        if (expanded) {
-            R.string.job_activity_admin_collapse_label
-        } else {
-            R.string.job_activity_admin_expand_label
-        },
-    )
-    val stateLabel = stringResource(
-        if (expanded) R.string.job_activity_group_expanded else R.string.job_activity_group_collapsed,
-    )
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(MaterialTheme.shapes.medium)
-                .clickable(onClickLabel = toggleLabel) { expanded = !expanded }
-                .semantics { stateDescription = stateLabel }
-                .heightIn(min = OverviewActivityHeaderMinHeight)
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.job_activity_admin_label, events.size),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                painter = painterResource(R.drawable.ic_chevron_right),
-                contentDescription = toggleLabel,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .size(OverviewChevronSize)
-                    .rotate(if (expanded) 90f else 0f),
-            )
-        }
-        if (expanded) {
-            ActivityTimeline(
-                events = events,
-                jobId = jobId,
-                photoImages = photoImages,
-                onOpenPhoto = onOpenPhoto,
-                canManageVisitNotes = canManageVisitNotes,
-                onEditVisitNote = onEditVisitNote,
-                onRemoveVisitNote = onRemoveVisitNote,
-                audio = audio,
-            )
         }
     }
 }
@@ -2474,6 +2863,32 @@ private fun overviewScheduleText(scheduledStart: String?): String {
  * an invented date (`BR-051`), and a value this build cannot read is reported as unavailable rather than as
  * a fabricated one (`BR-042`).
  */
+
+@Composable
+private fun overviewInstantText(value: String): String {
+    val instant = visitStart(value) ?: return stringResource(R.string.job_details_time_unknown)
+    val locale = deviceLocale()
+    val zoned = instant.atZone(ZoneId.systemDefault())
+    val date = zoned.format(
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale),
+    )
+    val time = zoned.format(
+        DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale),
+    )
+    return stringResource(R.string.job_details_date_time_format, date, time)
+}
+
+private fun quoteDocumentSize(byteSize: Long, locale: Locale): String {
+    if (byteSize < 1024L) {
+        return "$byteSize B"
+    }
+    val kib = byteSize / 1024.0
+    if (kib < 1024.0) {
+        return String.format(locale, "%.1f KB", kib)
+    }
+    return String.format(locale, "%.1f MB", kib / 1024.0)
+}
+
 @Composable
 private fun overviewDateText(scheduledStart: String?): String {
     val instant = visitStart(scheduledStart)
@@ -2508,3 +2923,23 @@ private fun visitActivitySummary(visit: JobDetailsVisitSummary): String {
 }
 
 
+
+@StringRes
+private fun jobQuoteDocumentFailureMessage(failure: JobQuoteDocumentFailure): Int =
+    when (failure) {
+        JobQuoteDocumentFailure.NOT_ALLOWED -> R.string.job_quote_document_error_not_allowed
+        JobQuoteDocumentFailure.NOT_PDF -> R.string.job_quote_document_error_not_pdf
+        JobQuoteDocumentFailure.NOT_READ -> R.string.job_quote_document_error_not_read
+        JobQuoteDocumentFailure.NOT_AVAILABLE -> R.string.job_quote_document_error_not_available
+        JobQuoteDocumentFailure.UNREACHABLE -> R.string.job_quote_document_error_unreachable
+        JobQuoteDocumentFailure.OPEN_FAILED -> R.string.job_quote_document_error_open_failed
+        JobQuoteDocumentFailure.NO_VIEWER -> R.string.job_quote_document_error_no_viewer
+        JobQuoteDocumentFailure.FAILED -> R.string.job_quote_document_error_failed
+    }
+
+@StringRes
+private fun jobQuoteDocumentMessageText(message: JobQuoteDocumentMessage): Int =
+    when (message) {
+        JobQuoteDocumentMessage.UPLOADED -> R.string.job_quote_document_uploaded
+        JobQuoteDocumentMessage.OPENED -> R.string.job_quote_document_opened
+    }

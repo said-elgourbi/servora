@@ -45,7 +45,7 @@ import java.util.Locale
  * One of the technician's own follow-up requests, read in full.
  *
  * The Requests list is the technician's index of what they asked for; touching a row opens the request
- * itself rather than the Job (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.12). A request is a
+ * itself rather than the Job (`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.12). A request is a
  * proposal about another field attempt, not an appointment (`BR-FV-002`), so the surface about it is a
  * surface about the proposal and the office's decision on it: what was proposed, why another attempt is
  * needed, what the office decided and what it said, and the conversation that decision was taken in

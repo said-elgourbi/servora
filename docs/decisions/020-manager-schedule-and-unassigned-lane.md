@@ -3,7 +3,7 @@
 **Status:** Accepted (agent decision, 2026-09-17, implemented in the same session)
 
 Date: 2026-09-17
-Tracker: `docs/tracker/038-android-manager-schedule.md`
+Tracker: `docs/tracker/android/038-android-manager-schedule.md`
 Contracts: `docs/api/schedule.md` (new)
 Predecessors: `docs/decisions/010-android-navigation.md` (the shell the Schedule destination lives in),
 `docs/decisions/011-android-contextual-top-bar.md` (the one top bar),

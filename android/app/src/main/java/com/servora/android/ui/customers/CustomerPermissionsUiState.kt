@@ -77,6 +77,10 @@ data class CustomerPermissionsUiState(
     // also holds (`BR-006`, `BR-011`): a company may withhold the request and keep the field work.
     val canRequestFollowUpVisit: Boolean = false,
     val canReportAdHocWork: Boolean = false,
+    // Reviewing and reconciling ad-hoc work reports is its own office capability (`BR-AH-002`,
+    // `BR-AH-005`): it is read from its own code and never inferred from reporting one or from the
+    // Job/request office capabilities.
+    val canReviewAdHocWork: Boolean = false,
 )
 
 fun customerPermissionsUiState(
@@ -121,4 +125,5 @@ fun customerPermissionsUiState(
         // API enforces on the request route and never from the office scheduling one.
         canRequestFollowUpVisit = permissionChecker.has(Permission.VISIT_REQUEST_FOLLOW_UP),
         canReportAdHocWork = permissionChecker.has(Permission.VISIT_REPORT_AD_HOC_WORK),
+        canReviewAdHocWork = permissionChecker.has(Permission.VISIT_REVIEW_AD_HOC_WORK),
     )

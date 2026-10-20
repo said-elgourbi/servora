@@ -7,6 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
   VISIT_PERMISSIONS,
+  CUSTOMER_PERMISSIONS,
+  PROPERTY_PERMISSIONS,
   type PermissionCode,
 } from '../src/auth/permissions.js';
 import {
@@ -19,6 +21,8 @@ import {
   permissions,
   properties,
   propertyCustomerRelationships,
+  pushAssignmentEvents,
+  visits,
 } from '../src/database/schema.js';
 import { hashPassword } from '../src/users/password-hasher.js';
 import {
@@ -65,17 +69,27 @@ describe('ad-hoc work reports (e2e)', () => {
     await database.dispose();
   });
 
-  async function signInFor(granted: readonly PermissionCode[]) {
+  async function signInFor(
+    granted: readonly PermissionCode[],
+    scopedOrganizationId = organizationId,
+  ) {
     const email = uniqueEmail('ad-hoc-reports');
     const user = await createTestUser(database.db, {
       email,
       passwordHash: await hashPassword(PASSWORD),
     });
     database.cleanup.trackUser(user.id);
-    const role = await createTestOrganizationRole(database.db, organizationId);
+    const role = await createTestOrganizationRole(
+      database.db,
+      scopedOrganizationId,
+    );
     const [member] = await database.db
       .insert(organizationMembers)
-      .values({ organizationId, userId: user.id, roleId: role.id })
+      .values({
+        organizationId: scopedOrganizationId,
+        userId: user.id,
+        roleId: role.id,
+      })
       .returning();
 
     for (const code of granted) {
@@ -88,7 +102,7 @@ describe('ad-hoc work reports (e2e)', () => {
         throw new Error(`Missing permission seed: ${code}`);
       }
       await database.db.insert(organizationMemberPermissions).values({
-        organizationId,
+        organizationId: scopedOrganizationId,
         memberId: member.id,
         permissionId: permission.id,
       });
@@ -204,9 +218,284 @@ describe('ad-hoc work reports (e2e)', () => {
       workEndedAt: '2026-10-01T15:00:00.000Z',
       outcomeCode: 'RESOLVED',
       summary: 'Replaced the leaking valve.',
+      ...(overrides.customerId
+        ? {}
+        : {
+            reportedCustomerName: 'Maple Leaf Bakery',
+            reportedCustomerPhone: '+16135550123',
+            reportedCustomerAddress: '210 Sparks Street, Ottawa',
+          }),
       ...overrides,
     };
   }
+
+  const resolutionPermissions = [
+    VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
+    CUSTOMER_PERMISSIONS.VIEW,
+    CUSTOMER_PERMISSIONS.CREATE,
+    PROPERTY_PERMISSIONS.VIEW,
+    PROPERTY_PERMISSIONS.CREATE,
+  ] as const;
+  const propertyInput = {
+    addressLine1: '210 Sparks Street',
+    city: 'Ottawa',
+    province: 'ON',
+    postalCode: 'K1P 5B4',
+  };
+  const customerInput = {
+    type: 'COMPANY',
+    displayName: 'Edited Bakery',
+    phone: '+16135550999',
+    company: { legalName: 'Edited Bakery Inc.' },
+  };
+
+  it('resolves an unknown report atomically, preserves provenance and converts exactly once', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor(resolutionPermissions);
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody(),
+    ).expect(201);
+    const beforeCustomers = await database.db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(eq(customers.organizationId, organizationId));
+    const beforeProperties = await database.db
+      .select({ id: properties.id })
+      .from(properties)
+      .where(eq(properties.organizationId, organizationId));
+    const body = {
+      newCustomer: customerInput,
+      newProperty: propertyInput,
+      expectedStatus: 'PENDING',
+      expectedVersion: created.body.version,
+    };
+    const resolve = () =>
+      request(app.getHttpServer())
+        .post(`/jobs/ad-hoc-work-reports/${created.body.id}/resolve-location`)
+        .set('Authorization', `Bearer ${reviewer.accessToken}`)
+        .send(body);
+    const responses = await Promise.all([resolve(), resolve()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      200, 409,
+    ]);
+    const resolved = responses.find(
+      (response) => response.status === 200,
+    )!.body;
+    expect(resolved).toMatchObject({
+      status: 'PENDING',
+      version: created.body.version + 1,
+      reportedCustomerName: 'Maple Leaf Bakery',
+      reportedCustomerPhone: '+16135550123',
+      reportedCustomerAddress: '210 Sparks Street, Ottawa',
+      customerName: 'Edited Bakery',
+      createdJobId: null,
+      createdVisitId: null,
+      reviewedAt: null,
+    });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(customers)
+          .where(eq(customers.organizationId, organizationId))
+      ).length,
+    ).toBe(beforeCustomers.length + 1);
+    expect(
+      (
+        await database.db
+          .select()
+          .from(properties)
+          .where(eq(properties.organizationId, organizationId))
+      ).length,
+    ).toBe(beforeProperties.length + 1);
+    await resolve().expect(409);
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/resolve-location`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({ ...body, expectedVersion: resolved.version })
+      .expect(409);
+    const convert = () =>
+      request(app.getHttpServer())
+        .post(`/jobs/ad-hoc-work-reports/${created.body.id}/convert`)
+        .set('Authorization', `Bearer ${reviewer.accessToken}`)
+        .send({
+          title: 'Reconciled work',
+          expectedStatus: 'PENDING',
+          expectedVersion: resolved.version,
+        });
+    const conversions = await Promise.all([convert(), convert()]);
+    expect(conversions.map((response) => response.status).sort()).toEqual([
+      201, 409,
+    ]);
+    const job = conversions.find((response) => response.status === 201)!.body;
+    expect(
+      await database.db
+        .select()
+        .from(pushAssignmentEvents)
+        .where(eq(pushAssignmentEvents.jobId, job.id)),
+    ).toHaveLength(0);
+    jobNumberSequence = Math.max(jobNumberSequence, job.jobNumber);
+    expect(
+      (await database.db.select().from(visits).where(eq(visits.jobId, job.id)))
+        .length,
+    ).toBe(1);
+    const [report] = await database.db
+      .select()
+      .from(adHocWorkReports)
+      .where(eq(adHocWorkReports.id, created.body.id));
+    expect(report.status).toBe('CONVERTED');
+    expect(report.createdJobId).toBe(job.id);
+  });
+
+  it('selects an existing customer/property and can create a property for a known customer', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor(resolutionPermissions);
+    const customer = await newCustomer('Resolution Match');
+    const property = await newProperty(customer.id, reviewer.membershipId);
+    for (const selection of [
+      { existingPropertyId: property.id },
+      { newProperty: propertyInput },
+    ]) {
+      const created = await submitReport(
+        reporter.accessToken,
+        validReportBody(),
+      ).expect(201);
+      const resolved = await request(app.getHttpServer())
+        .post(`/jobs/ad-hoc-work-reports/${created.body.id}/resolve-location`)
+        .set('Authorization', `Bearer ${reviewer.accessToken}`)
+        .send({
+          existingCustomerId: customer.id,
+          ...selection,
+          expectedStatus: 'PENDING',
+          expectedVersion: created.body.version,
+        })
+        .expect(200);
+      expect(resolved.body.customerId).toBe(customer.id);
+      expect(resolved.body.status).toBe('PENDING');
+      expect(resolved.body.propertyId).toBeTruthy();
+    }
+    const options = await request(app.getHttpServer())
+      .get('/jobs/ad-hoc-work-reports/review-customer-options?q=Resolution')
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .expect(200);
+    expect(
+      options.body.some((option: { id: string }) => option.id === customer.id),
+    ).toBe(true);
+    await request(app.getHttpServer())
+      .get(
+        `/jobs/ad-hoc-work-reports/review-property-options?customerId=${customer.id}`,
+      )
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .expect(200);
+  });
+
+  it('requires branch permissions and a version before creating canonical records', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody(),
+    ).expect(201);
+    for (const granted of [
+      [],
+      [VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK],
+      [VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK, CUSTOMER_PERMISSIONS.CREATE],
+      [VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK, PROPERTY_PERMISSIONS.CREATE],
+    ] as PermissionCode[][]) {
+      const reviewer = await signInFor(granted);
+      await request(app.getHttpServer())
+        .post(`/jobs/ad-hoc-work-reports/${created.body.id}/resolve-location`)
+        .set('Authorization', `Bearer ${reviewer.accessToken}`)
+        .send({
+          newCustomer: customerInput,
+          newProperty: propertyInput,
+          expectedStatus: 'PENDING',
+          expectedVersion: created.body.version,
+        })
+        .expect(403);
+      await request(app.getHttpServer())
+        .get('/jobs/ad-hoc-work-reports/review-customer-options?q=Maple')
+        .set('Authorization', `Bearer ${reviewer.accessToken}`)
+        .expect(403);
+    }
+    const reviewer = await signInFor(resolutionPermissions);
+    await request(app.getHttpServer())
+      .post(`/jobs/ad-hoc-work-reports/${created.body.id}/resolve-location`)
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({
+        newCustomer: customerInput,
+        newProperty: propertyInput,
+        expectedStatus: 'PENDING',
+      })
+      .expect(400);
+    const [pending] = await database.db
+      .select()
+      .from(adHocWorkReports)
+      .where(eq(adHocWorkReports.id, created.body.id));
+    expect(pending.customerId).toBeNull();
+    expect(pending.status).toBe('PENDING');
+  });
+
+  it('rejects foreign records and wrong customer/property pairs and rolls back creation', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    const reviewer = await signInFor(resolutionPermissions);
+    const created = await submitReport(
+      reporter.accessToken,
+      validReportBody(),
+    ).expect(201);
+    const customer = await newCustomer('Resolution owner');
+    const other = await newCustomer('Other owner');
+    const property = await newProperty(other.id, reviewer.membershipId);
+    const foreignOrg = await createTestOrganization(database.db, {
+      name: 'Foreign resolution org',
+    });
+    database.cleanup.trackOrganization(foreignOrg.id);
+    const [foreignCustomer] = await database.db
+      .insert(customers)
+      .values({
+        organizationId: foreignOrg.id,
+        type: 'COMPANY',
+        displayName: 'Foreign',
+      })
+      .returning();
+    const foreignReporter = await signInFor(
+      [VISIT_PERMISSIONS.REPORT_AD_HOC_WORK],
+      foreignOrg.id,
+    );
+    const foreignReport = await submitReport(
+      foreignReporter.accessToken,
+      validReportBody(),
+    ).expect(201);
+    for (const body of [
+      { existingCustomerId: customer.id, existingPropertyId: property.id },
+      { existingCustomerId: foreignCustomer.id, newProperty: propertyInput },
+      { existingCustomerId: customer.id, existingPropertyId: randomUUID() },
+    ]) {
+      await request(app.getHttpServer())
+        .post(`/jobs/ad-hoc-work-reports/${created.body.id}/resolve-location`)
+        .set('Authorization', `Bearer ${reviewer.accessToken}`)
+        .send({ ...body, expectedStatus: 'PENDING', expectedVersion: 1 })
+        .expect(404);
+    }
+    await request(app.getHttpServer())
+      .post(
+        `/jobs/ad-hoc-work-reports/${foreignReport.body.id}/resolve-location`,
+      )
+      .set('Authorization', `Bearer ${reviewer.accessToken}`)
+      .send({
+        newCustomer: customerInput,
+        newProperty: propertyInput,
+        expectedStatus: 'PENDING',
+        expectedVersion: 1,
+      })
+      .expect(404);
+    const [pending] = await database.db
+      .select()
+      .from(adHocWorkReports)
+      .where(eq(adHocWorkReports.id, created.body.id));
+    expect(pending.version).toBe(1);
+    expect(pending.customerId).toBeNull();
+  });
 
   it('creates a PENDING report and reflects the selected customer and property', async () => {
     const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
@@ -257,6 +546,30 @@ describe('ad-hoc work reports (e2e)', () => {
       reportedCustomerPhone: '+16135550123',
       reportedCustomerAddress: '210 Sparks Street, Ottawa',
     });
+  });
+
+  it.each([
+    'reportedCustomerName',
+    'reportedCustomerPhone',
+    'reportedCustomerAddress',
+  ])('refuses blank %s without a selected customer', async (field) => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    await submitReport(
+      reporter.accessToken,
+      validReportBody({ [field]: '   ' }),
+    ).expect(400);
+  });
+
+  it('refuses a report with neither a selected customer nor reported details', async () => {
+    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
+    await submitReport(
+      reporter.accessToken,
+      validReportBody({
+        reportedCustomerName: null,
+        reportedCustomerPhone: null,
+        reportedCustomerAddress: null,
+      }),
+    ).expect(400);
   });
 
   it('refuses a customer id that does not exist in the organization', async () => {
@@ -488,6 +801,12 @@ describe('ad-hoc work reports (e2e)', () => {
       .where(eq(adHocWorkReports.id, created.body.id));
     expect(report.status).toBe('LINKED');
     expect(report.createdVisitId).toBeTruthy();
+    expect(
+      await database.db
+        .select()
+        .from(pushAssignmentEvents)
+        .where(eq(pushAssignmentEvents.jobId, job.id)),
+    ).toHaveLength(0);
   });
 
   it('links a resolved report into a CANCELED Job and moves it to COMPLETED', async () => {
@@ -583,7 +902,9 @@ describe('ad-hoc work reports (e2e)', () => {
       .where(eq(adHocWorkReports.id, created.body.id));
     expect(report.status).toBe('CONVERTED');
     expect(report.createdJobId).toBeTruthy();
-    expect(await readJobStatus(report.createdJobId as string)).toBe('COMPLETED');
+    expect(await readJobStatus(report.createdJobId as string)).toBe(
+      'COMPLETED',
+    );
   });
 
   it('converts a follow-up report into a new active Job', async () => {

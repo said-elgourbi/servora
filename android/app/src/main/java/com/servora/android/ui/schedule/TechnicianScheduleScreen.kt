@@ -3,6 +3,8 @@ package com.servora.android.ui.schedule
 import android.text.format.DateFormat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +59,7 @@ import com.servora.android.R
 import com.servora.android.domain.model.AdHocReportCustomerOption
 import com.servora.android.domain.model.AdHocReportJobOption
 import com.servora.android.domain.model.AdHocReportPropertyOption
+import com.servora.android.domain.model.AdHocWorkReport
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.ScheduleVisit
 import com.servora.android.domain.model.VisitOutcome
@@ -71,6 +74,7 @@ import com.servora.android.ui.home.formatScheduledRange
 import com.servora.android.ui.home.formatScheduledTime
 import com.servora.android.ui.home.formattedAddressLine
 import com.servora.android.ui.home.techniciansSummary
+import com.servora.android.ui.jobs.visitOutcomeLabel
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -114,10 +118,11 @@ const val TechnicianScheduleLastReportedTag = "technician-schedule-last-reported
 /** Identifies one Visit card. */
 fun technicianScheduleVisitTag(visitId: String): String = "technician-schedule-visit-$visitId"
 
-/** Identifies the two views My Schedule offers, and the count the requests view carries. */
+/** Identifies My Schedule's views, and the count the requests view carries. */
 const val TechnicianScheduleTabSelectorTag = "technician-schedule-tab-selector"
 const val TechnicianScheduleTabScheduleTag = "technician-schedule-tab-schedule"
 const val TechnicianScheduleTabRequestsTag = "technician-schedule-tab-requests"
+const val TechnicianScheduleTabAdHocReportsTag = "technician-schedule-tab-ad-hoc-reports"
 const val TechnicianRequestsBadgeTag = "technician-requests-badge"
 
 /** Identifies the caller's own requests: the list, one request's card, and the states it can be in. */
@@ -142,6 +147,19 @@ fun technicianRequestAnswerTag(requestId: String): String =
     "technician-request-answer-$requestId"
 
 const val TechnicianRequestsMessageTag = "technician-requests-message"
+
+/**
+ * Identifies the caller's own ad-hoc work reports: the section header, the list, one report's card and
+ * the states its read can be in. A report is not a request and is never drawn as one (`BR-AH-001`,
+ * `BR-AH-004`).
+ */
+const val TechnicianAdHocReportsSectionTag = "technician-ad-hoc-reports-section"
+const val TechnicianAdHocReportsLoadingTag = "technician-ad-hoc-reports-loading"
+const val TechnicianAdHocReportsFailureTag = "technician-ad-hoc-reports-failure"
+const val TechnicianAdHocReportsRetryTag = "technician-ad-hoc-reports-retry"
+const val TechnicianAdHocReportsEmptyTag = "technician-ad-hoc-reports-empty"
+const val TechnicianAdHocReportsUnrefreshedTag = "technician-ad-hoc-reports-unrefreshed"
+fun technicianAdHocReportTag(reportId: String): String = "technician-ad-hoc-report-$reportId"
 
 /*
  * The views' own metrics. The tab row follows the office schedule's lane selector — a 32 dp pill the
@@ -172,7 +190,7 @@ private val RequestSameTechnicianLineIconGap = 6.dp
 private val TechnicianWeekArrowSize = 20.dp
 
 /**
- * My Schedule: the two views of the caller's own work — the schedule and their own requests.
+ * My Schedule: the caller's own schedule, visit requests and ad-hoc reports.
  *
  * Everything the screen does is driven by the state it is handed and reported back through the
  * callbacks, so it holds no state of its own: a configuration change returns to the view, the day and
@@ -182,7 +200,7 @@ private val TechnicianWeekArrowSize = 20.dp
  *
  * The second view is the technician's own record of the extra visits they asked for and of what the
  * office did with each of them (`BR-FV-012`, `BR-FV-013`), which is how a decision reaches the
- * technician who proposed it (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.3.5). It is offered
+ * technician who proposed it (`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.3.5). It is offered
  * only to a session that may read it, because the route is authorized by the asking capability, and
  * nothing is drawn that could not be fetched (`BR-011`). The date controls are **not** drawn beside it:
  * a request is a proposal about another attempt (`BR-FV-002`), no part of that view is scoped to the
@@ -238,12 +256,12 @@ fun TechnicianScheduleScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // The two views are one tap apart whichever is open, so the technician never has to leave the
-            // screen to read the answer to a request they raised (`BR-012`).
-            if (canRequestFollowUpVisit) {
+            if (canRequestFollowUpVisit || canReportAdHocWork) {
                 TechnicianScheduleTabs(
                     tab = state.tab,
                     awaitingReviewCount = state.awaitingReviewRequestCount,
+                    canRequestFollowUpVisit = canRequestFollowUpVisit,
+                    canReportAdHocWork = canReportAdHocWork,
                     onSelectTab = onSelectTab,
                 )
             }
@@ -298,6 +316,12 @@ fun TechnicianScheduleScreen(
                     zone = zone,
                     onAnswerRequest = { request -> answeringRequestId = request.id },
                     onOpenRequest = onOpenRequest,
+                    onRetry = onRetry,
+                )
+                TechnicianScheduleTab.AD_HOC_REPORTS -> TechnicianAdHocReports(
+                    state = state,
+                    locale = locale,
+                    zone = zone,
                     onRetry = onRetry,
                 )
             }
@@ -394,9 +418,9 @@ fun TechnicianScheduleScreen(
 }
 
 /**
- * My Schedule's two views: the caller's own day, and the requests they raised.
+ * My Schedule's views: the caller's own day, requests and work reports.
  *
- * They are two views of one destination rather than two screens, so the control follows the office
+ * They are views of one destination, so the control follows the office
  * schedule's lane selector (`docs/design/android-design-system.md`): a pill the width of its own
  * labels, the view in effect carrying the brand's container colour, and the requests segment carrying
  * how many of the caller's requests the office has still to answer — the count of what they are waiting
@@ -406,6 +430,8 @@ fun TechnicianScheduleScreen(
 private fun TechnicianScheduleTabs(
     tab: TechnicianScheduleTab,
     awaitingReviewCount: Int,
+    canRequestFollowUpVisit: Boolean,
+    canReportAdHocWork: Boolean,
     onSelectTab: (TechnicianScheduleTab) -> Unit,
 ) {
     Row(
@@ -413,6 +439,7 @@ private fun TechnicianScheduleTabs(
             .fillMaxWidth()
             .padding(horizontal = HomePageGutter)
             .height(HomeTouchTarget)
+            .horizontalScroll(rememberScrollState())
             .selectableGroup()
             .testTag(TechnicianScheduleTabSelectorTag),
         horizontalArrangement = Arrangement.spacedBy(TechnicianSegmentSpacing),
@@ -424,13 +451,23 @@ private fun TechnicianScheduleTabs(
             tag = TechnicianScheduleTabScheduleTag,
             onClick = { onSelectTab(TechnicianScheduleTab.SCHEDULE) },
         )
-        TechnicianScheduleTabSegment(
-            label = stringResource(R.string.technician_schedule_tab_requests),
-            selected = tab == TechnicianScheduleTab.REQUESTS,
-            badgeCount = awaitingReviewCount,
-            tag = TechnicianScheduleTabRequestsTag,
-            onClick = { onSelectTab(TechnicianScheduleTab.REQUESTS) },
-        )
+        if (canRequestFollowUpVisit) {
+            TechnicianScheduleTabSegment(
+                label = stringResource(R.string.technician_schedule_tab_requests),
+                selected = tab == TechnicianScheduleTab.REQUESTS,
+                badgeCount = awaitingReviewCount,
+                tag = TechnicianScheduleTabRequestsTag,
+                onClick = { onSelectTab(TechnicianScheduleTab.REQUESTS) },
+            )
+        }
+        if (canReportAdHocWork) {
+            TechnicianScheduleTabSegment(
+                label = stringResource(R.string.technician_schedule_tab_ad_hoc_reports),
+                selected = tab == TechnicianScheduleTab.AD_HOC_REPORTS,
+                tag = TechnicianScheduleTabAdHocReportsTag,
+                onClick = { onSelectTab(TechnicianScheduleTab.AD_HOC_REPORTS) },
+            )
+        }
     }
 }
 
@@ -1024,6 +1061,7 @@ private fun TechnicianRequests(
                     )
                 }
             }
+
         }
     }
 }
@@ -1115,6 +1153,223 @@ private fun TechnicianRequestsEmpty() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * The caller's own ad-hoc work reports, with their own read states (`BR-AH-001`, `BR-AH-004`).
+ */
+@Composable
+private fun TechnicianAdHocReports(
+    state: TechnicianScheduleUiState,
+    locale: Locale,
+    zone: ZoneId,
+    onRetry: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().testTag(TechnicianAdHocReportsSectionTag),
+        contentPadding = PaddingValues(
+            start = HomePageGutter,
+            end = HomePageGutter,
+            bottom = HomePageGutter,
+        ),
+        verticalArrangement = Arrangement.spacedBy(TechnicianCardSpacing),
+    ) {
+        when {
+            state.showsAdHocReportsLoading -> item { TechnicianAdHocReportsLoading() }
+
+            state.showsAdHocReportsFailure -> item { TechnicianAdHocReportsFailure(onRetry = onRetry) }
+
+            else -> {
+                if (state.showsAdHocReportsUnrefreshedNotice) {
+                    item(key = "unrefreshed") {
+                        OfflineNotice(
+                            message = stringResource(R.string.technician_ad_hoc_reports_unrefreshed),
+                            tag = TechnicianAdHocReportsUnrefreshedTag,
+                        )
+                    }
+                }
+                if (state.showsEmptyAdHocReports) {
+                    item(key = "empty") { TechnicianAdHocReportsEmpty() }
+                } else {
+                    items(items = state.adHocReports, key = { it.id }) { report ->
+                        TechnicianAdHocReportCard(report = report, locale = locale, zone = zone)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The first read of the caller's reports: nothing has been answered for them yet (`BR-013`). */
+@Composable
+private fun TechnicianAdHocReportsLoading() {
+    Box(
+        modifier = Modifier.fillMaxWidth().testTag(TechnicianAdHocReportsLoadingTag),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator()
+    }
+}
+
+/**
+ * The caller's reports could not be read.
+ *
+ * It is the honest answer rather than an empty list, and the read can be retried where the technician
+ * is standing instead of by leaving the screen (`BR-012`, `BR-013`).
+ */
+@Composable
+private fun TechnicianAdHocReportsFailure(onRetry: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag(TechnicianAdHocReportsFailureTag),
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 16.dp, horizontal = TechnicianCardPadding),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.technician_ad_hoc_reports_error_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            TextButton(
+                modifier = Modifier.testTag(TechnicianAdHocReportsRetryTag),
+                onClick = onRetry,
+            ) {
+                Text(stringResource(R.string.home_retry))
+            }
+        }
+    }
+}
+
+/**
+ * The caller has reported no ad-hoc work.
+ *
+ * It is the read's own answer rather than an error (`BR-042`), so the screen says so plainly instead
+ * of showing an empty list.
+ */
+@Composable
+private fun TechnicianAdHocReportsEmpty() {
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag(TechnicianAdHocReportsEmptyTag),
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 16.dp, horizontal = TechnicianCardPadding),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.technician_ad_hoc_reports_empty_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.technician_ad_hoc_reports_empty_detail),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+
+/**
+ * One of the caller's own ad-hoc work reports and the office's decision about it (`BR-AH-001`,
+ * `BR-AH-005`).
+ *
+ * A report is not a request and not a Visit, so it is its own card rather than either of theirs
+ * (`BR-AH-004`, `BR-042`). The card states what the technician reported — who it was for, where, when
+ * and what happened — and what the office did with it: the status carries the decision, and the
+ * office's own words are shown when it recorded a note (`BR-AH-005`, `BR-AH-007`).
+ */
+@Composable
+private fun TechnicianAdHocReportCard(
+    report: AdHocWorkReport,
+    locale: Locale,
+    zone: ZoneId,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(technicianAdHocReportTag(report.id)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(
+            modifier = Modifier.padding(TechnicianCardPadding),
+            verticalArrangement = Arrangement.spacedBy(TechnicianLineSpacing),
+        ) {
+            Text(
+                text = report.customerName
+                    ?: report.reportedCustomerName
+                    ?: stringResource(R.string.ad_hoc_report_unknown_customer),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = stringResource(adHocWorkReportStatusLabel(report.status)),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            report.propertyAddress?.let { address ->
+                formattedAddressLine(
+                    addressLine1 = address.addressLine1,
+                    addressLine2 = address.addressLine2,
+                    city = address.city,
+                    province = address.province,
+                    postalCode = address.postalCode,
+                )?.let { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } ?: report.reportedCustomerAddress?.let { address ->
+                Text(
+                    text = address,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            formatRequestWindow(report.workStartedAt, report.workEndedAt, zone, locale)?.let { window ->
+                RequestSummaryField(
+                    label = stringResource(R.string.ad_hoc_report_window_label),
+                    value = window,
+                )
+            }
+            RequestSummaryField(
+                label = stringResource(R.string.ad_hoc_report_outcome_label),
+                value = stringResource(visitOutcomeLabel(report.outcomeCode)),
+            )
+            RequestSummaryField(
+                label = stringResource(R.string.ad_hoc_report_summary_label),
+                value = report.summary,
+                maxLines = 3,
+            )
+            report.reviewNote?.takeIf { it.isNotBlank() }?.let { note ->
+                RequestSummaryField(
+                    label = stringResource(R.string.ad_hoc_report_review_note_label),
+                    value = note,
+                    maxLines = 3,
+                )
+            }
         }
     }
 }

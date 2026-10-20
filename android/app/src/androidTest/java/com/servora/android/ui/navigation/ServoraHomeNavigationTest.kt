@@ -43,8 +43,12 @@ import com.servora.android.data.schedule.AdHocReportCustomerOptionsResult
 import com.servora.android.data.schedule.AdHocReportJobOptionsResult
 import com.servora.android.data.schedule.AdHocReportPropertyOptionsResult
 import com.servora.android.data.schedule.AdHocWorkReportDraft
+import com.servora.android.data.schedule.AdHocWorkReportReconcileResult
+import com.servora.android.data.schedule.AdHocWorkReportRejectResult
 import com.servora.android.data.schedule.AdHocWorkReportResult
 import com.servora.android.data.schedule.AdHocWorkReportsRepository
+import com.servora.android.data.schedule.AdHocWorkReportsResult
+import com.servora.android.domain.model.AdHocWorkReport
 import com.servora.android.data.schedule.ScheduleRepository
 import com.servora.android.data.schedule.ScheduleResult
 import com.servora.android.data.schedule.VisitRequestReviewResult
@@ -85,6 +89,7 @@ import com.servora.android.domain.model.ScheduleScope
 import com.servora.android.domain.model.ScheduleScopeKind
 import com.servora.android.domain.model.ScheduleVisit
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.ui.components.ServoraTopBarBackTag
 import com.servora.android.ui.components.ServoraTopBarSubtitleTag
 import com.servora.android.ui.components.ServoraTopBarTitleTag
@@ -526,6 +531,7 @@ class ServoraHomeNavigationTest {
             scheduleRepository,
             FakeVisitRequestsRepository(),
             FakeJobDetailsRepository(),
+            FakeAdHocWorkReportsRepository(),
         )
         // The Job Details destination is wired by the shell too; the fake answers "not found",
         // because these tests cover navigation rather than Job behaviour.
@@ -586,6 +592,8 @@ class ServoraHomeNavigationTest {
                     createJobViewModel = createJobViewModel,
                     scheduleViewModel = scheduleViewModel,
                     technicianScheduleViewModel = technicianScheduleViewModel,
+                    notificationsEnabled = true,
+                    onNotificationsEnabledChange = {},
                     onSignOut = {},
                 )
             }
@@ -931,6 +939,10 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
 
     override suspend fun addVisitNoteRequest(note: VisitNote): ActivityWriteResult = unreachable()
 
+    override suspend fun editVisitNote(jobId: String, noteId: String, body: String): ActivityWriteResult = unreachable()
+
+    override suspend fun removeVisitNote(jobId: String, noteId: String, reason: String): ActivityWriteResult = unreachable()
+
     override suspend fun changeVisitStatus(action: VisitStatusChange): JobActionResult =
         unreachable()
 
@@ -971,6 +983,32 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
         expectedVersion: Int,
     ): JobActionResult = unreachable()
 
+
+    override suspend fun markQuoteSent(
+        jobId: String,
+        note: String?,
+        externalReference: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unreachable()
+
+    override suspend fun markQuoteRequired(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unreachable()
+
+    override suspend fun markQuoteApproved(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unreachable()
+
+    override suspend fun markQuoteRejected(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unreachable()
+
     override suspend fun rescheduleVisit(
         jobId: String,
         visitId: String,
@@ -999,6 +1037,7 @@ private class FakeJobDetailsRepository : JobDetailsRepository {
         scheduledStart: Instant,
         scheduledEnd: Instant,
         assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
         confirmConflicts: Boolean,
     ): JobActionResult = unreachable()
 
@@ -1088,6 +1127,11 @@ private class FakeVisitRequestsRepository : VisitRequestsRepository {
 
 /** An [AdHocWorkReportsRepository] that answers empty options and a successful submit. */
 private class FakeAdHocWorkReportsRepository : AdHocWorkReportsRepository {
+    override suspend fun listReviewJobs(customerId: String?, query: String?): AdHocReportJobOptionsResult =
+        AdHocReportJobOptionsResult.Success(emptyList())
+    override suspend fun searchReviewCustomers(query: String) = com.servora.android.data.schedule.AdHocReviewDataResult.Success(emptyList<com.servora.android.domain.model.AdHocReportCustomerOption>())
+    override suspend fun listReviewProperties(customerId: String) = com.servora.android.data.schedule.AdHocReviewDataResult.Success(emptyList<com.servora.android.domain.model.AdHocReportPropertyOption>())
+    override suspend fun resolveLocation(report: com.servora.android.domain.model.AdHocWorkReport, request: com.servora.android.data.schedule.ResolveAdHocLocationRequestDto) = com.servora.android.data.schedule.AdHocReviewDataResult.Failure(CustomersFailureReason.UNEXPECTED)
     override suspend fun searchCustomers(query: String): AdHocReportCustomerOptionsResult =
         AdHocReportCustomerOptionsResult.Success(emptyList())
 
@@ -1099,6 +1143,27 @@ private class FakeAdHocWorkReportsRepository : AdHocWorkReportsRepository {
 
     override suspend fun submit(report: AdHocWorkReportDraft): AdHocWorkReportResult =
         AdHocWorkReportResult.Success
+
+    override suspend fun loadReports(): AdHocWorkReportsResult =
+        AdHocWorkReportsResult.Success(emptyList())
+
+    override suspend fun reject(report: AdHocWorkReport, note: String): AdHocWorkReportRejectResult =
+        AdHocWorkReportRejectResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun link(
+        report: AdHocWorkReport,
+        jobId: String,
+        note: String,
+    ): AdHocWorkReportReconcileResult =
+        AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun convert(
+        report: AdHocWorkReport,
+        title: String,
+        description: String?,
+        note: String,
+    ): AdHocWorkReportReconcileResult =
+        AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNEXPECTED)
 }
 
 /**
@@ -1185,4 +1250,3 @@ private fun technicianScheduleDay(): Schedule = Schedule(
     unassignedTotal = 0,
     hasUnassignedLane = false,
 )
-

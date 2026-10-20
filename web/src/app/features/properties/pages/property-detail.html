@@ -1,0 +1,183 @@
+<section
+  [appPageTitle]="property()?.name || property()?.addressLine1 || i18n.text('propertyDetails')"
+>
+  <a
+    class="back-link"
+    [routerLink]="back()"
+    [queryParams]="
+      auth.hasPermission('customers.view') ? { properties: property()?.status || 'ACTIVE' } : {}
+    "
+    >←
+    {{
+      i18n.text(auth.hasPermission('customers.view') ? 'propertyBackCustomer' : 'propertyBackHome')
+    }}</a
+  >
+  @if (loading()) {
+    <p role="status">{{ i18n.text('busy') }}</p>
+  }
+  @if (error(); as message) {
+    <h1>{{ i18n.text('propertyDetails') }}</h1>
+    <div role="alert" class="notice">
+      <p>{{ i18n.text(message) }}</p>
+      @if (auth.hasPermission('properties.view')) {
+        <button mat-stroked-button (click)="refresh()">{{ i18n.text('retry') }}</button>
+      }
+    </div>
+  }
+  @if (property(); as p) {
+    <div class="page-heading">
+      <div>
+        <p class="eyebrow">
+          {{ i18n.text(p.status === 'ACTIVE' ? 'propertyActive' : 'propertyArchived') }}
+        </p>
+        <h1>{{ p.name || p.addressLine1 }}</h1>
+        <p class="context">{{ customerName() || i18n.text('propertyCustomerContext') }}</p>
+      </div>
+      <div class="actions">
+        <button mat-stroked-button (click)="refresh()" [disabled]="busy()">
+          {{ i18n.text('refresh') }}
+        </button>
+        @if (auth.hasPermission('properties.edit')) {
+          <a
+            mat-flat-button
+            [routerLink]="['/work/customers', customerId(), 'properties', id(), 'edit']"
+            >{{ i18n.text('propertyEdit') }}</a
+          >
+        }
+      </div>
+    </div>
+    @if (customerError(); as message) {
+      <p role="alert">{{ i18n.text(message) }}</p>
+    }
+    <div class="panel">
+      <h2>{{ i18n.text('propertyServiceAddress') }}</h2>
+      <p>{{ address(propertyAddress(p)) }}</p>
+      <a [href]="directions(propertyAddress(p))" target="_blank" rel="noopener noreferrer">{{
+        i18n.text('directions')
+      }}</a>
+      <dl>
+        <div>
+          <dt>{{ i18n.text('customerJobs') }}</dt>
+          <dd>{{ p.jobCount }}</dd>
+        </div>
+        <div>
+          <dt>{{ i18n.text('propertyLastService') }}</dt>
+          <dd>
+            @if (p.lastServiceAt) {
+              {{
+                p.lastServiceAt
+                  | date: 'mediumDate' : undefined : (i18n.language() === 'fr' ? 'fr-CA' : 'en-CA')
+              }}
+            } @else {
+              {{ i18n.text('propertyNeverServiced') }}
+            }
+          </dd>
+        </div>
+        @if (p.archivedAt) {
+          <div>
+            <dt>{{ i18n.text('propertyArchivedOn') }}</dt>
+            <dd>
+              {{
+                p.archivedAt
+                  | date: 'medium' : undefined : (i18n.language() === 'fr' ? 'fr-CA' : 'en-CA')
+              }}
+            </dd>
+          </div>
+        }
+        @if (p.notes) {
+          <div class="wide">
+            <dt>{{ i18n.text('customerNotes') }}</dt>
+            <dd class="pre-wrap">{{ p.notes }}</dd>
+          </div>
+        }
+      </dl>
+    </div>
+    @if (auth.hasPermission('customers.view')) {
+      <div class="panel">
+        <div class="page-heading">
+          <h2>{{ i18n.text('propertyJobHistory') }}</h2>
+          @if (p.status === 'ACTIVE' && auth.hasPermission('JOB_CREATE')) {
+            <a
+              mat-flat-button
+              [routerLink]="['/work/customers', customerId(), 'jobs', 'new']"
+              [queryParams]="{ property: p.id }"
+              >{{ i18n.text('jobNew') }}</a
+            >
+          }
+        </div>
+        <p class="muted">{{ i18n.text('propertyJobSnapshots') }}</p>
+        @if (jobsError(); as message) {
+          <p role="alert">{{ i18n.text(message) }}</p>
+        }
+        @if (jobs(); as items) {
+          @for (job of items; track job.id) {
+            <article class="job-row">
+              <div>
+                <a
+                  class="record-title"
+                  [routerLink]="['/work/jobs', job.id]"
+                  [queryParams]="{ view: 'office' }"
+                  >#{{ job.jobNumber }} · {{ job.title }}</a
+                >
+                <p class="muted">{{ address(job.propertyAddress) }}</p>
+                @if (job.scheduledStart) {
+                  <p>
+                    {{
+                      job.scheduledStart
+                        | date
+                          : 'medium'
+                          : undefined
+                          : (i18n.language() === 'fr' ? 'fr-CA' : 'en-CA')
+                    }}
+                  </p>
+                }
+              </div>
+              <app-work-status [code]="job.status" />
+            </article>
+          } @empty {
+            <p class="muted">{{ i18n.text('propertyNoJobs') }}</p>
+          }
+        } @else if (!jobsError()) {
+          <p role="status">{{ i18n.text('busy') }}</p>
+        }
+      </div>
+    }
+    <div class="panel">
+      <h2>{{ i18n.text('propertyLifecycle') }}</h2>
+      <p class="muted">
+        {{
+          i18n.text(
+            p.status === 'ACTIVE' ? 'propertyArchiveDescription' : 'propertyRestoreDescription'
+          )
+        }}
+      </p>
+      @if (writeError(); as message) {
+        <div role="alert" class="notice">
+          <p>{{ i18n.text(message) }}</p>
+          <button mat-stroked-button (click)="refresh()" [disabled]="busy()">
+            {{ i18n.text('customerReload') }}
+          </button>
+        </div>
+      }
+      <div class="actions">
+        @if (auth.hasPermission('properties.archive')) {
+          <button
+            mat-stroked-button
+            [disabled]="busy() || blocked()"
+            (click)="mutate(p.status === 'ACTIVE' ? 'archive' : 'restore')"
+          >
+            {{ i18n.text(p.status === 'ACTIVE' ? 'propertyArchive' : 'propertyRestore') }}
+          </button>
+        }
+        @if (auth.hasPermission('properties.delete') && p.canBePermanentlyDeleted) {
+          <button mat-stroked-button [disabled]="busy() || blocked()" (click)="mutate('delete')">
+            {{ i18n.text('propertyDelete') }}
+          </button>
+        }
+      </div>
+      @if (auth.hasPermission('properties.delete') && !p.canBePermanentlyDeleted) {
+        <p class="muted">{{ i18n.text('propertyHasReferences') }}</p>
+      }
+    </div>
+  }
+</section>

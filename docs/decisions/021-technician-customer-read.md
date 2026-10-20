@@ -5,7 +5,7 @@ recommended by the agent and accepted by product ownership in the same session, 
 requires)
 
 Date: 2026-09-18
-Tracker: `docs/tracker/042-technician-customer-read.md` — this ADR is its Phase 0
+Tracker: `docs/tracker/shared/042-technician-customer-read.md` — this ADR is its Phase 0
 Contracts: `docs/api/job-details.md` §2 and §3 (the customer block added by this decision)
 Predecessors: `docs/decisions/019-technician-field-experience.md` (D1/D2 — the field read this ADR
 extends), `docs/decisions/015-evidence-capabilities.md` and
@@ -197,7 +197,7 @@ untouched and remain open. D1, D2, D4 and D5 are unchanged, and the block's own 
 
 The decision update above records that tap-to-call and tap-to-email were decided **on both surfaces**, and
 only the Customer Detail card drew them at the time. The Job Details half is now implemented by
-`docs/tracker/052-android-technician-job-details-redesign.md`: the page's **Contacts** section draws the
+`docs/tracker/android/052-android-technician-job-details-redesign.md`: the page's **Contacts** section draws the
 effective primary contact's phone and email, and every folded other way of reaching the Customer, through
 the same `CustomerContactLine` affordance and the same `dialIntent` / `mailIntent` / `startContactIntent`
 actions.

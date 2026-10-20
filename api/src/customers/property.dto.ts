@@ -1,3 +1,7 @@
+import type {
+  PropertyDetails,
+  SavePropertyRequest,
+} from '@servora/shared-types';
 import {
   optionalInstant,
   optionalPositiveInteger,
@@ -45,7 +49,10 @@ export type CanadianProvinceCode = (typeof CANADIAN_PROVINCE_CODES)[number];
 export const PROPERTY_COUNTRY = 'Canada';
 
 /** The fields a caller supplies to create an organization-owned Property (`BR-049`). */
-export interface CreatePropertyDto {
+export interface CreatePropertyDto extends Omit<
+  SavePropertyRequest,
+  'expectedVersion'
+> {
   name?: string | null;
   addressLine1: string;
   addressLine2?: string | null;
@@ -198,7 +205,7 @@ export interface PropertyArchiveImpactDto {
  * right now; a client must not compute it locally (`BR-001`, `BR-007`). Nothing here is stored: every
  * derived value comes from the authoritative tables (`BR-080`).
  */
-export interface PropertyDetailDto {
+export interface PropertyDetailDto extends PropertyDetails {
   id: string;
   name: string | null;
   addressLine1: string;

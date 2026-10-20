@@ -20,6 +20,7 @@ import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.VisitStatus
 import java.time.Instant
 
@@ -218,6 +219,24 @@ enum class JobAudioMessage {
     EVIDENCE_REMOVED,
 }
 
+/** Why a quote PDF action could not complete. */
+enum class JobQuoteDocumentFailure {
+    NOT_ALLOWED,
+    NOT_PDF,
+    NOT_READ,
+    NOT_AVAILABLE,
+    UNREACHABLE,
+    OPEN_FAILED,
+    NO_VIEWER,
+    FAILED,
+}
+
+/** What the last quote PDF action did, until the screen acknowledges it. */
+enum class JobQuoteDocumentMessage {
+    UPLOADED,
+    OPENED,
+}
+
 /**
  * The evidence action the viewer is carrying out, or `null` when none is running (`D12`, `D13`).
  *
@@ -270,6 +289,9 @@ enum class JobActionKind {
      * (`BR-FV-004`) — rather than that any work was arranged.
      */
     FOLLOW_UP_REQUEST,
+
+    /** The Assessment quote workflow moved to the next customer-decision state (`BR-QUOTE-001`). */
+    QUOTE_WORKFLOW,
 }
 
 /**
@@ -302,6 +324,7 @@ sealed interface PendingJobAction {
         val scheduledStart: Instant,
         val scheduledEnd: Instant,
         val assignments: List<TechnicianAssignment>,
+        val purpose: VisitPurpose,
         override val conflicts: List<ScheduleConflict>,
     ) : PendingJobAction
 
@@ -371,6 +394,12 @@ data class JobDetailsUiState(
     val completedAction: JobActionKind? = null,
     /** Why the last action did not complete, or `null` when there is none to report. */
     val actionFailure: JobActionFailure? = null,
+    /** Whether a quote PDF upload/read is in flight. */
+    val isQuoteDocumentBusy: Boolean = false,
+    /** Why the last quote PDF action did not complete, or `null` when there is none to report. */
+    val quoteDocumentFailure: JobQuoteDocumentFailure? = null,
+    /** What the last quote PDF action did, until the screen acknowledges it. */
+    val quoteDocumentMessage: JobQuoteDocumentMessage? = null,
     /** An action waiting for the user to accept the conflicts it would create (`BR-070`). */
     val pendingConfirmation: PendingJobAction? = null,
     /** The follow-up Visit request this screen just submitted, if it still belongs to this Job. */

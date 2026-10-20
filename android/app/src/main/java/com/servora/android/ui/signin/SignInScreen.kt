@@ -290,7 +290,7 @@ internal fun SignInScreen(
  * something to print on a screen.
  *
  * Development tooling, not product behaviour (`BR-042`), recorded in
- * `docs/tracker/049-android-dev-sign-in-buttons.md`.
+ * `docs/tracker/android/049-android-dev-sign-in-buttons.md`.
  */
 @Composable
 private fun DevSignInSection(

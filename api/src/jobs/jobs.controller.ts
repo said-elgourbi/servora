@@ -1,3 +1,4 @@
+import { FieldScoped } from '../auth/field-scope.js';
 import {
   Body,
   Controller,
@@ -21,6 +22,7 @@ import { AuthApiError } from '../auth/auth-error.js';
 import { AuthGuard } from '../auth/auth.guard.js';
 import {
   CUSTOMER_PERMISSIONS,
+  PROPERTY_PERMISSIONS,
   EVIDENCE_PERMISSIONS,
   JOB_PERMISSIONS,
   VISIT_PERMISSIONS,
@@ -43,13 +45,16 @@ import {
   parseConvertAdHocWorkReportDto,
   parseLinkAdHocWorkReportDto,
   parseRejectAdHocWorkReportDto,
+  parseResolveAdHocWorkReportLocationDto,
   parseSubmitAdHocWorkReportDto,
   type AdHocWorkReportDto,
 } from './ad-hoc-work-report.dto.js';
 import {
   parseAdHocCustomerSearchQuery,
   parseAdHocReportCustomerContextQuery,
+  parseAdHocReviewJobOptionsQuery,
   type AdHocReportCustomerOptionDto,
+  type AdHocReviewCustomerOptionDto,
   type AdHocReportCustomerScope,
   type AdHocReportJobOptionDto,
   type AdHocReportPropertyOptionDto,
@@ -86,12 +91,23 @@ import {
 } from './job-audio.dto.js';
 import type { JobAudioNoteUpload } from './job-audio.dto.js';
 import {
+  MAX_JOB_DOCUMENT_BYTES,
+  parseCreateJobDocumentDto,
+  validateJobDocumentUpload,
+  type JobDocumentDto,
+  type JobDocumentUpload,
+} from './job-document.dto.js';
+import {
   JobAudioNoteAlreadyRemovedError,
   JobAudioNoteRemovalForbiddenError,
   JobAudioNoteNotFoundError,
   JobAudioNoteOperationReusedError,
   JobAudioNotesService,
 } from './job-audio-notes.service.js';
+import {
+  JobDocumentNotFoundError,
+  JobDocumentsService,
+} from './job-documents.service.js';
 import {
   JobPhotoAlreadyRemovedError,
   JobPhotoRemovalForbiddenError,
@@ -108,6 +124,9 @@ import {
   parseChangeVisitStatusDto,
   parseCompleteVisitDto,
   parseRescheduleVisitDto,
+  parseDecideQuoteDto,
+  parseCorrectQuoteToRequiredDto,
+  parseMarkQuoteSentDto,
 } from './job-action.dto.js';
 import type {
   AssignedJobViewer,
@@ -128,6 +147,10 @@ import {
   JobCustomerInactiveError,
   JobCustomerNotFoundError,
   JobNotFoundError,
+  JobQuoteDecisionCorrectionNotAllowedError,
+  JobQuoteWorkflowNotFoundError,
+  JobQuoteWorkflowTransitionNotAllowedError,
+  JobQuoteWorkflowVersionConflictError,
   JobStatusTransitionNotAllowedError,
   JobsService,
   JobVersionConflictError,
@@ -137,6 +160,7 @@ import {
   VisitNoteForbiddenError,
   VisitNotFoundError,
   VisitOperationReusedError,
+  VisitOutcomeInvalidForPurposeError,
   VisitSchedulingConditionNotMetError,
   VisitStatusTransitionNotAllowedError,
   VisitVersionConflictError,
@@ -163,7 +187,7 @@ import {
  * as a Manager default and which the seeded catalogue already grants to that role. Introducing
  * `jobs.*` codes would invent the capability set the Jobs feature has not defined, so the actions
  * reuse the one that exists; the interim decision and its open question are recorded in
- * `docs/api/job-actions.md` §2 and `docs/tracker/018-android-job-actions.md`.
+ * `docs/api/job-actions.md` §2 and `docs/tracker/android/018-android-job-actions.md`.
  *
  * The **create** route is the exception among the Job writes: `BR-008` names "create jobs" as a
  * Manager default and the foundation catalogue already defines and grants `JOB_CREATE`, so creating a
@@ -193,6 +217,7 @@ export class JobsController {
     private readonly jobs: JobsService,
     private readonly photos: JobPhotosService,
     private readonly audioNotes: JobAudioNotesService,
+    private readonly documents: JobDocumentsService,
   ) {}
 
   /**
@@ -233,6 +258,7 @@ export class JobsController {
     VISIT_PERMISSIONS.REVIEW_REQUESTS,
     VISIT_PERMISSIONS.REQUEST_FOLLOW_UP,
   )
+  @FieldScoped()
   async listVisitRequests(
     @Req() request: PermissionedRequest,
   ): Promise<readonly FollowUpVisitRequestDto[]> {
@@ -240,20 +266,33 @@ export class JobsController {
     return this.jobs.listFollowUpVisitRequests(
       { organizationId: authorization.organizationId },
       authorization.membershipId,
-      authorization.permissions.includes(VISIT_PERMISSIONS.REVIEW_REQUESTS),
+      !authorization.fieldScoped &&
+        authorization.permissions.includes(VISIT_PERMISSIONS.REVIEW_REQUESTS),
     );
   }
 
   @Post('ad-hoc-work-reports')
   @HttpCode(HttpStatus.CREATED)
   @RequirePermissions(VISIT_PERMISSIONS.REPORT_AD_HOC_WORK)
+  @FieldScoped()
   async submitAdHocWorkReport(
     @Req() request: PermissionedRequest,
     @Body() body: unknown,
   ): Promise<AdHocWorkReportDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseSubmitAdHocWorkReportDto(body));
+    if (authorization.fieldScoped && input.clientOperationId === null)
+      throw AuthApiError.validationFailed(
+        'Scoped commands require an operation id, capture time and observed version where applicable.',
+      );
     try {
+      if (input.knownJobId)
+        await assertScopedFieldJob(
+          authorization,
+          input.knownJobId,
+          this.jobs,
+          null,
+        );
       return await this.jobs.submitAdHocWorkReport(
         { organizationId: authorization.organizationId },
         authorization.membershipId,
@@ -269,6 +308,7 @@ export class JobsController {
     VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
     VISIT_PERMISSIONS.REPORT_AD_HOC_WORK,
   )
+  @FieldScoped()
   async listAdHocWorkReports(
     @Req() request: PermissionedRequest,
   ): Promise<readonly AdHocWorkReportDto[]> {
@@ -276,7 +316,10 @@ export class JobsController {
     return this.jobs.listAdHocWorkReports(
       { organizationId: authorization.organizationId },
       authorization.membershipId,
-      authorization.permissions.includes(VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK),
+      !authorization.fieldScoped &&
+        authorization.permissions.includes(
+          VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
+        ),
     );
   }
 
@@ -333,11 +376,108 @@ export class JobsController {
     }
   }
 
+  @Get('ad-hoc-work-reports/review-job-options')
+  @RequirePermissions(VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK)
+  async adHocReviewJobOptions(
+    @Req() request: PermissionedRequest,
+    @Query() query: unknown,
+  ): Promise<readonly AdHocReportJobOptionDto[]> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseAdHocReviewJobOptionsQuery(query));
+    try {
+      return await this.jobs.listReviewAdHocReportJobs(
+        { organizationId: authorization.organizationId },
+        input.customerId,
+        input.query,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Get('ad-hoc-work-reports/review-customer-options')
+  @RequirePermissions(
+    VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
+    CUSTOMER_PERMISSIONS.VIEW,
+  )
+  async reviewAdHocCustomers(
+    @Req() request: PermissionedRequest,
+    @Query() query: unknown,
+  ): Promise<readonly AdHocReviewCustomerOptionDto[]> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseAdHocCustomerSearchQuery(query));
+    return this.jobs.searchReviewAdHocReportCustomers(
+      { organizationId: authorization.organizationId },
+      input.query,
+    );
+  }
+
+  @Get('ad-hoc-work-reports/review-property-options')
+  @RequirePermissions(
+    VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
+    PROPERTY_PERMISSIONS.VIEW,
+  )
+  async reviewAdHocProperties(
+    @Req() request: PermissionedRequest,
+    @Query() query: unknown,
+  ): Promise<readonly AdHocReportPropertyOptionDto[]> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseAdHocReportCustomerContextQuery(query));
+    try {
+      return await this.jobs.listAdHocReportProperties(
+        { organizationId: authorization.organizationId },
+        { kind: 'ORGANIZATION' },
+        input.customerId,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
+  @Post('ad-hoc-work-reports/:reportId/resolve-location')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK)
+  async resolveAdHocLocation(
+    @Req() request: PermissionedRequest,
+    @Param('reportId') reportId: string,
+    @Body() body: unknown,
+  ): Promise<AdHocWorkReportDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() =>
+      parseResolveAdHocWorkReportLocationDto(body),
+    );
+    const required = [
+      input.newCustomer === null
+        ? CUSTOMER_PERMISSIONS.VIEW
+        : CUSTOMER_PERMISSIONS.CREATE,
+      input.newProperty === null
+        ? PROPERTY_PERMISSIONS.VIEW
+        : PROPERTY_PERMISSIONS.CREATE,
+    ];
+    if (
+      required.some(
+        (permission) => !authorization.permissions.includes(permission),
+      )
+    )
+      throw AuthApiError.forbidden();
+    try {
+      return await this.jobs.resolveAdHocWorkReportLocation(
+        { organizationId: authorization.organizationId },
+        reportId,
+        authorization.membershipId,
+        input,
+      );
+    } catch (error) {
+      throw mapActionError(error);
+    }
+  }
+
   @Get('ad-hoc-work-reports/:reportId')
   @RequireAnyPermission(
     VISIT_PERMISSIONS.REVIEW_AD_HOC_WORK,
     VISIT_PERMISSIONS.REPORT_AD_HOC_WORK,
   )
+  @FieldScoped()
   async getAdHocWorkReport(
     @Req() request: PermissionedRequest,
     @Param('reportId') reportId: string,
@@ -436,6 +576,7 @@ export class JobsController {
     CUSTOMER_PERMISSIONS.VIEW,
     VISIT_PERMISSIONS.VIEW_ASSIGNED,
   )
+  @FieldScoped()
   async findOne(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -457,6 +598,7 @@ export class JobsController {
   @Post(':id/visit-requests')
   @HttpCode(HttpStatus.CREATED)
   @RequirePermissions(VISIT_PERMISSIONS.REQUEST_FOLLOW_UP)
+  @FieldScoped()
   async submitVisitRequest(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -465,6 +607,12 @@ export class JobsController {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseSubmitFollowUpVisitRequestDto(body));
     try {
+      await assertScopedFieldJob(
+        authorization,
+        id,
+        this.jobs,
+        input.sourceVisitId,
+      );
       return await this.jobs.submitFollowUpVisitRequest(
         { organizationId: authorization.organizationId },
         id,
@@ -473,6 +621,170 @@ export class JobsController {
       );
     } catch (error) {
       throw mapActionError(error);
+    }
+  }
+
+  @Post(':id/quote/sent')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(JOB_PERMISSIONS.UPDATE)
+  async markQuoteSent(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseMarkQuoteSentDto(body));
+    return this.action(authorization, () =>
+      this.jobs.markQuoteSent(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
+  @Post(':id/quote/required')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(JOB_PERMISSIONS.UPDATE)
+  async correctQuoteToRequired(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseCorrectQuoteToRequiredDto(body));
+    return this.action(authorization, () =>
+      this.jobs.correctQuoteToRequired(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
+  @Post(':id/quote/approval')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(JOB_PERMISSIONS.UPDATE)
+  async approveQuote(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseDecideQuoteDto(body));
+    return this.action(authorization, () =>
+      this.jobs.approveQuote(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
+  @Post(':id/quote/rejection')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(JOB_PERMISSIONS.UPDATE)
+  async rejectQuote(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseDecideQuoteDto(body));
+    return this.action(authorization, () =>
+      this.jobs.rejectQuote(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+      ),
+    );
+  }
+
+  @Post(':id/documents')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions(JOB_PERMISSIONS.UPDATE)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_JOB_DOCUMENT_BYTES, files: 1 },
+    }),
+  )
+  async addDocument(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @UploadedFile() file: JobDocumentUpload | undefined,
+  ): Promise<JobDocumentDto> {
+    const authorization = authorizationOf(request);
+    const input = parseInput(() => parseCreateJobDocumentDto(body));
+    const document = parseInput(() => validateJobDocumentUpload(file));
+    try {
+      return await this.documents.addJobDocument(
+        { organizationId: authorization.organizationId },
+        id,
+        authorization.membershipId,
+        input,
+        document,
+      );
+    } catch (error) {
+      throw mapDocumentError(error);
+    }
+  }
+
+  @Get(':id/documents/quote/content')
+  @RequireAnyPermission(
+    JOB_PERMISSIONS.UPDATE,
+    CUSTOMER_PERMISSIONS.VIEW,
+    VISIT_PERMISSIONS.VIEW_ASSIGNED,
+  )
+  async readCurrentQuoteDocumentContent(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+  ): Promise<StreamableFile> {
+    const authorization = authorizationOf(request);
+    await assertCanReadJobDocument(authorization, id, this.jobs);
+    try {
+      const object = await this.documents.readCurrentQuoteDocumentContent(
+        { organizationId: authorization.organizationId },
+        id,
+      );
+      return new StreamableFile(object.body, {
+        type: object.contentType,
+        length: object.byteSize,
+      });
+    } catch (error) {
+      throw mapDocumentError(error);
+    }
+  }
+
+  @Get(':id/documents/:documentId/content')
+  @RequireAnyPermission(
+    JOB_PERMISSIONS.UPDATE,
+    CUSTOMER_PERMISSIONS.VIEW,
+    VISIT_PERMISSIONS.VIEW_ASSIGNED,
+  )
+  async readDocumentContent(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+  ): Promise<StreamableFile> {
+    const authorization = authorizationOf(request);
+    await assertCanReadJobDocument(authorization, id, this.jobs);
+    try {
+      const object = await this.documents.readJobDocumentContent(
+        { organizationId: authorization.organizationId },
+        id,
+        documentId,
+      );
+      return new StreamableFile(object.body, {
+        type: object.contentType,
+        length: object.byteSize,
+      });
+    } catch (error) {
+      throw mapDocumentError(error);
     }
   }
 
@@ -586,6 +898,7 @@ export class JobsController {
   @Post(':id/visit-requests/:requestId/reply')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions(VISIT_PERMISSIONS.REQUEST_FOLLOW_UP)
+  @FieldScoped()
   async replyToVisitRequest(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -629,6 +942,7 @@ export class JobsController {
     CUSTOMER_PERMISSIONS.VIEW,
     VISIT_PERMISSIONS.VIEW_ASSIGNED,
   )
+  @FieldScoped()
   async findActivity(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -638,9 +952,14 @@ export class JobsController {
     const options = parseInput(() => parseJobActivityOptions(query));
     if (
       options.includeRemovedEvidence === true &&
-      !authorization.permissions.includes(JOB_PERMISSIONS.UPDATE) &&
-      !authorization.permissions.includes(EVIDENCE_PERMISSIONS.PHOTO_REMOVE) &&
-      !authorization.permissions.includes(EVIDENCE_PERMISSIONS.AUDIO_REMOVE)
+      (authorization.fieldScoped === true ||
+        (!authorization.permissions.includes(JOB_PERMISSIONS.UPDATE) &&
+          !authorization.permissions.includes(
+            EVIDENCE_PERMISSIONS.PHOTO_REMOVE,
+          ) &&
+          !authorization.permissions.includes(
+            EVIDENCE_PERMISSIONS.AUDIO_REMOVE,
+          )))
     ) {
       throw AuthApiError.forbidden();
     }
@@ -767,6 +1086,7 @@ export class JobsController {
     JOB_PERMISSIONS.UPDATE,
     VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS,
   )
+  @FieldScoped()
   async changeVisitStatus(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -775,6 +1095,15 @@ export class JobsController {
   ): Promise<JobDetailsDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseChangeVisitStatusDto(body));
+    if (
+      authorization.fieldScoped &&
+      (input.clientOperationId === null ||
+        input.capturedAt === null ||
+        input.expectedVersion === null)
+    )
+      throw AuthApiError.validationFailed(
+        'Scoped commands require an operation id, capture time and observed version where applicable.',
+      );
     return this.action(authorization, () =>
       this.jobs.changeVisitStatus(
         { organizationId: authorization.organizationId },
@@ -796,6 +1125,7 @@ export class JobsController {
     JOB_PERMISSIONS.UPDATE,
     VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS,
   )
+  @FieldScoped()
   async completeVisit(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -807,6 +1137,15 @@ export class JobsController {
       throw AuthApiError.forbidden();
     }
     const input = parseInput(() => parseCompleteVisitDto(body));
+    if (
+      authorization.fieldScoped &&
+      (input.clientOperationId === null ||
+        input.capturedAt === null ||
+        input.expectedVersion === null)
+    )
+      throw AuthApiError.validationFailed(
+        'Scoped commands require an operation id, capture time and observed version where applicable.',
+      );
     return this.action(authorization, () =>
       this.jobs.completeVisit(
         { organizationId: authorization.organizationId },
@@ -834,6 +1173,7 @@ export class JobsController {
   @Post(':id/visits/:visitId/notes')
   @HttpCode(HttpStatus.CREATED)
   @RequireAnyPermission(JOB_PERMISSIONS.UPDATE, VISIT_PERMISSIONS.ADD_NOTE)
+  @FieldScoped()
   async addNote(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -842,6 +1182,13 @@ export class JobsController {
   ): Promise<JobActivityDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseAddVisitNoteDto(body));
+    if (
+      authorization.fieldScoped &&
+      (input.clientOperationId === null || input.capturedAt === null)
+    )
+      throw AuthApiError.validationFailed(
+        'Scoped commands require an operation id, capture time and observed version where applicable.',
+      );
     try {
       const events = await this.jobs.addVisitNote(
         { organizationId: authorization.organizationId },
@@ -932,6 +1279,7 @@ export class JobsController {
       limits: { fileSize: MAX_JOB_PHOTO_BYTES, files: 1 },
     }),
   )
+  @FieldScoped()
   async addPhoto(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -940,8 +1288,16 @@ export class JobsController {
   ): Promise<JobActivityDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseCreateJobPhotoDto(body));
+    if (
+      authorization.fieldScoped &&
+      (input.clientOperationId === null || input.capturedAt === null)
+    )
+      throw AuthApiError.validationFailed(
+        'Scoped commands require an operation id, capture time and observed version where applicable.',
+      );
     const photo = parseInput(() => validateJobPhotoUpload(file));
     try {
+      await assertScopedFieldJob(authorization, id, this.jobs, input.visitId);
       const events = await this.photos.addJobPhoto(
         { organizationId: authorization.organizationId },
         id,
@@ -967,6 +1323,7 @@ export class JobsController {
    */
   @Get(':id/photos/:photoId/content')
   @RequirePermissions(EVIDENCE_PERMISSIONS.VIEW)
+  @FieldScoped()
   async readPhotoContent(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -974,6 +1331,7 @@ export class JobsController {
   ): Promise<StreamableFile> {
     const authorization = authorizationOf(request);
     try {
+      await assertScopedFieldJob(authorization, id, this.jobs, null);
       const object = await this.photos.readJobPhotoContent(
         { organizationId: authorization.organizationId },
         id,
@@ -1006,10 +1364,7 @@ export class JobsController {
    */
   @Post(':id/photos/:photoId/removal')
   @HttpCode(HttpStatus.CREATED)
-  @RequireAnyPermission(
-    EVIDENCE_PERMISSIONS.PHOTO_REMOVE,
-    EVIDENCE_PERMISSIONS.PHOTO_ADD,
-  )
+  @RequirePermissions(EVIDENCE_PERMISSIONS.PHOTO_REMOVE)
   async removePhoto(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -1056,6 +1411,7 @@ export class JobsController {
       limits: { fileSize: MAX_JOB_AUDIO_BYTES, files: 1 },
     }),
   )
+  @FieldScoped()
   async addAudioNote(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -1064,8 +1420,16 @@ export class JobsController {
   ): Promise<JobActivityDto> {
     const authorization = authorizationOf(request);
     const input = parseInput(() => parseCreateJobAudioNoteDto(body));
+    if (
+      authorization.fieldScoped &&
+      (input.clientOperationId === null || input.capturedAt === null)
+    )
+      throw AuthApiError.validationFailed(
+        'Scoped commands require an operation id, capture time and observed version where applicable.',
+      );
     const audio = parseInput(() => validateJobAudioNoteUpload(file));
     try {
+      await assertScopedFieldJob(authorization, id, this.jobs, input.visitId);
       const events = await this.audioNotes.addJobAudioNote(
         { organizationId: authorization.organizationId },
         id,
@@ -1092,6 +1456,7 @@ export class JobsController {
    */
   @Get(':id/audio-notes/:audioNoteId/content')
   @RequirePermissions(EVIDENCE_PERMISSIONS.VIEW)
+  @FieldScoped()
   async readAudioNoteContent(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -1099,6 +1464,7 @@ export class JobsController {
   ): Promise<StreamableFile> {
     const authorization = authorizationOf(request);
     try {
+      await assertScopedFieldJob(authorization, id, this.jobs, null);
       const object = await this.audioNotes.readJobAudioNoteContent(
         { organizationId: authorization.organizationId },
         id,
@@ -1129,10 +1495,7 @@ export class JobsController {
    */
   @Post(':id/audio-notes/:audioNoteId/removal')
   @HttpCode(HttpStatus.CREATED)
-  @RequireAnyPermission(
-    EVIDENCE_PERMISSIONS.AUDIO_REMOVE,
-    EVIDENCE_PERMISSIONS.AUDIO_ADD,
-  )
+  @RequirePermissions(EVIDENCE_PERMISSIONS.AUDIO_REMOVE)
   async removeAudioNote(
     @Req() request: PermissionedRequest,
     @Param('id') id: string,
@@ -1348,7 +1711,36 @@ function jobDetailsReadOptionsOf(
     canCreateSchedule: authorization.permissions.includes(
       VISIT_PERMISSIONS.CREATE_SCHEDULE,
     ),
+    canManageQuote: authorization.permissions.includes(JOB_PERMISSIONS.UPDATE),
+    canReadQuoteDocument:
+      authorization.permissions.includes(JOB_PERMISSIONS.UPDATE) ||
+      authorization.permissions.includes(CUSTOMER_PERMISSIONS.VIEW) ||
+      authorization.permissions.includes(VISIT_PERMISSIONS.VIEW_ASSIGNED),
   };
+}
+
+async function assertCanReadJobDocument(
+  authorization: ReturnType<typeof authorizationOf>,
+  jobId: string,
+  jobs: JobsService,
+): Promise<void> {
+  const details = await jobs.findJobDetailsInOrganization(
+    { organizationId: authorization.organizationId },
+    jobId,
+    jobDocumentViewerOf(authorization),
+  );
+  if (details === null) {
+    throw jobNotFound();
+  }
+}
+
+function jobDocumentViewerOf(
+  authorization: ReturnType<typeof authorizationOf>,
+): AssignedJobViewer | null {
+  return authorization.permissions.includes(JOB_PERMISSIONS.UPDATE) ||
+    authorization.permissions.includes(CUSTOMER_PERMISSIONS.VIEW)
+    ? null
+    : { membershipId: authorization.membershipId };
 }
 
 /**
@@ -1548,6 +1940,41 @@ function audioNoteAlreadyRemoved(): HttpException {
   );
 }
 
+/** Maps a Job document failure onto the HTTP contract (`dev.md` §7). */
+function mapDocumentError(error: unknown): unknown {
+  if (error instanceof JobNotFoundError) {
+    return jobNotFound();
+  }
+  if (error instanceof JobQuoteWorkflowNotFoundError) {
+    return quoteWorkflowNotFound();
+  }
+  if (error instanceof JobDocumentNotFoundError) {
+    return documentNotFound();
+  }
+  if (error instanceof ObjectStorageError) {
+    return new HttpException(
+      {
+        statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+        code: 'STORAGE_UNAVAILABLE',
+        message: 'The document could not be stored or read.',
+      },
+      HttpStatus.SERVICE_UNAVAILABLE,
+    );
+  }
+  return error;
+}
+
+function documentNotFound(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.NOT_FOUND,
+      code: 'JOB_DOCUMENT_NOT_FOUND',
+      message: 'Job document was not found.',
+    },
+    HttpStatus.NOT_FOUND,
+  );
+}
+
 /** Maps a Job or Visit action failure onto the HTTP contract (`dev.md` §7). */
 function mapActionError(error: unknown): unknown {
   if (error instanceof JobNotFoundError) {
@@ -1595,11 +2022,26 @@ function mapActionError(error: unknown): unknown {
   if (error instanceof AdHocWorkReportLocationRequiredError) {
     return adHocWorkReportLocationRequired();
   }
+  if (error instanceof JobQuoteWorkflowNotFoundError) {
+    return quoteWorkflowNotFound();
+  }
+  if (error instanceof JobQuoteWorkflowTransitionNotAllowedError) {
+    return quoteWorkflowTransitionNotAllowed(error);
+  }
+  if (error instanceof JobQuoteDecisionCorrectionNotAllowedError) {
+    return quoteDecisionCorrectionNotAllowed(error);
+  }
+  if (error instanceof JobQuoteWorkflowVersionConflictError) {
+    return versionConflict('QUOTE_WORKFLOW', error.currentVersion);
+  }
   if (error instanceof JobStatusTransitionNotAllowedError) {
     return transitionNotAllowed(error);
   }
   if (error instanceof VisitStatusTransitionNotAllowedError) {
     return visitTransitionNotAllowed(error);
+  }
+  if (error instanceof VisitOutcomeInvalidForPurposeError) {
+    return visitOutcomeInvalidForPurpose(error);
   }
   if (error instanceof VisitSchedulingConditionNotMetError) {
     return visitSchedulingConditionNotMet(error);
@@ -1641,6 +2083,45 @@ function mapActionError(error: unknown): unknown {
   return error;
 }
 
+function quoteWorkflowNotFound(): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.NOT_FOUND,
+      code: 'QUOTE_WORKFLOW_NOT_FOUND',
+      message: 'Quote workflow was not found.',
+    },
+    HttpStatus.NOT_FOUND,
+  );
+}
+
+function quoteWorkflowTransitionNotAllowed(
+  error: JobQuoteWorkflowTransitionNotAllowedError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'QUOTE_WORKFLOW_TRANSITION_NOT_ALLOWED',
+      message: 'The quote workflow cannot move to that state.',
+      details: { fromState: error.from, toState: error.to },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
+function quoteDecisionCorrectionNotAllowed(
+  error: JobQuoteDecisionCorrectionNotAllowedError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.CONFLICT,
+      code: 'QUOTE_DECISION_CORRECTION_NOT_ALLOWED',
+      message: 'The quote decision can no longer be corrected.',
+      details: { fromState: error.from, toState: error.to },
+    },
+    HttpStatus.CONFLICT,
+  );
+}
+
 function visitNotFound(): HttpException {
   return new HttpException(
     {
@@ -1649,6 +2130,23 @@ function visitNotFound(): HttpException {
       message: 'Visit was not found on this job.',
     },
     HttpStatus.NOT_FOUND,
+  );
+}
+
+function visitOutcomeInvalidForPurpose(
+  error: VisitOutcomeInvalidForPurposeError,
+): HttpException {
+  return new HttpException(
+    {
+      statusCode: HttpStatus.BAD_REQUEST,
+      code: 'VISIT_OUTCOME_INVALID_FOR_PURPOSE',
+      message: 'The outcome is not valid for this visit purpose.',
+      details: {
+        purposeCode: error.purposeCode,
+        outcomeCode: error.outcomeCode,
+      },
+    },
+    HttpStatus.BAD_REQUEST,
   );
 }
 
@@ -1914,7 +2412,7 @@ function techniciansNotAssignable(
 }
 
 function versionConflict(
-  record: 'JOB' | 'VISIT',
+  record: 'JOB' | 'VISIT' | 'QUOTE_WORKFLOW',
   currentVersion: number,
 ): HttpException {
   return new HttpException(
@@ -1926,4 +2424,31 @@ function versionConflict(
     },
     HttpStatus.CONFLICT,
   );
+}
+
+async function assertScopedFieldJob(
+  authorization: ReturnType<typeof authorizationOf>,
+  jobId: string,
+  jobs: JobsService,
+  visitId: string | null,
+): Promise<void> {
+  if (!authorization.fieldScoped) return;
+  const details = await jobs.findJobDetailsInOrganization(
+    { organizationId: authorization.organizationId },
+    jobId,
+    { membershipId: authorization.membershipId },
+  );
+  if (!details) throw jobNotFound();
+  if (
+    visitId !== null &&
+    !(details.visits ?? []).some(
+      (visit) =>
+        visit.visitId === visitId &&
+        visit.technicians.some(
+          (technician) =>
+            technician.membershipId === authorization.membershipId,
+        ),
+    )
+  )
+    throw visitNotFound();
 }

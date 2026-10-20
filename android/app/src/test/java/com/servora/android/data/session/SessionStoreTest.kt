@@ -5,6 +5,8 @@ import com.servora.android.domain.model.IssuedSession
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -15,6 +17,47 @@ import org.junit.Test
  * reaches the storage rather than only the in-memory copy.
  */
 class SessionStoreTest {
+
+    @Test
+    fun `late session replacement cannot undo sign-out or a new account`() = runTest {
+        val store = inMemorySessionStore()
+        val old = session("old-access", "old-refresh")
+        store.store(old)
+        store.clear()
+        assertFalse(store.replaceIfCurrent(old, old))
+        assertNull(store.current())
+        val newer = old.copy(sessionId = "new-session")
+        store.store(newer)
+        assertFalse(store.replaceIfCurrent(old, null))
+        assertEquals(newer, store.current())
+    }
+
+    @Test
+    fun `conditional refresh persists the new pair and emits observed state`() = runTest {
+        val storage = InMemorySessionStorage()
+        val store = SessionStore(storage)
+        val old = session("old-access", "old-refresh")
+        val newer = session("new-access", "new-refresh")
+        store.store(old)
+        assertTrue(store.replaceIfCurrent(old, newer))
+        assertEquals(newer, storage.stored)
+        assertEquals(newer, store.changes.value)
+        assertFalse(store.replaceIfCurrent(old, null))
+        assertTrue(store.replaceIfCurrent(newer, null))
+        assertNull(storage.stored)
+        assertNull(store.changes.value)
+    }
+
+    @Test
+    fun `restored session is observable by registration`() = runTest {
+        val storage = InMemorySessionStorage()
+        val old = session("old-access", "old-refresh")
+        storage.write(old)
+        val store = SessionStore(storage)
+        assertNull(store.changes.value)
+        store.restore()
+        assertEquals(old, store.changes.value)
+    }
 
     @Test
     fun `holds nothing before a session is stored`() = runTest {

@@ -5,7 +5,7 @@ under the `BR-040` change procedure)
 
 Date: 2026-10-01
 
-Tracker: `docs/tracker/059-technician-ad-hoc-work-reporting.md` — Phase 1 (this ADR finalises the decision
+Tracker: `docs/tracker/shared/059-technician-ad-hoc-work-reporting.md` — Phase 1 (this ADR finalises the decision
 record; §5/§5a are the open decisions it answers)
 
 Rules produced: `BR-AH-005` – `BR-AH-009` in `.clinerules/Business Rules.md` §23 Ad-hoc / Unrecorded Field
@@ -16,7 +16,7 @@ Contracts: `docs/api/ad-hoc-work-reports.md`, `docs/domain/job-visit-domain-mode
 Predecessors: `docs/decisions/023-follow-up-clarification-conversation.md` (the office-review request
 lifecycle this record's `REJECTED` mirrors), `docs/decisions/020-manager-schedule-and-unassigned-lane.md`
 (the office review lane), `docs/decisions/015-evidence-capabilities.md` and
-`docs/tracker/056-evidence-belongs-to-a-visit.md` (why report evidence is deferred)
+`docs/tracker/shared/056-evidence-belongs-to-a-visit.md` (why report evidence is deferred)
 
 References: `BR-001`, `BR-006`, `BR-007`, `BR-009`, `BR-012`, `BR-013`, `BR-014`, `BR-028`, `BR-031`,
 `BR-032`, `BR-033`, `BR-040`, `BR-041`, `BR-042`, `BR-047`, `BR-050`, `BR-051`, `BR-058`, `BR-060`,

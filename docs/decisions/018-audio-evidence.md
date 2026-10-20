@@ -4,10 +4,10 @@
 delegation, 2026-09-16; `A11` decided by product ownership, 2026-09-17)
 
 Date: 2026-09-16
-Tracker: `docs/tracker/035-android-audio-evidence.md` (Phase 9 of `docs/tracker/029-photo-evidence-phases.md`)
+Tracker: `docs/tracker/android/035-android-audio-evidence.md` (Phase 9 of `docs/tracker/shared/029-photo-evidence-phases.md`)
 Contract: `docs/api/job-audio.md`
-Predecessors: `docs/tracker/027-android-job-photo-updates.md` (the photo evidence slice),
-`docs/tracker/029-photo-evidence-phases.md` (the evidence lifecycle), `docs/tracker/033-android-add-update-hierarchy.md`
+Predecessors: `docs/tracker/android/027-android-job-photo-updates.md` (the photo evidence slice),
+`docs/tracker/shared/029-photo-evidence-phases.md` (the evidence lifecycle), `docs/tracker/android/033-android-add-update-hierarchy.md`
 (the sheet's audio seam), `docs/decisions/013-object-storage-minio-and-s3.md` (the store),
 `docs/decisions/015-evidence-capabilities.md` (the capability catalogue this activates)
 
@@ -247,7 +247,7 @@ condition for staying out of the outbox (§5, §8, §13.2).
 | Database | `job_audio_notes` (+ `job_audio_note_removals`), and the two capability rows with their default-role grants |
 | API | `POST /jobs/:id/audio-notes`, `GET /jobs/:id/audio-notes/:audioNoteId/content`, `POST /jobs/:id/audio-notes/:audioNoteId/removal`; `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED` in the Activity read |
 | Contracts | `docs/api/job-audio.md` (new), `docs/api/job-activity.md` §3.2 |
-| Android | the recorder, the draft, the queued upload, the sheet's audio kind becoming reachable, playback (`docs/tracker/035-android-audio-evidence.md`); since `A11` a seekable playhead, seeking and the position stated |
+| Android | the recorder, the draft, the queued upload, the sheet's audio kind becoming reachable, playback (`docs/tracker/android/035-android-audio-evidence.md`); since `A11` a seekable playhead, seeking and the position stated |
 | Business rules | none amended by this ADR: `BR-091` already states audio is evidence. `BR-008`/`BR-009`'s default-role grants are product ownership's text edit, as `BR-040` requires, and remain outstanding exactly as the photo capability's edit did |
 | Design system | `docs/design/android-design-system.md` (the Add update sheet's audio kind) |
 

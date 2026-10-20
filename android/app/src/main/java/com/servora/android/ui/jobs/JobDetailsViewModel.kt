@@ -23,6 +23,12 @@ import com.servora.android.data.jobs.JobPhotoPickedItems
 import com.servora.android.data.jobs.JobPhotoRecordResult
 import com.servora.android.data.jobs.JobPhotoRefusal
 import com.servora.android.data.jobs.JobPhotoSession
+import com.servora.android.data.jobs.JobQuoteDocuments
+import com.servora.android.data.jobs.JobQuoteDocumentReadResult
+import com.servora.android.data.jobs.JobQuoteDocumentPick
+import com.servora.android.data.jobs.JobQuoteDocumentOpen
+import com.servora.android.data.jobs.PickedJobQuoteDocument
+import com.servora.android.data.jobs.UnavailableJobQuoteDocuments
 import com.servora.android.data.jobs.ActivityWriteResult
 import com.servora.android.data.jobs.VisitCompletion
 import com.servora.android.data.jobs.VisitNote
@@ -32,12 +38,14 @@ import com.servora.android.data.offline.ReadSource
 import com.servora.android.domain.model.CapturedJobPhoto
 import com.servora.android.domain.model.EvidencePhase
 import com.servora.android.domain.model.JobActivityKind
+import com.servora.android.domain.model.JobQuoteAction
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.PendingJobAudioNote
 import com.servora.android.domain.model.PendingJobPhoto
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.domain.model.isRefusedUpload
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -104,6 +112,7 @@ class JobDetailsViewModel @Inject constructor(
     private val jobPhotoImages: JobPhotoImages,
     private val pickedItems: JobPhotoPickedItems,
     private val exporter: JobPhotoExporter,
+    private val quoteDocuments: JobQuoteDocuments = UnavailableJobQuoteDocuments,
     private val audioEvidence: JobAudioEvidenceCache,
     private val audioPlayer: JobAudioPlayer,
     private val clock: Clock,
@@ -120,6 +129,7 @@ class JobDetailsViewModel @Inject constructor(
      */
     val photoImages: JobPhotoImages get() = jobPhotoImages
 
+    private var detailsRead: kotlinx.coroutines.Job? = null
     private var readInFlight = false
     private var representedVisitId: String? = null
     private var actionInFlight = false
@@ -128,6 +138,8 @@ class JobDetailsViewModel @Inject constructor(
     private var exportInFlight = false
     /** Whether accepted evidence is being removed right now, so one removal runs at a time. */
     private var removalInFlight = false
+    /** Whether a quote PDF upload/read is running right now. */
+    private var quoteDocumentInFlight = false
     private var photoCollection: Job? = null
 
     /** Whether the microphone is being started or a recording is being stopped right now. */
@@ -257,6 +269,11 @@ class JobDetailsViewModel @Inject constructor(
         read(jobId, representedVisitId = representedVisitId)
     }
 
+    /** A notification requests a fresh authorized read, even when this Job is already open. */
+    fun openAssignment(jobId: String, visitId: String) {
+        read(jobId, representedVisitId = visitId)
+    }
+
     /** Re-runs the read after a failure the screen reported. */
     fun retry() {
         if (readInFlight) {
@@ -276,6 +293,8 @@ class JobDetailsViewModel @Inject constructor(
      * outlive that session in the UI either.
      */
     fun reset() {
+        detailsRead?.cancel()
+        detailsRead = null
         readInFlight = false
         actionInFlight = false
         // The pending photos belong to the session that captured them, so nothing of them outlives it
@@ -308,6 +327,201 @@ class JobDetailsViewModel @Inject constructor(
                 jobVersion = details.version,
             ),
         )
+    }
+
+    /** Marks the current Assessment quote as sent (`BR-QUOTE-001`). */
+    fun markQuoteSent(note: String? = null, externalReference: String? = null) {
+        val details = _uiState.value.details ?: return
+        val quote = details.quote ?: return
+        if (JobQuoteAction.MARK_SENT !in quote.allowedActions) {
+            return
+        }
+        submit(
+            JobActionRequest.QuoteSent(
+                jobId = details.id,
+                note = note,
+                externalReference = externalReference,
+                quoteVersion = quote.version,
+            ),
+        )
+    }
+
+    /** Corrects an accidentally recorded sent quote back to required. */
+    fun markQuoteRequired(note: String? = null) {
+        val details = _uiState.value.details ?: return
+        val quote = details.quote ?: return
+        if (JobQuoteAction.MARK_REQUIRED !in quote.allowedActions) {
+            return
+        }
+        submit(
+            JobActionRequest.QuoteRequired(
+                jobId = details.id,
+                note = note,
+                quoteVersion = quote.version,
+            ),
+        )
+    }
+
+    /** Records the customer's quote approval (`BR-QUOTE-001`). */
+    fun markQuoteApproved(note: String? = null) {
+        submitQuoteDecision(JobQuoteAction.MARK_APPROVED, note)
+    }
+
+    /** Records the customer's quote rejection (`BR-QUOTE-001`). */
+    fun markQuoteRejected(note: String? = null) {
+        submitQuoteDecision(JobQuoteAction.MARK_REJECTED, note)
+    }
+
+    private fun submitQuoteDecision(action: JobQuoteAction, note: String?) {
+        val details = _uiState.value.details ?: return
+        val quote = details.quote ?: return
+        if (action !in quote.allowedActions) {
+            return
+        }
+        submit(
+            JobActionRequest.QuoteDecision(
+                jobId = details.id,
+                action = action,
+                note = note,
+                quoteVersion = quote.version,
+            ),
+        )
+    }
+
+    /** Reports that the device could not open its document picker. */
+    fun quoteDocumentPickerUnavailable() {
+        _uiState.update { current ->
+            current.copy(quoteDocumentFailure = JobQuoteDocumentFailure.NOT_READ)
+        }
+    }
+
+    /** Uploads or replaces the quote PDF the manager selected. Online-only for Phase 16. */
+    fun uploadQuoteDocument(uri: String) {
+        val details = _uiState.value.details ?: return
+        val quote = details.quote ?: return
+        if (quoteDocumentInFlight) {
+            return
+        }
+        if (JobQuoteAction.UPLOAD_DOCUMENT !in quote.allowedActions) {
+            _uiState.update { current ->
+                current.copy(quoteDocumentFailure = JobQuoteDocumentFailure.NOT_ALLOWED)
+            }
+            return
+        }
+        when (val picked = quoteDocuments.readPicked(uri)) {
+            is JobQuoteDocumentPick.Picked -> submitQuoteDocument(details.id, picked.document)
+            JobQuoteDocumentPick.NotPdf -> _uiState.update { current ->
+                current.copy(quoteDocumentFailure = JobQuoteDocumentFailure.NOT_PDF)
+            }
+            JobQuoteDocumentPick.Unreadable -> _uiState.update { current ->
+                current.copy(quoteDocumentFailure = JobQuoteDocumentFailure.NOT_READ)
+            }
+        }
+    }
+
+    /** Reads and opens the current quote PDF through the device's PDF viewer. */
+    fun openQuoteDocument() {
+        val details = _uiState.value.details ?: return
+        val quote = details.quote ?: return
+        val document = quote.currentDocument ?: return
+        if (quoteDocumentInFlight) {
+            return
+        }
+        if (JobQuoteAction.READ_DOCUMENT !in quote.allowedActions) {
+            _uiState.update { current ->
+                current.copy(quoteDocumentFailure = JobQuoteDocumentFailure.NOT_ALLOWED)
+            }
+            return
+        }
+        quoteDocumentInFlight = true
+        _uiState.update { current ->
+            current.copy(
+                isQuoteDocumentBusy = true,
+                quoteDocumentFailure = null,
+                quoteDocumentMessage = null,
+            )
+        }
+        viewModelScope.launch {
+            val read = repository.readQuoteDocument(details.id)
+            val update: (JobDetailsUiState) -> JobDetailsUiState = when (read) {
+                is JobQuoteDocumentReadResult.Success -> {
+                    when (
+                        quoteDocuments.open(
+                            jobId = details.id,
+                            fileName = document.displayName?.takeIf { it.isNotBlank() } ?: "quote.pdf",
+                            bytes = read.bytes,
+                        )
+                    ) {
+                        JobQuoteDocumentOpen.Opened -> { current ->
+                            current.copy(quoteDocumentMessage = JobQuoteDocumentMessage.OPENED)
+                        }
+                        JobQuoteDocumentOpen.Failed -> { current ->
+                            current.copy(quoteDocumentFailure = JobQuoteDocumentFailure.OPEN_FAILED)
+                        }
+                        JobQuoteDocumentOpen.NoViewer -> { current ->
+                            current.copy(quoteDocumentFailure = JobQuoteDocumentFailure.NO_VIEWER)
+                        }
+                    }
+                }
+                is JobQuoteDocumentReadResult.Failure -> { current ->
+                    current.copy(quoteDocumentFailure = read.reason.toQuoteDocumentFailure())
+                }
+            }
+            quoteDocumentInFlight = false
+            _uiState.update { current ->
+                if (current.jobId == details.id) {
+                    update(current).copy(isQuoteDocumentBusy = false)
+                } else {
+                    current
+                }
+            }
+        }
+    }
+
+    private fun submitQuoteDocument(jobId: String, document: PickedJobQuoteDocument) {
+        quoteDocumentInFlight = true
+        _uiState.update { current ->
+            current.copy(
+                isQuoteDocumentBusy = true,
+                quoteDocumentFailure = null,
+                quoteDocumentMessage = null,
+            )
+        }
+        viewModelScope.launch {
+            val result = repository.uploadQuoteDocument(jobId, document)
+            quoteDocumentInFlight = false
+            _uiState.update { current ->
+                if (current.jobId != jobId) {
+                    current
+                } else {
+                    when (result) {
+                        is JobActionResult.Success ->
+                            current.copy(
+                                isQuoteDocumentBusy = false,
+                                details = result.details,
+                                detailsSource = ReadSource.BACKEND,
+                                quoteDocumentMessage = JobQuoteDocumentMessage.UPLOADED,
+                                quoteDocumentFailure = null,
+                                failureReason = null,
+                            )
+                        is JobActionResult.Failure ->
+                            current.copy(
+                                isQuoteDocumentBusy = false,
+                                quoteDocumentFailure = result.reason.toQuoteDocumentFailure(),
+                            )
+                        is JobActionResult.Conflicts,
+                        is JobActionResult.Queued ->
+                            current.copy(
+                                isQuoteDocumentBusy = false,
+                                quoteDocumentFailure = JobQuoteDocumentFailure.FAILED,
+                            )
+                    }
+                }
+            }
+            if (result is JobActionResult.Success) {
+                readActivity(result.details.id)
+            }
+        }
     }
 
     /** Edits the represented Visit's schedule (`BR-073`). */
@@ -356,6 +570,7 @@ class JobDetailsViewModel @Inject constructor(
         scheduledStart: Instant,
         scheduledEnd: Instant,
         assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
     ) {
         val details = _uiState.value.details ?: return
         submit(
@@ -364,6 +579,7 @@ class JobDetailsViewModel @Inject constructor(
                 scheduledStart = scheduledStart,
                 scheduledEnd = scheduledEnd,
                 assignments = assignments,
+                purpose = purpose,
             ),
         )
     }
@@ -738,6 +954,7 @@ class JobDetailsViewModel @Inject constructor(
                     scheduledStart = pending.scheduledStart,
                     scheduledEnd = pending.scheduledEnd,
                     assignments = pending.assignments,
+                    purpose = pending.purpose,
                 ),
                 confirmed = true,
             )
@@ -794,6 +1011,13 @@ class JobDetailsViewModel @Inject constructor(
     fun dismissActionMessage() {
         _uiState.update { current ->
             current.copy(completedAction = null, actionQueued = false, actionFailure = null)
+        }
+    }
+
+    /** Acknowledges the quote PDF outcome the screen has reported. */
+    fun dismissQuoteDocumentMessage() {
+        _uiState.update { current ->
+            current.copy(quoteDocumentFailure = null, quoteDocumentMessage = null)
         }
     }
 
@@ -1992,6 +2216,7 @@ class JobDetailsViewModel @Inject constructor(
         representedVisitId: String? = this.representedVisitId,
         keepContent: Boolean = false,
     ) {
+        detailsRead?.cancel()
         this.representedVisitId = representedVisitId
         readInFlight = true
         if (keepContent) {
@@ -2005,7 +2230,7 @@ class JobDetailsViewModel @Inject constructor(
             pickedPhotos.clear()
             skippedPhotos.clear()
         }
-        viewModelScope.launch {
+        detailsRead = viewModelScope.launch {
             val result = repository.loadJobDetails(jobId, representedVisitId)
             // The field work the queue is still holding is read with the Job, so what is presented as
             // waiting is the real queue rather than a second copy of it (`BR-041`, §7).
@@ -2266,6 +2491,18 @@ private data class SkippedPhoto(
  * One management action the user asked for, kept whole so it can be sent a second time once its
  * conflicts are accepted (`BR-070`).
  */
+private fun JobActionFailure.toQuoteDocumentFailure(): JobQuoteDocumentFailure =
+    when (this) {
+        JobActionFailure.NETWORK,
+        JobActionFailure.SERVER -> JobQuoteDocumentFailure.UNREACHABLE
+
+        JobActionFailure.NOT_FOUND -> JobQuoteDocumentFailure.NOT_AVAILABLE
+        JobActionFailure.FORBIDDEN,
+        JobActionFailure.UNAUTHENTICATED -> JobQuoteDocumentFailure.NOT_ALLOWED
+        JobActionFailure.VALIDATION -> JobQuoteDocumentFailure.NOT_PDF
+        else -> JobQuoteDocumentFailure.FAILED
+    }
+
 private sealed interface JobActionRequest {
     /** The action this request performs, for the confirmation the screen reports. */
     val kind: JobActionKind
@@ -2335,6 +2572,73 @@ private sealed interface JobActionRequest {
             PendingJobAction.Reschedule(scheduledStart, scheduledEnd, conflicts)
     }
 
+    data class QuoteSent(
+        override val jobId: String,
+        val note: String?,
+        val externalReference: String?,
+        val quoteVersion: Int,
+    ) : JobActionRequest {
+        override val kind: JobActionKind = JobActionKind.QUOTE_WORKFLOW
+
+        override suspend fun send(
+            repository: JobDetailsRepository,
+            confirmed: Boolean,
+        ): JobActionResult =
+            repository.markQuoteSent(
+                jobId = jobId,
+                note = note,
+                externalReference = externalReference,
+                expectedVersion = quoteVersion,
+            )
+
+        override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction? = null
+    }
+
+    data class QuoteRequired(
+        override val jobId: String,
+        val note: String?,
+        val quoteVersion: Int,
+    ) : JobActionRequest {
+        override val kind: JobActionKind = JobActionKind.QUOTE_WORKFLOW
+
+        override suspend fun send(
+            repository: JobDetailsRepository,
+            confirmed: Boolean,
+        ): JobActionResult =
+            repository.markQuoteRequired(jobId, note, quoteVersion)
+
+        override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction? = null
+    }
+
+    data class QuoteDecision(
+        override val jobId: String,
+        val action: JobQuoteAction,
+        val note: String?,
+        val quoteVersion: Int,
+    ) : JobActionRequest {
+        override val kind: JobActionKind = JobActionKind.QUOTE_WORKFLOW
+
+        override suspend fun send(
+            repository: JobDetailsRepository,
+            confirmed: Boolean,
+        ): JobActionResult =
+            when (action) {
+                JobQuoteAction.MARK_APPROVED ->
+                    repository.markQuoteApproved(jobId, note, quoteVersion)
+
+                JobQuoteAction.MARK_REJECTED ->
+                    repository.markQuoteRejected(jobId, note, quoteVersion)
+
+                JobQuoteAction.UPLOAD_DOCUMENT,
+                JobQuoteAction.READ_DOCUMENT,
+                JobQuoteAction.MARK_SENT,
+                JobQuoteAction.MARK_REQUIRED ->
+                    JobActionResult.Failure(JobActionFailure.UNEXPECTED)
+            }
+
+        override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction? = null
+    }
+
     /**
      * One Visit being scheduled on the Job (`BR-071`, `BR-072`).
      *
@@ -2346,6 +2650,7 @@ private sealed interface JobActionRequest {
         val scheduledStart: Instant,
         val scheduledEnd: Instant,
         val assignments: List<TechnicianAssignment>,
+        val purpose: VisitPurpose,
     ) : JobActionRequest {
         override val kind: JobActionKind = JobActionKind.CREATE_VISIT
 
@@ -2358,11 +2663,12 @@ private sealed interface JobActionRequest {
                 scheduledStart = scheduledStart,
                 scheduledEnd = scheduledEnd,
                 assignments = assignments,
+                purpose = purpose,
                 confirmConflicts = confirmed,
             )
 
         override fun pending(conflicts: List<ScheduleConflict>): PendingJobAction =
-            PendingJobAction.CreateVisit(scheduledStart, scheduledEnd, assignments, conflicts)
+            PendingJobAction.CreateVisit(scheduledStart, scheduledEnd, assignments, purpose, conflicts)
     }
 
     data class Assignment(

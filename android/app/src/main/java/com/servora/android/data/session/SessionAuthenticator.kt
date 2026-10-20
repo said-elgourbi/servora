@@ -62,17 +62,22 @@ class DefaultSessionAuthenticator @Inject constructor(
         if (current != null && current != rejectedToken) {
             return@withLock SessionRenewal.Renewed(current)
         }
-        val refreshToken = sessionStore.refreshToken() ?: return@withLock SessionRenewal.Rejected
+        val renewingSession = sessionStore.current() ?: return@withLock SessionRenewal.Rejected
+        val refreshToken = renewingSession.tokens.refreshToken
 
         try {
             val renewed = api.refresh(RefreshRequestDto(refreshToken = refreshToken))
                 .toIssuedSession()
-            sessionStore.store(renewed)
+            // Registration is cancelled on account changes, but a completed refresh can still
+            // race local sign-out. Never restore the account that just ended.
+            if (!sessionStore.replaceIfCurrent(renewingSession, renewed)) {
+                return@withLock SessionRenewal.Rejected
+            }
             SessionRenewal.Renewed(renewed.tokens.accessToken)
         } catch (failure: HttpException) {
             // A refused refresh token ends the session; a backend failure does not.
             if (failure.code() == HTTP_UNAUTHORIZED || failure.code() == HTTP_BAD_REQUEST) {
-                sessionStore.clear()
+                sessionStore.replaceIfCurrent(renewingSession, null)
                 SessionRenewal.Rejected
             } else {
                 SessionRenewal.Unavailable

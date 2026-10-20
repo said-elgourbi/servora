@@ -76,6 +76,25 @@ describe('follow-up Visit request DTOs', () => {
     ).toThrow(DomainValidationError);
   });
 
+  it('defaults direct Visit creation to WORK and accepts ASSESSMENT intentionally', () => {
+    expect(
+      parseDirectCreateVisitDto({
+        scheduledStart: '2026-09-21T14:00:00.000Z',
+        scheduledEnd: '2026-09-21T16:00:00.000Z',
+        technicians: [{ membershipId: LEAD_ID, roleCode: 'LEAD' }],
+      }).purposeCode,
+    ).toBe('WORK');
+
+    expect(
+      parseDirectCreateVisitDto({
+        purposeCode: 'ASSESSMENT',
+        scheduledStart: '2026-09-21T14:00:00.000Z',
+        scheduledEnd: '2026-09-21T16:00:00.000Z',
+        technicians: [{ membershipId: LEAD_ID, roleCode: 'LEAD' }],
+      }).purposeCode,
+    ).toBe('ASSESSMENT');
+  });
+
   it('requires exactly one lead and unique technicians for a scheduled Visit', () => {
     expect(() =>
       parseDirectCreateVisitDto({
@@ -159,7 +178,9 @@ describe('follow-up Visit request DTOs', () => {
   });
 
   it('answers a request that carries no conversation with an empty list', () => {
-    expect(toFollowUpVisitRequestDto(REQUEST_ROW, REQUEST_CONTEXT)).toMatchObject({
+    expect(
+      toFollowUpVisitRequestDto(REQUEST_ROW, REQUEST_CONTEXT),
+    ).toMatchObject({
       jobNumber: 42,
       jobTitle: 'Replace rooftop unit',
       customerName: 'Northwind Foods',

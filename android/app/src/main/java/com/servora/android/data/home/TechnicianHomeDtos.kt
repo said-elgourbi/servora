@@ -75,6 +75,7 @@ data class TechnicianHomeVisitDto(
     val address: TechnicianHomeAddressDto? = null,
     val technicians: List<TechnicianHomeTechnicianDto> = emptyList(),
     val overdue: Boolean = false,
+    val staleStarted: Boolean = false,
 )
 
 /** One technician assigned to a Visit. [name] is absent without a member profile. */

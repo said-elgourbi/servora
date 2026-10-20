@@ -1,0 +1,188 @@
+<section [appPageTitle]="i18n.text('customers')">
+  <div class="page-heading">
+    <div>
+      <p class="eyebrow">{{ i18n.text('customerWorkspace') }}</p>
+      <h1>{{ i18n.text('customers') }}</h1>
+      <p class="muted">{{ i18n.text('customerListDescription') }}</p>
+    </div>
+    @if (auth.hasPermission('customers.view') && auth.hasPermission('customers.create')) {
+      <a mat-flat-button routerLink="/work/customers/new"
+        ><app-icon name="plus" />{{ i18n.text('customerNew') }}</a
+      >
+    }
+  </div>
+  @if (auth.hasPermission('customers.view')) {
+    <div class="directory">
+      <div class="directory-heading">
+        <div>
+          <h2>{{ i18n.text('customerDirectory') }}</h2>
+          <p role="status" class="muted">
+            {{ filtered().length }} {{ i18n.text('customerResults') }}
+          </p>
+        </div>
+        <button mat-stroked-button (click)="refresh()" [disabled]="loading()">
+          <app-icon name="refresh" />{{ i18n.text('refresh') }}
+        </button>
+      </div>
+      <div class="directory-filters">
+        <label class="search-filter"
+          ><span>{{ i18n.text('customerSearch') }}</span>
+          <span class="search-control"
+            ><app-icon name="search" /><input
+              type="search"
+              [formControl]="search"
+              maxlength="255"
+              [placeholder]="i18n.text('customerSearch')"
+          /></span>
+        </label>
+        <label
+          >{{ i18n.text('customerStatus') }}
+          <select [formControl]="status" [attr.aria-label]="i18n.text('customerStatus')">
+            <option value="ALL">{{ i18n.text('customerAll') }}</option>
+            <option value="ACTIVE">{{ i18n.text('customerActive') }}</option>
+            <option value="INACTIVE">{{ i18n.text('customerInactive') }}</option>
+          </select>
+        </label>
+        <label
+          >{{ i18n.text('customerJobsFilter') }}
+          <select [formControl]="jobs" [attr.aria-label]="i18n.text('customerJobsFilter')">
+            <option value="ALL">{{ i18n.text('customerAll') }}</option>
+            <option value="HAS_OPEN_JOBS">{{ i18n.text('customerOpenJobs') }}</option>
+            <option value="NO_OPEN_JOBS">{{ i18n.text('customerNoOpenJobs') }}</option>
+            <option value="HAS_OVERDUE_VISITS">{{ i18n.text('customerOverdue') }}</option>
+            <option value="NO_JOBS">{{ i18n.text('customerNoJobsFilter') }}</option>
+          </select>
+        </label>
+      </div>
+      @if (hasFilters()) {
+        <div class="filter-context">
+          <span>{{ i18n.text('customerFilteredHint') }}</span
+          ><button mat-button (click)="clearFilters()">
+            {{ i18n.text('customerClearFilters') }}
+          </button>
+        </div>
+      }
+      @if (loading()) {
+        <p class="directory-message" role="status">{{ i18n.text('busy') }}</p>
+      }
+      @if (error(); as message) {
+        <div role="alert" class="notice">
+          <p>{{ i18n.text(message) }}</p>
+          <button mat-stroked-button (click)="refresh()">{{ i18n.text('retry') }}</button>
+        </div>
+      }
+      @if (!loading() && !error()) {
+        <div
+          class="table-scroll"
+          tabindex="0"
+          role="region"
+          [attr.aria-label]="i18n.text('customerDirectory')"
+        >
+          <table>
+            <caption class="visually-hidden">
+              {{
+                i18n.text('customerDirectory')
+              }}
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">{{ i18n.text('customerNameColumn') }}</th>
+                <th scope="col">{{ i18n.text('customerContactColumn') }}</th>
+                <th scope="col" class="numeric">{{ i18n.text('customerProperties') }}</th>
+                <th scope="col">{{ i18n.text('customerActiveJobsColumn') }}</th>
+                <th scope="col">{{ i18n.text('customerOverdueColumn') }}</th>
+                <th scope="col">
+                  {{ i18n.text('customerStatus') }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of filtered(); track row.id) {
+                <tr>
+                  <th scope="row">
+                    <div class="customer-identity">
+                      <span
+                        class="customer-avatar"
+                        [class.company-avatar]="row.type === 'COMPANY'"
+                        aria-hidden="true"
+                      >
+                        @if (row.type === 'COMPANY') {
+                          <app-icon name="building" />
+                        } @else {
+                          {{ initials(row.displayName) }}
+                        }
+                      </span>
+                      <div>
+                        <a class="record-title" [routerLink]="['/work/customers', row.id]">{{
+                          row.displayName
+                        }}</a>
+                        <p class="muted">
+                          {{
+                            i18n.text(
+                              row.type === 'INDIVIDUAL' ? 'customerIndividual' : 'customerCompany'
+                            )
+                          }}
+                        </p>
+                      </div>
+                    </div>
+                  </th>
+                  <td>
+                    <div class="contact-lines">
+                      @if (row.email) {
+                        <a [href]="'mailto:' + row.email"
+                          ><app-icon name="mail" />{{ row.email }}</a
+                        >
+                      }
+                      @if (row.phone) {
+                        <a [href]="'tel:' + row.phone"><app-icon name="phone" />{{ row.phone }}</a>
+                      }
+                      @if (!row.email && !row.phone) {
+                        <span class="muted">—</span>
+                      }
+                    </div>
+                  </td>
+                  <td class="numeric property-count">{{ row.propertyCount }}</td>
+                  <td>
+                    <span class="work-count" [class.has-work]="row.openJobCount > 0">{{
+                      row.openJobCount
+                    }}</span>
+                    <p class="muted">{{ row.jobCount }} {{ i18n.text('customerAllJobs') }}</p>
+                  </td>
+                  <td>
+                    @if (row.overdueVisitCount > 0) {
+                      <span class="overdue-count">{{ row.overdueVisitCount }}</span>
+                    } @else {
+                      <span class="muted">—</span>
+                    }
+                  </td>
+                  <td>
+                    <span class="status-pill" [class.is-active]="row.status === 'ACTIVE'"
+                      ><span aria-hidden="true"></span
+                      >{{
+                        i18n.text(row.status === 'ACTIVE' ? 'customerActive' : 'customerInactive')
+                      }}</span
+                    >
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="6">
+                    <div class="empty">
+                      <app-icon name="people" />
+                      <h2>{{ i18n.text('customerEmpty') }}</h2>
+                      <p>{{ i18n.text('customerEmptyDescription') }}</p>
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+  } @else if (error(); as message) {
+    <div role="alert" class="notice">
+      <p>{{ i18n.text(message) }}</p>
+    </div>
+  }
+</section>

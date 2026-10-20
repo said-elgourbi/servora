@@ -90,6 +90,8 @@ fun AuthFlowScreen(
     createJobViewModel: CreateJobViewModel,
     scheduleViewModel: ScheduleViewModel,
     technicianScheduleViewModel: TechnicianScheduleViewModel,
+    notificationsEnabled: Boolean,
+    onNotificationsEnabledChange: (Boolean) -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -124,6 +126,8 @@ fun AuthFlowScreen(
                 createJobViewModel = createJobViewModel,
                 scheduleViewModel = scheduleViewModel,
                 technicianScheduleViewModel = technicianScheduleViewModel,
+                notificationsEnabled = notificationsEnabled,
+                onNotificationsEnabledChange = onNotificationsEnabledChange,
                 onSignOut = onSignOut,
                 modifier = modifier,
             )

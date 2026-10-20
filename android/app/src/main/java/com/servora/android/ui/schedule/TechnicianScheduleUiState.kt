@@ -3,6 +3,7 @@ package com.servora.android.ui.schedule
 import androidx.compose.runtime.Immutable
 import com.servora.android.data.customers.CustomersFailureReason
 import com.servora.android.data.offline.ReadSource
+import com.servora.android.domain.model.AdHocWorkReport
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.Schedule
 import com.servora.android.domain.model.ScheduleVisit
@@ -10,7 +11,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 
 /**
- * The two views My Schedule offers (`BR-009`, `BR-FV-012`).
+ * The views My Schedule offers (`BR-009`, `BR-FV-012`, `BR-AH-001`).
  *
  * They answer different questions about the same member. The schedule asks "what is assigned to me,
  * and what am I doing next?" (`BR-010`, `BR-012`); the requests view asks "what happened to the extra
@@ -26,6 +27,9 @@ enum class TechnicianScheduleTab {
      * (`BR-FV-012`, `BR-FV-013`).
      */
     REQUESTS,
+
+    /** The caller's own reports of work that happened outside the schedule. */
+    AD_HOC_REPORTS,
 }
 
 /**
@@ -50,7 +54,7 @@ data class TechnicianScheduleUiState(
     val selectedDate: LocalDate? = null,
     /** The first day of the week the strip is showing; swiping moves it past the selection. */
     val displayedWeekStart: LocalDate? = null,
-    /** Which of the screen's two views is open. */
+    /** Which of the screen's views is open. */
     val tab: TechnicianScheduleTab = TechnicianScheduleTab.SCHEDULE,
     /** Whether a read is in flight. Content stays visible while it is. */
     val isRefreshing: Boolean = false,
@@ -78,6 +82,25 @@ data class TechnicianScheduleUiState(
     val requests: List<FollowUpVisitRequest> = emptyList(),
     /** Why the last request read failed, or `null` when it succeeded. */
     val requestsFailureReason: CustomersFailureReason? = null,
+    /**
+     * Whether the caller's own ad-hoc work reports have been read at least once.
+     *
+     * Like the requests, the reports view is not date-scoped, so it is read when that view is opened
+     * rather than with the day — and this says whether an answer has arrived, so "no reports yet" is
+     * never presented before the backend has answered (`BR-042`).
+     */
+    val adHocReportsRead: Boolean = false,
+    /**
+     * The caller's own ad-hoc work reports, newest first, as the backend reported them.
+     *
+     * They are the reports the API resolved for the caller's own membership (`BR-AH-001`, `BR-AH-002`);
+     * which reports those are is the backend's answer and never a filter the client applies
+     * (`BR-007`, `BR-042`). A report is not a request and not a Visit, and is never drawn as either
+     * (`BR-AH-001`, `BR-AH-004`).
+     */
+    val adHocReports: List<AdHocWorkReport> = emptyList(),
+    /** Why the last ad-hoc report read failed, or `null` when it succeeded. */
+    val adHocReportsFailureReason: CustomersFailureReason? = null,
     /**
      * The request whose answer is being sent, or `null` when none is (`BR-FV-012`).
      *
@@ -161,6 +184,22 @@ data class TechnicianScheduleUiState(
      */
     val showsRequestsUnrefreshedNotice: Boolean
         get() = requestsRead && requestsFailureReason != null
+
+    /** Nothing has been answered for the reports yet: the view shows its first-load state. */
+    val showsAdHocReportsLoading: Boolean
+        get() = !adHocReportsRead && adHocReportsFailureReason == null
+
+    /** Nothing has been answered for the reports and the read failed. */
+    val showsAdHocReportsFailure: Boolean
+        get() = !adHocReportsRead && adHocReportsFailureReason != null
+
+    /** The backend answered, and the caller has no ad-hoc report of their own. */
+    val showsEmptyAdHocReports: Boolean
+        get() = adHocReportsRead && adHocReports.isEmpty()
+
+    /** The reports on screen are the last the backend reported rather than a current answer. */
+    val showsAdHocReportsUnrefreshedNotice: Boolean
+        get() = adHocReportsRead && adHocReportsFailureReason != null
 
     /**
      * The day on screen is the last one the backend reported rather than a current answer.

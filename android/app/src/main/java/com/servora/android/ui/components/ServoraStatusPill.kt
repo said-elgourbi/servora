@@ -46,7 +46,7 @@ import com.servora.android.ui.theme.stateColors
  * A chip may also *be* the control that changes the state it presents ([onClick]), which is how the
  * Job Details screen offers the Job's status action: the status the user wants to change is the thing
  * they tap
- * (`docs/tracker/020-android-job-details-status-control.md`).
+ * (`docs/tracker/android/020-android-job-details-status-control.md`).
  *
  * Two more pieces of that presentation live here, because the chip and the menu the control opens both
  * use them and a second copy would let them drift apart (`BR-041`): [StatusDot], the round status

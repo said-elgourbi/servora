@@ -11,12 +11,7 @@ import { jobs } from '../database/schema.js';
  */
 
 /** The Job status vocabulary the API exchanges (`BR-058`). */
-export const JOB_STATUSES = [
-  'NEW',
-  'ACTIVE',
-  'COMPLETED',
-  'CANCELED',
-] as const;
+export const JOB_STATUSES = ['NEW', 'ACTIVE', 'COMPLETED', 'CANCELED'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
 /** The Visit status vocabulary the API exchanges (`BR-074`). */
@@ -30,6 +25,105 @@ export const VISIT_STATUSES = [
   'CANCELED',
 ] as const;
 export type VisitStatus = (typeof VISIT_STATUSES)[number];
+
+/** The Visit purpose vocabulary the API exchanges (`BR-071`, `BR-078`). */
+export const VISIT_PURPOSE_CODES = ['WORK', 'ASSESSMENT'] as const;
+export type VisitPurposeCode = (typeof VISIT_PURPOSE_CODES)[number];
+
+/** Visit outcomes valid for a Work Visit (`BR-078`). */
+export const WORK_VISIT_OUTCOME_CODES = [
+  'RESOLVED',
+  'NEEDS_FOLLOW_UP',
+  'NEEDS_PARTS',
+  'UNABLE_TO_COMPLETE',
+] as const;
+export type WorkVisitOutcomeCode = (typeof WORK_VISIT_OUTCOME_CODES)[number];
+
+/** Visit outcomes valid for an Assessment Visit (`BR-078`). */
+export const ASSESSMENT_VISIT_OUTCOME_CODES = [
+  'NO_WORK_REQUIRED',
+  'WORK_RECOMMENDED',
+  'QUOTE_REQUIRED',
+  'UNABLE_TO_ASSESS',
+] as const;
+export type AssessmentVisitOutcomeCode =
+  (typeof ASSESSMENT_VISIT_OUTCOME_CODES)[number];
+
+/**
+ * The Assessment quote workflow state (`BR-QUOTE-001`).
+ *
+ * This is a commercial/customer-decision workflow, not a Job lifecycle status and not a Visit
+ * purpose/outcome. A Job remains in its ordinary lifecycle (`NEW`, `ACTIVE`, `COMPLETED`,
+ * `CANCELED`) while quote handling moves through these states.
+ */
+export const JOB_QUOTE_WORKFLOW_STATES = [
+  'REQUIRED',
+  'SENT',
+  'APPROVED',
+  'REJECTED',
+] as const;
+export type JobQuoteWorkflowState = (typeof JOB_QUOTE_WORKFLOW_STATES)[number];
+
+/** Append-only events recorded as the Assessment quote workflow changes (`BR-QUOTE-005`). */
+export const JOB_QUOTE_WORKFLOW_HISTORY_EVENTS = [
+  'REQUIRED',
+  'SENT',
+  'APPROVED',
+  'REJECTED',
+  'CORRECTED',
+] as const;
+export type JobQuoteWorkflowHistoryEvent =
+  (typeof JOB_QUOTE_WORKFLOW_HISTORY_EVENTS)[number];
+
+export type JobQuoteDecisionState = Extract<
+  JobQuoteWorkflowState,
+  'APPROVED' | 'REJECTED'
+>;
+
+export interface JobQuoteDecisionCorrectionVisit {
+  readonly visitId: string;
+  readonly sequence: number;
+  readonly purposeCode?: VisitPurposeCode;
+}
+
+export function isJobQuoteDecisionState(
+  state: JobQuoteWorkflowState,
+): state is JobQuoteDecisionState {
+  return state === 'APPROVED' || state === 'REJECTED';
+}
+
+/**
+ * Whether a decided quote can still be corrected (`BR-QUOTE-004`).
+ *
+ * A mistaken approval/rejection can be corrected only before approval has produced downstream Work.
+ * Once any later Work Visit exists, the audit trail must stay intact and the ordinary Visit/Job
+ * cancellation workflows own the correction; this helper never cancels or rewrites that Visit.
+ */
+export function canCorrectJobQuoteDecision(input: {
+  readonly state: JobQuoteWorkflowState;
+  readonly sourceVisitId: string;
+  readonly visits: readonly JobQuoteDecisionCorrectionVisit[];
+}): input is {
+  readonly state: JobQuoteDecisionState;
+  readonly sourceVisitId: string;
+  readonly visits: readonly JobQuoteDecisionCorrectionVisit[];
+} {
+  if (!isJobQuoteDecisionState(input.state)) {
+    return false;
+  }
+
+  const sourceVisit = input.visits.find(
+    (visit) => visit.visitId === input.sourceVisitId,
+  );
+  if (sourceVisit === undefined) {
+    return false;
+  }
+
+  return !input.visits.some(
+    (visit) =>
+      visit.sequence > sourceVisit.sequence && visit.purposeCode === 'WORK',
+  );
+}
 
 /** The follow-up request lifecycle (`BR-041`): proposed work, not a scheduled Visit. */
 export const FOLLOW_UP_VISIT_REQUEST_STATUSES = [
@@ -91,10 +185,12 @@ export type AssignmentRoleCode = (typeof ASSIGNMENT_ROLE_CODES)[number];
  * operation: `NEW` → `ACTIVE` starts execution, and `NEW`/`ACTIVE` → `COMPLETED` or `CANCELED` closes
  * the request. `NEW` is never a destination for an open Job: an explicit reopen (`BR-063`) moves a
  * terminal Job back to `ACTIVE`, which is the status a Job with historical Visits really has
- * (`docs/tracker/051-job-visit-lifecycle-redesign.md`). `COMPLETED` and `CANCELED` are terminal and
+ * (`docs/tracker/shared/051-job-visit-lifecycle-redesign.md`). `COMPLETED` and `CANCELED` are terminal and
  * offer exactly that one destination.
  */
-export const JOB_STATUS_TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
+export const JOB_STATUS_TRANSITIONS: Readonly<
+  Record<JobStatus, readonly JobStatus[]>
+> = {
   NEW: ['ACTIVE', 'COMPLETED', 'CANCELED'],
   ACTIVE: ['COMPLETED', 'CANCELED'],
   COMPLETED: ['ACTIVE'],
@@ -139,10 +235,7 @@ export function applicableJobStatusTransitions(
  * so it is remaining work for completion. The two named sets answer different questions and neither
  * replaces the other (`BR-060`, `BR-083` Notes).
  */
-export const TERMINAL_VISIT_STATUSES = [
-  'COMPLETED',
-  'CANCELED',
-] as const;
+export const TERMINAL_VISIT_STATUSES = ['COMPLETED', 'CANCELED'] as const;
 
 /** Whether a Visit in [status] is terminal, i.e. no longer open work (`BR-074`, `BR-083`). */
 export function isTerminalVisitStatus(status: VisitStatus): boolean {
@@ -160,13 +253,17 @@ export function isTerminalVisitStatus(status: VisitStatus): boolean {
  * The follow-up expectation is derived from the code (`BR-078`): only `RESOLVED` expects none.
  */
 export const VISIT_OUTCOME_CODES = [
-  'RESOLVED',
-  'NEEDS_FOLLOW_UP',
-  'NEEDS_PARTS',
-  'UNABLE_TO_COMPLETE',
+  ...WORK_VISIT_OUTCOME_CODES,
+  ...ASSESSMENT_VISIT_OUTCOME_CODES,
 ] as const;
 
-export type VisitOutcomeCode = (typeof VISIT_OUTCOME_CODES)[number];
+export type VisitOutcomeCode =
+  WorkVisitOutcomeCode | AssessmentVisitOutcomeCode;
+
+export const JOB_CLOSING_VISIT_OUTCOME_CODES = [
+  'RESOLVED',
+  'NO_WORK_REQUIRED',
+] as const satisfies readonly VisitOutcomeCode[];
 
 /**
  * Whether a recorded outcome expects a follow-up field attempt (`BR-078`).
@@ -176,10 +273,42 @@ export type VisitOutcomeCode = (typeof VISIT_OUTCOME_CODES)[number];
  * expects one. A Visit that holds no outcome (`null`) holds no expectation either, because no field
  * attempt has recorded a result to derive one from (`BR-077`, `BR-079`).
  */
+export function visitOutcomeCodesForPurpose(
+  purposeCode: VisitPurposeCode,
+): readonly VisitOutcomeCode[] {
+  return purposeCode === 'WORK'
+    ? WORK_VISIT_OUTCOME_CODES
+    : ASSESSMENT_VISIT_OUTCOME_CODES;
+}
+
+export function isVisitOutcomeValidForPurpose(
+  purposeCode: VisitPurposeCode,
+  outcomeCode: VisitOutcomeCode,
+): boolean {
+  return visitOutcomeCodesForPurpose(purposeCode).includes(outcomeCode);
+}
+
 export function expectsFollowUpVisit(
   outcomeCode: VisitOutcomeCode | null,
 ): boolean {
-  return outcomeCode !== null && outcomeCode !== 'RESOLVED';
+  return (
+    outcomeCode !== null &&
+    (WORK_VISIT_OUTCOME_CODES as readonly VisitOutcomeCode[]).includes(
+      outcomeCode,
+    ) &&
+    outcomeCode !== 'RESOLVED'
+  );
+}
+
+export function closesJobWhenLastOpenVisit(
+  outcomeCode: VisitOutcomeCode | null,
+): boolean {
+  return (
+    outcomeCode !== null &&
+    (JOB_CLOSING_VISIT_OUTCOME_CODES as readonly VisitOutcomeCode[]).includes(
+      outcomeCode,
+    )
+  );
 }
 
 /**
@@ -283,3 +412,27 @@ export function isReschedulableVisitStatus(status: VisitStatus): boolean {
  * projections re-export it rather than redeclaring it (`docs/domain/job-visit-domain-model.md` §5).
  */
 export type Job = InferSelectModel<typeof jobs>;
+
+/** A reopened Job can start a new attempt without rewriting its finished Visits (`BR-063`).
+ * Assessment conclusions requiring office action still use their existing scheduling workflow.
+ */
+export function canScheduleAfterFinishedVisits(
+  visits: readonly {
+    readonly sequence: number;
+    readonly status: VisitStatus;
+    readonly outcomeCode: VisitOutcomeCode | null;
+  }[],
+): boolean {
+  if (
+    visits.length === 0 ||
+    visits.some((visit) => !isTerminalVisitStatus(visit.status))
+  ) {
+    return false;
+  }
+  const latest = visits.reduce((a, b) => (a.sequence > b.sequence ? a : b));
+  return (
+    latest.status === 'CANCELED' ||
+    latest.outcomeCode === 'RESOLVED' ||
+    latest.outcomeCode === 'NO_WORK_REQUIRED'
+  );
+}

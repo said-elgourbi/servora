@@ -59,7 +59,7 @@ import me.saket.telephoto.zoomable.rememberZoomableImageState
  *
  * It is a dedicated media surface rather than another form screen: a black ground that is the same in
  * both appearances, the photo filling it, and the smallest chrome that still says which photo this is
- * and what can be done with it (`docs/tracker/031-android-photo-viewer-ui.md`).
+ * and what can be done with it (`docs/tracker/android/031-android-photo-viewer-ui.md`).
  *
  * It is presentation only. It decides nothing about the photo — not whether the session may read it
  * (the API answers that, `BR-007`), not what a photo is, and not what its phase means.
@@ -305,7 +305,7 @@ private enum class JobPhotoViewerImageState {
  * The photo is the screen. It is drawn on the viewer's own black ground — the same in both appearances,
  * because this is a media surface rather than a form — and fills everything between the system bars and
  * the note; the top bar and the badge are drawn **over** it rather than around it, so they cost the photo
- * nothing (`docs/tracker/031-android-photo-viewer-ui.md`).
+ * nothing (`docs/tracker/android/031-android-photo-viewer-ui.md`).
  *
  * The chrome is three small things, each where it belongs rather than in one bar: the photo's phase
  * badge over the photo's own bottom-left corner, a top bar whose close action is on the left, the

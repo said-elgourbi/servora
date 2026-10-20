@@ -1,0 +1,151 @@
+@if (view() === 'field') {
+  <p>
+    <a routerLink="/work/report">{{ i18n.text('fieldAdHoc') }}</a>
+  </p>
+  @if (fieldSession.issue()) {
+    <p role="status">{{ i18n.text('fieldContextUnavailable') }}</p>
+  }
+  @if (snapshotTime(); as time) {
+    <p role="status">
+      {{ i18n.text('fieldStale') }} {{ time | date: 'medium' : undefined : i18n.language() }}
+    </p>
+  }
+}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">{{ i18n.text(view() === 'field' ? 'fieldHome' : 'officeHome') }}</p>
+    <h1 [appPageTitle]="i18n.text('homeHeading')">{{ i18n.text('homeHeading') }}</h1>
+  </div>
+  @if (view()) {
+    <button mat-stroked-button (click)="refresh()" [disabled]="loading()">
+      <app-icon name="refresh" />{{ i18n.text('refresh') }}
+    </button>
+  }
+</div>
+@if (office() && field()) {
+  <nav class="view-switch" [attr.aria-label]="i18n.text('home')">
+    <a
+      routerLink="/"
+      [queryParams]="{ view: 'office' }"
+      [attr.aria-current]="view() === 'office' ? 'page' : null"
+      >{{ i18n.text('officeHome') }}</a
+    >
+    <a
+      routerLink="/"
+      [queryParams]="{ view: 'field' }"
+      [attr.aria-current]="view() === 'field' ? 'page' : null"
+      >{{ i18n.text('fieldHome') }}</a
+    >
+  </nav>
+}
+@if (!view()) {
+  <p>{{ i18n.text('noPermissions') }}</p>
+}
+@if (loading()) {
+  <p role="status">{{ i18n.text('busy') }}</p>
+}
+@if (error(); as message) {
+  <div class="form-error" role="alert">
+    <p>{{ i18n.text(message) }}</p>
+    <button mat-button (click)="refresh()">{{ i18n.text('retry') }}</button>
+  </div>
+}
+@if (data(); as home) {
+  <p class="day-context">
+    @if (home.viewer.displayName) {
+      {{ i18n.text('hello') }}, {{ home.viewer.displayName }} ·
+    }
+    {{ dayLabel(home.day.start, home.day.timeZone) }}
+  </p>
+  @if (manager(); as officeDay) {
+    <section class="summary" [attr.aria-label]="i18n.text('totalVisits')">
+      <p>
+        <strong>{{ officeDay.today.total }}</strong
+        >{{ i18n.text('totalVisits') }}
+      </p>
+      <p>
+        <strong>{{ officeDay.today.completed }}</strong
+        >{{ i18n.text('completedCount') }}
+      </p>
+      <p>
+        <strong>{{ officeDay.today.inProgress }}</strong
+        >{{ i18n.text('inProgressCount') }}
+      </p>
+      <p>
+        <strong>{{ officeDay.today.upcoming }}</strong
+        >{{ i18n.text('upcomingCount') }}
+      </p>
+    </section>
+  }
+  @if (technician(); as fieldDay) {
+    <section>
+      <h2>{{ i18n.text('upNext') }}</h2>
+      @if (fieldDay.nextVisit; as next) {
+        <app-visit-card [visit]="next" view="field" [staleStarted]="next.staleStarted" />
+      } @else {
+        <p class="empty">{{ i18n.text('noNextVisit') }}</p>
+      }
+    </section>
+  }
+  <ng-template #attentionSection>
+    <section class="attention">
+      <h2>
+        {{ i18n.text('attention') }} <span class="count">{{ home.attention.total }}</span>
+      </h2>
+      @for (item of home.attention.items; track $index) {
+        <a
+          class="attention-row"
+          [routerLink]="['/work/jobs', item.jobId]"
+          [queryParams]="{ visit: item.visitId, view: view() }"
+          ><strong><app-icon name="briefcase" />{{ item.kind | workLabel }}</strong
+          ><span>{{ item.jobTitle }} · #{{ item.jobNumber }}</span
+          ><span>{{ item.customerName }}</span>
+          @if (item.scheduledStart) {
+            <span>{{ item.scheduledStart | date: 'medium' : undefined : i18n.language() }}</span>
+          }
+        </a>
+      } @empty {
+        <p class="empty">{{ i18n.text('caughtUp') }}</p>
+      }
+    </section>
+  </ng-template>
+  @if (manager()) {
+    <ng-container [ngTemplateOutlet]="attentionSection" />
+  }
+  <section>
+    <h2>{{ i18n.text('todayVisits') }}</h2>
+    <div class="visit-grid">
+      @for (visit of home.visits; track visit.visitId) {
+        <app-visit-card
+          [visit]="visit"
+          [view]="view() || 'office'"
+          [staleStarted]="'staleStarted' in visit && visit.staleStarted === true"
+        />
+      } @empty {
+        <p class="empty">{{ i18n.text('noVisits') }}</p>
+      }
+    </div>
+  </section>
+  @if (technician() && home.attention.total > 0) {
+    <ng-container [ngTemplateOutlet]="attentionSection" />
+  }
+  @if (technician(); as fieldDay) {
+    <section>
+      <h2>
+        {{ i18n.text('upcomingVisits') }} <span class="count">{{ fieldDay.upcomingTotal }}</span>
+      </h2>
+      <div class="visit-grid">
+        @for (visit of fieldDay.upcoming; track visit.visitId) {
+          <app-visit-card [visit]="visit" view="field" [staleStarted]="visit.staleStarted" />
+        } @empty {
+          <p class="empty">{{ i18n.text('noUpcoming') }}</p>
+        }
+      </div>
+    </section>
+  }
+  <p class="footnote">
+    {{ i18n.text('updatedAt') }}
+    {{ home.generatedAt | date: 'medium' : undefined : i18n.language() }} · {{ home.day.timeZone
+    }}<br />{{ i18n.text('onlineOnly') }}
+  </p>
+}

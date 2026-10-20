@@ -9,11 +9,32 @@ import java.util.Properties
  */
 
 plugins {
+    alias(libs.plugins.google.services)
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+// Each variant owns its Firebase project. Builds without that variant's ignored configuration
+// remain usable without push; never fall back from release to development configuration.
+androidComponents {
+    onVariants { variant ->
+        val taskName = "process${variant.name.replaceFirstChar { it.uppercaseChar() }}GoogleServices"
+        val configuration = layout.projectDirectory.file("src/${variant.name}/google-services.json").asFile
+        tasks.named<com.google.gms.googleservices.GoogleServicesTask>(taskName).configure {
+            googleServicesJsonFiles.set(listOf(configuration))
+            missingGoogleServicesStrategy.set(com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy.IGNORE)
+            doFirst {
+                if (googleServicesJsonFiles.get().none { it.isFile }) {
+                    // Removing configuration must also remove previously generated Firebase resources.
+                    outputDirectory.get().asFile.deleteRecursively()
+                    gmpAppId.get().asFile.delete()
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +153,7 @@ ksp {
 }
 
 dependencies {
+    implementation(libs.firebase.messaging)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     // Supplies the per-app locale application and the app-wide night mode behind the sign-in

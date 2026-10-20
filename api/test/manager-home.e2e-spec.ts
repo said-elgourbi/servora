@@ -11,6 +11,7 @@ import {
 import { DatabaseModule } from '../src/database/database.module.js';
 import {
   customers,
+  jobQuoteWorkflows,
   jobs,
   organizationMemberPermissions,
   organizationMembers,
@@ -493,7 +494,7 @@ describe('manager home derivation (e2e)', () => {
     );
   });
 
-  it('does not report a Visit that has progressed past SCHEDULED', async () => {
+  it('allows started work to overrun its scheduled window within the same local day', async () => {
     const organization = await newOrganization();
     const member = await newMembership(organization.id);
     const customer = await newCustomer(organization.id, 'Working Co');
@@ -521,6 +522,56 @@ describe('manager home derivation (e2e)', () => {
 
     expect(read.attention).toEqual([]);
   });
+
+  it.each(['EN_ROUTE', 'ON_SITE', 'IN_PROGRESS'])(
+    "reports %s from an earlier day at local midnight, outside today's schedule",
+    async (status) => {
+      const organization = await newOrganization();
+      const member = await newMembership(organization.id);
+      const customer = await newCustomer(organization.id, 'Unfinished Co');
+      const job = await newJob({
+        organizationId: organization.id,
+        customerId: customer.id,
+        jobNumber: 1010,
+        status: 'ACTIVE',
+      });
+      const visit = await newVisit({
+        organizationId: organization.id,
+        jobId: job.id,
+        status,
+        scheduledStart: new Date('2026-09-30T13:20:00Z'),
+        scheduledEnd: new Date('2026-09-30T16:20:00Z'),
+        actorMembershipId: member.id,
+      });
+
+      const beforeMidnight = new Date('2026-10-01T03:59:59.999Z');
+      const before = await service.readManagerHome(
+        scopeOf(organization.id),
+        member.userId,
+        resolveDayWindow('America/Toronto', beforeMidnight),
+        beforeMidnight,
+      );
+      expect(before.attention).toEqual([]);
+
+      const midnight = new Date('2026-10-01T04:00:00Z');
+      const after = await service.readManagerHome(
+        scopeOf(organization.id),
+        member.userId,
+        resolveDayWindow('America/Toronto', midnight),
+        midnight,
+      );
+      expect(after.attentionTotal).toBe(1);
+      expect(after.attention).toEqual([
+        expect.objectContaining({
+          kind: 'VISIT_STALE_STARTED',
+          visitId: visit.id,
+          jobNumber: 1010,
+        }),
+      ]);
+      expect(after.visits).toEqual([]);
+      expect(after.today.total).toBe(0);
+    },
+  );
 
   it('reports a NEW or ACTIVE Job with no active Visit as needing scheduling', async () => {
     const organization = await newOrganization();
@@ -579,6 +630,93 @@ describe('manager home derivation (e2e)', () => {
     ).toBe(true);
     expect(read.attention[0]?.visitId).toBeNull();
     expect(read.attention[0]?.scheduledStart).toBeNull();
+  });
+
+  it('derives quote attention from the persisted quote workflow state', async () => {
+    const organization = await newOrganization();
+    const member = await newMembership(organization.id);
+    const customer = await newCustomer(organization.id, 'Quote Co');
+    const sentJob = await newJob({
+      organizationId: organization.id,
+      customerId: customer.id,
+      jobNumber: 1,
+      status: 'ACTIVE',
+      title: 'Assessment quote pending',
+    });
+    const approvedJob = await newJob({
+      organizationId: organization.id,
+      customerId: customer.id,
+      jobNumber: 2,
+      status: 'ACTIVE',
+      title: 'Approved quote already scheduled',
+    });
+    const sentAssessment = await newVisit({
+      organizationId: organization.id,
+      jobId: sentJob.id,
+      status: 'COMPLETED',
+      scheduledStart: new Date(now.getTime() - 6 * 3_600_000),
+      scheduledEnd: new Date(now.getTime() - 5 * 3_600_000),
+      actorMembershipId: member.id,
+    });
+    const approvedAssessment = await newVisit({
+      organizationId: organization.id,
+      jobId: approvedJob.id,
+      status: 'COMPLETED',
+      scheduledStart: new Date(now.getTime() - 6 * 3_600_000),
+      scheduledEnd: new Date(now.getTime() - 5 * 3_600_000),
+      actorMembershipId: member.id,
+    });
+    await database.db
+      .update(visits)
+      .set({ purposeCode: 'ASSESSMENT', outcomeCode: 'QUOTE_REQUIRED' })
+      .where(eq(visits.id, sentAssessment.id));
+    await database.db
+      .update(visits)
+      .set({ purposeCode: 'ASSESSMENT', outcomeCode: 'QUOTE_REQUIRED' })
+      .where(eq(visits.id, approvedAssessment.id));
+    await database.db.insert(jobQuoteWorkflows).values([
+      {
+        organizationId: organization.id,
+        jobId: sentJob.id,
+        sourceVisitId: sentAssessment.id,
+        state: 'SENT',
+        sentAt: now,
+        sentByMembershipId: member.id,
+      },
+      {
+        organizationId: organization.id,
+        jobId: approvedJob.id,
+        sourceVisitId: approvedAssessment.id,
+        state: 'APPROVED',
+        sentAt: now,
+        sentByMembershipId: member.id,
+        decidedAt: now,
+        decidedByMembershipId: member.id,
+      },
+    ]);
+    await newVisit({
+      organizationId: organization.id,
+      jobId: approvedJob.id,
+      status: 'SCHEDULED',
+      scheduledStart: new Date(now.getTime() + 3_600_000),
+      scheduledEnd: new Date(now.getTime() + 4_600_000),
+      actorMembershipId: member.id,
+    });
+
+    const read = await service.readManagerHome(
+      scopeOf(organization.id),
+      member.userId,
+      day,
+      now,
+    );
+
+    expect(read.attention).toEqual([
+      expect.objectContaining({
+        kind: 'JOB_CUSTOMER_DECISION_PENDING',
+        jobId: sentJob.id,
+        visitId: sentAssessment.id,
+      }),
+    ]);
   });
 
   it('reports the parts a completed Visit requires as office attention', async () => {

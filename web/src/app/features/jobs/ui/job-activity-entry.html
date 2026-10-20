@@ -1,0 +1,243 @@
+@let event = value();
+@if (history()) {
+  <article class="activity system-event">
+    <div class="history-heading">
+      <h4>{{ event.kind | fieldActivityLabel }}</h4>
+      <ng-container [ngTemplateOutlet]="eventMeta" />
+    </div>
+    @for (text of activityText(event); track $index) {
+      <p class="history-text">{{ text }}</p>
+    }
+    <ng-container [ngTemplateOutlet]="eventFacts" />
+  </article>
+} @else {
+  <article
+    class="activity update-card"
+    [class.outcome-update]="!!event.outcomeCode"
+    [class.evidence-update]="!!(event.photoId || event.audioNoteId)"
+  >
+    <div class="update-heading">
+      <span class="entry-symbol" [class.result-symbol]="!!event.outcomeCode"
+        ><app-icon [name]="entryIcon(event)"
+      /></span>
+      <div class="entry-heading-copy">
+        <p class="entry-sentence">
+          <strong>{{ event.actorName || i18n.text('unnamedMember') }}</strong>
+          {{ i18n.text(action(event)) }}
+        </p>
+        <p class="entry-context">
+          @if (event.visitSequence) {
+            <span>{{ i18n.text('visit') }} {{ event.visitSequence }}</span
+            ><span aria-hidden="true">·</span>
+          }
+          <time
+            [attr.datetime]="event.recordedAt"
+            [title]="event.recordedAt | date: 'medium' : undefined : i18n.language()"
+            >{{ event.recordedAt | date: 'shortTime' : undefined : i18n.language() }}</time
+          >
+        </p>
+      </div>
+      <button
+        class="entry-menu"
+        mat-icon-button
+        [matMenuTriggerFor]="entryActions"
+        [attr.aria-label]="i18n.text('activityMoreOptions')"
+      >
+        <app-icon name="more" />
+      </button>
+    </div>
+    <div class="update-body" [class.has-photo]="evidenceAvailable() && event.photoId">
+      @if (evidenceAvailable() && event.kind === 'JOB_PHOTO_ADDED' && event.photoId) {
+        <app-job-photo-preview
+          [jobId]="jobId()"
+          [photoId]="event.photoId"
+          (opened)="opened.emit()"
+        />
+      }
+      <div class="update-copy">
+        @if (
+          !event.outcomeCode &&
+          !event.photoId &&
+          !event.audioNoteId &&
+          event.kind !== 'VISIT_NOTE_ADDED'
+        ) {
+          <h4 class="decision-title">
+            {{ event.kind | fieldActivityLabel }}
+            @if (event.toStatus) {
+              · {{ event.toStatus | workLabel }}
+            }
+          </h4>
+        }
+        @if (event.outcomeCode) {
+          <h4 class="outcome-title">{{ event.outcomeCode | workLabel }}</h4>
+        }
+        <div
+          class="comment"
+          [id]="'comment-' + event.id"
+          [class.clamped]="longNote() && !expanded()"
+        >
+          @for (text of activityText(event); track $index) {
+            <p>{{ text }}</p>
+          }
+        </div>
+        @if (longNote()) {
+          <button
+            mat-button
+            class="read-note"
+            [attr.aria-expanded]="expanded()"
+            [attr.aria-controls]="'comment-' + event.id"
+            (click)="expanded.set(!expanded())"
+          >
+            {{ i18n.text(expanded() ? 'activityReadLess' : 'activityReadMore') }}
+          </button>
+        }
+        @if (['BEFORE', 'DURING', 'AFTER'].includes(event.photoPhase || event.audioPhase || '')) {
+          <span class="evidence-phase">{{ phaseLabel(event.photoPhase || event.audioPhase) }}</span>
+        }
+        @if (event.quoteDocumentDisplayName) {
+          <p class="document-name">
+            {{ event.quoteDocumentDisplayName }} · {{ event.quoteDocumentVersion }}
+          </p>
+        }
+        @if (evidenceAvailable() && event.audioNoteId) {
+          @if (media(); as content) {
+            @if (content.audio && content.id === event.audioNoteId) {
+              <div class="audio-player">
+                <audio
+                  controls
+                  [src]="content.url"
+                  [attr.aria-label]="i18n.text('fieldPlayAudio')"
+                ></audio
+                ><button mat-button (click)="mediaClosed.emit()">
+                  {{ i18n.text('jobCloseMedia') }}
+                </button>
+              </div>
+            } @else {
+              <ng-container [ngTemplateOutlet]="audioButton" />
+            }
+          } @else {
+            <ng-container [ngTemplateOutlet]="audioButton" />
+          }
+        }
+      </div>
+    </div>
+  </article>
+}
+<ng-template #eventMeta>
+  <span class="event-meta">
+    <span class="event-author">{{ event.actorName || i18n.text('unnamedMember') }}</span>
+    @if (event.visitSequence) {
+      <span>{{ i18n.text('visit') }} {{ event.visitSequence }}</span>
+    }
+    <time
+      [attr.datetime]="event.recordedAt"
+      [title]="event.recordedAt | date: 'medium' : undefined : i18n.language()"
+      >{{ event.recordedAt | date: 'shortTime' : undefined : i18n.language() }}</time
+    >
+  </span>
+</ng-template>
+<ng-template #audioButton>
+  <button
+    mat-stroked-button
+    class="audio-button"
+    [attr.aria-label]="i18n.text('fieldPlayAudio')"
+    (click)="opened.emit()"
+  >
+    {{ i18n.text('fieldPlayAudio') }}
+    @if (event.audioDurationSeconds) {
+      · {{ event.audioDurationSeconds }}s
+    }
+  </button>
+</ng-template>
+<ng-template #eventFacts>
+  <div class="event-facts">
+    @if (event.toStatus) {
+      <p>
+        @if (event.fromStatus) {
+          {{ event.fromStatus | workLabel }} →
+        }
+        {{ event.toStatus | workLabel }}
+      </p>
+    }
+    @if (event.technicianName) {
+      <p>{{ event.technicianName }}</p>
+    }
+    @if (event.roleCode) {
+      <p>
+        {{ event.previousRoleCode ? (event.previousRoleCode | workLabel) + ' → ' : ''
+        }}{{ event.roleCode | workLabel }}
+      </p>
+    }
+    @if (event.outcomeCode) {
+      <p>{{ event.outcomeCode | workLabel }}</p>
+    }
+    @if (event.quoteToState) {
+      <p>
+        {{ event.quoteFromState ? (event.quoteFromState | workLabel) + ' → ' : ''
+        }}{{ event.quoteToState | workLabel }}
+      </p>
+    }
+    @if (event.photoPhase || event.audioPhase) {
+      <p>{{ i18n.text('fieldPhase') }}: {{ phaseLabel(event.photoPhase || event.audioPhase) }}</p>
+    }
+    @if (event.audioDurationSeconds !== null) {
+      <p>{{ i18n.text('activityDuration') }}: {{ event.audioDurationSeconds }}s</p>
+    }
+    @if (event.quoteDocumentDisplayName) {
+      <p>{{ event.quoteDocumentDisplayName }} · {{ event.quoteDocumentVersion }}</p>
+    }
+    @if (event.photoRemovalReason || event.audioRemovalReason || event.noteRemovalReason) {
+      <p class="pre-wrap">
+        {{ i18n.text('jobRemovalReason') }}:
+        {{ event.photoRemovalReason || event.audioRemovalReason || event.noteRemovalReason }}
+      </p>
+    }
+    @if (event.noteEditedAt) {
+      <p>
+        {{ i18n.text('jobNoteEdited') }} ·
+        <time [attr.datetime]="event.noteEditedAt" [title]="event.noteEditedAt">{{
+          event.noteEditedAt | date: 'medium' : undefined : i18n.language()
+        }}</time>
+      </p>
+    }
+    @if (event.noteRemovedAt) {
+      <p>
+        {{ i18n.text('activityRemoved') }} ·
+        <time [attr.datetime]="event.noteRemovedAt" [title]="event.noteRemovedAt">{{
+          event.noteRemovedAt | date: 'medium' : undefined : i18n.language()
+        }}</time>
+      </p>
+    }
+    <p class="record-reference">
+      <time [attr.datetime]="event.recordedAt">{{ event.recordedAt }}</time
+      ><span>{{ i18n.text('activityRecord') }}: {{ event.id }}</span>
+    </p>
+  </div>
+</ng-template>
+
+<mat-menu #entryActions="matMenu">
+  <button mat-menu-item (click)="showRecord(recordDialog)">
+    {{ i18n.text('activityEventDetails') }}
+  </button>
+  @if (removable()) {
+    <button mat-menu-item class="destructive" [disabled]="busy()" (click)="removed.emit()">
+      {{ i18n.text('jobRemoveEvidence') }}
+    </button>
+  }
+</mat-menu>
+<ng-template #recordDialog>
+  <h2 mat-dialog-title>{{ i18n.text('activityEventDetails') }}</h2>
+  <mat-dialog-content>
+    <h3 class="record-title">{{ event.kind | fieldActivityLabel }}</h3>
+    <ng-container [ngTemplateOutlet]="eventMeta" />
+    @for (text of activityText(event); track $index) {
+      <p class="history-text">{{ text }}</p>
+    }
+    <ng-container [ngTemplateOutlet]="eventFacts" />
+  </mat-dialog-content>
+  <mat-dialog-actions align="end"
+    ><button mat-button mat-dialog-close>
+      {{ i18n.text('activityClose') }}
+    </button></mat-dialog-actions
+  >
+</ng-template>

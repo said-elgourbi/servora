@@ -2,12 +2,12 @@
 
 - Status: Accepted
 - Date: 2026-09-10
-- Milestone: `docs/tracker/003-foundation-domain-model.md`
+- Milestone: `docs/tracker/shared/003-foundation-domain-model.md`
 - Supersedes: nothing
 
 ## Context
 
-The API foundation (`docs/tracker/001-foundation.md`) stood up NestJS + PostgreSQL + Drizzle
+The API foundation (`docs/tracker/api/001-foundation.md`) stood up NestJS + PostgreSQL + Drizzle
 with no domain tables. The first domain slice must model the platform's tenant, identity and
 customer foundation — organizations, users/auth, profiles, memberships/roles, customers and
 their contacts/addresses — before jobs and later-phase entities are added.

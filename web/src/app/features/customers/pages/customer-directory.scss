@@ -1,0 +1,254 @@
+.page-heading {
+  margin-bottom: 28px;
+}
+.page-heading a app-icon {
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+}
+.directory {
+  background: var(--mat-sys-surface);
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.directory-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 24px 0;
+}
+.directory-heading h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.directory-heading p {
+  margin: 5px 0 0;
+}
+.directory-heading button app-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+}
+.directory-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, 180px) minmax(180px, 220px);
+  gap: 16px;
+  padding: 24px;
+}
+.directory-filters label {
+  min-width: 0;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--mat-sys-on-surface-variant);
+  font-weight: 550;
+}
+.directory-filters select,
+.search-control {
+  height: 44px;
+  border: 1px solid var(--mat-sys-outline);
+  border-radius: 8px;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
+}
+.directory-filters select {
+  width: 100%;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.search-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+}
+.search-control app-icon {
+  width: 18px;
+  height: 18px;
+}
+.search-control input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--mat-sys-on-surface);
+  font-size: 13px;
+  height: 100%;
+}
+.search-control:focus-within {
+  outline: 2px solid var(--mat-sys-primary);
+  outline-offset: 2px;
+}
+.search-control input:focus-visible {
+  outline: none;
+}
+.search-control input::placeholder {
+  color: var(--mat-sys-on-surface-variant);
+  opacity: 0.85;
+}
+.filter-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 24px 12px;
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 12px;
+}
+.table-scroll {
+  position: relative;
+  overflow-x: auto;
+}
+caption {
+  left: 0;
+  top: 0;
+}
+table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+thead {
+  background: var(--mat-sys-surface-container-low);
+}
+th,
+td {
+  padding: 20px;
+  border-top: 1px solid var(--mat-sys-outline-variant);
+  vertical-align: middle;
+}
+thead th {
+  padding-block: 14px;
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+tbody th {
+  font-weight: 400;
+  width: 30%;
+}
+tbody td:nth-child(2) {
+  width: 28%;
+}
+tbody tr:hover {
+  background: var(--mat-sys-surface-container-low);
+}
+td p,
+th p {
+  margin: 5px 0 0;
+}
+.customer-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.customer-avatar {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--mat-sys-primary-container);
+  color: var(--mat-sys-on-primary-container);
+  font-size: 12px;
+  font-weight: 650;
+}
+.company-avatar {
+  border-radius: 10px;
+  background: var(--mat-sys-secondary-container);
+  color: var(--mat-sys-on-secondary-container);
+}
+.record-title {
+  color: var(--mat-sys-on-surface);
+  font-size: 13px;
+}
+.contact-lines {
+  gap: 7px;
+  font-size: 12px;
+}
+.contact-lines a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mat-sys-on-surface-variant);
+  text-decoration: none;
+}
+.contact-lines a:hover {
+  color: var(--mat-sys-primary);
+  text-decoration: underline;
+}
+.contact-lines app-icon {
+  width: 14px;
+  height: 14px;
+}
+.numeric {
+  text-align: center;
+}
+.work-count {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--mat-sys-on-surface-variant);
+}
+.has-work {
+  color: var(--mat-sys-primary);
+}
+.status-pill,
+.overdue-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+  background: var(--mat-sys-surface-container);
+  color: var(--mat-sys-on-surface-variant);
+}
+.status-pill > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.is-active {
+  color: var(--app-on-success-container);
+  background: color-mix(in srgb, var(--app-success-container) 50%, var(--mat-sys-surface));
+}
+.overdue-count {
+  color: var(--mat-sys-on-error-container);
+  background: var(--mat-sys-error-container);
+}
+.directory-message {
+  padding: 24px;
+}
+.notice {
+  margin: 0 24px 24px;
+}
+@media (max-width: 1100px) {
+  th,
+  td {
+    padding-inline: 14px;
+  }
+}
+@media (max-width: 700px) {
+  .directory-heading {
+    padding: 18px 16px 0;
+  }
+  .directory-filters {
+    grid-template-columns: 1fr 1fr;
+    padding: 20px 16px;
+    gap: 14px 12px;
+  }
+  .search-filter {
+    grid-column: 1 / -1;
+  }
+  .filter-context {
+    padding-inline: 16px;
+  }
+}

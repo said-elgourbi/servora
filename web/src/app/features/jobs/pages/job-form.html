@@ -1,0 +1,83 @@
+<section [appPageTitle]="i18n.text('jobNew')">
+  <a class="back-link" [routerLink]="back()"
+    >←
+    {{
+      i18n.text(auth.hasPermission('customers.view') ? 'propertyBackCustomer' : 'propertyBackHome')
+    }}</a
+  >
+  <h1>{{ i18n.text('jobNew') }}</h1>
+  @if (customerName(); as name) {
+    <p class="context">{{ name }}</p>
+  }
+  <p>{{ i18n.text('jobCreateDescription') }}</p>
+  @if (loading()) {
+    <p role="status">{{ i18n.text('busy') }}</p>
+  }
+  @if (readError(); as message) {
+    <div role="alert">
+      <p>{{ i18n.text(message) }}</p>
+      <button mat-button (click)="reload()">{{ i18n.text('retry') }}</button>
+    </div>
+  } @else if (!loading()) {
+    @if (saved(); as receipt) {
+      <p role="status">
+        {{ i18n.text('jobCreated') }} #{{ receipt.jobNumber }} · {{ receipt.title }}
+      </p>
+    } @else if (!properties().length) {
+      <p role="status">{{ i18n.text('jobNoProperties') }}</p>
+      @if (auth.hasPermission('properties.create')) {
+        <a mat-flat-button [routerLink]="['/work/customers', customerId(), 'properties', 'new']">{{
+          i18n.text('propertyNew')
+        }}</a>
+      }
+    } @else {
+      <form class="panel form-panel" [formGroup]="form" (ngSubmit)="save()">
+        <label
+          >{{ i18n.text('jobProperty') }}
+          <select
+            formControlName="propertyId"
+            [attr.aria-label]="i18n.text('jobProperty')"
+            required
+          >
+            <option value="">{{ i18n.text('jobChooseProperty') }}</option>
+            @for (property of properties(); track property.id) {
+              <option [value]="property.id">
+                {{ property.name || property.addressLine1 }} · {{ property.addressLine1 }},
+                {{ property.city }}
+              </option>
+            }
+          </select>
+        </label>
+        @if (form.controls.propertyId.touched && form.controls.propertyId.invalid) {
+          <p role="alert">{{ i18n.text('required') }}</p>
+        }
+        <mat-form-field appearance="outline"
+          ><mat-label>{{ i18n.text('jobTitle') }}</mat-label
+          ><input matInput formControlName="title" maxlength="255" required /><mat-error>{{
+            i18n.text('required')
+          }}</mat-error></mat-form-field
+        >
+        <mat-form-field appearance="outline"
+          ><mat-label>{{ i18n.text('jobDescription') }}</mat-label
+          ><textarea matInput formControlName="description" maxlength="2000" rows="5"></textarea>
+        </mat-form-field>
+        @if (error(); as message) {
+          <div class="notice" role="alert">
+            <p>{{ i18n.text(message) }}</p>
+            @if (blocked()) {
+              <button mat-stroked-button type="button" (click)="reload()">
+                {{ i18n.text('customerReload') }}
+              </button>
+            }
+          </div>
+        }
+        <p class="muted">{{ i18n.text('onlineOnly') }}</p>
+        <div class="actions">
+          <button mat-flat-button type="submit" [disabled]="busy() || blocked()">
+            {{ i18n.text(busy() ? 'busy' : 'jobCreate') }}</button
+          ><a mat-button [routerLink]="back()">{{ i18n.text('cancel') }}</a>
+        </div>
+      </form>
+    }
+  }
+</section>

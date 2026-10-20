@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -73,6 +74,8 @@ import com.servora.android.domain.model.CustomerJobFilter
 import com.servora.android.domain.model.CustomerStatus
 import com.servora.android.domain.model.CustomerStatusFilter
 import com.servora.android.R
+import com.servora.android.ui.appearance.AppearanceControls
+import com.servora.android.ui.notifications.NotificationPermissionSettings
 import com.servora.android.ui.components.CustomerContactLine
 import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.ServoraTopBar
@@ -183,6 +186,8 @@ fun ServoraHomeScreen(
     createJobViewModel: CreateJobViewModel,
     scheduleViewModel: ScheduleViewModel,
     technicianScheduleViewModel: TechnicianScheduleViewModel,
+    notificationsEnabled: Boolean,
+    onNotificationsEnabledChange: (Boolean) -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -446,6 +451,9 @@ fun ServoraHomeScreen(
                                 onOpenRequest = { requestId ->
                                     navController.navigate(ServoraRoutes.requestDetail(requestId))
                                 },
+                                onOpenAdHocReport = { reportId ->
+                                    navController.navigate(ServoraRoutes.adHocReportDetail(reportId))
+                                },
                                 onClarifyRequest = scheduleViewModel::askForClarification,
                                 onRejectRequest = scheduleViewModel::rejectRequest,
                                 onStartApproval = scheduleViewModel::beginApproval,
@@ -580,7 +588,12 @@ fun ServoraHomeScreen(
                         }
 
                     DashboardTab.SETTINGS ->
-                        SettingsTab(onSignOut = onSignOut, modifier = Modifier)
+                        SettingsTab(
+                            notificationsEnabled = notificationsEnabled,
+                            onNotificationsEnabledChange = onNotificationsEnabledChange,
+                            onSignOut = onSignOut,
+                            modifier = Modifier,
+                        )
                 }
             },
             modifier = Modifier.padding(padding),
@@ -1648,36 +1661,163 @@ internal fun StatusPill(status: CustomerStatus, modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * The Settings tab.
- *
- * Only sign-out is implemented here. The other settings surfaces the design defines are separate
- * features and are not invented by this slice (`BR-042`); they are added when their own rules are
- * decided. Sign-out is the one item this slice needs, because persisting a session across restarts
- * makes ending one from the device necessary (`BR-014`).
- */
+/** The Settings tab. */
 @Composable
-private fun SettingsTab(onSignOut: () -> Unit, modifier: Modifier = Modifier) {
-    Column(
+private fun SettingsTab(
+    notificationsEnabled: Boolean,
+    onNotificationsEnabledChange: (Boolean) -> Unit,
+    onSignOut: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
         modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, top = 18.dp, end = 16.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        OutlinedButton(
-            onClick = onSignOut,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .testTag(SettingsSignOutTag),
-            shape = MaterialTheme.shapes.medium,
-        ) {
+        item {
+            SettingsProfileHeader()
+        }
+        item {
+            SettingsSection(title = stringResource(R.string.settings_appearance_title)) {
+                AppearanceControls()
+            }
+        }
+        item {
+            SettingsSection(title = stringResource(R.string.settings_account_title)) {
+                SettingsToggleRow(
+                    title = stringResource(R.string.settings_notifications_title),
+                    detail = stringResource(
+                        if (notificationsEnabled) {
+                            R.string.settings_notifications_on
+                        } else {
+                            R.string.settings_notifications_off
+                        },
+                    ),
+                    checked = notificationsEnabled,
+                    onCheckedChange = onNotificationsEnabledChange,
+                )
+                NotificationPermissionSettings()
+            }
+        }
+        item {
+            OutlinedButton(
+                onClick = onSignOut,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag(SettingsSignOutTag),
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_sign_out),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+        item {
             Text(
-                text = stringResource(R.string.settings_sign_out),
-                style = MaterialTheme.typography.labelLarge,
+                text = stringResource(R.string.settings_version),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+}
+
+@Composable
+private fun SettingsProfileHeader(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            modifier = Modifier.size(48.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = stringResource(R.string.settings_profile_initials),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = stringResource(R.string.settings_profile_name),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_profile_subtitle),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsSection(
+    title: String,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 10.dp),
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Box(modifier = Modifier.padding(14.dp)) {
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    detail: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

@@ -12,6 +12,8 @@ import {
 } from '../src/auth/permissions.js';
 import {
   customers,
+  jobQuoteHistory,
+  jobQuoteWorkflows,
   jobStatusHistory,
   jobs,
   organizationMemberPermissions,
@@ -208,6 +210,7 @@ describe('visit field lifecycle (e2e)', () => {
   async function newVisit(values: {
     jobId: string;
     status: string;
+    purposeCode?: 'WORK' | 'ASSESSMENT';
     propertyId?: string;
     scheduledStart?: Date;
     scheduledEnd?: Date;
@@ -217,6 +220,7 @@ describe('visit field lifecycle (e2e)', () => {
       .values({
         organizationId,
         jobId: values.jobId,
+        purposeCode: values.purposeCode ?? 'WORK',
         propertyId: values.propertyId ?? null,
         locationAddressSnapshot:
           values.propertyId === undefined
@@ -255,6 +259,7 @@ describe('visit field lifecycle (e2e)', () => {
   async function jobWithVisit(options: {
     jobStatus?: string;
     visitStatus: string;
+    purposeCode?: 'WORK' | 'ASSESSMENT';
     property?: boolean;
     schedule?: boolean;
     crew?: readonly {
@@ -284,6 +289,7 @@ describe('visit field lifecycle (e2e)', () => {
     const visit = await newVisit({
       jobId: job.id,
       status: options.visitStatus,
+      purposeCode: options.purposeCode,
       propertyId: property?.id,
       ...(options.schedule === false
         ? {}
@@ -393,6 +399,68 @@ describe('visit field lifecycle (e2e)', () => {
       .send(body);
   }
 
+  function markQuoteSent(
+    session: { accessToken: string },
+    jobId: string,
+    body: Record<string, unknown>,
+  ) {
+    return request(app.getHttpServer())
+      .post(`${base}/${jobId}/quote/sent`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send(body);
+  }
+
+  function approveQuote(
+    session: { accessToken: string },
+    jobId: string,
+    body: Record<string, unknown>,
+  ) {
+    return request(app.getHttpServer())
+      .post(`${base}/${jobId}/quote/approval`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send(body);
+  }
+
+  function correctQuoteToRequired(
+    session: { accessToken: string },
+    jobId: string,
+    body: Record<string, unknown>,
+  ) {
+    return request(app.getHttpServer())
+      .post(`${base}/${jobId}/quote/required`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send(body);
+  }
+
+  function rejectQuote(
+    session: { accessToken: string },
+    jobId: string,
+    body: Record<string, unknown>,
+  ) {
+    return request(app.getHttpServer())
+      .post(`${base}/${jobId}/quote/rejection`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send(body);
+  }
+
+  async function quoteHistory(jobId: string) {
+    return database.db
+      .select({
+        event: jobQuoteHistory.event,
+        fromState: jobQuoteHistory.fromState,
+        toState: jobQuoteHistory.toState,
+        note: jobQuoteHistory.note,
+      })
+      .from(jobQuoteHistory)
+      .where(
+        and(
+          eq(jobQuoteHistory.organizationId, organizationId),
+          eq(jobQuoteHistory.jobId, jobId),
+        ),
+      )
+      .orderBy(asc(jobQuoteHistory.recordedAt), asc(jobQuoteHistory.id));
+  }
+
   it('refuses an unauthenticated caller', async () => {
     const { job, visit } = await jobWithVisit({ visitStatus: 'SCHEDULED' });
     await request(app.getHttpServer())
@@ -425,9 +493,9 @@ describe('visit field lifecycle (e2e)', () => {
       });
 
     // ... and the write it does not name is refused by the API, not by a hidden button (`BR-007`).
-    await changeStatus(session, job.id, visit.id, { status: 'EN_ROUTE' }).expect(
-      403,
-    );
+    await changeStatus(session, job.id, visit.id, {
+      status: 'EN_ROUTE',
+    }).expect(403);
     expect(await statusHistory(visit.id)).toEqual([]);
   });
 
@@ -437,9 +505,9 @@ describe('visit field lifecycle (e2e)', () => {
 
     // The Visit is not the caller's, so it is reported as absent exactly as the read reports a Job the
     // caller's own assignments do not reach (`ADR-019` D2, D3).
-    await changeStatus(session, job.id, visit.id, { status: 'EN_ROUTE' }).expect(
-      404,
-    );
+    await changeStatus(session, job.id, visit.id, {
+      status: 'EN_ROUTE',
+    }).expect(404);
 
     // "Currently assigned" is evaluated at the moment of the action: being removed before the action is
     // the same scope answer.
@@ -448,9 +516,9 @@ describe('visit field lifecycle (e2e)', () => {
       technicianMembershipId: session.membershipId,
       roleCode: 'LEAD',
     });
-    await changeStatus(session, job.id, visit.id, { status: 'EN_ROUTE' }).expect(
-      200,
-    );
+    await changeStatus(session, job.id, visit.id, {
+      status: 'EN_ROUTE',
+    }).expect(200);
     await database.db
       .delete(visitTechnicians)
       .where(eq(visitTechnicians.visitId, visit.id));
@@ -542,9 +610,9 @@ describe('visit field lifecycle (e2e)', () => {
       completionAllowed: false,
     });
 
-    await changeStatus(session, job.id, visit.id, { status: 'EN_ROUTE' }).expect(
-      404,
-    );
+    await changeStatus(session, job.id, visit.id, {
+      status: 'EN_ROUTE',
+    }).expect(404);
     await completeVisit(session, job.id, visit.id, {
       outcomeCode: 'RESOLVED',
       outcomeSummary: 'Done.',
@@ -651,7 +719,9 @@ describe('visit field lifecycle (e2e)', () => {
     });
 
     // The destinations the projection offered are the ones the route applies ...
-    await changeStatus(office, job.id, visit.id, { status: 'EN_ROUTE' }).expect(200);
+    await changeStatus(office, job.id, visit.id, { status: 'EN_ROUTE' }).expect(
+      200,
+    );
 
     // ... and the operation it did not offer is refused by the API rather than by a hidden control
     // (`BR-007`).
@@ -660,9 +730,9 @@ describe('visit field lifecycle (e2e)', () => {
       outcomeSummary: 'Done.',
     }).expect(403);
     // The status route takes no completion at all, whichever capabilities the caller holds (`BR-077`).
-    await changeStatus(office, job.id, visit.id, { status: 'COMPLETED' }).expect(
-      409,
-    );
+    await changeStatus(office, job.id, visit.id, {
+      status: 'COMPLETED',
+    }).expect(409);
     expect(await statusHistory(visit.id)).toHaveLength(1);
   });
 
@@ -697,9 +767,9 @@ describe('visit field lifecycle (e2e)', () => {
     await changeStatus(session, job.id, visit.id, { status: 'ON_SITE' }).expect(
       200,
     );
-    await changeStatus(session, job.id, visit.id, { status: 'EN_ROUTE' }).expect(
-      200,
-    );
+    await changeStatus(session, job.id, visit.id, {
+      status: 'EN_ROUTE',
+    }).expect(200);
     // Stepping around the working statuses leaves the Job where it is: a Job already in the status an
     // event implies does not move, because a status that does not change is not a transition
     // (`BR-058`, `BR-067`).
@@ -811,7 +881,9 @@ describe('visit field lifecycle (e2e)', () => {
 
   it('skips a step and steps backward, one recorded transition each', async () => {
     const session = await signInTechnician();
-    const crew = [{ membershipId: session.membershipId, roleCode: 'LEAD' as const }];
+    const crew = [
+      { membershipId: session.membershipId, roleCode: 'LEAD' as const },
+    ];
 
     // A technician who never tapped "en route" is not made to walk the chain: `SCHEDULED →
     // IN_PROGRESS` is one permitted transition (`BR-074`).
@@ -909,7 +981,10 @@ describe('visit field lifecycle (e2e)', () => {
     // Nothing changed: one recorded transition, one outcome, and the Visit still carries it
     // (`BR-067`, `BR-079`).
     expect(
-      (await statusHistory(visit.id)).map((row) => [row.fromStatus, row.toStatus]),
+      (await statusHistory(visit.id)).map((row) => [
+        row.fromStatus,
+        row.toStatus,
+      ]),
     ).toEqual([['IN_PROGRESS', 'COMPLETED']]);
     expect(await visitRow(visit.id)).toMatchObject({
       status: 'COMPLETED',
@@ -972,12 +1047,9 @@ describe('visit field lifecycle (e2e)', () => {
       visitStatus: 'SCHEDULED',
       crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
     });
-    await changeStatus(
-      session,
-      advancing.job.id,
-      advancing.visit.id,
-      { status: 'EN_ROUTE' },
-    ).expect(200);
+    await changeStatus(session, advancing.job.id, advancing.visit.id, {
+      status: 'EN_ROUTE',
+    }).expect(200);
 
     const completing = await jobWithVisit({
       visitStatus: 'IN_PROGRESS',
@@ -1056,9 +1128,7 @@ describe('visit field lifecycle (e2e)', () => {
     const noLead = await jobWithVisit({
       jobStatus: 'ACTIVE',
       visitStatus: 'EN_ROUTE',
-      crew: [
-        { membershipId: session.membershipId, roleCode: 'TECHNICIAN' },
-      ],
+      crew: [{ membershipId: session.membershipId, roleCode: 'TECHNICIAN' }],
     });
     const crewRefusal = await changeStatus(
       session,
@@ -1206,6 +1276,260 @@ describe('visit field lifecycle (e2e)', () => {
     }
   });
 
+  it('starts the Assessment quote workflow when completion records QUOTE_REQUIRED', async () => {
+    const session = await signInTechnician();
+    const { job, visit } = await jobWithVisit({
+      jobStatus: 'ACTIVE',
+      visitStatus: 'IN_PROGRESS',
+      purposeCode: 'ASSESSMENT',
+      crew: [{ membershipId: session.membershipId, roleCode: 'LEAD' }],
+    });
+
+    const response = await completeVisit(session, job.id, visit.id, {
+      outcomeCode: 'QUOTE_REQUIRED',
+      outcomeSummary: 'Replacement needs customer authorization.',
+    }).expect(200);
+
+    expect(response.body.attention).toEqual([
+      {
+        code: 'JOB_QUOTE_REQUIRED',
+        relevantVisitId: visit.id,
+        reasonCode: null,
+      },
+    ]);
+    expect((await jobRow(job.id))?.status).toBe('ACTIVE');
+    expect(await jobHistory(job.id)).toEqual([]);
+
+    const [workflow] = await database.db
+      .select()
+      .from(jobQuoteWorkflows)
+      .where(
+        and(
+          eq(jobQuoteWorkflows.organizationId, organizationId),
+          eq(jobQuoteWorkflows.jobId, job.id),
+        ),
+      )
+      .limit(1);
+    expect(workflow).toMatchObject({
+      organizationId,
+      jobId: job.id,
+      sourceVisitId: visit.id,
+      state: 'REQUIRED',
+      sentAt: null,
+      decidedAt: null,
+      version: 1,
+    });
+
+    const history = await database.db
+      .select({
+        quoteWorkflowId: jobQuoteHistory.quoteWorkflowId,
+        sourceVisitId: jobQuoteHistory.sourceVisitId,
+        event: jobQuoteHistory.event,
+        fromState: jobQuoteHistory.fromState,
+        toState: jobQuoteHistory.toState,
+        actorMembershipId: jobQuoteHistory.actorMembershipId,
+      })
+      .from(jobQuoteHistory)
+      .where(
+        and(
+          eq(jobQuoteHistory.organizationId, organizationId),
+          eq(jobQuoteHistory.jobId, job.id),
+        ),
+      );
+    expect(history).toEqual([
+      {
+        quoteWorkflowId: workflow?.id,
+        sourceVisitId: visit.id,
+        event: 'REQUIRED',
+        fromState: null,
+        toState: 'REQUIRED',
+        actorMembershipId: session.membershipId,
+      },
+    ]);
+  });
+
+  it('lets the office move an Assessment quote through sent and approval', async () => {
+    const technician = await signInTechnician();
+    const office = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const { job, visit } = await jobWithVisit({
+      jobStatus: 'ACTIVE',
+      visitStatus: 'IN_PROGRESS',
+      purposeCode: 'ASSESSMENT',
+      crew: [{ membershipId: technician.membershipId, roleCode: 'LEAD' }],
+    });
+
+    await completeVisit(technician, job.id, visit.id, {
+      outcomeCode: 'QUOTE_REQUIRED',
+      outcomeSummary: 'Authorization is required.',
+    }).expect(200);
+
+    const sent = await markQuoteSent(office, job.id, {
+      note: 'Sent by email.',
+      externalReference: 'estimate-1042',
+      expectedVersion: 1,
+    }).expect(200);
+    expect(sent.body.attention).toEqual([
+      {
+        code: 'JOB_CUSTOMER_DECISION_PENDING',
+        relevantVisitId: visit.id,
+        reasonCode: null,
+      },
+    ]);
+
+    const approved = await approveQuote(office, job.id, {
+      note: 'Customer approved the quote.',
+      expectedVersion: 2,
+    }).expect(200);
+    expect(approved.body.attention).toEqual([
+      {
+        code: 'JOB_WORK_READY_TO_SCHEDULE',
+        relevantVisitId: visit.id,
+        reasonCode: null,
+      },
+    ]);
+    expect((await jobRow(job.id))?.status).toBe('ACTIVE');
+
+    const [workflow] = await database.db
+      .select()
+      .from(jobQuoteWorkflows)
+      .where(
+        and(
+          eq(jobQuoteWorkflows.organizationId, organizationId),
+          eq(jobQuoteWorkflows.jobId, job.id),
+        ),
+      )
+      .limit(1);
+    expect(workflow).toMatchObject({
+      state: 'APPROVED',
+      sentByMembershipId: office.membershipId,
+      sentNote: 'Sent by email.',
+      externalReference: 'estimate-1042',
+      decidedByMembershipId: office.membershipId,
+      decisionNote: 'Customer approved the quote.',
+      version: 3,
+    });
+    expect(await quoteHistory(job.id)).toEqual([
+      { event: 'REQUIRED', fromState: null, toState: 'REQUIRED', note: null },
+      {
+        event: 'SENT',
+        fromState: 'REQUIRED',
+        toState: 'SENT',
+        note: 'Sent by email.',
+      },
+      {
+        event: 'APPROVED',
+        fromState: 'SENT',
+        toState: 'APPROVED',
+        note: 'Customer approved the quote.',
+      },
+    ]);
+  });
+
+  it('lets the office correct an accidentally sent quote back to required', async () => {
+    const technician = await signInTechnician();
+    const office = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const unauthorized = await signInFor([]);
+    const { job, visit } = await jobWithVisit({
+      jobStatus: 'ACTIVE',
+      visitStatus: 'IN_PROGRESS',
+      purposeCode: 'ASSESSMENT',
+      crew: [{ membershipId: technician.membershipId, roleCode: 'LEAD' }],
+    });
+
+    await completeVisit(technician, job.id, visit.id, {
+      outcomeCode: 'QUOTE_REQUIRED',
+      outcomeSummary: 'Authorization is required.',
+    }).expect(200);
+    await markQuoteSent(office, job.id, {
+      note: 'Sent by email.',
+      expectedVersion: 1,
+    }).expect(200);
+
+    await correctQuoteToRequired(unauthorized, job.id, {}).expect(403);
+
+    const corrected = await correctQuoteToRequired(office, job.id, {
+      note: 'Marked sent by mistake.',
+      expectedVersion: 2,
+    }).expect(200);
+
+    expect(corrected.body.quote).toMatchObject({
+      state: 'REQUIRED',
+      sentAt: null,
+      sentByMembershipId: null,
+      sentNote: null,
+      externalReference: null,
+      decidedAt: null,
+      decidedByMembershipId: null,
+      decisionNote: null,
+      version: 3,
+    });
+    expect(await quoteHistory(job.id)).toEqual([
+      { event: 'REQUIRED', fromState: null, toState: 'REQUIRED', note: null },
+      {
+        event: 'SENT',
+        fromState: 'REQUIRED',
+        toState: 'SENT',
+        note: 'Sent by email.',
+      },
+      {
+        event: 'CORRECTED',
+        fromState: 'SENT',
+        toState: 'REQUIRED',
+        note: 'Marked sent by mistake.',
+      },
+    ]);
+  });
+
+  it('blocks quote decision correction after approval has produced a Work Visit', async () => {
+    const technician = await signInTechnician();
+    const office = await signInFor([JOB_PERMISSIONS.UPDATE]);
+    const { job, visit, property } = await jobWithVisit({
+      jobStatus: 'ACTIVE',
+      visitStatus: 'IN_PROGRESS',
+      purposeCode: 'ASSESSMENT',
+      crew: [{ membershipId: technician.membershipId, roleCode: 'LEAD' }],
+    });
+
+    await completeVisit(technician, job.id, visit.id, {
+      outcomeCode: 'QUOTE_REQUIRED',
+      outcomeSummary: 'Authorization is required.',
+    }).expect(200);
+    await markQuoteSent(office, job.id, {}).expect(200);
+    await approveQuote(office, job.id, {}).expect(200);
+
+    await newVisit({
+      jobId: job.id,
+      status: 'SCHEDULED',
+      purposeCode: 'WORK',
+      propertyId: property?.id,
+      scheduledStart: new Date(Date.now() + 86_400_000),
+      scheduledEnd: new Date(Date.now() + 90_000_000),
+    });
+
+    const rejection = await rejectQuote(office, job.id, {
+      note: 'Customer changed their mind.',
+    }).expect(409);
+    expect(rejection.body).toMatchObject({
+      code: 'QUOTE_DECISION_CORRECTION_NOT_ALLOWED',
+      details: { fromState: 'APPROVED', toState: 'REJECTED' },
+    });
+
+    const [workflow] = await database.db
+      .select({
+        state: jobQuoteWorkflows.state,
+        version: jobQuoteWorkflows.version,
+      })
+      .from(jobQuoteWorkflows)
+      .where(
+        and(
+          eq(jobQuoteWorkflows.organizationId, organizationId),
+          eq(jobQuoteWorkflows.jobId, job.id),
+        ),
+      )
+      .limit(1);
+    expect(workflow).toEqual({ state: 'APPROVED', version: 3 });
+  });
+
   it('keeps a job active while another visit is still scheduled (`BR-062`)', async () => {
     const session = await signInTechnician();
     const first = await jobWithVisit({
@@ -1285,10 +1609,15 @@ describe('visit field lifecycle (e2e)', () => {
 
     // One operation id names one operation, and that operation addressed one Visit: answering with
     // another Visit's state would report a change the caller did not make (`BR-031`).
-    const response = await changeStatus(session, second.job.id, second.visit.id, {
-      status: 'EN_ROUTE',
-      clientOperationId: operationId,
-    }).expect(409);
+    const response = await changeStatus(
+      session,
+      second.job.id,
+      second.visit.id,
+      {
+        status: 'EN_ROUTE',
+        clientOperationId: operationId,
+      },
+    ).expect(409);
     expect(response.body).toMatchObject({ code: 'VISIT_OPERATION_REUSED' });
     expect(await statusHistory(second.visit.id)).toEqual([]);
     expect((await visitRow(second.visit.id))?.status).toBe('SCHEDULED');
@@ -1465,7 +1794,10 @@ describe('visit field lifecycle (e2e)', () => {
     await request(app.getHttpServer())
       .post(`${base}/${job.id}/visits/${visit.id}/notes`)
       .set('Authorization', `Bearer ${session.accessToken}`)
-      .send({ body: 'Customer not home; left a card.', clientOperationId: operationId })
+      .send({
+        body: 'Customer not home; left a card.',
+        clientOperationId: operationId,
+      })
       .expect(201);
     expect(
       await database.db

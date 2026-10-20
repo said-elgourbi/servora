@@ -3,7 +3,7 @@
 **Status: IMPLEMENTED** for the Job and Visit management actions, and for the Visit field lifecycle.
 
 > **Which lifecycle model this documents.** The Job and Visit vocabulary the API exchanges is the model
-> `docs/tracker/051-job-visit-lifecycle-redesign.md` defines, and `Business Rules.md` now states it:
+> `docs/tracker/shared/051-job-visit-lifecycle-redesign.md` defines, and `Business Rules.md` now states it:
 > Job status is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED` (`BR-058`); Visit status is `DRAFT`,
 > `SCHEDULED`, `EN_ROUTE`, `ON_SITE`, `IN_PROGRESS`, `COMPLETED` or `CANCELED` (`BR-074`); an outcome is
 > `RESOLVED`, `NEEDS_FOLLOW_UP`, `NEEDS_PARTS` or `UNABLE_TO_COMPLETE` (`BR-078`); and operational
@@ -19,10 +19,10 @@ References: `BR-001`, `BR-006`, `BR-007`, `BR-008`, `BR-009`, `BR-010`, `BR-011`
 `BR-067`, `BR-068`, `BR-069`, `BR-070`, `BR-072`, `BR-073`, `BR-074`, `BR-075`, `BR-076`, `BR-077`,
 `BR-078`, `BR-079`, `BR-083`, `BR-086`, `BR-FV-007`, `dev.md` §7, `Project.md` §15,
 `docs/domain/job-visit-domain-model.md` §6 – §7, §15,
-`docs/decisions/019-technician-field-experience.md`, `docs/tracker/018-android-job-actions.md`,
-`docs/tracker/034-manager-job-status-workflow.md`,
-`docs/tracker/037-technician-field-experience.md`,
-`docs/tracker/051-job-visit-lifecycle-redesign.md` (the lifecycle model this document describes),
+`docs/decisions/019-technician-field-experience.md`, `docs/tracker/android/018-android-job-actions.md`,
+`docs/tracker/shared/034-manager-job-status-workflow.md`,
+`docs/tracker/shared/037-technician-field-experience.md`,
+`docs/tracker/shared/051-job-visit-lifecycle-redesign.md` (the lifecycle model this document describes),
 `docs/api/visit-requests.md` (the follow-up Visit request routes),
 `docs/api/job-details.md` (the read this document's actions answer with).
 
@@ -89,7 +89,7 @@ a completion still requires `VISIT_RECORD_OUTCOME` of every caller (`BR-093`).
 > (reschedule, assign) should require in its own right. Until it exists, every **office** action here
 > requires `JOB_UPDATE`, which never grants more than the catalogue already does — `BR-093`'s office Visit
 > completion included; whether the office should have a dedicated Visit capability of its own is part of
-> this question. Recorded in `docs/tracker/018-android-job-actions.md`.
+> this question. Recorded in `docs/tracker/android/018-android-job-actions.md`.
 
 **Why `JOB_UPDATE` and not a `jobs.*` capability set.** `BR-008` confirms that the Manager default role
 updates Jobs, and the foundation catalogue already carries a `JOB_UPDATE` capability granted to that
@@ -398,7 +398,7 @@ status, the actor and the server's instant — and a status that does not change
 nothing is written when the Job already holds it (`BR-058`, `BR-067`). **A resolving completion is the one
 place a field event closes a Job**, and it is the entry the tracker's model gives it: there is no
 business-review step between the field work and the closure
-(`docs/tracker/051-job-visit-lifecycle-redesign.md`). It is bounded by `BR-062`'s invariant, which the API
+(`docs/tracker/shared/051-job-visit-lifecycle-redesign.md`). It is bounded by `BR-062`'s invariant, which the API
 evaluates for the consequence exactly as it does for `PATCH /jobs/:id/status` (§3.2): a Job is never
 `COMPLETED` while it still holds an open Visit. Nothing else about a Job's lifecycle moves on a field
 event — a cancel, a reopen and an explicit close remain authorized office actions (`BR-062`, `BR-063`,
@@ -518,7 +518,7 @@ from it (`BR-042`, `§10`).
 
 ## 10. Open questions
 
-Recorded rather than guessed (`BR-042`); `docs/tracker/018-android-job-actions.md` carries the same list
+Recorded rather than guessed (`BR-042`); `docs/tracker/android/018-android-job-actions.md` carries the same list
 with what each one blocks.
 
 1. **The `jobs.*` capability set** (`BR-006`, `BR-008`): every **office** action here requires the

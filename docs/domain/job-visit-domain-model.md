@@ -9,7 +9,7 @@
 > customer/property API; the **Job and Visit** tables are implemented by migration `0003`, and the
 > first read over them — one Job with the Visit that represents it and that Visit's technicians — is
 > `GET /jobs/:id` (`docs/api/job-details.md`,
-> `docs/tracker/017-android-job-details.md`). Their **write** behaviour (scheduling, assignment,
+> `docs/tracker/android/017-android-job-details.md`). Their **write** behaviour (scheduling, assignment,
 > status transitions, outcomes) is implemented by `docs/api/job-actions.md`: the office actions
 > (Job status, rescheduling, crew assignment) reuse the existing `JOB_UPDATE` capability because no
 > `jobs.*` capability exists yet (`BR-006`, `BR-042`), and the Visit **field** lifecycle (status
@@ -477,7 +477,7 @@ Constraints and indexes:
   rows written before the link existed — no rule attributes those to a Visit retroactively, and deleting them
   would destroy recorded evidence (`BR-042`, `BR-088`). This supersedes `D2` of 2026-09-15 ("evidence is
   Job-level"), which product ownership amended on 2026-09-28
-  (`docs/tracker/056-evidence-belongs-to-a-visit.md`).
+  (`docs/tracker/shared/056-evidence-belongs-to-a-visit.md`).
 - Audio is evidence of its own kind with the same Visit link; generic files remain out of scope
   (`BR-027`, `BR-091`, `D8`).
 
@@ -812,7 +812,7 @@ visits.status = 'SCHEDULED' AND visits.scheduled_end < now()
   overdue; a terminal Visit is history.
 - Both conditions are evaluated by the backend inside the tenant-scoped query, so a client cannot
   widen its own scope (`BR-001`, `BR-007`). The product decision and API contract are recorded in
-  `docs/tracker/008-android-customers-filter.md`.
+  `docs/tracker/android/008-android-customers-filter.md`.
 
 **Customer detail projections (`BR-081`)**
 
@@ -884,6 +884,7 @@ decides one. These are not Job statuses.
 | Kind                   | Condition                                                                      |
 | ---------------------- | ------------------------------------------------------------------------------ |
 | `VISIT_OVERDUE`        | The overdue-Visit condition defined for the customer-list filters (above).     |
+| `VISIT_STALE_STARTED` | Visit in `EN_ROUTE`, `ON_SITE`, or `IN_PROGRESS` whose scheduled end is before the start of today's local day. |
 | `JOB_NEEDS_SCHEDULING` | The "Needs Scheduling" signal defined at the start of this section (`BR-060`). |
 | `FOLLOW_UP_NEEDS_SCHEDULING` | Latest relevant completed Visit has `NEEDS_FOLLOW_UP`, the Job is `ACTIVE`, and no later actionable Visit exists. |
 | `PARTS_REQUIRED` | Latest relevant completed Visit has `NEEDS_PARTS`; absence of a future Visit is intentional while parts are obtained. |
@@ -892,6 +893,12 @@ decides one. These are not Job statuses.
 - The overdue condition is not restricted to the requested day: a Visit scheduled for an earlier day
   that never advanced is still work that has gone wrong, so hiding it because its day passed would
   hide exactly the exception a manager has to resolve.
+- Started work becomes `VISIT_STALE_STARTED` at midnight after the local calendar day of its scheduled
+  end (product decision, 2026-10-07). Same-day overruns are allowed. Overnight visits use the day of
+  their scheduled end; terminal visits do not qualify. The API uses the same requested time zone and
+  resolved day window as both home reads. This is derived attention, with no automatic status change.
+- Manager attention orders overdue scheduled visits first, stale started visits next, then office
+  review and planning conditions. Both visit conditions include work from earlier days.
 - Work of a Customer the organization has deleted (`customers.deleted_at`) is excluded, and no Job
   or Visit of another organization is reachable (`BR-023`, `BR-001`).
 - The list is capped at `MANAGER_HOME_ATTENTION_LIMIT` items and reports the full count alongside it.
@@ -941,15 +948,18 @@ the window, chronologically, capped for the payload with the full count reported
 preview of the Schedule surface (`GET /schedule`, below), which is the office's read rather than the
 technician's.
 
-*Attention list.* One condition, already defined above (the overdue-Visit condition the customer-list
-filters define), applied to the caller's own Visits:
+*Attention list.* The shared home Visit conditions, applied to the caller's own Visits:
 
 | Kind            | Condition                                                                    |
 | --------------- | ---------------------------------------------------------------------------- |
 | `VISIT_OVERDUE` | Visit still `SCHEDULED` (`BR-074`) whose scheduled end has passed (`BR-072`). |
+| `VISIT_STALE_STARTED` | Started work still open after the local day of its scheduled end, as defined for manager home. |
 
 - It is not restricted to the requested day, for the manager home's reason: an attempt that never
   happened on an earlier day is still work the technician has to resolve.
+- The current (`nextVisit`) card and today's rows show their own conditions and are excluded from
+  the attention list to avoid duplicate presentation. `staleStarted` is the API's warning flag on a
+  Visit; the current card preserves its working status and displays an unfinished-visit warning.
 - The kinds the section *could* carry are recorded rather than invented (`BR-042`): a pending
   follow-up request belongs to `BR-FV-001` – `BR-FV-013` and is not modelled, and evidence waiting to
   be synchronized is a device-local fact (`BR-014`, `BR-031`) the API cannot see.
@@ -1182,7 +1192,7 @@ COMPLETED, CANCELED
 `DRAFT` is neither. It is a stored, unscheduled attempt: nothing has happened to it and no technician is
 working on it, so it is never a technician's working state and it has **no** destination in the field
 table below. The API's supported create operation schedules the Visit it creates, so no supported workflow
-produces one (`BR-042`, `docs/tracker/051-job-visit-lifecycle-redesign.md`).
+produces one (`BR-042`, `docs/tracker/shared/051-job-visit-lifecycle-redesign.md`).
 
 The **normal progression** is the order a successful field attempt usually follows:
 
@@ -1280,7 +1290,7 @@ AND scheduled_end IS NOT NULL))` — a Visit cannot be `SCHEDULED` without an op
   creation order for display and is not stored as a numbering scheme the business never defined.
   The Job Activity read (`BR-080`) exposes that derived ordinal as `visitSequence` — `Visit 1`,
   `Visit 2`, … — for Visit-level events, and never exposes a database id (`docs/api/job-activity.md`,
-  `docs/tracker/022-android-job-activity-timeline.md`).
+  `docs/tracker/android/022-android-job-activity-timeline.md`).
 
 ### 9.3 Scheduling (`BR-072`)
 
@@ -1605,8 +1615,8 @@ AND existing.scheduled_end > new.scheduled_start
   from the Visit outcome; the request is a separate workflow record created by an assigned
   technician, unless a technician has explicit scheduling permission and creates the follow-up Visit
   directly (`BR-FV-001`, `BR-FV-011`). Job Details offers that direct scheduling path only while the
-  Job is open (`NEW` or `ACTIVE`) and its Visit shape admits it: the Job has no scheduled Visit, or
-  the represented Work Visit is completed and its outcome expects follow-up. A `COMPLETED` or `CANCELED`
+  Job is open (`NEW` or `ACTIVE`) and its Visit shape admits it: the Job has no scheduled Visit, only finished Visits with the latest canceled or completed as
+  `RESOLVED`/`NO_WORK_REQUIRED` (including reopened Jobs), or the represented Work Visit is completed and its outcome expects follow-up. A `COMPLETED` or `CANCELED`
   Job offers no scheduling action until it is reopened (`BR-062`, `BR-063`), and an already scheduled
   or active Visit exposes actions for that Visit instead of a casual parallel Visit create path. The
   API projects this eligibility as `canScheduleVisit` on the Job read, and the write itself refuses a
@@ -2164,9 +2174,9 @@ catalogue or column was invented for it (`BR-042`, `qa.md` §15).
 | 21  | Is the archive-warning "active" classification reconciled with `BR-060`'s narrower derived condition?                         | `BR-060`, `BR-083` | **Decided:** kept as two named concepts — `needsSchedulingActiveVisit` (`BR-060`) and `archiveWarningOpenWork` (`BR-083`) (`ADR-012` D4). No shared vocabulary is imposed.                            | —                                       |
 | 22  | Which offline/outbox architecture standard do Property archive and restore follow?                                            | `BR-086`           | **Decided:** `docs/architecture/offline-first-architecture.md` defines the working set, outbox, idempotency, replay and conflict model (`ADR-012` D7).                                                 | Offline Property lifecycle.             |
 | 23  | Does a Property's own lifecycle history permanently block its deletion?                                                       | `BR-082`           | **Decided:** no. `property_lifecycle_history.property_id` is `ON DELETE CASCADE`; deletion stays blocked by other references (`ADR-012` D5).                                                          | —                                       |
-| 24  | What formally defines a technician as "running late"?                                                                         | `BR-070`, `BR-038` | Not defined. The manager home presents only the **overdue Visit** condition above, which compares the Visit's own scheduled window against the server clock and needs no travel time, location or estimate. No "running late" alert is produced, and no ETA is derived from GPS or travel data (`docs/tracker/016-android-manager-home.md`). | A "running late" alert; any ETA or travel-time estimate. |
+| 24  | What formally defines a technician as "running late"?                                                                         | `BR-070`, `BR-038` | Not defined. The manager home presents only the **overdue Visit** condition above, which compares the Visit's own scheduled window against the server clock and needs no travel time, location or estimate. No "running late" alert is produced, and no ETA is derived from GPS or travel data (`docs/tracker/android/016-android-manager-home.md`). | A "running late" alert; any ETA or travel-time estimate. |
 | 25  | Which attention conditions should a cancelled Visit raised **today** produce on the manager home?                             | `BR-076`           | Not defined. A `CANCELED` Visit is excluded from today's schedule and counts, and no "cancelled today" condition is produced: the Visit row carries no cancellation instant of its own (only the status history does), and "today" for it is undefined. Recorded rather than inferred. | A "cancelled today" attention condition. |
-| 26  | Does the manager home's "Needs attention" list need a capability of its own?                                                 | `BR-006`, `BR-008` | The read is guarded by the existing `customers.view`, the same capability the Job/Visit projections already use. The permission model has no `jobs.*` capability yet, and inventing one is forbidden (`BR-042`) — see `docs/tracker/016-android-manager-home.md`. | The Jobs feature's permission set; the manager home's own capability. |
+| 26  | Does the manager home's "Needs attention" list need a capability of its own?                                                 | `BR-006`, `BR-008` | The read is guarded by the existing `customers.view`, the same capability the Job/Visit projections already use. The permission model has no `jobs.*` capability yet, and inventing one is forbidden (`BR-042`) — see `docs/tracker/android/016-android-manager-home.md`. | The Jobs feature's permission set; the manager home's own capability. |
 | 27  | May a **field** member read another technician's schedule (a **team** scope), and which capability authorizes it?             | `BR-006`, `BR-009`, `BR-024` | **Open, and enforced closed.** `GET /schedule` resolves a **scope** from the capability the caller holds: `customers.view` reads the operation's day (`ORGANIZATION`), `VISIT_VIEW_ASSIGNED` reads only the caller's own assigned Visits (`SELF`) (`ADR-020` decision update). A `membershipId` outside the resolved scope is refused `403`, uniformly whether or not it names anybody. No capability for a team scope exists in the catalogue — `VISIT_VIEW_ASSIGNED` is by definition the caller's *own* assignments, and `TECHNICIAN_VIEW` authorizes the technician **records** an assignee is chosen from — so none was invented (`BR-042`). | The technician Schedule screen's technician selector; any `TEAM` scope; `docs/api/schedule.md` §5.4. |
 
 Not an open question, recorded here to prevent a false assumption: **Job-number gaps**. `BR-052`

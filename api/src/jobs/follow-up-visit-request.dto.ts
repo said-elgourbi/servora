@@ -15,6 +15,8 @@ import {
   type AssignmentRoleCode,
   type FollowUpVisitRequestMessageAuthorKind,
   type FollowUpVisitRequestStatus,
+  VISIT_PURPOSE_CODES,
+  type VisitPurposeCode,
 } from './job.types.js';
 
 function fail(field: string, rule: string): never {
@@ -113,6 +115,7 @@ export interface FollowUpVisitApprovalDto extends FollowUpVisitReviewDto {
 }
 
 export interface DirectCreateVisitDto {
+  readonly purposeCode: VisitPurposeCode;
   readonly scheduledStart: Date;
   readonly scheduledEnd: Date;
   readonly technicians: readonly RequestedVisitTechnician[];
@@ -191,14 +194,23 @@ export function parseFollowUpVisitApprovalDto(
   };
 }
 
-export function parseDirectCreateVisitDto(input: unknown): DirectCreateVisitDto {
+export function parseDirectCreateVisitDto(
+  input: unknown,
+): DirectCreateVisitDto {
   const source = (input ?? {}) as Record<string, unknown>;
-  const scheduledStart = requireInstant(source.scheduledStart, 'scheduledStart');
+  const scheduledStart = requireInstant(
+    source.scheduledStart,
+    'scheduledStart',
+  );
   const scheduledEnd = requireInstant(source.scheduledEnd, 'scheduledEnd');
   if (scheduledEnd.getTime() <= scheduledStart.getTime()) {
     fail('scheduledEnd', 'must be after scheduledStart');
   }
   return {
+    purposeCode:
+      source.purposeCode === undefined || source.purposeCode === null
+        ? 'WORK'
+        : requireEnum(source.purposeCode, VISIT_PURPOSE_CODES, 'purposeCode'),
     scheduledStart,
     scheduledEnd,
     technicians: parseRequestedTechnicians(source.technicians),
@@ -226,11 +238,7 @@ function optionalFollowUpStatus(
   if (value === undefined || value === null) {
     return null;
   }
-  return requireEnum(
-    value,
-    FOLLOW_UP_VISIT_REQUEST_STATUSES,
-    'expectedStatus',
-  );
+  return requireEnum(value, FOLLOW_UP_VISIT_REQUEST_STATUSES, 'expectedStatus');
 }
 
 function parseRequestedTechnicians(
@@ -257,11 +265,16 @@ function parseRequestedTechnicians(
       ),
     };
   });
-  const uniqueIds = new Set(technicians.map((technician) => technician.membershipId));
+  const uniqueIds = new Set(
+    technicians.map((technician) => technician.membershipId),
+  );
   if (uniqueIds.size !== technicians.length) {
     fail('technicians', 'must not contain duplicates');
   }
-  if (technicians.filter((technician) => technician.roleCode === 'LEAD').length !== 1) {
+  if (
+    technicians.filter((technician) => technician.roleCode === 'LEAD')
+      .length !== 1
+  ) {
     fail('technicians', 'must include exactly one lead technician');
   }
   return technicians;

@@ -5,6 +5,7 @@ import coil3.ImageLoader
 import coil3.disk.DiskCache
 import com.servora.android.data.jobs.ContentResolverJobPhotoPickedItems
 import com.servora.android.data.jobs.AndroidJobPhotoExportTarget
+import com.servora.android.data.jobs.AndroidJobQuoteDocuments
 import com.servora.android.data.jobs.DefaultJobPhotoExporter
 import com.servora.android.data.jobs.DefaultJobPhotoImages
 import com.servora.android.data.jobs.DefaultJobPhotoProcessing
@@ -16,6 +17,7 @@ import com.servora.android.data.jobs.JobPhotoImages
 import com.servora.android.data.jobs.JobPhotoPickedItems
 import com.servora.android.data.jobs.JobPhotoProcessing
 import com.servora.android.data.jobs.JobPhotoUploadHandler
+import com.servora.android.data.jobs.JobQuoteDocuments
 import com.servora.android.data.jobs.PrivateJobPhotoFiles
 import com.servora.android.data.jobs.JobAudioFiles
 import com.servora.android.data.jobs.JobAudioPlayer
@@ -204,4 +206,9 @@ internal abstract class JobsOfflineBindingsModule {
     abstract fun bindJobPhotoExportTarget(
         implementation: AndroidJobPhotoExportTarget,
     ): JobPhotoExportTarget
+
+    /** Reads picked quote PDFs and opens downloaded quote PDFs through the platform viewer. */
+    @Binds
+    @Singleton
+    abstract fun bindJobQuoteDocuments(implementation: AndroidJobQuoteDocuments): JobQuoteDocuments
 }

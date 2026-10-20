@@ -17,6 +17,7 @@ function visit(
 ): ManagerHomeVisit {
   return {
     visitId: 'visit-1',
+    purposeCode: 'WORK',
     scheduledStart: new Date('2026-09-14T13:00:00.000Z'),
     scheduledEnd: new Date('2026-09-14T14:00:00.000Z'),
     jobId: 'job-1',
@@ -43,6 +44,7 @@ describe('compareVisits', () => {
     const upcoming = visit({
       visitId: 'upcoming',
       visitStatus: 'SCHEDULED',
+      purposeCode: 'WORK',
       scheduledStart: new Date('2026-09-14T16:00:00.000Z'),
       scheduledEnd: new Date('2026-09-14T17:00:00.000Z'),
     });
@@ -137,6 +139,16 @@ describe('compareAttentionItems', () => {
       'VISIT_OVERDUE',
       'JOB_NEEDS_SCHEDULING',
     ]);
+  });
+
+  it('ranks stale started work after overdue visits and before office planning', () => {
+    const stale = item({ kind: 'VISIT_STALE_STARTED' });
+    const overdue = item({ kind: 'VISIT_OVERDUE' });
+    const office = item({ kind: 'PARTS_REQUIRED' });
+    const scheduling = item({ kind: 'JOB_NEEDS_SCHEDULING' });
+    expect(
+      [scheduling, office, stale, overdue].sort(compareAttentionItems),
+    ).toEqual([overdue, stale, office, scheduling]);
   });
 
   it('orders overdue items by how long they have been overdue', () => {

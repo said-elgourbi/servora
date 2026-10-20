@@ -1,0 +1,239 @@
+<div class="job-toolbar">
+  <ng-content select="[job-heading]" />
+  <div class="job-actions">
+    <ng-content select="[job-refresh]" />
+    @if (job().canScheduleVisit) {
+      <button
+        class="schedule-visit"
+        mat-flat-button
+        [disabled]="busy() || blocked() || !job().propertyId"
+        (click)="scheduleVisit()"
+      >
+        {{ i18n.text('jobScheduleVisit') }}
+      </button>
+    }
+  </div>
+</div>
+@if (job().canScheduleVisit && !job().propertyId) {
+  <p class="scheduling-hint">{{ i18n.text('jobVisitPropertyRequired') }}</p>
+}
+@if (canUpdate() && job().allowedStatusTransitions.length) {
+  <div class="status-toolbar" role="group" [attr.aria-label]="i18n.text('jobChangeStatus')">
+    <h2 class="action-label">{{ i18n.text('jobChangeStatus') }}</h2>
+    <div class="actions">
+      @for (statusCode of job().allowedStatusTransitions; track statusCode) {
+        <button
+          [matButton]="statusCode === 'CANCELED' ? 'text' : 'outlined'"
+          [class.destructive]="statusCode === 'CANCELED'"
+          [disabled]="busy() || blocked()"
+          (click)="status(statusCode)"
+        >
+          @if (statusCode === 'CANCELED') {
+            {{ i18n.text('jobCancel') }}
+          } @else if (
+            statusCode === 'ACTIVE' && (job().status === 'COMPLETED' || job().status === 'CANCELED')
+          ) {
+            {{ i18n.text('jobReopen') }}
+          } @else {
+            {{ statusCode | workLabel }}
+          }
+        </button>
+      }
+    </div>
+  </div>
+}
+@if (job().attention.length) {
+  <section class="attention-bar" [attr.aria-label]="i18n.text('attention')">
+    <strong>{{ i18n.text('attention') }}</strong>
+    @for (attention of job().attention; track $index) {
+      <a [href]="'#visit-' + attention.relevantVisitId"
+        >{{ attention.code | workLabel }}
+        @if (attention.reasonCode) {
+          · {{ attention.reasonCode | workLabel }}
+        }
+      </a>
+    }
+  </section>
+}
+@if (writeError(); as message) {
+  <div class="panel" role="alert">
+    <p>{{ i18n.text(message) }}</p>
+    @if (retainedNote(); as note) {
+      <p class="pre-wrap">{{ note }}</p>
+    }
+    <button mat-stroked-button [disabled]="busy()" (click)="reload()">
+      {{ i18n.text('customerReload') }}
+    </button>
+  </div>
+}
+<div class="workspace-grid">
+  <div class="work-column">
+    <ng-content select="[job-main]" />
+    <section class="panel feed-panel" [attr.aria-label]="i18n.text('activityTitle')">
+      <div class="heading">
+        <h2>{{ i18n.text('activityTitle') }}</h2>
+        <button mat-button [disabled]="busy() || loading()" (click)="reloadActivity()">
+          {{ i18n.text('refresh') }}
+        </button>
+      </div>
+      <mat-button-toggle-group
+        class="activity-views"
+        [value]="view()"
+        [attr.aria-label]="i18n.text('activityView')"
+        [hideSingleSelectionIndicator]="true"
+        (change)="changeView($event.value)"
+      >
+        <mat-button-toggle value="updates" [aria-label]="i18n.text('activityUpdates')">{{
+          i18n.text('activityUpdates')
+        }}</mat-button-toggle>
+        <mat-button-toggle value="all" [aria-label]="i18n.text('activityAll')">{{
+          i18n.text('activityAll')
+        }}</mat-button-toggle>
+        <mat-button-toggle value="history" [aria-label]="i18n.text('activityHistory')">{{
+          i18n.text('activityHistory')
+        }}</mat-button-toggle>
+      </mat-button-toggle-group>
+      @if (view() === 'history') {
+        <p class="feed-hint">{{ i18n.text('activityHistoryHint') }}</p>
+        @if (canAudit()) {
+          <button
+            class="audit-toggle"
+            mat-button
+            [disabled]="busy()"
+            [attr.aria-pressed]="audit()"
+            (click)="toggleAudit()"
+          >
+            {{ i18n.text('jobAudit') }}
+          </button>
+        }
+      }
+      @if (loading()) {
+        <p role="status">{{ i18n.text('busy') }}</p>
+      }
+      @if (error(); as message) {
+        <p role="alert">{{ i18n.text(message) }}</p>
+      }
+      @if (mediaError(); as message) {
+        <p role="alert">{{ i18n.text(message) }}</p>
+      }
+      @if (mediaLoading()) {
+        <p role="status">{{ i18n.text('busy') }}</p>
+      }
+      @for (day of feed().days; track day.key) {
+        <div class="activity-day">
+          <h3 class="date-heading">
+            {{ day.date | date: 'mediumDate' : undefined : i18n.language() }}
+          </h3>
+          @for (entry of day.entries; track entry.id) {
+            @if (entry.type === 'summary') {
+              <details class="system-group">
+                <summary>
+                  <span class="summary-label">{{ summaryLabel(entry) }}</span>
+                  <span class="summary-context">
+                    @if (entry.events[0].visitSequence) {
+                      {{ i18n.text('visit') }} {{ entry.events[0].visitSequence }}
+                    }
+                  </span>
+                  <time [attr.datetime]="entry.events[0].recordedAt"
+                    >{{
+                      entry.events.at(-1)?.recordedAt
+                        | date: 'shortTime' : undefined : i18n.language()
+                    }}
+                    @if (entry.events.length > 1) {
+                      –
+                      {{
+                        entry.events[0].recordedAt | date: 'shortTime' : undefined : i18n.language()
+                      }}
+                    }
+                  </time>
+                </summary>
+                @for (event of entry.events; track event.id) {
+                  <app-job-activity-entry
+                    [value]="event"
+                    [jobId]="job().id"
+                    [history]="true"
+                    [evidenceAvailable]="canViewEvidence() && !removed(event)"
+                    [removable]="removable(event)"
+                    [busy]="busy() || blocked()"
+                    [media]="media()"
+                    (opened)="open(event, photoViewer)"
+                    (removed)="remove(event)"
+                    (mediaClosed)="clearMedia()"
+                  />
+                }
+              </details>
+            } @else if (entry.type === 'history') {
+              <app-job-activity-entry
+                [value]="entry.events[0]"
+                [jobId]="job().id"
+                [history]="true"
+                [evidenceAvailable]="canViewEvidence() && !removed(entry.events[0])"
+                [removable]="removable(entry.events[0])"
+                [busy]="busy() || blocked()"
+                [media]="media()"
+                (opened)="open(entry.events[0], photoViewer)"
+                (removed)="remove(entry.events[0])"
+                (mediaClosed)="clearMedia()"
+              />
+            } @else {
+              <app-job-activity-entry
+                [value]="entry.events[0]"
+                [jobId]="job().id"
+                [history]="false"
+                [evidenceAvailable]="canViewEvidence() && !removed(entry.events[0])"
+                [removable]="removable(entry.events[0])"
+                [busy]="busy() || blocked()"
+                [media]="media()"
+                (opened)="open(entry.events[0], photoViewer)"
+                (removed)="remove(entry.events[0])"
+                (mediaClosed)="clearMedia()"
+              />
+            }
+          }
+        </div>
+      } @empty {
+        @if (!loading() && !error()) {
+          <p class="activity-empty">
+            {{
+              i18n.text(
+                view() === 'updates'
+                  ? 'activityNoUpdates'
+                  : view() === 'history'
+                    ? 'activityNoHistory'
+                    : 'fieldNoActivity'
+              )
+            }}
+          </p>
+        }
+      }
+      @if (feed().remaining) {
+        <button class="older-activity" mat-stroked-button (click)="showOlder()">
+          {{ i18n.text('jobOlderActivity') }}
+        </button>
+      }
+    </section>
+  </div>
+  <aside class="context-column"><ng-content select="[job-context]" /></aside>
+</div>
+
+<ng-template #photoViewer>
+  @if (media(); as content) {
+    <h2 mat-dialog-title>{{ content.event.body || i18n.text('fieldViewPhoto') }}</h2>
+    <mat-dialog-content
+      ><img class="full-photo" [src]="content.url" [alt]="i18n.text('fieldAcceptedPhoto')"
+    /></mat-dialog-content>
+    <mat-dialog-actions align="end">
+      @if (removable(content.event)) {
+        <button
+          mat-button
+          class="destructive"
+          [disabled]="busy() || blocked()"
+          (click)="remove(content.event)"
+        >
+          {{ i18n.text('jobRemoveEvidence') }}
+        </button>
+      }
+      <button mat-button (click)="clearMedia()">{{ i18n.text('jobCloseMedia') }}</button>
+    </mat-dialog-actions>
+  }
+</ng-template>

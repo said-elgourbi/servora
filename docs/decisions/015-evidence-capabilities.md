@@ -1,11 +1,11 @@
 # ADR-015 — Evidence capabilities: per-kind evidence permissions and the Job photo routes
 
-**Status:** Accepted (product-owner decision, 2026-09-15; implemented by `docs/tracker/029-photo-evidence-phases.md` Phase 1)
+**Status:** Accepted (product-owner decision, 2026-09-15; implemented by `docs/tracker/shared/029-photo-evidence-phases.md` Phase 1)
 
 Date: 2026-09-15
-Tracker: `docs/tracker/029-photo-evidence-phases.md` (Phase 0 D1, D1b; Phase 1 implements them)
+Tracker: `docs/tracker/shared/029-photo-evidence-phases.md` (Phase 0 D1, D1b; Phase 1 implements them)
 Contract: `docs/api/job-photos.md` §2
-Predecessor of the feature: `docs/tracker/027-android-job-photo-updates.md`, `docs/api/job-photos.md`
+Predecessor of the feature: `docs/tracker/android/027-android-job-photo-updates.md`, `docs/api/job-photos.md`
 
 References: `BR-001`, `BR-004`, `BR-006`, `BR-007`, `BR-009`, `BR-011`, `BR-015`, `BR-027`, `BR-041`,
 `BR-042`, `ADR-012` (the same pattern for the Property capability set), `ADR-013` (the store evidence
@@ -14,7 +14,7 @@ travels to), `Project.md` §19, §31, `dev.md` §6, §7, §9, `qa.md` §4.3, §1
 ## Context
 
 `BR-015` and `BR-027` make a photo field evidence, and the first evidence slice
-(`docs/tracker/027-android-job-photo-updates.md`) implemented it end to end: the `job_photos` table, the
+(`docs/tracker/android/027-android-job-photo-updates.md`) implemented it end to end: the `job_photos` table, the
 object store behind `ADR-013`, `POST /jobs/:id/photos` and `GET /jobs/:id/photos/:photoId/content`, and
 the Android capture flow.
 
@@ -54,7 +54,7 @@ shape.
 
 **Created 2026-09-16**, by this ADR's own condition being met: the rules that accept a recording now
 exist (`BR-091`), so `evidence.audio.add` and the audio kind's own Manager-level `evidence.audio.remove`
-are created by `0012_job_audio_notes.sql` and implemented by `docs/tracker/035-android-audio-evidence.md`
+are created by `0012_job_audio_notes.sql` and implemented by `docs/tracker/android/035-android-audio-evidence.md`
 (decisions `ADR-018` A7). The code is the reserved one, unchanged.
 
 `evidence.view` and `evidence.photo.add` are independent: adding evidence does not grant reading it
@@ -117,7 +117,7 @@ Recorded rather than guessed (`BR-042`); tracker 029 carries them with the phase
    `evidence.audio.add` is therefore **created when the audio feature is implemented** (tracker 029
    Phase 9), not before — a capability for a kind nothing can add is still invented behaviour.
 2. Evidence scope — Job versus Visit (D2). **Decided 2026-09-15: Job-level; the domain document is corrected
-   with it** (`docs/tracker/029-photo-evidence-phases.md` D2).
+   with it** (`docs/tracker/shared/029-photo-evidence-phases.md` D2).
 3. A viewer, and any thumbnail or derived-object strategy (D4). **Decided:** the viewer landed in tracker 029
    Phase 4, the preview/caching strategy is `docs/decisions/016-android-image-stack-and-viewer-zoom.md`
    (D4b ✓, Coil 3), and server-derived thumbnails are **not built in v1** — `ADR-013` open question 3,

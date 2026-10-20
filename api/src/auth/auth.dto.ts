@@ -29,10 +29,7 @@ export interface AuthSessionDto {
  * Public view of the authenticated principal. It carries only the stable identity and
  * effective permission codes the client needs for permission-aware UI.
  */
-export interface AuthMeDto {
-  userId: string;
-  permissions: readonly string[];
-}
+export type { AuthMeDto } from '@servora/shared-types';
 
 export function toAuthSessionDto(session: AuthSession): AuthSessionDto {
   return {

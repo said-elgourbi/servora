@@ -64,6 +64,62 @@ interface JobDetailsApi {
         @Body request: ChangeJobStatusRequestDto,
     ): JobDetailsDto
 
+    /** `POST /jobs/{jobId}/quote/sent` — marks the current Assessment quote as sent. */
+    @POST("jobs/{jobId}/quote/sent")
+    suspend fun markQuoteSent(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Body request: MarkQuoteSentRequestDto,
+    ): JobDetailsDto
+
+    /** `POST /jobs/{jobId}/quote/required` — corrects an accidentally recorded sent quote. */
+    @POST("jobs/{jobId}/quote/required")
+    suspend fun markQuoteRequired(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Body request: CorrectQuoteToRequiredRequestDto,
+    ): JobDetailsDto
+
+    /** `POST /jobs/{jobId}/quote/approval` — records the customer's approval decision. */
+    @POST("jobs/{jobId}/quote/approval")
+    suspend fun markQuoteApproved(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Body request: MarkQuoteDecisionRequestDto,
+    ): JobDetailsDto
+
+    /** `POST /jobs/{jobId}/quote/rejection` — records the customer's rejection decision. */
+    @POST("jobs/{jobId}/quote/rejection")
+    suspend fun markQuoteRejected(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Body request: MarkQuoteDecisionRequestDto,
+    ): JobDetailsDto
+
+    /**
+     * `POST /jobs/{jobId}/documents` — replaces the current Assessment quote PDF.
+     *
+     * Quote PDFs are online-only for now: document replacement can reset a sent quote back to required,
+     * so the backend's refreshed Job read is needed before the app reports the result.
+     */
+    @Multipart
+    @POST("jobs/{jobId}/documents")
+    suspend fun uploadQuoteDocument(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+        @Part("documentType") documentType: RequestBody,
+        @Part("displayName") displayName: RequestBody?,
+        @Part file: MultipartBody.Part,
+    ): JobDetailsQuoteDocumentDto
+
+    /** `GET /jobs/{jobId}/documents/quote/content` — streams the current quote PDF. */
+    @Streaming
+    @GET("jobs/{jobId}/documents/quote/content")
+    suspend fun quoteDocumentContent(
+        @Header("Authorization") authorization: String,
+        @Path("jobId") jobId: String,
+    ): ResponseBody
+
     /** `PATCH /jobs/{jobId}/visits/{visitId}/schedule` — edits the Visit's schedule (`BR-073`). */
     @PATCH("jobs/{jobId}/visits/{visitId}/schedule")
     suspend fun rescheduleVisit(

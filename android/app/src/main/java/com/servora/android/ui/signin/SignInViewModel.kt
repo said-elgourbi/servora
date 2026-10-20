@@ -53,7 +53,7 @@ class SignInViewModel @Inject constructor(
 
     /**
      * Signs in with a local development account in one step, for the temporary dev shortcut on the
-     * sign-in screen (`docs/tracker/049-android-dev-sign-in-buttons.md`).
+     * sign-in screen (`docs/tracker/android/049-android-dev-sign-in-buttons.md`).
      *
      * It only prefills the form and reuses [onSubmit], so the attempt goes through exactly the same
      * validation, repository call and state handling as a typed one. There is no second

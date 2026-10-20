@@ -1,7 +1,7 @@
 {
   "name": "@servora/api",
   "version": "0.0.1",
-  "description": "Servora REST API — backend system of record (NestJS + PostgreSQL + Drizzle).",
+  "description": "Servora REST API \u2014 backend system of record (NestJS + PostgreSQL + Drizzle).",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
@@ -17,6 +17,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node --env-file-if-exists=../.env dist/main.js",
     "typecheck": "tsc --noEmit",
+    "firebase:check": "node --env-file-if-exists=../.env dist/push/check-firebase.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
@@ -32,13 +33,15 @@
     "@nestjs/platform-express": "^12.0.1",
     "argon2": "^0.45.1",
     "drizzle-orm": "^0.45.2",
+    "firebase-admin": "14.5.0",
     "jose": "^6.2.12",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "postgres": "^3.4.9",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "twilio": "^6.1.1"
+    "twilio": "^6.1.1",
+    "@servora/shared-types": "file:../packages/shared-types"
   },
   "devDependencies": {
     "@nestjs/cli": "^12.0.0",

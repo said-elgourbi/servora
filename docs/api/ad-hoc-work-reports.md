@@ -47,6 +47,10 @@ reconciled again, and no reopen/resubmission workflow exists in v1.
 
 Submission is idempotent by `clientOperationId`.
 
+A customer is required: submit a selected `customerId`, or provide all three nonblank
+`reportedCustomerName`, `reportedCustomerPhone` and `reportedCustomerAddress` fields.
+Incomplete customer details are rejected with `400`. Text fields are trimmed before storage.
+
 When the technician cannot identify the canonical Customer or Property, the report captures the facts as
 provenance only — never creating a Customer, Property or Job (`BR-AH-009`). The `reportedCustomerName`,
 `reportedCustomerPhone` and `reportedCustomerAddress` columns carry that provenance. When a Customer is
@@ -59,6 +63,51 @@ list.
 
 `GET /jobs/ad-hoc-work-reports/:reportId` reads one report with the same scoping: a reviewer reads any
 organization report, a reporter reads only their own, and any other report is reported as not found.
+
+### Resolve Customer and Property
+
+`POST /jobs/ad-hoc-work-reports/:reportId/resolve-location` attaches canonical records to a pending report
+before conversion. Supply exactly one of `existingCustomerId` or `newCustomer`, and exactly one of
+`existingPropertyId` or `newProperty`. New records use the same validated payloads as `POST /customers`
+and `POST /customers/:id/properties`. A new customer requires a new property.
+
+```json
+{
+  "newCustomer": {
+    "type": "COMPANY",
+    "displayName": "Maple Leaf Bakery",
+    "phone": "+16135550123",
+    "company": { "legalName": "Maple Leaf Bakery" }
+  },
+  "newProperty": {
+    "addressLine1": "210 Sparks Street",
+    "city": "Ottawa",
+    "province": "ON",
+    "postalCode": "K1P 5B4"
+  },
+  "expectedStatus": "PENDING",
+  "expectedVersion": 1
+}
+```
+
+The manager edits the reported name, phone and address as starting values, or selects an existing match.
+Every branch requires `visits.review_ad_hoc_work`, plus `customers.create` / `customers.view` for new /
+existing customers and `properties.create` / `properties.view` for new / existing properties. Existing
+records must be active, in the caller's organization, and the property must currently belong to the
+selected customer.
+
+The response is the updated report with an incremented version and status still `PENDING`. Original
+`reportedCustomer*` fields and review metadata are preserved. No job or visit is created until link or
+convert succeeds. Creation and attachment share a transaction under the report row lock. Both expected
+fields are required, so stale or concurrent retries return `409` without duplicate customers or properties.
+Once attached, creating another customer/property for that report is refused; existing selections can
+still be corrected. Android refreshes after network failures or conflicts to recover a successful response
+that was lost. Conversion then uses the updated report version; its row lock prevents duplicate jobs/visits.
+
+Manager selection uses `GET .../review-customer-options?q=<name-or-phone>` (review plus `customers.view`) and
+`GET .../review-property-options?customerId=<uuid>` (review plus `properties.view`). These have the same
+organization and active-record scope as the normal discovery reads. Customer matches include a phone
+number to help distinguish similar names. Technician-only access is refused.
 
 `POST /jobs/ad-hoc-work-reports/:reportId/link` links a pending report to an existing Job and creates a normal completed Work Visit from the reported work facts. Ad-hoc reports are always `WORK`: they preserve work already performed without a scheduled Visit and are not an assessment workflow.
 

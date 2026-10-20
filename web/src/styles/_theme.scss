@@ -1,0 +1,95 @@
+@use '@angular/material' as mat;
+
+// Source: docs/design/android-design-system.md. Overrides retain the shared role pairs.
+html {
+  color-scheme: light;
+  --app-success-container: #b7f0b1;
+  --app-on-success-container: #002204;
+  @include mat.theme(
+    (
+      color: (
+        primary: mat.$azure-palette,
+        theme-type: light,
+      ),
+      typography: 'Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif',
+      density: 0,
+    )
+  );
+  @include mat.theme-overrides(
+    (
+      primary: #2b5ea7,
+      on-primary: #ffffff,
+      primary-container: #c5d9f5,
+      on-primary-container: #0d2f62,
+      secondary: #f0f2f5,
+      on-secondary: #394460,
+      secondary-container: #e0e4ec,
+      on-secondary-container: #2e3a5a,
+      tertiary: #4a6080,
+      on-tertiary: #ffffff,
+      tertiary-container: #dae5f2,
+      on-tertiary-container: #1a2e44,
+      background: #f1f3f8,
+      on-background: #131720,
+      surface: #ffffff,
+      on-surface: #131720,
+      surface-container-lowest: #ffffff,
+      surface-container-low: #f7f8fa,
+      surface-container: #eef0f5,
+      surface-container-high: #e6e9ee,
+      surface-container-highest: #dfe3e9,
+      on-surface-variant: #52617a,
+      outline: #d0d5dd,
+      outline-variant: #e4e7ec,
+      error: #c62828,
+      on-error: #ffffff,
+      error-container: #ffdad6,
+      on-error-container: #410002,
+    )
+  );
+}
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --app-success-container: #1a4a2a;
+  --app-on-success-container: #b7f0b1;
+  @include mat.theme(
+    (
+      color: (
+        primary: mat.$azure-palette,
+        theme-type: dark,
+      ),
+    )
+  );
+  @include mat.theme-overrides(
+    (
+      primary: #6b9bd9,
+      on-primary: #001b3d,
+      primary-container: #1e3a5f,
+      on-primary-container: #c5d9f5,
+      secondary: #1a1a1a,
+      on-secondary: #b8c4d8,
+      secondary-container: #2a2a2a,
+      on-secondary-container: #d0dae8,
+      tertiary: #8fafc8,
+      on-tertiary: #001525,
+      tertiary-container: #1e3044,
+      on-tertiary-container: #b8cce4,
+      background: #000000,
+      on-background: #e8eaf0,
+      surface: #0a0a0a,
+      on-surface: #e8eaf0,
+      surface-container-lowest: #050505,
+      surface-container-low: #0f0f0f,
+      surface-container: #141414,
+      surface-container-high: #1a1a1a,
+      surface-container-highest: #212121,
+      on-surface-variant: #a8b4cc,
+      outline: #3a3a3a,
+      outline-variant: #2a2a2a,
+      error: #ff6b6b,
+      on-error: #3d0000,
+      error-container: #5c1a1a,
+      on-error-container: #ffdad6,
+    )
+  );
+}

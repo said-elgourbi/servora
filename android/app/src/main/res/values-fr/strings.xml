@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="ad_hoc_resolve_location">Identifier le client et la propriété</string>
+    <string name="ad_hoc_new_customer">Créer un client</string>
+    <string name="ad_hoc_existing_customer">Client existant</string>
+    <string name="ad_hoc_individual">Particulier</string>
+    <string name="ad_hoc_company">Entreprise</string>
+    <string name="ad_hoc_customer_name">Nom du client</string>
+    <string name="ad_hoc_first_name">Prénom</string>
+    <string name="ad_hoc_last_name">Nom de famille</string>
+    <string name="ad_hoc_existing_property">Propriété existante</string>
+    <string name="ad_hoc_new_property">Créer une propriété</string>
+    <string name="ad_hoc_street">Adresse signalée / rue</string>
+    <string name="ad_hoc_unit">Unité</string>
+    <string name="ad_hoc_city">Ville</string>
+    <string name="ad_hoc_postal_code">Code postal</string>
+    <string name="ad_hoc_location_cancel">Annuler</string>
+    <string name="ad_hoc_location_retry">Réessayer</string>
+    <string name="ad_hoc_customer_search">Nom ou téléphone du client</string>
     <!--
       French sign-in strings (`Project.md` §10, `BR-028`).
 
@@ -106,15 +123,39 @@
     <string name="nav_settings">Réglages</string>
     <!-- Le contrôle de retour d'un écran secondaire est une icône (`BR-028`). -->
     <string name="nav_back">Retour</string>
+    <string name="settings_profile_initials" translatable="false">SV</string>
+    <string name="settings_profile_name">Compte Servora</string>
+    <string name="settings_profile_subtitle">Profil et préférences</string>
+    <string name="settings_appearance_title">Apparence</string>
+    <string name="settings_account_title">Compte</string>
+    <string name="settings_notifications_title">Notifications</string>
+    <string name="notification_channel_assignments">Affectations de visites</string>
+    <string name="notification_permission_available">Les notifications Android sont autorisées sur cet appareil.</string>
+    <string name="notification_permission_unavailable">Les notifications Android sont bloquées ou leur autorisation n’a pas été accordée.</string>
+    <string name="notification_permission_action">Autoriser les notifications sur cet appareil</string>
+    <string name="notification_permission_explanation">Autorisez Servora à vous avertir des affectations de visites sur cet appareil. Vous pouvez modifier séparément l’autorisation Android et votre préférence Servora à tout moment.</string>
+    <string name="notification_permission_continue">Continuer</string>
+    <string name="notification_permission_later">Plus tard</string>
+    <string name="settings_notifications_on">Activées</string>
+    <string name="settings_notifications_off">Désactivées</string>
     <string name="settings_sign_out">Se déconnecter</string>
+    <string name="settings_version" translatable="false">Servora</string>
     <string name="home_attention_title">À traiter</string>
     <string name="home_attention_all_clear_title">Vous êtes à jour</string>
     <string name="home_attention_all_clear_detail">Rien ne requiert votre attention pour le moment.</string>
     <string name="home_attention_overdue_title">L\'intervention n° %1$d est en retard</string>
+    <string name="home_attention_stale_started_title">L\'intervention n° %1$d a une visite non terminée</string>
+    <string name="home_visit_stale_started">À traiter : visite encore ouverte depuis un jour précédent</string>
     <string name="home_attention_scheduling_title">L\'intervention n° %1$d doit être planifiée</string>
     <string name="home_attention_follow_up_title">L\'intervention n° %1$d nécessite une visite de suivi</string>
     <string name="home_attention_parts_title">L\'intervention n° %1$d attend des pièces</string>
     <string name="home_attention_unable_to_complete_title">L\'intervention n° %1$d n\'a pas pu être réalisée</string>
+    <string name="home_attention_work_recommended_title">L\'intervention n° %1$d a un travail recommandé</string>
+    <string name="home_attention_quote_required_title">L\'intervention n° %1$d nécessite une soumission</string>
+    <string name="home_attention_customer_decision_pending_title">L\'intervention n° %1$d attend l\'approbation de la soumission</string>
+    <string name="home_attention_work_ready_to_schedule_title">L\'intervention n° %1$d est prête à planifier les travaux</string>
+    <string name="home_attention_cancellation_required_title">L\'intervention n° %1$d nécessite une révision d\'annulation</string>
+    <string name="home_attention_reassessment_title">L\'intervention n° %1$d nécessite une autre évaluation</string>
     <string name="home_attention_detail_format">%1$s · %2$s</string>
     <string name="home_attention_scheduled">Prévue %1$s</string>
     <string name="home_attention_open">Ouvrir l\'intervention</string>
@@ -298,11 +339,17 @@
     -->
     <string name="technician_schedule_tab_schedule">Horaire</string>
     <string name="technician_schedule_tab_requests">Demandes de visite</string>
+    <string name="technician_schedule_tab_ad_hoc_reports">Signalements</string>
     <string name="technician_requests_loading">Chargement de vos demandes…</string>
     <string name="technician_requests_error_title">Impossible de charger vos demandes</string>
     <string name="technician_requests_unrefreshed">Impossible d’actualiser vos demandes.</string>
     <string name="technician_requests_empty_title">Aucune demande</string>
     <string name="technician_requests_empty_detail">Vous n’avez pas demandé d’autre visite.</string>
+    <string name="technician_ad_hoc_reports_section">Travail non planifié signalé</string>
+    <string name="technician_ad_hoc_reports_error_title">Impossible de charger vos signalements</string>
+    <string name="technician_ad_hoc_reports_unrefreshed">Impossible d’actualiser vos signalements.</string>
+    <string name="technician_ad_hoc_reports_empty_title">Aucun signalement</string>
+    <string name="technician_ad_hoc_reports_empty_detail">Vous n’avez signalé aucun travail non planifié.</string>
     <string name="technician_requests_proposed">Vous avez proposé · %1$s</string>
     <string name="technician_requests_proposed_none">Vous n’avez proposé aucun moment</string>
     <string name="technician_request_job">Intervention no %1$d · %2$s</string>
@@ -334,7 +381,7 @@
     <string name="technician_request_answer_failed">La réponse n’a pas été consignée — la demande est inchangée.</string>
     <string name="technician_ad_hoc_report_action">Signaler du travail non planifié</string>
     <string name="technician_ad_hoc_report_title">Signaler du travail non planifié</string>
-    <string name="technician_ad_hoc_report_customer">Client, s’il est connu</string>
+    <string name="technician_ad_hoc_report_customer">Client</string>
     <string name="technician_ad_hoc_report_property">Propriété</string>
     <string name="technician_ad_hoc_report_outcome">Résultat</string>
     <string name="technician_ad_hoc_report_summary">Ce qui s’est passé</string>
@@ -344,6 +391,8 @@
     <string name="technician_ad_hoc_report_failed">Le rapport n’a pas pu être envoyé.</string>
     <string name="technician_ad_hoc_report_queued">Rapport enregistré. Il sera envoyé dès que vous serez de nouveau en ligne.</string>
     <string name="technician_ad_hoc_report_problem_summary">Décrivez ce qui s’est passé avant d’envoyer.</string>
+    <string name="technician_ad_hoc_report_problem_customer">Choisissez un client ou sélectionnez « Je ne trouve pas le client ».</string>
+    <string name="technician_ad_hoc_report_problem_customer_details">Saisissez le nom, le téléphone et l’adresse du client.</string>
     <string name="technician_ad_hoc_report_work_window">Quand le travail a eu lieu</string>
     <string name="technician_ad_hoc_report_unknown_customer">Je ne trouve pas le client</string>
     <string name="technician_ad_hoc_report_use_customer_search">Rechercher plutôt le client</string>
@@ -354,6 +403,56 @@
     <string name="technician_ad_hoc_report_property_unnamed">Propriété sans nom</string>
     <string name="technician_ad_hoc_report_related_work">Travail lié, le cas échéant</string>
     <string name="technician_ad_hoc_report_no_related_work">Aucun travail lié n’est répertorié pour ce client.</string>
+
+    <!-- Ad-hoc work report review: the manager Work view lane and its review surface (`BR-AH-002`). -->
+    <string name="work_tab_ad_hoc_reports_count">Rapports · %1$d</string>
+    <string name="schedule_empty_ad_hoc_reports_title">Aucun rapport à examiner</string>
+    <string name="schedule_empty_ad_hoc_reports_detail">Le travail signalé sans visite enregistrée apparaît ici pour rapprochement.</string>
+    <string name="ad_hoc_report_unknown_customer">Client inconnu</string>
+    <string name="ad_hoc_report_unknown_location">Emplacement inconnu</string>
+    <string name="ad_hoc_report_detail_title">Rapport de travail non planifié</string>
+    <string name="ad_hoc_report_status_label">Statut</string>
+    <string name="ad_hoc_report_status_pending">En attente d’examen</string>
+    <string name="ad_hoc_report_status_linked">Lié à un travail</string>
+    <string name="ad_hoc_report_status_converted">Travail créé</string>
+    <string name="ad_hoc_report_status_rejected">Rejeté</string>
+    <string name="ad_hoc_report_location_label">Emplacement</string>
+    <string name="ad_hoc_report_known_job_label">Travail lié</string>
+    <string name="ad_hoc_report_known_job_value">Travail n° %1$d · %2$s</string>
+    <string name="ad_hoc_report_known_job_number_only">Travail n° %1$d</string>
+    <string name="ad_hoc_report_window_label">Quand le travail a eu lieu</string>
+    <string name="ad_hoc_report_outcome_label">Résultat</string>
+    <string name="ad_hoc_report_summary_label">Ce qui s’est passé</string>
+    <string name="ad_hoc_report_notes_label">Notes</string>
+    <string name="ad_hoc_report_reported_phone_label">Téléphone signalé</string>
+    <string name="ad_hoc_report_review_note_label">Note d’examen</string>
+    <string name="ad_hoc_report_open_job">Ouvrir le travail</string>
+    <string name="ad_hoc_report_link_action">Lier à un travail</string>
+    <string name="ad_hoc_report_convert_action">Créer un travail</string>
+    <string name="ad_hoc_report_reject_action">Rejeter le rapport</string>
+    <string name="ad_hoc_report_cancel">Annuler</string>
+    <string name="ad_hoc_report_reject_title">Rejeter le rapport</string>
+    <string name="ad_hoc_report_reject_message">Aucun travail ni visite n’est créé et le rapport est fermé. Ce que vous écrivez est consigné comme motif du refus.</string>
+    <string name="ad_hoc_report_reject_note">Pourquoi est-il rejeté?</string>
+    <string name="ad_hoc_report_reject_confirm">Rejeter</string>
+    <string name="ad_hoc_report_link_title">Lier au travail</string>
+    <string name="ad_hoc_report_link_message">Ce rapport est lié au travail n° %1$d · %2$s et sa visite terminée est consignée à partir du travail signalé.</string>
+    <string name="ad_hoc_report_link_message_number_only">Ce rapport est lié au travail n° %1$d et sa visite terminée est consignée à partir du travail signalé.</string>
+    <string name="ad_hoc_report_link_note">Note (facultative)</string>
+    <string name="ad_hoc_report_link_confirm">Lier</string>
+    <string name="ad_hoc_report_link_search_label">Rechercher par numéro ou titre de travail</string>
+    <string name="ad_hoc_report_link_jobs_failed">Impossible de charger les travaux.</string>
+    <string name="ad_hoc_report_link_no_jobs">Aucun travail à lier.</string>
+    <string name="ad_hoc_report_convert_title">Créer un travail</string>
+    <string name="ad_hoc_report_convert_message">Un nouveau travail est créé pour le client et la propriété signalés, et sa visite terminée est consignée à partir du travail signalé.</string>
+    <string name="ad_hoc_report_convert_title_label">Titre du travail</string>
+    <string name="ad_hoc_report_convert_description_label">Description (facultative)</string>
+    <string name="ad_hoc_report_convert_note_label">Note (facultative)</string>
+    <string name="ad_hoc_report_convert_confirm">Créer le travail</string>
+    <string name="ad_hoc_report_review_failed">La décision n’a pas été consignée — le rapport est inchangé.</string>
+    <string name="ad_hoc_report_rejected">Rapport rejeté.</string>
+    <string name="ad_hoc_report_detail_failed_title">Le rapport n’a pas pu être lu.</string>
+    <string name="ad_hoc_report_detail_unavailable">Ce rapport n’est pas disponible.</string>
     <!--
       L’écran de détail d’une demande : une des demandes du technicien, ouverte en touchant sa ligne
       dans la liste des demandes. Une demande est une proposition d’autre visite (`BR-FV-002`) : l’écran
@@ -633,6 +732,7 @@
     <!-- Rôles d\'assignation (`BR-068`). Une visite avec des techniciens a exactement un responsable. -->
     <string name="assignment_role_lead">Responsable</string>
     <string name="assignment_role_technician">Technicien</string>
+    <string name="assignment_role_unknown">Rôle non précisé</string>
 
     <!--
       Détails de l\'intervention (`BR-021`, `BR-058`, `BR-068`, `BR-081`).
@@ -669,6 +769,49 @@
       d'accès ne soit pas enfouie parmi les métadonnées.
     -->
     <string name="job_details_location_label">Lieu</string>
+    <string name="job_details_quote_label">Soumission</string>
+    <string name="job_details_quote_status_label">Statut de la soumission</string>
+    <string name="job_details_quote_source_visit_label">Visite d’évaluation</string>
+    <string name="job_details_quote_sent_label">Envoyée</string>
+    <string name="job_details_quote_reference_label">Référence</string>
+    <string name="job_details_quote_decision_label">Décision consignée</string>
+    <string name="job_details_quote_document_label">PDF courant</string>
+    <string name="job_details_quote_document_default_name">PDF de soumission</string>
+    <string name="job_details_quote_document_version_label">Version du PDF</string>
+    <string name="job_details_quote_document_version_format">Version %1$d</string>
+    <string name="job_details_quote_document_size_label">Taille du PDF</string>
+    <string name="job_details_quote_no_document">Aucun PDF de soumission joint.</string>
+    <string name="job_details_quote_allowed_actions_label">Actions disponibles</string>
+    <string name="job_details_quote_state_required">Soumission requise</string>
+    <string name="job_details_quote_state_sent">En attente de la décision du client</string>
+    <string name="job_details_quote_state_approved">Soumission approuvée</string>
+    <string name="job_details_quote_state_rejected">Soumission refusée</string>
+    <string name="job_details_quote_action_upload_document">Téléverser le PDF</string>
+    <string name="job_details_quote_action_attach_document">Joindre le PDF</string>
+    <string name="job_details_quote_action_replace_document">Remplacer</string>
+    <string name="job_details_quote_action_view_document">Voir le devis</string>
+    <string name="job_details_quote_action_record_decision">Enregistrer la décision</string>
+    <string name="job_details_quote_action_undo_sent">Annuler l’envoi de la soumission</string>
+    <string name="job_details_quote_action_schedule_work_visit">Planifier la visite de travail</string>
+    <string name="job_details_quote_action_cancel_job">Annuler le travail</string>
+    <string name="job_details_quote_action_more">Plus</string>
+    <string name="job_details_quote_decision_approved">Approuvée</string>
+    <string name="job_details_quote_decision_rejected">Refusée</string>
+    <string name="job_details_quote_document_summary_format">%1$s · %2$s</string>
+    <string name="job_details_quote_action_read_document">Ouvrir le PDF</string>
+    <string name="job_details_quote_action_mark_sent">Enregistrer comme envoyée</string>
+    <string name="job_details_quote_action_mark_approved">Marquer approuvée</string>
+    <string name="job_quote_document_uploaded">PDF de soumission téléversé.</string>
+    <string name="job_quote_document_opened">PDF de soumission ouvert.</string>
+    <string name="job_quote_document_error_not_allowed">Votre rôle ne permet pas de gérer les PDF de soumission pour ce travail.</string>
+    <string name="job_quote_document_error_not_pdf">Choisissez un document PDF.</string>
+    <string name="job_quote_document_error_not_read">Ce PDF n’a pas pu être lu sur cet appareil.</string>
+    <string name="job_quote_document_error_not_available">Aucun PDF de soumission courant n’est disponible.</string>
+    <string name="job_quote_document_error_unreachable">Les PDF de soumission exigent le serveur. Connectez-vous et réessayez.</string>
+    <string name="job_quote_document_error_open_failed">Le PDF de soumission n’a pas pu être ouvert.</string>
+    <string name="job_quote_document_error_no_viewer">Aucune application sur cet appareil ne peut ouvrir les PDF.</string>
+    <string name="job_quote_document_error_failed">L’action sur le PDF de soumission n’a pas pu être terminée.</string>
+    <string name="job_details_quote_action_mark_rejected">Marquer refusée</string>
     <string name="job_details_contacts_label">Contacts</string>
     <plurals name="job_details_customer_other_contacts">
         <item quantity="one">%1$d autre contact</item>
@@ -704,8 +847,8 @@
     <string name="job_details_no_selected_visit_detail">Cette intervention n\'a encore aucune visite planifiée.</string>
     <string name="job_details_visit_activity_label">Activité de la visite</string>
     <string name="job_details_visit_activity_empty">Rien n\'a encore été consigné pour cette visite.</string>
-    <string name="job_details_job_updates_label">Mises à jour générales de l\'intervention</string>
-    <string name="job_details_job_updates_empty">Aucune mise à jour générale pour l\'instant.</string>
+    <string name="job_details_job_updates_label">Historique de l\'intervention</string>
+    <string name="job_details_job_updates_empty">Aucun historique de l\'intervention pour l\'instant.</string>
 
     <!--
       Activité de l'intervention (`BR-080`) : la chronologie unifiée de l'intervention, la plus
@@ -722,6 +865,7 @@
       pareil, et la date énonce ce pour quoi le groupe existait (`BR-052`, `BR-072`).
     -->
     <string name="job_activity_visit_title_format">Visite %1$d · %2$s</string>
+    <string name="job_activity_visit_ad_hoc_badge">Travail ponctuel terminé</string>
     <!--
       Ce qu'un groupe de visite replié énonce sous son titre : où la tentative s'est rendue et ce qu'elle a
       donné — « Terminée · Suivi requis » (`BR-074`, `BR-078`, `BR-080`). Le statut est celui de la visite
@@ -732,11 +876,8 @@
     <string name="job_activity_visit_expand_label">Développer la visite %1$d</string>
     <string name="job_activity_visit_collapse_label">Réduire la visite %1$d</string>
     <!-- Le groupe qui contient les mises à jour propres à l'intervention, sans visite (`BR-080`). -->
-    <string name="job_activity_general_expand_label">Développer les mises à jour générales</string>
-    <string name="job_activity_general_collapse_label">Réduire les mises à jour générales</string>
-    <string name="job_activity_admin_label">Historique administratif · %1$d</string>
-    <string name="job_activity_admin_expand_label">Développer l’historique administratif</string>
-    <string name="job_activity_admin_collapse_label">Réduire l’historique administratif</string>
+    <string name="job_activity_general_expand_label">Développer l’historique de l’intervention</string>
+    <string name="job_activity_general_collapse_label">Réduire l’historique de l’intervention</string>
     <!-- L'état qu'un groupe replié ou déployé annonce à un lecteur d'écran (`BR-028`). -->
     <string name="job_activity_group_expanded">Déployé</string>
     <string name="job_activity_group_collapsed">Replié</string>
@@ -788,6 +929,18 @@
     <string name="job_activity_outcome_needs_parts">Pièces requises</string>
     <string name="job_activity_outcome_needs_follow_up">Suivi requis</string>
     <string name="job_activity_outcome_unable_to_complete">Impossible de terminer</string>
+    <string name="job_activity_outcome_no_work_required">Aucun travail requis</string>
+    <string name="job_activity_outcome_work_recommended">Travail recommandé</string>
+    <string name="job_activity_outcome_quote_required">Soumission requise</string>
+    <string name="job_activity_outcome_unable_to_assess">Impossible d’évaluer</string>
+    <string name="job_activity_quote_required">Soumission requise</string>
+    <string name="job_activity_quote_sent">Soumission envoyée</string>
+    <string name="job_activity_quote_approved">Soumission approuvée</string>
+    <string name="job_activity_quote_rejected">Soumission refusée</string>
+    <string name="job_activity_quote_corrected">Décision de soumission corrigée</string>
+    <string name="job_activity_quote_updated">Soumission mise à jour</string>
+    <string name="job_activity_quote_document_uploaded">PDF de soumission téléversé</string>
+    <string name="job_activity_quote_document_uploaded_detail">%1$s · version %2$d</string>
 
     <!--
       Job photo evidence (`BR-015`, `BR-027`). The phase codes are stable domain values; only these
@@ -922,6 +1075,7 @@
     <string name="job_action_done_reschedule">Visite replanifiée avec succès</string>
     <string name="job_action_done_assignment">Équipe de la visite mise à jour</string>
     <string name="job_action_done_activity_text">Mise à jour ajoutée</string>
+    <string name="job_action_done_quote_workflow">Soumission mise à jour</string>
     <string name="job_action_error_unauthenticated">Votre session est terminée. Reconnectez-vous.</string>
     <string name="job_action_error_forbidden">Vous n’avez pas la permission de modifier les interventions.</string>
     <string name="job_action_error_not_found">Cette intervention ou cette visite n’est plus disponible.</string>
@@ -965,12 +1119,18 @@
     <string name="job_visit_complete_outcome_needs_followup_support">Une autre visite est requise pour terminer le travail.</string>
     <string name="job_visit_complete_outcome_needs_parts_support">Le travail nécessite des pièces avant de pouvoir être terminé.</string>
     <string name="job_visit_complete_outcome_unable_support">Le travail n’a pas pu être fait. Indiquez pourquoi.</string>
+    <string name="job_visit_complete_outcome_no_work_required_support">Rien ne doit être fait.</string>
+    <string name="job_visit_complete_outcome_work_recommended_support">Un travail est recommandé. Le bureau décidera de la suite.</string>
+    <string name="job_visit_complete_outcome_quote_required_support">Une soumission est requise avant de procéder au travail.</string>
+    <string name="job_visit_complete_outcome_unable_to_assess_support">L’évaluation n’a pas pu être faite. Indiquez pourquoi.</string>
     <string name="job_visit_complete_summary_label">Résumé</string>
     <string name="job_visit_complete_summary_placeholder">Que s’est-il passé sur place ?</string>
     <string name="job_visit_complete_summary_required">Obligatoire : indiquez le résultat de la visite.</string>
     <string name="job_visit_complete_reason_label">Motif</string>
     <string name="job_visit_complete_reason_placeholder">Pourquoi le travail n’a-t-il pas pu être terminé ?</string>
+    <string name="job_visit_complete_unable_to_assess_placeholder">Pourquoi l’évaluation n’a-t-elle pas pu être faite ?</string>
     <string name="job_visit_complete_reason_required">Obligatoire : indiquez pourquoi le travail n’a pas pu être terminé.</string>
+    <string name="job_visit_complete_unable_to_assess_required">Obligatoire : indiquez pourquoi l’évaluation n’a pas pu être faite.</string>
     <string name="job_visit_complete_confirm">Terminer la visite</string>
     <string name="job_visit_pending_title">En attente de synchronisation</string>
     <string name="job_visit_pending_action">Visite → %1$s</string>
@@ -1029,6 +1189,9 @@
     <string name="schedule_visit_problem_end">L’heure de fin doit être après l’heure de début.</string>
     <string name="schedule_visit_problem_crew">Choisissez au moins un technicien.</string>
     <string name="schedule_visit_problem_lead">Choisissez le technicien qui dirige la visite.</string>
+    <string name="schedule_visit_purpose_label">Objet</string>
+    <string name="visit_purpose_work">Travail</string>
+    <string name="visit_purpose_assessment">Évaluation</string>
 
     <!--
       Demander une visite de suivi (`BR-FV-001`, `BR-FV-003`). Le formulaire demande la plage proposée,
@@ -1151,4 +1314,6 @@
     <string name="job_create_error_conflict">Le client ou la propriété ne peut pas recevoir de nouveaux travaux pour le moment.</string>
     <string name="job_create_error_network">Vérifiez votre réseau et réessayez.</string>
     <string name="job_create_error_server">L’intervention n’a pas pu être créée. Veuillez réessayer.</string>
+    <string name="notification_assignment_title">Nouvelle affectation de visite</string>
+    <string name="notification_assignment_body">Une visite vous a été affectée. Ouvrez Servora pour la consulter.</string>
 </resources>

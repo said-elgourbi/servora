@@ -1,0 +1,123 @@
+<section [appPageTitle]="i18n.text(id() ? 'customerEdit' : 'customerNew')">
+  <a class="back-link" [routerLink]="id() ? ['/work/customers', id()] : ['/work/customers']"
+    >← {{ i18n.text('customerBack') }}</a
+  >
+  <h1>{{ i18n.text(id() ? 'customerEdit' : 'customerNew') }}</h1>
+  <p class="muted">{{ i18n.text('customerOnlineOnly') }}</p>
+  @if (loading()) {
+    <p role="status">{{ i18n.text('busy') }}</p>
+  }
+  @if (error(); as message) {
+    <div role="alert" class="notice">
+      {{ i18n.text(message) }}
+      @if (id() && !loaded() && allowed()) {
+        <button mat-stroked-button (click)="refresh()">{{ i18n.text('retry') }}</button>
+      }
+    </div>
+  }
+  @if (allowed() && !loading() && (!id() || loaded())) {
+    <form [formGroup]="form" (ngSubmit)="save()">
+      <fieldset [disabled]="busy()" class="editor">
+        <legend>{{ i18n.text('customerInformation') }}</legend>
+        <label
+          >{{ i18n.text('customerType')
+          }}<select formControlName="type" [attr.aria-label]="i18n.text('customerType')">
+            <option value="INDIVIDUAL">{{ i18n.text('customerIndividual') }}</option>
+            <option value="COMPANY">{{ i18n.text('customerCompany') }}</option>
+          </select></label
+        >
+        <mat-form-field
+          ><mat-label>{{ i18n.text('customerDisplayName') }}</mat-label
+          ><input matInput formControlName="displayName" maxlength="255" required /><mat-error>{{
+            i18n.text('customerRequired')
+          }}</mat-error></mat-form-field
+        >
+        @if (type() === 'INDIVIDUAL') {
+          <mat-form-field
+            ><mat-label>{{ i18n.text('customerFirstName') }}</mat-label
+            ><input matInput formControlName="firstName" maxlength="100" required /><mat-error>{{
+              i18n.text('customerRequired')
+            }}</mat-error></mat-form-field
+          >
+          <mat-form-field
+            ><mat-label>{{ i18n.text('customerLastName') }}</mat-label
+            ><input matInput formControlName="lastName" maxlength="100" required /><mat-error>{{
+              i18n.text('customerRequired')
+            }}</mat-error></mat-form-field
+          >
+          <mat-form-field
+            ><mat-label>{{ i18n.text('customerDateOfBirth') }}</mat-label
+            ><input matInput type="date" formControlName="dateOfBirth"
+          /></mat-form-field>
+        } @else {
+          <mat-form-field
+            ><mat-label>{{ i18n.text('customerLegalName') }}</mat-label
+            ><input matInput formControlName="legalName" maxlength="255" required /><mat-error>{{
+              i18n.text('customerRequired')
+            }}</mat-error></mat-form-field
+          >
+          <mat-form-field
+            ><mat-label>{{ i18n.text('customerBusinessName') }}</mat-label
+            ><input matInput formControlName="businessName" maxlength="255"
+          /></mat-form-field>
+          <mat-form-field
+            ><mat-label>{{ i18n.text('customerTaxNumber') }}</mat-label
+            ><input matInput formControlName="taxNumber" maxlength="100"
+          /></mat-form-field>
+        }
+        <mat-form-field
+          ><mat-label>{{ i18n.text('email') }}</mat-label
+          ><input matInput type="email" formControlName="email" maxlength="255" /><mat-error>{{
+            i18n.text('emailInvalid')
+          }}</mat-error></mat-form-field
+        >
+        <mat-form-field
+          ><mat-label>{{ i18n.text('phone') }}</mat-label
+          ><input matInput type="tel" formControlName="phone" maxlength="50"
+        /></mat-form-field>
+        <label
+          >{{ i18n.text('customerLanguage')
+          }}<select formControlName="language" [attr.aria-label]="i18n.text('customerLanguage')">
+            <option value="en-CA">English</option>
+            <option value="fr-CA">Français</option>
+          </select></label
+        >
+        <label
+          >{{ i18n.text('customerPreferredContact')
+          }}<select
+            formControlName="preferredContactMethod"
+            [attr.aria-label]="i18n.text('customerPreferredContact')"
+          >
+            <option value="NONE">{{ i18n.text('customerNoPreference') }}</option>
+            <option value="EMAIL">{{ i18n.text('email') }}</option>
+            <option value="PHONE">{{ i18n.text('phone') }}</option>
+            <option value="SMS">{{ i18n.text('customerSms') }}</option>
+          </select></label
+        >
+        @if (id()) {
+          <label
+            >{{ i18n.text('customerStatus')
+            }}<select formControlName="status" [attr.aria-label]="i18n.text('customerStatus')">
+              <option value="ACTIVE">{{ i18n.text('customerActive') }}</option>
+              <option value="INACTIVE">{{ i18n.text('customerInactive') }}</option>
+            </select></label
+          >
+        }
+        <mat-form-field class="wide"
+          ><mat-label>{{ i18n.text('customerNotes') }}</mat-label
+          ><textarea matInput formControlName="notes" maxlength="4000" rows="4"></textarea>
+        </mat-form-field>
+      </fieldset>
+      @if (attempted() && form.invalid) {
+        <p role="alert">{{ i18n.text('customerFormInvalid') }}</p>
+      }
+      <div class="actions">
+        <button mat-flat-button type="submit" [disabled]="busy() || uncertain()">
+          {{ i18n.text(busy() ? 'customerSaving' : 'customerSave') }}</button
+        ><a mat-button [routerLink]="id() ? ['/work/customers', id()] : ['/work/customers']">{{
+          i18n.text('cancel')
+        }}</a>
+      </div>
+    </form>
+  }
+</section>

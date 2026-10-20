@@ -10,8 +10,8 @@ event vocabulary), `BR-028` (stable codes, localized labels) and `docs/domain/jo
 
 References: `BR-001`, `BR-006`, `BR-007`, `BR-020`, `BR-041`, `BR-042`, `BR-058`, `BR-067`, `BR-068`,
 `BR-073`, `BR-074`, `BR-077`, `BR-078`, `BR-079`, `BR-080`, `BR-088`, `BR-089`,
-`docs/tracker/022-android-job-activity-timeline.md`, `docs/tracker/029-photo-evidence-phases.md`,
-`docs/tracker/048-android-job-activity-visit-outcome.md`.
+`docs/tracker/android/022-android-job-activity-timeline.md`, `docs/tracker/shared/029-photo-evidence-phases.md`,
+`docs/tracker/android/048-android-job-activity-visit-outcome.md`.
 
 ## 1. Conventions
 
@@ -124,7 +124,7 @@ derived from this read: it travels on the Visit itself, as `visits[].outcomeCode
 phase the technician chose (`BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK`) — a stable code, not a label
 (`BR-028`, `BR-041`) — and a photo's note travels in `body`, the same field a text update uses.
 `JOB_PHOTO_ADDED` is **Visit-level**: a photo is recorded against the Visit it was taken during
-(`BR-047`, `BR-080`), so its `visitSequence` names that Visit (`docs/tracker/056-evidence-belongs-to-a-visit.md`).
+(`BR-047`, `BR-080`), so its `visitSequence` names that Visit (`docs/tracker/shared/056-evidence-belongs-to-a-visit.md`).
 A photo recorded before that link existed carries no Visit, which is the only case in which an evidence
 entry is Job-level.
 
@@ -219,7 +219,7 @@ assigned to is `404` for the same reason (`ADR-019` D2).
 
 ## 5. Open questions
 
-Recorded rather than guessed (`BR-042`); `docs/tracker/022-android-job-activity-timeline.md` carries
+Recorded rather than guessed (`BR-042`); `docs/tracker/android/022-android-job-activity-timeline.md` carries
 the same list with what each one blocks.
 
 1. **The `jobs.*` capability set** (`BR-006`, `BR-008`): this read is reached through `customers.view`

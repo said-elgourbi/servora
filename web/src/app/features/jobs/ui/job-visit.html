@@ -1,0 +1,67 @@
+@let visit = value();
+<article
+  class="visit"
+  [class.selected]="selected()"
+  [attr.aria-label]="i18n.text('visit') + ' ' + visit.sequence"
+>
+  <div class="visit-header">
+    <h3>
+      {{ i18n.text('visit') }} {{ visit.sequence
+      }}<span class="purpose">{{ visit.purposeCode | workLabel }}</span>
+    </h3>
+    <app-work-status [code]="visit.status" />
+  </div>
+  <div class="visit-facts">
+    <div class="fact">
+      <app-icon name="calendar" />
+      <div>
+        <span class="field-label">{{ i18n.text('visitSchedule') }}</span>
+        @if (visit.scheduledStart) {
+          <p>
+            {{ visit.scheduledStart | date: 'mediumDate' : undefined : i18n.language() }}
+          </p>
+          <span class="secondary-text"
+            >{{ visit.scheduledStart | date: 'shortTime' : undefined : i18n.language() }}
+            –
+            {{ visit.scheduledEnd | date: 'shortTime' : undefined : i18n.language() }}
+            @if (
+              (visit.scheduledStart | date: 'yyyy-MM-dd') !==
+              (visit.scheduledEnd | date: 'yyyy-MM-dd')
+            ) {
+              · {{ visit.scheduledEnd | date: 'mediumDate' : undefined : i18n.language() }}
+            }
+          </span>
+        } @else {
+          <p>{{ i18n.text('unscheduled') }}</p>
+        }
+      </div>
+    </div>
+    <div class="fact">
+      <app-icon name="people" />
+      <div>
+        <span class="field-label">{{ i18n.text('crew') }}</span>
+        <div class="crew-list">
+          @for (member of visit.technicians; track member.membershipId) {
+            <span class="crew-member"
+              ><span class="avatar" aria-hidden="true">{{
+                (member.name || i18n.text('unnamedMember')).slice(0, 1)
+              }}</span
+              >{{ member.name || i18n.text('unnamedMember') }}</span
+            >
+          } @empty {
+            <p>{{ i18n.text('noCrew') }}</p>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+  @if (visit.outcomeCode) {
+    <p class="outcome"><app-icon name="check" />{{ visit.outcomeCode | workLabel }}</p>
+  }
+  @for (code of attention(); track code) {
+    <p class="visit-attention">{{ code | workLabel }}</p>
+  }
+  @if (selected()) {
+    <div class="selected-label"><app-icon name="check" />{{ i18n.text('selectedVisit') }}</div>
+  }
+</article>

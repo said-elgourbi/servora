@@ -1,7 +1,7 @@
 # ADR-013 — Local object storage (MinIO) and the S3-only application contract
 
 - Status: Accepted (product-owner decision, 2026-09-14)
-- Milestone: docs/tracker/023-object-storage-minio.md
+- Milestone: docs/tracker/shared/023-object-storage-minio.md
 
 References: `BR-001`, `BR-007`, `BR-015`, `BR-027`, `BR-041`, `BR-042`, `dev.md` §4, §5, §6, §11
 and §14, `Project.md` §13, §14, §16 and §23, `qa.md` §15, `ADR-001` (foundation stack),
@@ -151,7 +151,7 @@ reads remain a possible read-path optimization, not a decision taken here.
 
 ## Update (2026-09-15) — the adapter landed, and the first evidence feature with it
 
-`docs/tracker/027-android-job-photo-updates.md` implements the first evidence slice: Job photo upload
+`docs/tracker/android/027-android-job-photo-updates.md` implements the first evidence slice: Job photo upload
 and read (`docs/api/job-photos.md`). Two things here are worth recording, because they are the parts of
 D6 that became code — and the parts that did not.
 
@@ -181,7 +181,7 @@ lists what remains undefined).
 
 ## Update (2026-09-16) — the read model and derived objects are decided
 
-`docs/tracker/029-photo-evidence-phases.md` Phase 0 answers the two questions this ADR left open (its
+`docs/tracker/shared/029-photo-evidence-phases.md` Phase 0 answers the two questions this ADR left open (its
 open questions 3 and 4), together with the evidence lifecycle that touches the store (2). The decisions
 are recorded there (D6d, D6e, D7, D8, and the object-storage answer recorded as D15) and as business
 rules `BR-088` – `BR-091`; this section records what they mean **for this ADR**.

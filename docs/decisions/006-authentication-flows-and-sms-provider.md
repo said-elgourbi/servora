@@ -4,7 +4,7 @@
 
 Supersedes nothing. Extends `ADR-004` (authentication domain model) and `ADR-005`
 (sign-in hardening and the SMS delivery port), and resolves the two flows that
-`docs/api/authentication.md` §9 and `docs/tracker/004-authentication-domain-model.md`
+`docs/api/authentication.md` §9 and `docs/tracker/shared/004-authentication-domain-model.md`
 recorded as blocked.
 
 References: `BR-018`, `BR-019`, `BR-043`, `BR-044`, `BR-045`, `BR-046`, `BR-042`,

@@ -10,6 +10,8 @@ package com.servora.android.domain.model
 enum class TechnicianAttentionKind {
     /** An assigned Visit still `SCHEDULED` after its scheduled window ended. */
     VISIT_OVERDUE,
+    /** Started work still open after the local day of its scheduled end. */
+    VISIT_STALE_STARTED,
 }
 
 /** One technician assigned to a Visit (`BR-068`). [name] is absent without a member profile. */
@@ -53,6 +55,7 @@ data class TechnicianHomeVisit(
      * from the device clock (`BR-001`).
      */
     val isOverdue: Boolean,
+    val isStaleStarted: Boolean = false,
 )
 
 /** One condition on the technician's own work. */

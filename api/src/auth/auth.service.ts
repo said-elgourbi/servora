@@ -1,7 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
-import { authRefreshTokens, authSessions, users } from '../database/schema.js';
+import {
+  authRefreshTokens,
+  authSessions,
+  pushInstallations,
+  users,
+} from '../database/schema.js';
 import {
   DUMMY_PASSWORD_HASH,
   verifyPassword,
@@ -212,15 +217,41 @@ export class AuthService {
     );
   }
 
+  async signOutByRefreshToken(rawToken: string): Promise<void> {
+    const [stored] = await this.database.db
+      .select({ sessionId: authRefreshTokens.sessionId })
+      .from(authRefreshTokens)
+      .where(eq(authRefreshTokens.tokenHash, hashOpaqueToken(rawToken)))
+      .limit(1);
+    if (stored) await this.signOut(stored.sessionId);
+  }
+
   /**
    * Revokes one session. The row is recorded, never deleted (`ADR-004` D6), so
    * "was this session revoked, and when" stays answerable (`BR-033`).
    */
   async signOut(sessionId: string, now: Date = new Date()): Promise<void> {
-    await this.database.db
-      .update(authSessions)
-      .set({ revokedAt: now })
-      .where(eq(authSessions.id, sessionId));
+    await this.database.db.transaction(async (tx) => {
+      await tx
+        .update(authSessions)
+        .set({ revokedAt: now })
+        .where(eq(authSessions.id, sessionId));
+      await tx
+        .update(pushInstallations)
+        .set({
+          state: 'UNREGISTERED',
+          targetValue: null,
+          targetDigest: null,
+          alertsEnabled: false,
+          revision: sql`${pushInstallations.revision} + 1`,
+        })
+        .where(
+          and(
+            eq(pushInstallations.sessionId, sessionId),
+            sql`${pushInstallations.state} <> 'UNREGISTERED'`,
+          ),
+        );
+    });
   }
 
   /** The caller's own active sessions, most recently used first. */

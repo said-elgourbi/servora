@@ -21,13 +21,18 @@ import {
   visitTechnicians,
 } from '../database/schema.js';
 import { TERMINAL_VISIT_STATUSES } from '../jobs/job.types.js';
-import type { JobStatus, VisitStatus } from '../jobs/job.types.js';
+import type {
+  JobStatus,
+  VisitPurposeCode,
+  VisitStatus,
+} from '../jobs/job.types.js';
 import { readAssignedTechnicians } from '../jobs/visit-assignment.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
 import type { DayWindow } from './home-day.js';
 import {
   NOT_DAY_WORK_VISIT_STATUSES,
   isVisitOverdue,
+  isVisitStaleStarted,
 } from './home-visit-conditions.js';
 import { readViewerDisplayName } from './home-viewer.js';
 import {
@@ -49,6 +54,7 @@ import type {
 interface TechnicianVisitRow {
   readonly visitId: string;
   readonly visitStatus: string;
+  readonly purposeCode: string;
   /** Both ends of the schedule. Every query here requires it, so it is present for every row. */
   readonly scheduledStart: Date | null;
   readonly scheduledEnd: Date | null;
@@ -113,6 +119,7 @@ export class TechnicianHomeService {
             row,
             technicians.get(row.visitId) ?? [],
             now,
+            day.start,
           );
           return visit === null ? [] : [visit];
         })
@@ -133,7 +140,7 @@ export class TechnicianHomeService {
     // is rather than a second time here (`BR-012`, `BR-041`). What it holds is ordered by urgency: the
     // attempt that has been overdue longest first.
     const attention = selectAttentionVisits(
-      open.filter((visit) => visit.overdue),
+      open.filter((visit) => visit.overdue || visit.staleStarted),
       nextVisit,
       visits,
     )
@@ -247,6 +254,7 @@ export class TechnicianHomeService {
 const visitSelection = {
   visitId: visits.id,
   visitStatus: visits.status,
+  purposeCode: visits.purposeCode,
   scheduledStart: visits.scheduledStart,
   scheduledEnd: visits.scheduledEnd,
   visitAddressSnapshot: visits.locationAddressSnapshot,
@@ -277,6 +285,7 @@ function toTechnicianVisit(
   row: TechnicianVisitRow,
   technicians: readonly TechnicianHomeTechnician[],
   now: Date,
+  localDayStart: Date,
 ): TechnicianHomeVisit | null {
   // The reads require a schedule, so this only guards a row the query could not have returned.
   if (row.scheduledStart === null || row.scheduledEnd === null) {
@@ -286,6 +295,7 @@ function toTechnicianVisit(
   return {
     visitId: row.visitId,
     visitStatus,
+    purposeCode: row.purposeCode as VisitPurposeCode,
     scheduledStart: row.scheduledStart,
     scheduledEnd: row.scheduledEnd,
     jobId: row.jobId,
@@ -299,6 +309,10 @@ function toTechnicianVisit(
     overdue: isVisitOverdue(
       { visitStatus, scheduledEnd: row.scheduledEnd },
       now,
+    ),
+    staleStarted: isVisitStaleStarted(
+      { visitStatus, scheduledEnd: row.scheduledEnd },
+      localDayStart,
     ),
   };
 }
@@ -325,7 +339,7 @@ function visitAddress(row: TechnicianVisitRow): AddressSnapshot | null {
  */
 function toAttentionItem(visit: TechnicianHomeVisit): TechnicianAttentionItem {
   return {
-    kind: 'VISIT_OVERDUE',
+    kind: visit.staleStarted ? 'VISIT_STALE_STARTED' : 'VISIT_OVERDUE',
     visitId: visit.visitId,
     jobId: visit.jobId,
     jobNumber: visit.jobNumber,

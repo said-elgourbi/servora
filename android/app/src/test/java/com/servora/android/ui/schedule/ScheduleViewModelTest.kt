@@ -18,9 +18,20 @@ import com.servora.android.data.jobs.VisitStatusChange
 import com.servora.android.data.jobs.VisitRequestSubmitResult
 import com.servora.android.data.schedule.ScheduleRepository
 import com.servora.android.data.schedule.ScheduleResult
+import com.servora.android.data.schedule.AdHocReportCustomerOptionsResult
+import com.servora.android.data.schedule.AdHocReportJobOptionsResult
+import com.servora.android.data.schedule.AdHocReportPropertyOptionsResult
+import com.servora.android.data.schedule.AdHocWorkReportDraft
+import com.servora.android.data.schedule.AdHocWorkReportReconcileResult
+import com.servora.android.data.schedule.AdHocWorkReportRejectResult
+import com.servora.android.data.schedule.AdHocWorkReportResult
+import com.servora.android.data.schedule.AdHocWorkReportsRepository
+import com.servora.android.data.schedule.AdHocWorkReportsResult
+import com.servora.android.data.schedule.toReport
 import com.servora.android.data.schedule.VisitRequestReviewResult
 import com.servora.android.data.schedule.VisitRequestsRepository
 import com.servora.android.data.schedule.VisitRequestsResult
+import com.servora.android.domain.model.AdHocWorkReport
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.AssignmentRole
 import com.servora.android.domain.model.FollowUpVisitRequest
@@ -35,6 +46,7 @@ import com.servora.android.domain.model.ScheduleDay
 import com.servora.android.domain.model.ScheduleTechnician
 import com.servora.android.domain.model.ScheduleVisit
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.VisitStatus
 import java.time.DayOfWeek
 import java.time.Instant
@@ -64,6 +76,49 @@ import org.junit.Test
  * result belonging to a day the manager has already left is dropped.
  */
 class ScheduleViewModelTest {
+    private fun unknownReport() = com.servora.android.data.schedule.AdHocWorkReportDto(
+        id = "unknown", workStartedAt = "2026-10-01T13:00:00Z", workEndedAt = "2026-10-01T15:00:00Z",
+        outcomeCode = "RESOLVED", summary = "Repair", status = "PENDING", version = 1,
+        createdAt = "2026-10-01T15:00:00Z", reportedCustomerName = "Reported name",
+        reportedCustomerPhone = "6135550123", reportedCustomerAddress = "Reported address",
+    ).toReport()!!
+
+    @Test
+    fun `location resolution replaces the pending report without navigating to a job`() = runTest(dispatcher) {
+        val original = unknownReport()
+        val resolved = original.copy(customerId = "customer", propertyId = "property", version = 2)
+        val reports = EmptyAdHocWorkReportsRepository().apply {
+            reportsAnswer = listOf(original)
+            resolutionAnswer = com.servora.android.data.schedule.AdHocReviewDataResult.Success(resolved)
+        }
+        val viewModel = ScheduleViewModel(RecordingScheduleRepository(ScheduleResult.Success(schedule())), EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), reports)
+        viewModel.openAdHocReports(DEVICE_ZONE)
+        advanceUntilIdle()
+        val request = com.servora.android.data.schedule.ResolveAdHocLocationRequestDto(existingCustomerId = "customer", existingPropertyId = "property", expectedVersion = 1)
+        viewModel.resolveAdHocLocation(original, request)
+        viewModel.resolveAdHocLocation(original, request)
+        advanceUntilIdle()
+        assertEquals(1, reports.resolutionCalls)
+        assertEquals(resolved, viewModel.uiState.value.adHocReports.single())
+        assertEquals(null, viewModel.uiState.value.reconciledAdHocJobId)
+        assertEquals(null, viewModel.uiState.value.reviewingAdHocReportId)
+    }
+
+    @Test
+    fun `resolution conflict refreshes canonical ids after a lost success`() = runTest(dispatcher) {
+        val original = unknownReport()
+        val resolved = original.copy(customerId = "customer", propertyId = "property", version = 2)
+        val reports = EmptyAdHocWorkReportsRepository().apply {
+            reportsAnswer = listOf(resolved)
+            resolutionAnswer = com.servora.android.data.schedule.AdHocReviewDataResult.Failure(CustomersFailureReason.VERSION_CONFLICT)
+        }
+        val viewModel = ScheduleViewModel(RecordingScheduleRepository(ScheduleResult.Success(schedule())), EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), reports)
+        viewModel.resolveAdHocLocation(original, com.servora.android.data.schedule.ResolveAdHocLocationRequestDto(existingCustomerId = "customer", existingPropertyId = "property", expectedVersion = 1))
+        advanceUntilIdle()
+        assertEquals(resolved, viewModel.uiState.value.adHocReports.single())
+        assertEquals(CustomersFailureReason.VERSION_CONFLICT, viewModel.uiState.value.adHocLocationFailure)
+        assertEquals(null, viewModel.uiState.value.reconciledAdHocJobId)
+    }
 
     private val dispatcher = StandardTestDispatcher()
 
@@ -80,7 +135,7 @@ class ScheduleViewModelTest {
     @Test
     fun `opens on today and reads it for the device zone`() = runTest(dispatcher) {
         val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
 
         viewModel.start(today = MONDAY, timeZoneId = DEVICE_ZONE, firstDayOfWeek = DayOfWeek.MONDAY)
         assertTrue(viewModel.uiState.value.showsInitialLoading)
@@ -103,7 +158,7 @@ class ScheduleViewModelTest {
     @Test
     fun `selects a day and moves the strip to its week`() = runTest(dispatcher) {
         val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
 
@@ -124,7 +179,7 @@ class ScheduleViewModelTest {
     fun `shows another week without reading a day the manager did not choose`() =
         runTest(dispatcher) {
             val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-            val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+            val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
             viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
             advanceUntilIdle()
 
@@ -142,7 +197,7 @@ class ScheduleViewModelTest {
     @Test
     fun `reads the day again when the technician filter changes`() = runTest(dispatcher) {
         val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
 
@@ -166,7 +221,7 @@ class ScheduleViewModelTest {
     fun `reads one day for a group of technicians rather than a request each`() =
         runTest(dispatcher) {
             val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-            val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+            val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
             viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
             advanceUntilIdle()
 
@@ -191,7 +246,7 @@ class ScheduleViewModelTest {
     @Test
     fun `shows the whole organization again when the filter is cleared`() = runTest(dispatcher) {
         val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
 
@@ -211,7 +266,7 @@ class ScheduleViewModelTest {
     @Test
     fun `carries the filter into another day's read`() = runTest(dispatcher) {
         val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
 
@@ -232,7 +287,7 @@ class ScheduleViewModelTest {
     @Test
     fun `switches lanes without reading the day again`() = runTest(dispatcher) {
         val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
 
@@ -251,6 +306,7 @@ class ScheduleViewModelTest {
             repository = RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             visitRequestsRepository = requests,
             jobDetailsRepository = EmptyJobDetailsRepository(),
+            adHocWorkReportsRepository = EmptyAdHocWorkReportsRepository(),
         )
 
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
@@ -271,6 +327,7 @@ class ScheduleViewModelTest {
             repository = RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             visitRequestsRepository = RecordingVisitRequestsRepository(clarified),
             jobDetailsRepository = EmptyJobDetailsRepository(),
+            adHocWorkReportsRepository = EmptyAdHocWorkReportsRepository(),
         )
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -297,6 +354,7 @@ class ScheduleViewModelTest {
             repository = RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             visitRequestsRepository = requests,
             jobDetailsRepository = EmptyJobDetailsRepository(),
+            adHocWorkReportsRepository = EmptyAdHocWorkReportsRepository(),
         )
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -325,6 +383,7 @@ class ScheduleViewModelTest {
             repository = RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             visitRequestsRepository = requests,
             jobDetailsRepository = EmptyJobDetailsRepository(),
+            adHocWorkReportsRepository = EmptyAdHocWorkReportsRepository(),
         )
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -350,6 +409,7 @@ class ScheduleViewModelTest {
             repository = RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             visitRequestsRepository = requests,
             jobDetailsRepository = EmptyJobDetailsRepository(),
+            adHocWorkReportsRepository = EmptyAdHocWorkReportsRepository(),
         )
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -374,6 +434,7 @@ class ScheduleViewModelTest {
             repository = RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             visitRequestsRepository = RecordingVisitRequestsRepository(request()),
             jobDetailsRepository = jobDetails,
+            adHocWorkReportsRepository = EmptyAdHocWorkReportsRepository(),
         )
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -397,7 +458,7 @@ class ScheduleViewModelTest {
             jobDetails.approvalResults += JobActionResult.Success(job())
             val requests = RecordingVisitRequestsRepository(pending)
             val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-            val viewModel = ScheduleViewModel(repository, requests, jobDetails)
+            val viewModel = ScheduleViewModel(repository, requests, jobDetails, EmptyAdHocWorkReportsRepository())
             viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
             advanceUntilIdle()
             val readsBefore = requests.reads
@@ -445,6 +506,7 @@ class ScheduleViewModelTest {
                 RecordingScheduleRepository(ScheduleResult.Success(schedule())),
                 RecordingVisitRequestsRepository(pending),
                 jobDetails,
+                EmptyAdHocWorkReportsRepository(),
             )
             viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
             advanceUntilIdle()
@@ -491,6 +553,7 @@ class ScheduleViewModelTest {
             RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             RecordingVisitRequestsRepository(pending),
             jobDetails,
+            EmptyAdHocWorkReportsRepository(),
         )
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -522,6 +585,7 @@ class ScheduleViewModelTest {
             RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             RecordingVisitRequestsRepository(pending),
             jobDetails,
+            EmptyAdHocWorkReportsRepository(),
         )
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -553,6 +617,7 @@ class ScheduleViewModelTest {
             RecordingScheduleRepository(ScheduleResult.Success(schedule())),
             RecordingVisitRequestsRepository(pending),
             jobDetails,
+            EmptyAdHocWorkReportsRepository(),
         )
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -584,7 +649,7 @@ class ScheduleViewModelTest {
         val repository = RecordingScheduleRepository(
             ScheduleResult.Failure(CustomersFailureReason.FORBIDDEN),
         )
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
 
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -601,7 +666,7 @@ class ScheduleViewModelTest {
             ScheduleResult.Success(schedule()),
             ScheduleResult.Failure(CustomersFailureReason.NETWORK),
         )
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
 
@@ -617,7 +682,7 @@ class ScheduleViewModelTest {
     @Test
     fun `drops an answer that belongs to a day the manager has already left`() = runTest(dispatcher) {
         val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
 
         // Two selections before the first read settles: only the last one's answer may be applied.
@@ -634,7 +699,7 @@ class ScheduleViewModelTest {
         val repository = RecordingScheduleRepository(
             ScheduleResult.Success(schedule().copy(visits = emptyList(), unassigned = emptyList())),
         )
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
 
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
@@ -650,7 +715,7 @@ class ScheduleViewModelTest {
     @Test
     fun `forgets the day with the session`() = runTest(dispatcher) {
         val repository = RecordingScheduleRepository(ScheduleResult.Success(schedule()))
-        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository())
+        val viewModel = ScheduleViewModel(repository, EmptyVisitRequestsRepository(), EmptyJobDetailsRepository(), EmptyAdHocWorkReportsRepository())
         viewModel.start(MONDAY, DEVICE_ZONE, DayOfWeek.MONDAY)
         advanceUntilIdle()
 
@@ -828,6 +893,56 @@ private class EmptyVisitRequestsRepository : VisitRequestsRepository {
  * technician read with the organization's members and refuses everything else: a test that reached
  * another operation would be asserting something this suite does not cover (`qa.md` §6.1).
  */
+private class EmptyAdHocWorkReportsRepository : AdHocWorkReportsRepository {
+    var reportsAnswer: List<AdHocWorkReport> = emptyList()
+    var resolutionCalls = 0
+    var resolutionAnswer: com.servora.android.data.schedule.AdHocReviewDataResult<AdHocWorkReport> = com.servora.android.data.schedule.AdHocReviewDataResult.Failure(CustomersFailureReason.UNEXPECTED)
+    override suspend fun searchReviewCustomers(query: String) = com.servora.android.data.schedule.AdHocReviewDataResult.Success(emptyList<com.servora.android.domain.model.AdHocReportCustomerOption>())
+    override suspend fun listReviewProperties(customerId: String) = com.servora.android.data.schedule.AdHocReviewDataResult.Success(emptyList<com.servora.android.domain.model.AdHocReportPropertyOption>())
+    override suspend fun resolveLocation(report: AdHocWorkReport, request: com.servora.android.data.schedule.ResolveAdHocLocationRequestDto): com.servora.android.data.schedule.AdHocReviewDataResult<AdHocWorkReport> {
+        resolutionCalls += 1
+        return resolutionAnswer
+    }
+    override suspend fun searchCustomers(query: String): AdHocReportCustomerOptionsResult =
+        AdHocReportCustomerOptionsResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun listProperties(customerId: String): AdHocReportPropertyOptionsResult =
+        AdHocReportPropertyOptionsResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun listJobs(customerId: String): AdHocReportJobOptionsResult =
+        AdHocReportJobOptionsResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun listReviewJobs(
+        customerId: String?,
+        query: String?,
+    ): AdHocReportJobOptionsResult =
+        AdHocReportJobOptionsResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun submit(report: AdHocWorkReportDraft): AdHocWorkReportResult =
+        AdHocWorkReportResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun loadReports(): AdHocWorkReportsResult =
+        AdHocWorkReportsResult.Success(reportsAnswer)
+
+    override suspend fun reject(report: AdHocWorkReport, note: String): AdHocWorkReportRejectResult =
+        AdHocWorkReportRejectResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun link(
+        report: AdHocWorkReport,
+        jobId: String,
+        note: String,
+    ): AdHocWorkReportReconcileResult =
+        AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNEXPECTED)
+
+    override suspend fun convert(
+        report: AdHocWorkReport,
+        title: String,
+        description: String?,
+        note: String,
+    ): AdHocWorkReportReconcileResult =
+        AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNEXPECTED)
+}
+
 private class EmptyJobDetailsRepository(
     private val technicians: List<AssignableTechnician> = emptyList(),
 ) : JobDetailsRepository {
@@ -916,6 +1031,32 @@ private class EmptyJobDetailsRepository(
         expectedVersion: Int,
     ): JobActionResult = unsupported()
 
+
+    override suspend fun markQuoteSent(
+        jobId: String,
+        note: String?,
+        externalReference: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteRequired(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteApproved(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteRejected(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
     override suspend fun rescheduleVisit(
         jobId: String,
         visitId: String,
@@ -939,6 +1080,7 @@ private class EmptyJobDetailsRepository(
         scheduledStart: Instant,
         scheduledEnd: Instant,
         assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
         confirmConflicts: Boolean,
     ): JobActionResult = unsupported()
 

@@ -69,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
+import com.servora.android.domain.model.AdHocWorkReport
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.ScheduleTechnician
@@ -81,6 +82,7 @@ import com.servora.android.ui.home.HomeVisitStatusPill
 import com.servora.android.ui.home.deviceLocale
 import com.servora.android.ui.home.formatScheduledRange
 import com.servora.android.ui.home.formattedAddressLine
+import com.servora.android.ui.jobs.visitOutcomeLabel
 import com.servora.android.ui.home.statusColor
 import com.servora.android.ui.home.techniciansSummary
 import com.servora.android.ui.jobs.ScheduleConflictDialog
@@ -129,6 +131,12 @@ const val ScheduleEmptyUnassignedTag = "schedule-empty-unassigned"
 
 /** Identifies the pending follow-up request lane's empty state. */
 const val ScheduleEmptyRequestsTag = "schedule-empty-requests"
+
+/** Identifies the pending ad-hoc report lane's empty state. */
+const val ScheduleEmptyAdHocReportsTag = "schedule-empty-ad-hoc-reports"
+
+/** Identifies one ad-hoc work report card. */
+fun scheduleAdHocReportTag(reportId: String): String = "schedule-ad-hoc-report-$reportId"
 
 /** Identifies one follow-up request card and its review actions. */
 fun scheduleRequestTag(requestId: String): String = "schedule-request-$requestId"
@@ -399,7 +407,7 @@ fun ScheduleScreen(
             crewFailure = state.assignableFailure,
             isSubmitting = state.isApproving,
             onRetryCrew = { onStartApproval(request) },
-            onConfirm = { start, end, assignments ->
+            onConfirm = { start, end, assignments, _ ->
                 onApproveRequest(request, start, end, assignments)
             },
             onDismiss = onDismissApproval,
@@ -443,6 +451,7 @@ fun ManagerWorkScreen(
     canApproveVisitRequests: Boolean,
     onOpenJob: (String, String?) -> Unit,
     onOpenRequest: (String) -> Unit,
+    onOpenAdHocReport: (String) -> Unit,
     onClarifyRequest: (FollowUpVisitRequest, String) -> Unit,
     onRejectRequest: (FollowUpVisitRequest, String) -> Unit,
     onStartApproval: (FollowUpVisitRequest) -> Unit,
@@ -507,6 +516,12 @@ fun ManagerWorkScreen(
                         },
                         onStartApproval = onStartApproval,
                     )
+
+                    WorkTab.AD_HOC -> WorkAdHocReports(
+                        state = state,
+                        listState = listState,
+                        onOpenReport = onOpenAdHocReport,
+                    )
                 }
             }
         }
@@ -569,7 +584,7 @@ fun ManagerWorkScreen(
             crewFailure = state.assignableFailure,
             isSubmitting = state.isApproving,
             onRetryCrew = { onStartApproval(request) },
-            onConfirm = { start, end, assignments -> onApproveRequest(request, start, end, assignments) },
+            onConfirm = { start, end, assignments, _ -> onApproveRequest(request, start, end, assignments) },
             onDismiss = onDismissApproval,
         )
     }
@@ -622,6 +637,10 @@ private fun WorkTabs(
                             WorkTab.REQUESTS -> stringResource(
                                 R.string.work_tab_visit_requests_count,
                                 state.reviewableRequestCount,
+                            )
+                            WorkTab.AD_HOC -> stringResource(
+                                R.string.work_tab_ad_hoc_reports_count,
+                                state.reviewableAdHocReportCount,
                             )
                         },
                         style = MaterialTheme.typography.labelSmall,
@@ -813,6 +832,117 @@ private fun WorkVisitRequests(
             }
         }
     }
+}
+
+@Composable
+private fun WorkAdHocReports(
+    state: ScheduleUiState,
+    listState: LazyListState,
+    onOpenReport: (String) -> Unit,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize().testTag(ScheduleContentTag),
+        contentPadding = PaddingValues(HomePageGutter),
+        verticalArrangement = Arrangement.spacedBy(ScheduleItemSpacing),
+    ) {
+        if (state.showsRefreshingIndicator || state.isReadingAdHocReports) {
+            item(key = "refreshing") { ScheduleRefreshing() }
+        }
+        val reports = state.reviewableAdHocReports
+        if (reports.isEmpty()) {
+            item(key = "empty") {
+                WorkEmptyCard(
+                    title = stringResource(R.string.schedule_empty_ad_hoc_reports_title),
+                    detail = stringResource(R.string.schedule_empty_ad_hoc_reports_detail),
+                )
+            }
+        } else {
+            itemsIndexed(items = reports, key = { _, report -> report.id }) { _, report ->
+                AdHocWorkReportCard(
+                    report = report,
+                    onOpen = { onOpenReport(report.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdHocWorkReportCard(
+    report: AdHocWorkReport,
+    onOpen: () -> Unit,
+) {
+    val locale = deviceLocale()
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen)
+            .testTag(scheduleAdHocReportTag(report.id)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(modifier = Modifier.padding(ScheduleCardPadding)) {
+            Text(
+                text = report.customerName
+                    ?: stringResource(R.string.ad_hoc_report_unknown_customer),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = adHocReportLocationLine(report),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = report.summary,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(visitOutcomeLabel(report.outcomeCode)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                formatScheduledRange(report.workStartedAt, report.workEndedAt, locale)?.let { window ->
+                    Text(
+                        text = window,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun adHocReportLocationLine(report: AdHocWorkReport): String {
+    val address = report.propertyAddress
+    if (address == null) {
+        return stringResource(R.string.ad_hoc_report_unknown_location)
+    }
+    return formattedAddressLine(
+        addressLine1 = address.addressLine1,
+        addressLine2 = address.addressLine2,
+        city = address.city,
+        province = address.province,
+        postalCode = address.postalCode,
+    ) ?: stringResource(R.string.ad_hoc_report_unknown_location)
 }
 
 @Composable

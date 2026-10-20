@@ -205,6 +205,10 @@ fun JobDetailsScreen(
     onOpenInMaps: (address: CustomerJobAddress) -> Unit,
     onLoadAssignableTechnicians: () -> Unit,
     onChangeJobStatus: (status: JobStatus) -> Unit,
+    onMarkQuoteSent: () -> Unit,
+    onMarkQuoteRequired: () -> Unit,
+    onMarkQuoteApproved: () -> Unit,
+    onMarkQuoteRejected: () -> Unit,
     onChangeVisitStatus: (status: VisitStatus) -> Unit,
     onCompleteVisit: (outcome: VisitOutcome, summary: String) -> Unit,
     onDiscardQueuedVisitAction: (operationId: String) -> Unit,
@@ -287,7 +291,7 @@ fun JobDetailsScreen(
     val shareChooserTitle = stringResource(R.string.job_photo_viewer_share_title)
     // The viewer is a full-screen dialog in a window of its own, so it — and not the screen behind it —
     // is where a report about a photo action has to be drawn while it is open
-    // (`docs/tracker/031-android-photo-viewer-ui.md`).
+    // (`docs/tracker/android/031-android-photo-viewer-ui.md`).
     val isViewerOpen = viewedPhotoPage != null
 
     // Android 8-9 guards a write into shared storage with a permission (`D12`). The screen asks for it
@@ -435,7 +439,7 @@ fun JobDetailsScreen(
          * The report is drawn by whichever window is on screen: this stack normally, and the photo
          * viewer's own host while its full-screen dialog is open — otherwise a save made from the
          * viewer would report itself behind the viewer, where nobody can see it
-         * (`docs/tracker/031-android-photo-viewer-ui.md`).
+         * (`docs/tracker/android/031-android-photo-viewer-ui.md`).
          */
         Column(
             modifier = Modifier
@@ -600,15 +604,18 @@ fun JobDetailsScreen(
     // The Visit's completion: the outcome `BR-077` requires is stated here, and submitting sends the
     // completion operation itself, so the recorded outcome and the Visit's finished state are one
     // recorded fact (`BR-077`, `BR-078`).
-    if (details != null && showVisitCompletion && details.selectedVisit != null) {
-        VisitCompletionSheet(
-            isSubmitting = state.isSubmitting,
-            onConfirm = { outcome, summary ->
-                showVisitCompletion = false
-                onCompleteVisit(outcome, summary)
-            },
-            onDismiss = { showVisitCompletion = false },
-        )
+    if (details != null && showVisitCompletion) {
+        details.selectedVisit?.let { visit ->
+            VisitCompletionSheet(
+                purpose = visit.purpose,
+                isSubmitting = state.isSubmitting,
+                onConfirm = { outcome, summary ->
+                    showVisitCompletion = false
+                    onCompleteVisit(outcome, summary)
+                },
+                onDismiss = { showVisitCompletion = false },
+            )
+        }
     }
 
     // The photo the technician just captured. Dismissing it keeps the photo — it is already recorded
@@ -884,7 +891,7 @@ private fun JobDetailsContent(
  *
  * When the session may move the Job and the backend reports a permitted transition, the status chip
  * **is** the control that moves it, so the state the user wants to change is the thing they tap
- * (`docs/tracker/020-android-job-details-status-control.md`). Otherwise the status is still presented
+ * (`docs/tracker/android/020-android-job-details-status-control.md`). Otherwise the status is still presented
  * and simply does not act: the read is not an action, and an action nobody may perform is not one to
  * offer (`BR-006`, `BR-007`, `BR-058`).
  */

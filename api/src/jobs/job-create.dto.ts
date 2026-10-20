@@ -1,3 +1,4 @@
+import type { CreateJobRequest } from '@servora/shared-types';
 import {
   DomainValidationError,
   optionalText,
@@ -44,7 +45,7 @@ function requireUuid(value: unknown, field: string): string {
 export const MAX_JOB_DESCRIPTION_LENGTH = 2000;
 
 /** The fields a caller supplies to create a Job (`BR-053`, `BR-056`). */
-export interface CreateJobDto {
+export interface CreateJobDto extends CreateJobRequest {
   /** The Customer the Job belongs to; a Job cannot exist without one (`BR-048`). */
   readonly customerId: string;
   /** The Property the work is performed at; the supported create requires one (`BR-056`). */

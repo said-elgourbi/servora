@@ -1,3 +1,8 @@
+import type {
+  CustomerDetails,
+  CustomerProperty,
+  CustomerJob,
+} from '@servora/shared-types';
 import {
   ASSIGNMENT_ROLE_CODES,
   JOB_STATUSES,
@@ -75,14 +80,14 @@ export interface CustomerJobSummary {
   readonly technicians: CustomerJobTechnician[];
 }
 
-export interface CustomerDetailDto {
+export interface CustomerDetailDto extends CustomerDetails {
   customer: CustomerSummaryDto;
   individual: CustomerIndividualDto | null;
   company: CustomerCompanyDto | null;
   contacts: CustomerContactDto[];
 }
 
-export interface CustomerPropertyDto {
+export interface CustomerPropertyDto extends CustomerProperty {
   id: string;
   name: string | null;
   addressLine1: string;
@@ -124,7 +129,7 @@ export interface CustomerJobTechnicianDto {
   roleCode: AssignmentRoleCode;
 }
 
-export interface CustomerJobDto {
+export interface CustomerJobDto extends CustomerJob {
   id: string;
   jobNumber: number;
   title: string;

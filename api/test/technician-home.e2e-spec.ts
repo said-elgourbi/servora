@@ -240,7 +240,11 @@ describe('technician home endpoint (e2e)', () => {
   ) {
     const customer = await newCustomer();
     const property = await newProperty();
-    const job = await newJob({ customerId: customer.id, propertyId: property.id, title });
+    const job = await newJob({
+      customerId: customer.id,
+      propertyId: property.id,
+      title,
+    });
     const visit = await newVisit({
       jobId: job.id,
       propertyId: property.id,
@@ -431,7 +435,6 @@ describe('technician home endpoint (e2e)', () => {
   });
 });
 
-
 /**
  * The technician home derivation against a real PostgreSQL, with a pinned clock and day.
  *
@@ -565,7 +568,6 @@ describe('technician home derivation (e2e)', () => {
     return new Date(day.start.getTime() + hour * 3_600_000);
   }
 
-
   it('reads the day in time order and leaves out the attempts that did not happen', async () => {
     const organization = await newOrganization();
     const { member, user } = await newMembership(organization.id);
@@ -611,9 +613,9 @@ describe('technician home derivation (e2e)', () => {
       scheduled.visit.id,
       later.visit.id,
     ]);
-    expect(read.visits.some((visit) => visit.visitId === canceled.visit.id)).toBe(
-      false,
-    );
+    expect(
+      read.visits.some((visit) => visit.visitId === canceled.visit.id),
+    ).toBe(false);
   });
 
   it('chooses the Visit already started as the next one', async () => {
@@ -644,6 +646,64 @@ describe('technician home derivation (e2e)', () => {
 
     expect(read.nextVisit?.visitId).toBe(underWay.visit.id);
     expect(read.nextVisit?.visitId).not.toBe(notStarted.visit.id);
+  });
+
+  it('flags stale started work on the current card and lists other unfinished visits', async () => {
+    const organization = await newOrganization();
+    const { member, user } = await newMembership(organization.id);
+    const { member: colleague } = await newMembership(organization.id);
+    const current = await seedVisit({
+      organizationId: organization.id,
+      crew: [member.id],
+      status: 'IN_PROGRESS',
+      start: new Date('2026-09-30T13:20:00Z'),
+    });
+    const other = await seedVisit({
+      organizationId: organization.id,
+      crew: [member.id],
+      status: 'ON_SITE',
+      start: new Date('2026-09-30T15:00:00Z'),
+    });
+    await seedVisit({
+      organizationId: organization.id,
+      crew: [colleague.id],
+      status: 'EN_ROUTE',
+      start: new Date('2026-09-30T12:00:00Z'),
+    });
+    const scope = { organizationId: organization.id };
+    const beforeMidnight = new Date('2026-10-01T03:59:59.999Z');
+    const before = await service.readTechnicianHome(
+      scope,
+      user.id,
+      member.id,
+      resolveDayWindow('America/Toronto', beforeMidnight),
+      beforeMidnight,
+    );
+    expect(before.nextVisit?.staleStarted).toBe(false);
+    expect(before.attentionTotal).toBe(0);
+
+    const midnight = new Date('2026-10-01T04:00:00Z');
+    const after = await service.readTechnicianHome(
+      scope,
+      user.id,
+      member.id,
+      resolveDayWindow('America/Toronto', midnight),
+      midnight,
+    );
+    expect(after.nextVisit).toMatchObject({
+      visitId: current.visit.id,
+      visitStatus: 'IN_PROGRESS',
+      staleStarted: true,
+      overdue: false,
+    });
+    expect(after.attentionTotal).toBe(1);
+    expect(after.attention).toEqual([
+      expect.objectContaining({
+        kind: 'VISIT_STALE_STARTED',
+        visitId: other.visit.id,
+      }),
+    ]);
+    expect(after.visits).toEqual([]);
   });
 
   it('offers an overdue Visit as the next one without repeating it in the section', async () => {
@@ -735,7 +795,6 @@ describe('technician home derivation (e2e)', () => {
       underWay.visit.id,
     ]);
   });
-
 
   it('previews what comes after today and reports how many there are', async () => {
     const organization = await newOrganization();

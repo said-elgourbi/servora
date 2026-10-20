@@ -1,0 +1,172 @@
+<section [appPageTitle]="i18n.text('officeSchedule')">
+  <div class="page-heading">
+    <div>
+      <p class="eyebrow">{{ i18n.text('scheduleDispatch') }}</p>
+      <h1>{{ i18n.text('officeSchedule') }}</h1>
+    </div>
+    @if (data(); as schedule) {
+      <div class="summary" aria-live="polite">
+        <span
+          ><strong>{{ schedule.visits.length }}</strong>
+          {{ i18n.text('scheduleVisitsLabel') }}</span
+        ><span
+          ><strong>{{ schedule.unassigned?.total ?? 0 }}</strong>
+          {{ i18n.text('scheduleUnassigned') }}</span
+        >
+        @if (overdue()) {
+          <span class="attention"
+            ><strong>{{ overdue() }}</strong> {{ i18n.text('overdue') }}</span
+          >
+        }
+        @if (board()?.overlapping?.size) {
+          <span class="attention"
+            ><strong>{{ board()?.overlapping?.size }}</strong>
+            {{ i18n.text('scheduleOverlappingLabel') }}</span
+          >
+        }
+      </div>
+    }
+  </div>
+  <div class="toolbar">
+    <div class="date-controls">
+      <button
+        mat-button
+        class="day-arrow"
+        (click)="move(-1)"
+        [attr.aria-label]="i18n.text('schedulePrevious')"
+      >
+        ‹
+      </button>
+      <label class="date-label"
+        ><span class="visually-hidden">{{ i18n.text('scheduleDate') }}</span
+        ><input type="date" [formControl]="date" required
+      /></label>
+      <button
+        mat-button
+        class="day-arrow"
+        (click)="move(1)"
+        [attr.aria-label]="i18n.text('scheduleNext')"
+      >
+        ›
+      </button>
+      <button mat-stroked-button (click)="today()">{{ i18n.text('scheduleToday') }}</button>
+    </div>
+    @if (technicians().length) {
+      <mat-form-field
+        appearance="outline"
+        floatLabel="always"
+        subscriptSizing="dynamic"
+        class="technician-filter"
+        ><mat-label>{{ i18n.text('jobVisitTechnicians') }}</mat-label>
+        <mat-select
+          [formControl]="members"
+          multiple
+          [placeholder]="i18n.text('scheduleClearFilter')"
+        >
+          @for (member of technicians(); track member.membershipId) {
+            <mat-option [value]="member.membershipId">{{
+              member.name || i18n.text('unnamedMember')
+            }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+    }
+    @if (members.value.length) {
+      <button mat-button (click)="members.setValue([])">
+        {{ i18n.text('scheduleClearFilter') }}
+      </button>
+    }
+    <div class="toolbar-end">
+      @if (!compact().matches) {
+        <div class="view-switch" role="group" [attr.aria-label]="i18n.text('scheduleView')">
+          <button mat-button [attr.aria-pressed]="view() === 'grid'" (click)="view.set('grid')">
+            {{ i18n.text('scheduleGridView') }}</button
+          ><button mat-button [attr.aria-pressed]="view() === 'list'" (click)="view.set('list')">
+            {{ i18n.text('scheduleListView') }}
+          </button>
+        </div>
+      }
+      <button mat-button (click)="refresh()" [disabled]="loading()">
+        {{ i18n.text('refresh') }}
+      </button>
+    </div>
+  </div>
+  <div class="section-bar">
+    <div class="lanes" role="group" [attr.aria-label]="i18n.text('officeSchedule')">
+      <button [attr.aria-pressed]="lane() === 'day'" (click)="lane.set('day')">
+        {{ i18n.text('scheduleDay') }}</button
+      ><button [attr.aria-pressed]="lane() === 'unassigned'" (click)="lane.set('unassigned')">
+        {{ i18n.text('scheduleUnassigned') }}
+        @if (data()?.unassigned; as waiting) {
+          ({{ waiting.total }})
+        }
+      </button>
+    </div>
+    @if (data(); as schedule) {
+      <span class="zone">{{ schedule.day.timeZone }}</span>
+    }
+  </div>
+  @if (loading()) {
+    <p class="state" role="status">{{ i18n.text('busy') }}</p>
+  }
+  @if (error(); as error) {
+    <div class="state" role="alert">
+      <p>{{ i18n.text(error) }}</p>
+      <button mat-stroked-button (click)="refresh()">{{ i18n.text('retry') }}</button>
+    </div>
+  }
+  @if (data(); as schedule) {
+    @if (lane() === 'unassigned') {
+      <p class="scope-note">{{ i18n.text('scheduleUnassignedHint') }}</p>
+    }
+    @if (rows().length) {
+      @if (lane() === 'day' && view() === 'grid' && !compact().matches) {
+        @if (board(); as board) {
+          <div class="board-caption">
+            <span>{{ i18n.text('scheduleGridHint') }}</span
+            ><button mat-button [attr.aria-pressed]="fullDay()" (click)="fullDay.set(!fullDay())">
+              {{ i18n.text(fullDay() ? 'scheduleWorkHours' : 'scheduleFullDay') }}
+            </button>
+          </div>
+          <app-dispatch-grid [board]="board" [zone]="schedule.day.timeZone" />
+          @if (board.outside.length) {
+            <p class="scope-note">{{ i18n.text('scheduleOutsideGrid') }}</p>
+            <app-schedule-list [visits]="board.outside" [zone]="schedule.day.timeZone" />
+          }
+          <p class="scope-note">
+            {{ i18n.text('scheduleSharedHint') }} {{ i18n.text('scheduleAvailabilityHint') }}
+          </p>
+          @if (board.brief.length) {
+            <p class="scope-note">{{ i18n.text('scheduleBriefVisits') }}</p>
+            <app-schedule-list
+              [visits]="board.brief"
+              [zone]="schedule.day.timeZone"
+              [overlaps]="board.overlapping"
+            />
+          }
+        }
+      } @else {
+        <app-schedule-list
+          [visits]="rows()"
+          [zone]="schedule.day.timeZone"
+          [compact]="compact().matches"
+          [overlaps]="board()?.overlapping ?? emptyOverlaps"
+        />
+        @if (lane() === 'day') {
+          <p class="scope-note">{{ i18n.text('scheduleGridHint') }}</p>
+        }
+      }
+    } @else {
+      <p class="state" role="status">
+        {{ i18n.text(lane() === 'day' ? 'scheduleEmptyDay' : 'scheduleEmptyUnassigned') }}
+      </p>
+    }
+    @if (
+      lane() === 'unassigned' && schedule.unassigned && schedule.unassigned.total > rows().length
+    ) {
+      <p class="scope-note" role="status">
+        {{ i18n.text('scheduleCapped') }} ({{ rows().length }} / {{ schedule.unassigned.total }})
+      </p>
+    }
+  }
+</section>

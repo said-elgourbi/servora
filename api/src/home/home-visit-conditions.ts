@@ -59,3 +59,14 @@ export function isVisitOverdue(
     visit.scheduledEnd.getTime() < now.getTime()
   );
 }
+
+/** Started work still open after the local day of its scheduled end has passed. */
+export function isVisitStaleStarted(
+  visit: { readonly visitStatus: VisitStatus; readonly scheduledEnd: Date },
+  localDayStart: Date,
+): boolean {
+  return (
+    hasVisitStarted(visit.visitStatus) &&
+    visit.scheduledEnd.getTime() < localDayStart.getTime()
+  );
+}

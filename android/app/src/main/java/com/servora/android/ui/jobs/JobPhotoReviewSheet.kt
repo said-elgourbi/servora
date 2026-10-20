@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -49,7 +50,7 @@ import com.servora.android.domain.model.PendingJobPhoto
  * its own window, which the signed-in shell's inset (`docs/design/android-design-system.md`) cannot
  * reach, because the sheet is a window of its own. What the panel has to provide is a content area
  * that can shrink, because that is the resize Compose answers by bringing the focused field back into
- * view (`docs/tracker/014-android-add-customer.md`); without it the note field was the part of the
+ * view (`docs/tracker/android/014-android-add-customer.md`); without it the note field was the part of the
  * panel left underneath the keyboard. The customer filter sheet scrolls for the same reason.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -133,6 +134,8 @@ internal fun JobPhotoReviewSheet(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),

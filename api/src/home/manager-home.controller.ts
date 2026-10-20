@@ -19,7 +19,7 @@ import { ManagerHomeService } from './manager-home.service.js';
  * already reach every Job and Visit it returns. Reusing it keeps this read inside the existing
  * permission model instead of introducing a capability the Jobs feature has not defined yet
  * (`BR-006`, `BR-042`); the interim decision is recorded in `docs/api/manager-home.md` §2 and
- * `docs/tracker/016-android-manager-home.md`.
+ * `docs/tracker/android/016-android-manager-home.md`.
  *
  * The date is settled here rather than by the client: the caller names the time zone it renders in
  * and the API resolves the local day, so the "today" this read returns and the "today" every other

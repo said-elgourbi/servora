@@ -1,14 +1,23 @@
 import {
   ACTIVE_VISIT_STATUSES,
   JOB_STATUS_TRANSITIONS,
+  JOB_QUOTE_WORKFLOW_HISTORY_EVENTS,
+  JOB_QUOTE_WORKFLOW_STATES,
   TERMINAL_VISIT_STATUSES,
+  ASSESSMENT_VISIT_OUTCOME_CODES,
   VISIT_OUTCOME_CODES,
+  VISIT_PURPOSE_CODES,
   VISIT_STATUSES,
   VISIT_STATUS_TRANSITIONS,
+  WORK_VISIT_OUTCOME_CODES,
   applicableJobStatusTransitions,
   applicableVisitStatusTransitions,
+  canCorrectJobQuoteDecision,
+  closesJobWhenLastOpenVisit,
   expectsFollowUpVisit,
+  canScheduleAfterFinishedVisits,
   isPermittedJobStatusTransition,
+  isVisitOutcomeValidForPurpose,
   isPermittedVisitStatusTransition,
   isReschedulableVisitStatus,
   isTerminalVisitStatus,
@@ -42,6 +51,107 @@ describe('job lifecycle vocabulary', () => {
       'ON_SITE',
       'IN_PROGRESS',
     ]);
+  });
+  it('exposes exactly the canonical Visit purpose codes', () => {
+    expect([...VISIT_PURPOSE_CODES]).toEqual(['WORK', 'ASSESSMENT']);
+  });
+
+  it('keeps the Assessment quote workflow out of the Job lifecycle vocabulary', () => {
+    expect([...JOB_QUOTE_WORKFLOW_STATES]).toEqual([
+      'REQUIRED',
+      'SENT',
+      'APPROVED',
+      'REJECTED',
+    ]);
+    for (const state of JOB_QUOTE_WORKFLOW_STATES) {
+      expect(JOB_STATUS_TRANSITIONS).not.toHaveProperty(state);
+    }
+  });
+
+  it('exposes the append-only Assessment quote workflow history events', () => {
+    expect([...JOB_QUOTE_WORKFLOW_HISTORY_EVENTS]).toEqual([
+      'REQUIRED',
+      'SENT',
+      'APPROVED',
+      'REJECTED',
+      'CORRECTED',
+    ]);
+  });
+
+  it('allows quote decision corrections only before downstream Work exists', () => {
+    const assessment = {
+      visitId: 'assessment-1',
+      sequence: 1,
+      purposeCode: 'ASSESSMENT',
+    } as const;
+
+    expect(
+      canCorrectJobQuoteDecision({
+        state: 'APPROVED',
+        sourceVisitId: assessment.visitId,
+        visits: [assessment],
+      }),
+    ).toBe(true);
+    expect(
+      canCorrectJobQuoteDecision({
+        state: 'REJECTED',
+        sourceVisitId: assessment.visitId,
+        visits: [assessment],
+      }),
+    ).toBe(true);
+    expect(
+      canCorrectJobQuoteDecision({
+        state: 'SENT',
+        sourceVisitId: assessment.visitId,
+        visits: [assessment],
+      }),
+    ).toBe(false);
+    expect(
+      canCorrectJobQuoteDecision({
+        state: 'REQUIRED',
+        sourceVisitId: assessment.visitId,
+        visits: [assessment],
+      }),
+    ).toBe(false);
+  });
+
+  it('blocks quote decision corrections after approval has produced a Work Visit', () => {
+    const assessment = {
+      visitId: 'assessment-1',
+      sequence: 1,
+      purposeCode: 'ASSESSMENT',
+    } as const;
+
+    expect(
+      canCorrectJobQuoteDecision({
+        state: 'APPROVED',
+        sourceVisitId: assessment.visitId,
+        visits: [
+          assessment,
+          { visitId: 'work-1', sequence: 2, purposeCode: 'WORK' },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      canCorrectJobQuoteDecision({
+        state: 'REJECTED',
+        sourceVisitId: assessment.visitId,
+        visits: [
+          { visitId: 'work-before', sequence: 0, purposeCode: 'WORK' },
+          assessment,
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it('refuses quote decision corrections when the source Assessment Visit is unavailable', () => {
+    expect(
+      canCorrectJobQuoteDecision({
+        state: 'APPROVED',
+        sourceVisitId: 'missing-assessment',
+        visits: [{ visitId: 'work-1', sequence: 2, purposeCode: 'WORK' }],
+      }),
+    ).toBe(false);
   });
 
   it('classifies completed and canceled Visits as terminal while preserving internal draft', () => {
@@ -80,8 +190,12 @@ describe('visit lifecycle vocabulary', () => {
   });
 
   it('moves a Visit directly between working statuses', () => {
-    expect(isPermittedVisitStatusTransition('SCHEDULED', 'IN_PROGRESS')).toBe(true);
-    expect(isPermittedVisitStatusTransition('IN_PROGRESS', 'SCHEDULED')).toBe(true);
+    expect(isPermittedVisitStatusTransition('SCHEDULED', 'IN_PROGRESS')).toBe(
+      true,
+    );
+    expect(isPermittedVisitStatusTransition('IN_PROGRESS', 'SCHEDULED')).toBe(
+      true,
+    );
     expect(isPermittedVisitStatusTransition('ON_SITE', 'EN_ROUTE')).toBe(true);
     expect(isPermittedVisitStatusTransition('SCHEDULED', 'DRAFT')).toBe(false);
     expect(isPermittedVisitStatusTransition('DRAFT', 'COMPLETED')).toBe(false);
@@ -101,20 +215,119 @@ describe('visit lifecycle vocabulary', () => {
     expect(applicableVisitStatusTransitions('CANCELED')).toEqual([]);
   });
 
-  it('exposes exactly the canonical outcome codes', () => {
-    expect([...VISIT_OUTCOME_CODES]).toEqual([
+  it('exposes exactly the purpose-aware canonical outcome codes', () => {
+    expect([...WORK_VISIT_OUTCOME_CODES]).toEqual([
       'RESOLVED',
       'NEEDS_FOLLOW_UP',
       'NEEDS_PARTS',
       'UNABLE_TO_COMPLETE',
     ]);
+    expect([...ASSESSMENT_VISIT_OUTCOME_CODES]).toEqual([
+      'NO_WORK_REQUIRED',
+      'WORK_RECOMMENDED',
+      'QUOTE_REQUIRED',
+      'UNABLE_TO_ASSESS',
+    ]);
+    expect([...VISIT_OUTCOME_CODES]).toEqual([
+      'RESOLVED',
+      'NEEDS_FOLLOW_UP',
+      'NEEDS_PARTS',
+      'UNABLE_TO_COMPLETE',
+      'NO_WORK_REQUIRED',
+      'WORK_RECOMMENDED',
+      'QUOTE_REQUIRED',
+      'UNABLE_TO_ASSESS',
+    ]);
+  });
+
+  it('validates outcomes against the Visit purpose', () => {
+    expect(isVisitOutcomeValidForPurpose('WORK', 'RESOLVED')).toBe(true);
+    expect(isVisitOutcomeValidForPurpose('WORK', 'QUOTE_REQUIRED')).toBe(false);
+    expect(
+      isVisitOutcomeValidForPurpose('ASSESSMENT', 'WORK_RECOMMENDED'),
+    ).toBe(true);
+    expect(isVisitOutcomeValidForPurpose('ASSESSMENT', 'RESOLVED')).toBe(false);
   });
 
   it('derives the follow-up expectation from the outcome code', () => {
     expect(expectsFollowUpVisit('RESOLVED')).toBe(false);
-    for (const code of ['NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE'] as const) {
+    for (const code of [
+      'NEEDS_FOLLOW_UP',
+      'NEEDS_PARTS',
+      'UNABLE_TO_COMPLETE',
+    ] as const) {
       expect(expectsFollowUpVisit(code)).toBe(true);
     }
+    expect(expectsFollowUpVisit('WORK_RECOMMENDED')).toBe(false);
+    expect(expectsFollowUpVisit('QUOTE_REQUIRED')).toBe(false);
     expect(expectsFollowUpVisit(null)).toBe(false);
+  });
+
+  it('treats resolved work and no-work-required assessments as closing outcomes', () => {
+    expect(closesJobWhenLastOpenVisit('RESOLVED')).toBe(true);
+    expect(closesJobWhenLastOpenVisit('NO_WORK_REQUIRED')).toBe(true);
+    for (const code of [
+      'NEEDS_FOLLOW_UP',
+      'NEEDS_PARTS',
+      'UNABLE_TO_COMPLETE',
+      'WORK_RECOMMENDED',
+      'QUOTE_REQUIRED',
+      'UNABLE_TO_ASSESS',
+    ] as const) {
+      expect(closesJobWhenLastOpenVisit(code)).toBe(false);
+    }
+    expect(closesJobWhenLastOpenVisit(null)).toBe(false);
+  });
+});
+
+describe('scheduling after finished Visits', () => {
+  const resolved = {
+    sequence: 1,
+    status: 'COMPLETED' as const,
+    outcomeCode: 'RESOLVED' as const,
+  };
+  it('permits a new attempt after resolved work, no work required or cancellation', () => {
+    expect(canScheduleAfterFinishedVisits([resolved])).toBe(true);
+    expect(
+      canScheduleAfterFinishedVisits([
+        { ...resolved, outcomeCode: 'NO_WORK_REQUIRED' },
+      ]),
+    ).toBe(true);
+    expect(
+      canScheduleAfterFinishedVisits([
+        { ...resolved, status: 'CANCELED', outcomeCode: null },
+      ]),
+    ).toBe(true);
+  });
+  it('requires all existing attempts to be finished', () => {
+    for (const status of [
+      'DRAFT',
+      'SCHEDULED',
+      'EN_ROUTE',
+      'ON_SITE',
+      'IN_PROGRESS',
+    ] as const) {
+      expect(
+        canScheduleAfterFinishedVisits([
+          resolved,
+          { sequence: 2, status, outcomeCode: null },
+        ]),
+      ).toBe(false);
+    }
+  });
+  it('keeps Assessment office decisions in their own workflow and uses sequence rather than list order', () => {
+    for (const outcomeCode of [
+      'QUOTE_REQUIRED',
+      'WORK_RECOMMENDED',
+      'UNABLE_TO_ASSESS',
+    ] as const) {
+      expect(
+        canScheduleAfterFinishedVisits([
+          { ...resolved, sequence: 2, outcomeCode },
+          resolved,
+        ]),
+      ).toBe(false);
+    }
+    expect(canScheduleAfterFinishedVisits([])).toBe(false);
   });
 });

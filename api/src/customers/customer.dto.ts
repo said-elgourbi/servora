@@ -1,3 +1,10 @@
+import type {
+  CustomerRecord,
+  CustomerSummary,
+  CustomerListSummary,
+  CustomerIndividual as PublicCustomerIndividual,
+  CustomerCompany as PublicCustomerCompany,
+} from '@servora/shared-types';
 import {
   optionalDate,
   optionalEmail,
@@ -19,7 +26,7 @@ import {
   type IndividualCustomer,
 } from './customer.types.js';
 
-export interface CustomerDto {
+export interface CustomerDto extends CustomerRecord {
   id: string;
   organizationId: string;
   type: CustomerType;
@@ -47,19 +54,22 @@ export interface CustomerDto {
  * counts the Jobs that belong to the customer, whatever their status (`BR-048`). Neither count is
  * stored on the customer; both are derived from the authoritative tables (`BR-080`).
  */
-export interface CustomerSummaryDto extends CustomerDto {
+export interface CustomerSummaryDto extends CustomerDto, CustomerSummary {
   propertyCount: number;
   jobCount: number;
 }
 
-export interface CustomerIndividualDto {
+export interface CustomerListSummaryDto
+  extends CustomerSummaryDto, CustomerListSummary {}
+
+export interface CustomerIndividualDto extends PublicCustomerIndividual {
   customerId: string;
   firstName: string;
   lastName: string;
   dateOfBirth: string | null;
 }
 
-export interface CustomerCompanyDto {
+export interface CustomerCompanyDto extends PublicCustomerCompany {
   customerId: string;
   legalName: string;
   businessName: string | null;

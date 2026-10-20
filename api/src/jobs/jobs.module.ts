@@ -5,6 +5,7 @@ import { DatabaseModule } from '../database/database.module.js';
 import { StorageModule } from '../storage/storage.module.js';
 import { JobsController } from './jobs.controller.js';
 import { JobAudioNotesService } from './job-audio-notes.service.js';
+import { JobDocumentsService } from './job-documents.service.js';
 import { JobPhotosService } from './job-photos.service.js';
 import { JobsService } from './jobs.service.js';
 
@@ -19,7 +20,12 @@ import { JobsService } from './jobs.service.js';
 @Module({
   imports: [DatabaseModule, AuthModule, StorageModule, CustomersModule],
   controllers: [JobsController],
-  providers: [JobsService, JobPhotosService, JobAudioNotesService],
+  providers: [
+    JobsService,
+    JobPhotosService,
+    JobAudioNotesService,
+    JobDocumentsService,
+  ],
   exports: [JobsService],
 })
 export class JobsModule {}

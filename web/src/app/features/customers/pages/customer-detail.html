@@ -1,0 +1,310 @@
+<section [appPageTitle]="detail()?.customer?.displayName || i18n.text('customerDetails')">
+  <a class="back-link" routerLink="/work/customers">← {{ i18n.text('customerBack') }}</a>
+  @if (loading()) {
+    <p role="status">{{ i18n.text('busy') }}</p>
+  }
+  @if (error(); as message) {
+    <h1>{{ i18n.text('customerDetails') }}</h1>
+    <div role="alert" class="notice">
+      <p>{{ i18n.text(message) }}</p>
+      @if (auth.hasPermission('customers.view')) {
+        <button mat-stroked-button (click)="refresh()">{{ i18n.text('retry') }}</button>
+      }
+    </div>
+  }
+  @if (detail(); as d) {
+    <div class="page-heading">
+      <div>
+        <p class="eyebrow">
+          {{ i18n.text(d.customer.type === 'COMPANY' ? 'customerCompany' : 'customerIndividual') }}
+          · {{ i18n.text(d.customer.status === 'ACTIVE' ? 'customerActive' : 'customerInactive') }}
+        </p>
+        <h1>{{ d.customer.displayName }}</h1>
+        <p class="muted">
+          {{ d.customer.propertyCount }} {{ i18n.text('customerProperties') }} ·
+          {{ d.customer.jobCount }} {{ i18n.text('customerJobs') }}
+        </p>
+      </div>
+      <div class="actions">
+        <button mat-stroked-button (click)="refresh()" [disabled]="busy() || editing()">
+          {{ i18n.text('refresh') }}
+        </button>
+        @if (auth.hasPermission('customers.edit')) {
+          <a mat-flat-button [routerLink]="['/work/customers', id(), 'edit']">{{
+            i18n.text('customerEdit')
+          }}</a>
+        }
+      </div>
+    </div>
+    <div class="panel">
+      <h2>{{ i18n.text('customerInformation') }}</h2>
+      <dl>
+        <div>
+          <dt>{{ i18n.text('customerGeneralContact') }}</dt>
+          <dd class="contact-lines">
+            @if (d.customer.phone) {
+              <a [href]="'tel:' + d.customer.phone">{{ d.customer.phone }}</a>
+            }
+            @if (d.customer.email) {
+              <a [href]="'mailto:' + d.customer.email">{{ d.customer.email }}</a>
+            }
+          </dd>
+        </div>
+        @if (d.company; as company) {
+          <div>
+            <dt>{{ i18n.text('customerLegalName') }}</dt>
+            <dd>{{ company.legalName }}</dd>
+          </div>
+          @if (company.businessName) {
+            <div>
+              <dt>{{ i18n.text('customerBusinessName') }}</dt>
+              <dd>{{ company.businessName }}</dd>
+            </div>
+          }
+        }
+        @if (d.individual; as individual) {
+          <div>
+            <dt>{{ i18n.text('customerIndividual') }}</dt>
+            <dd>{{ individual.firstName }} {{ individual.lastName }}</dd>
+          </div>
+        }
+        <div>
+          <dt>{{ i18n.text('customerSince') }}</dt>
+          <dd>
+            {{
+              d.customer.createdAt
+                | date: 'mediumDate' : undefined : (i18n.language() === 'fr' ? 'fr-CA' : 'en-CA')
+            }}
+          </dd>
+        </div>
+        @if (d.customer.notes) {
+          <div class="wide">
+            <dt>{{ i18n.text('customerNotes') }}</dt>
+            <dd class="pre-wrap">{{ d.customer.notes }}</dd>
+          </div>
+        }
+      </dl>
+      @if (!d.contacts[0]?.isPrimary) {
+        <p class="muted">{{ i18n.text('customerGeneralPrimary') }}</p>
+      }
+    </div>
+    <div class="panel">
+      <div class="page-heading">
+        <h2>{{ i18n.text('customerContacts') }}</h2>
+        @if (auth.hasPermission('customers.contacts.create')) {
+          <button
+            mat-stroked-button
+            [disabled]="busy() || blocked() || editing()"
+            (click)="edit(null)"
+          >
+            {{ i18n.text('customerContactNew') }}
+          </button>
+        }
+      </div>
+      @for (contact of d.contacts; track contact.id) {
+        <article class="customer-row">
+          <div>
+            <h3>{{ contact.firstName }} {{ contact.lastName }}</h3>
+            @if (contact.isPrimary) {
+              <span class="eyebrow">{{ i18n.text('customerPrimary') }}</span>
+            }
+          </div>
+          <div class="contact-lines">
+            @if (contact.phone) {
+              <a [href]="'tel:' + contact.phone">{{ contact.phone }}</a>
+            }
+            @if (contact.email) {
+              <a [href]="'mailto:' + contact.email">{{ contact.email }}</a>
+            }
+          </div>
+          <div class="actions">
+            @if (auth.hasPermission('customers.contacts.edit')) {
+              <button
+                mat-button
+                [attr.aria-label]="
+                  i18n.text('customerContactEdit') +
+                  ' · ' +
+                  contact.firstName +
+                  ' ' +
+                  contact.lastName
+                "
+                [disabled]="busy() || blocked() || editing()"
+                (click)="edit(contact)"
+              >
+                {{ i18n.text('customerContactEdit') }}
+              </button>
+            }
+            @if (auth.hasPermission('customers.contacts.remove')) {
+              <button
+                mat-button
+                [attr.aria-label]="
+                  i18n.text('customerContactRemove') +
+                  ' · ' +
+                  contact.firstName +
+                  ' ' +
+                  contact.lastName
+                "
+                [disabled]="busy() || blocked() || editing()"
+                (click)="mutate(contact)"
+              >
+                {{ i18n.text('customerContactRemove') }}
+              </button>
+            }
+          </div>
+        </article>
+      } @empty {
+        <p class="muted">{{ i18n.text('customerNoContacts') }}</p>
+      }
+      @if (editing()) {
+        <app-contact-editor
+          [customerId]="id()"
+          [contact]="selectedContact()"
+          (closed)="editing.set(false)"
+          (saved)="refresh()"
+        />
+      }
+    </div>
+    <div class="panel">
+      <div class="page-heading">
+        <h2>{{ i18n.text('customerJobs') }}</h2>
+        @if (auth.hasPermission('JOB_CREATE') && auth.hasPermission('properties.view')) {
+          <a mat-flat-button [routerLink]="['/work/customers', id(), 'jobs', 'new']">{{
+            i18n.text('jobNew')
+          }}</a>
+        }
+      </div>
+      @if (jobsError(); as message) {
+        <p role="alert">{{ i18n.text(message) }}</p>
+      }
+      <label
+        >{{ i18n.text('jobSearch')
+        }}<input type="search" [formControl]="jobSearch" [attr.aria-label]="i18n.text('jobSearch')"
+      /></label>
+      @if (visibleJobs(); as items) {
+        @for (job of items; track job.id) {
+          <article class="customer-row">
+            <div>
+              <a
+                class="record-title"
+                [routerLink]="['/work/jobs', job.id]"
+                [queryParams]="{ view: 'office' }"
+                >#{{ job.jobNumber }} · {{ job.title }}</a
+              >
+              <p class="muted">{{ address(job.propertyAddress) }}</p>
+            </div>
+            <div>
+              @if (job.scheduledStart) {
+                <p>
+                  {{
+                    job.scheduledStart
+                      | date: 'medium' : undefined : (i18n.language() === 'fr' ? 'fr-CA' : 'en-CA')
+                  }}
+                </p>
+              }
+              @for (technician of job.technicians; track technician.membershipId) {
+                <span>{{ technician.name || i18n.text('unnamedMember') }} </span>
+              }
+            </div>
+            <app-work-status [code]="job.status" />
+          </article>
+        } @empty {
+          <p class="muted">{{ i18n.text('customerNoJobs') }}</p>
+        }
+      } @else if (!jobsError()) {
+        <p role="status">{{ i18n.text('busy') }}</p>
+      }
+    </div>
+    @if (auth.hasPermission('properties.view') || auth.hasPermission('properties.create')) {
+      <div class="panel">
+        <div class="page-heading">
+          <h2>{{ i18n.text('customerProperties') }}</h2>
+          @if (auth.hasPermission('properties.create')) {
+            <a mat-stroked-button [routerLink]="['/work/customers', id(), 'properties', 'new']">{{
+              i18n.text('propertyNew')
+            }}</a>
+          }
+        </div>
+        @if (auth.hasPermission('properties.view')) {
+          <label
+            >{{ i18n.text('propertyFilter')
+            }}<select
+              [formControl]="propertyStatus"
+              [attr.aria-label]="i18n.text('propertyFilter')"
+            >
+              <option value="ACTIVE">{{ i18n.text('propertyActive') }}</option>
+              <option value="ARCHIVED">{{ i18n.text('propertyArchived') }}</option>
+              <option value="ALL">{{ i18n.text('customerAll') }}</option>
+            </select></label
+          >
+          @if (propertyError(); as message) {
+            <p role="alert">{{ i18n.text(message) }}</p>
+          }
+          @if (properties(); as items) {
+            @for (property of items; track property.id) {
+              <article class="customer-row">
+                <div>
+                  <h3>
+                    <a
+                      class="record-title"
+                      [routerLink]="['/work/customers', id(), 'properties', property.id]"
+                      >{{ property.name || property.addressLine1 }}</a
+                    >
+                  </h3>
+                  <p class="muted">
+                    {{ property.addressLine1 }} {{ property.addressLine2 }} · {{ property.city }},
+                    {{ property.province }} {{ property.postalCode }}
+                  </p>
+                  <p class="muted">
+                    {{
+                      i18n.text(
+                        property.status === 'ACTIVE' ? 'propertyActive' : 'propertyArchived'
+                      )
+                    }}
+                    · {{ i18n.text('propertyLastService') }}:
+                    @if (property.lastServiceAt) {
+                      {{
+                        property.lastServiceAt
+                          | date
+                            : 'mediumDate'
+                            : undefined
+                            : (i18n.language() === 'fr' ? 'fr-CA' : 'en-CA')
+                      }}
+                    } @else {
+                      {{ i18n.text('propertyNeverServiced') }}
+                    }
+                  </p>
+                </div>
+                <p class="muted">{{ property.jobCount }} {{ i18n.text('customerJobs') }}</p>
+              </article>
+            } @empty {
+              <p class="muted">
+                {{
+                  i18n.text(
+                    propertyStatus.value === 'ACTIVE' ? 'customerNoProperties' : 'propertyNoMatches'
+                  )
+                }}
+              </p>
+            }
+          } @else if (!propertyError()) {
+            <p role="status">{{ i18n.text('busy') }}</p>
+          }
+        }
+      </div>
+    }
+    @if (writeError(); as message) {
+      <div role="alert" class="notice">
+        <p>{{ i18n.text(message) }}</p>
+        <button mat-stroked-button (click)="refresh()">{{ i18n.text('customerReload') }}</button>
+      </div>
+    }
+    @if (auth.hasPermission('customers.archive')) {
+      <div class="panel">
+        <h2>{{ i18n.text('customerArchive') }}</h2>
+        <p class="muted">{{ i18n.text('customerArchiveDescription') }}</p>
+        <button mat-stroked-button [disabled]="busy() || blocked() || editing()" (click)="mutate()">
+          {{ i18n.text('customerArchive') }}
+        </button>
+      </div>
+    }
+  }
+</section>

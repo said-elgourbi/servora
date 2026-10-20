@@ -29,30 +29,34 @@ describe('the Visit to Job consequence', () => {
     }
   });
 
-  it('completes the Job when a Visit completes as resolved', () => {
+  it('completes the Job when a Visit completes with a closing outcome', () => {
     for (const jobStatus of OPEN_JOB_STATUSES) {
-      expect(
-        jobStatusConsequenceForVisitTransition(
-          'COMPLETED',
-          'RESOLVED',
-          jobStatus,
-        ),
-      ).toBe('COMPLETED');
+      for (const outcomeCode of ['RESOLVED', 'NO_WORK_REQUIRED'] as const) {
+        expect(
+          jobStatusConsequenceForVisitTransition(
+            'COMPLETED',
+            outcomeCode,
+            jobStatus,
+          ),
+        ).toBe('COMPLETED');
+      }
     }
   });
 
-  it('keeps the Job active when a resolving completion leaves another Visit open', () => {
-    // `BR-062`: a Job is never `COMPLETED` while it still has an open Visit, so a resolving completion
+  it('keeps the Job active when a closing completion leaves another Visit open', () => {
+    // `BR-062`: a Job is never `COMPLETED` while it still has an open Visit, so a closing completion
     // closes the Job only when the attempt that just ended was its last remaining work.
     for (const jobStatus of OPEN_JOB_STATUSES) {
-      expect(
-        jobStatusConsequenceForVisitTransition(
-          'COMPLETED',
-          'RESOLVED',
-          jobStatus,
-          { hasOtherOpenVisit: true },
-        ),
-      ).toBe('ACTIVE');
+      for (const outcomeCode of ['RESOLVED', 'NO_WORK_REQUIRED'] as const) {
+        expect(
+          jobStatusConsequenceForVisitTransition(
+            'COMPLETED',
+            outcomeCode,
+            jobStatus,
+            { hasOtherOpenVisit: true },
+          ),
+        ).toBe('ACTIVE');
+      }
     }
   });
 
@@ -78,16 +82,21 @@ describe('the Visit to Job consequence', () => {
     }
   });
 
-  it('keeps the Job active for every non-resolving outcome', () => {
-    const nonResolvingOutcomes: readonly VisitOutcomeCode[] =
-      VISIT_OUTCOME_CODES.filter((code) => code !== 'RESOLVED');
-    expect(nonResolvingOutcomes).toEqual([
+  it('keeps the Job active for every non-closing outcome', () => {
+    const nonClosingOutcomes: readonly VisitOutcomeCode[] =
+      VISIT_OUTCOME_CODES.filter(
+        (code) => code !== 'RESOLVED' && code !== 'NO_WORK_REQUIRED',
+      );
+    expect(nonClosingOutcomes).toEqual([
       'NEEDS_FOLLOW_UP',
       'NEEDS_PARTS',
       'UNABLE_TO_COMPLETE',
+      'WORK_RECOMMENDED',
+      'QUOTE_REQUIRED',
+      'UNABLE_TO_ASSESS',
     ]);
 
-    for (const outcomeCode of nonResolvingOutcomes) {
+    for (const outcomeCode of nonClosingOutcomes) {
       expect(
         jobStatusConsequenceForVisitTransition(
           'COMPLETED',
@@ -132,31 +141,38 @@ describe('the Visit to Job consequence', () => {
 });
 
 describe('the ad-hoc reconciliation Job consequence (`BR-AH-008`)', () => {
-  const FOLLOW_UP_OUTCOMES: readonly VisitOutcomeCode[] = [
+  const NON_CLOSING_OUTCOMES: readonly VisitOutcomeCode[] = [
     'NEEDS_FOLLOW_UP',
     'NEEDS_PARTS',
     'UNABLE_TO_COMPLETE',
+    'WORK_RECOMMENDED',
+    'QUOTE_REQUIRED',
+    'UNABLE_TO_ASSESS',
   ];
 
-  it('closes an open Job on a resolving outcome with no other Visit open', () => {
+  it('closes an open Job on a closing outcome with no other Visit open', () => {
     for (const jobStatus of OPEN_JOB_STATUSES) {
-      expect(
-        adHocReconciliationJobConsequence('RESOLVED', jobStatus, false),
-      ).toBe('COMPLETED');
+      for (const outcomeCode of ['RESOLVED', 'NO_WORK_REQUIRED'] as const) {
+        expect(
+          adHocReconciliationJobConsequence(outcomeCode, jobStatus, false),
+        ).toBe('COMPLETED');
+      }
     }
   });
 
-  it('keeps an open Job active when a resolving outcome leaves another Visit open', () => {
+  it('keeps an open Job active when a closing outcome leaves another Visit open', () => {
     for (const jobStatus of OPEN_JOB_STATUSES) {
-      expect(
-        adHocReconciliationJobConsequence('RESOLVED', jobStatus, true),
-      ).toBe('ACTIVE');
+      for (const outcomeCode of ['RESOLVED', 'NO_WORK_REQUIRED'] as const) {
+        expect(
+          adHocReconciliationJobConsequence(outcomeCode, jobStatus, true),
+        ).toBe('ACTIVE');
+      }
     }
   });
 
-  it('keeps an open Job active for every follow-up-required outcome', () => {
+  it('keeps an open Job active for every non-closing outcome', () => {
     for (const jobStatus of OPEN_JOB_STATUSES) {
-      for (const outcomeCode of FOLLOW_UP_OUTCOMES) {
+      for (const outcomeCode of NON_CLOSING_OUTCOMES) {
         expect(
           adHocReconciliationJobConsequence(outcomeCode, jobStatus, false),
         ).toBe('ACTIVE');
@@ -164,21 +180,27 @@ describe('the ad-hoc reconciliation Job consequence (`BR-AH-008`)', () => {
     }
   });
 
-  it('leaves a COMPLETED Job completed on a resolving outcome', () => {
-    expect(adHocReconciliationJobConsequence('RESOLVED', 'COMPLETED', false)).toBeNull();
+  it('leaves a COMPLETED Job completed on a closing outcome', () => {
+    for (const outcomeCode of ['RESOLVED', 'NO_WORK_REQUIRED'] as const) {
+      expect(
+        adHocReconciliationJobConsequence(outcomeCode, 'COMPLETED', false),
+      ).toBeNull();
+    }
   });
 
-  it('moves a CANCELED Job to COMPLETED on a resolving outcome', () => {
+  it('moves a CANCELED Job to COMPLETED on a closing outcome', () => {
     // `BR-AH-008`: the work actually happened, so the request was not truly canceled. This is the
     // privileged exception `BR-AH-006` grants; it is deliberately outside `BR-058`'s transition list.
-    expect(adHocReconciliationJobConsequence('RESOLVED', 'CANCELED', false)).toBe(
-      'COMPLETED',
-    );
+    for (const outcomeCode of ['RESOLVED', 'NO_WORK_REQUIRED'] as const) {
+      expect(
+        adHocReconciliationJobConsequence(outcomeCode, 'CANCELED', false),
+      ).toBe('COMPLETED');
+    }
   });
 
-  it('moves a terminal Job to ACTIVE for every follow-up-required outcome', () => {
+  it('moves a terminal Job to ACTIVE for every non-closing outcome', () => {
     for (const jobStatus of ['COMPLETED', 'CANCELED'] as const) {
-      for (const outcomeCode of FOLLOW_UP_OUTCOMES) {
+      for (const outcomeCode of NON_CLOSING_OUTCOMES) {
         expect(
           adHocReconciliationJobConsequence(outcomeCode, jobStatus, false),
         ).toBe('ACTIVE');

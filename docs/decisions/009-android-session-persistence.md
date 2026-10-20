@@ -14,7 +14,7 @@ The Android client authenticated correctly while running: sign-in stored the ses
 expired access token was renewed through `POST /auth/refresh`. But the session lived only in memory.
 Closing the app — or the OS reclaiming the process — dropped it, and the next launch always showed
 sign-in. The signed-in UI state lived in per-screen ViewModel flags (`signedIn`), which die with the
-process for the same reason (`docs/tracker/007-android-customers-list.md` recorded both as out of
+process for the same reason (`docs/tracker/android/007-android-customers-list.md` recorded both as out of
 scope: "session persistence, sign-out and token refresh").
 
 Two facts shaped the fix:

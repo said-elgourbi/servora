@@ -1,3 +1,5 @@
+import type { KnownPermissionCode } from '@servora/shared-types';
+
 export const CUSTOMER_PERMISSIONS = {
   VIEW: 'customers.view',
   CREATE: 'customers.create',
@@ -21,7 +23,7 @@ export const CUSTOMER_PERMISSIONS = {
    * any-of one and never both (`ADR-019` D1, `ADR-021` D2).
    */
   VIEW_ASSIGNED: 'customers.view_assigned',
-} as const;
+} as const satisfies Record<string, KnownPermissionCode>;
 
 export type CustomerPermission =
   (typeof CUSTOMER_PERMISSIONS)[keyof typeof CUSTOMER_PERMISSIONS];
@@ -50,7 +52,7 @@ export const CUSTOMER_CONTACT_PERMISSIONS = {
   CREATE: 'customers.contacts.create',
   EDIT: 'customers.contacts.edit',
   REMOVE: 'customers.contacts.remove',
-} as const;
+} as const satisfies Record<string, KnownPermissionCode>;
 
 export type CustomerContactPermission =
   (typeof CUSTOMER_CONTACT_PERMISSIONS)[keyof typeof CUSTOMER_CONTACT_PERMISSIONS];
@@ -71,7 +73,7 @@ export const PROPERTY_PERMISSIONS = {
   EDIT: 'properties.edit',
   ARCHIVE: 'properties.archive',
   DELETE: 'properties.delete',
-} as const;
+} as const satisfies Record<string, KnownPermissionCode>;
 
 export type PropertyPermission =
   (typeof PROPERTY_PERMISSIONS)[keyof typeof PROPERTY_PERMISSIONS];
@@ -82,7 +84,7 @@ export type PropertyPermission =
  * `BR-008` confirms that the Manager default role updates Jobs, and the foundation catalogue already
  * carries a `JOB_UPDATE` capability granted to that role. The Jobs feature has not defined its own
  * `resource.action` capability set — that is an **OPEN QUESTION** recorded in
- * `docs/tracker/018-android-job-actions.md` and `docs/api/job-actions.md` — so the actions reuse the
+ * `docs/tracker/android/018-android-job-actions.md` and `docs/api/job-actions.md` — so the actions reuse the
  * existing `JOB_UPDATE` capability instead of inventing `jobs.*` codes (`BR-006`, `BR-042`).
  *
  * This is the same interim-authorization pattern the Job read already follows, where `GET /jobs/:id`
@@ -97,7 +99,7 @@ export type PropertyPermission =
 export const JOB_PERMISSIONS = {
   CREATE: 'JOB_CREATE',
   UPDATE: 'JOB_UPDATE',
-} as const;
+} as const satisfies Record<string, KnownPermissionCode>;
 
 export type JobPermission =
   (typeof JOB_PERMISSIONS)[keyof typeof JOB_PERMISSIONS];
@@ -108,18 +110,18 @@ export type JobPermission =
  * Assigning work means choosing from the organization's technicians, so reading that list is the
  * existing `TECHNICIAN_VIEW` capability `BR-008` already names as a Manager default. The Technician
  * capability set has not been re-defined as `technicians.*` — that is an **OPEN QUESTION** recorded
- * in `docs/tracker/018-android-job-actions.md`.
+ * in `docs/tracker/android/018-android-job-actions.md`.
  */
 export const TECHNICIAN_PERMISSIONS = {
   VIEW: 'TECHNICIAN_VIEW',
-} as const;
+} as const satisfies Record<string, KnownPermissionCode>;
 
 export type TechnicianPermission =
   (typeof TECHNICIAN_PERMISSIONS)[keyof typeof TECHNICIAN_PERMISSIONS];
 
 export const SCHEDULE_PERMISSIONS = {
   VIEW_ORG: 'schedule.view_org',
-} as const;
+} as const satisfies Record<string, KnownPermissionCode>;
 
 export type SchedulePermission =
   (typeof SCHEDULE_PERMISSIONS)[keyof typeof SCHEDULE_PERMISSIONS];
@@ -161,7 +163,7 @@ export const EVIDENCE_PERMISSIONS = {
    * the catalogue is per kind: a member may be trusted with one kind's removals and not the other kind's.
    */
   AUDIO_REMOVE: 'evidence.audio.remove',
-} as const;
+} as const satisfies Record<string, KnownPermissionCode>;
 
 export type EvidencePermission =
   (typeof EVIDENCE_PERMISSIONS)[keyof typeof EVIDENCE_PERMISSIONS];
@@ -206,7 +208,7 @@ export const VISIT_PERMISSIONS = {
   ADD_NOTE: 'VISIT_ADD_NOTE',
   /** Record the outcome a completed Visit requires (`BR-077`, `BR-078`, `ADR-019` D3). */
   RECORD_OUTCOME: 'VISIT_RECORD_OUTCOME',
-} as const;
+} as const satisfies Record<string, KnownPermissionCode>;
 
 export type VisitPermission =
   (typeof VISIT_PERMISSIONS)[keyof typeof VISIT_PERMISSIONS];

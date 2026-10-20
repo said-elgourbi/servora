@@ -64,6 +64,24 @@ enum class JobActivityKind {
      * recording itself leaves the ordinary timeline, so a client draws no player for this kind.
      */
     JOB_AUDIO_REMOVED,
+
+    /** A quote workflow was opened or reset to required after an Assessment Visit. */
+    JOB_QUOTE_REQUIRED,
+
+    /** A quote was marked as sent to the customer. */
+    JOB_QUOTE_SENT,
+
+    /** A customer approved a quote. */
+    JOB_QUOTE_APPROVED,
+
+    /** A customer rejected a quote. */
+    JOB_QUOTE_REJECTED,
+
+    /** A prior quote decision was corrected. */
+    JOB_QUOTE_CORRECTED,
+
+    /** A quote PDF was uploaded or replaced. */
+    JOB_QUOTE_DOCUMENT_UPLOADED,
 }
 
 /**
@@ -147,4 +165,20 @@ data class JobActivityEvent(
      * performed, not text an author recorded with the evidence (`BR-028`).
      */
     val audioRemovalReason: String? = null,
+    /** Previous quote workflow state (`JOB_QUOTE_*` workflow events), or `null` for the first event. */
+    val quoteFromState: String? = null,
+    /** New quote workflow state (`JOB_QUOTE_*` workflow events), as the API's stable code. */
+    val quoteToState: String? = null,
+    /** Optional manager note carried by a quote workflow event. */
+    val quoteNote: String? = null,
+    /** The uploaded quote document id (`JOB_QUOTE_DOCUMENT_UPLOADED`). */
+    val quoteDocumentId: String? = null,
+    /** Optional display name for the uploaded quote PDF. */
+    val quoteDocumentDisplayName: String? = null,
+    /** Preserved quote PDF version (`JOB_QUOTE_DOCUMENT_UPLOADED`). */
+    val quoteDocumentVersion: Int? = null,
+    /** Whether this uploaded quote PDF is the current document version. */
+    val quoteDocumentIsCurrent: Boolean? = null,
+    /** Quote PDF byte size reported by the API. */
+    val quoteDocumentByteSize: Long? = null,
 )

@@ -126,6 +126,7 @@ enum class WorkTab {
     ALL_JOBS,
     UNASSIGNED,
     REQUESTS,
+    AD_HOC,
 }
 
 /** Fast local filters for the Work view's All Jobs list. */

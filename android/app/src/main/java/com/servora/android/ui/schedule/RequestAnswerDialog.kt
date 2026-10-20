@@ -3,6 +3,7 @@ package com.servora.android.ui.schedule
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -67,7 +68,7 @@ internal fun RequestAnswerDialog(
 
     AlertDialog(
         onDismissRequest = { if (!isSending) onDismiss() },
-        modifier = Modifier.testTag(TechnicianRequestAnswerDialogTag),
+        modifier = Modifier.imePadding().testTag(TechnicianRequestAnswerDialogTag),
         title = { Text(stringResource(R.string.technician_request_answer_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(RequestAnswerLineSpacing)) {

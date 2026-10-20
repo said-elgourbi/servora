@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -77,7 +78,9 @@ import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.VisitStatus
+import com.servora.android.domain.model.visitOutcomesForPurpose
 import com.servora.android.ui.components.JobStatusPill
 import com.servora.android.ui.components.StatusDot
 import com.servora.android.ui.components.jobStatusAccent
@@ -149,7 +152,7 @@ const val JobDetailsRequestFollowUpActionTag = "job-details-action-request-follo
  *
  * It is a compact row of the four working states the technician may choose between, and the state the
  * Visit is in is the selected chip of that row — so the status a technician wants to change is the
- * thing they tap, without a menu to open (`docs/tracker/051-job-visit-lifecycle-redesign.md`).
+ * thing they tap, without a menu to open (`docs/tracker/shared/051-job-visit-lifecycle-redesign.md`).
  */
 const val JobDetailsVisitStatusSelectorTag = "job-details-visit-status-selector"
 
@@ -275,7 +278,7 @@ internal fun JobContextualAction(
  *
  * The status a user wants to change is the thing they tap: the chip the header presents **is** the
  * control, rather than a second "Change status" action drawn beside it that described the same state
- * twice (`docs/tracker/020-android-job-details-status-control.md`). The chip wears the current
+ * twice (`docs/tracker/android/020-android-job-details-status-control.md`). The chip wears the current
  * status's own dot, colour and label, so what the Job is now and what may be done to it are one
  * control, and its trailing chevron says it opens something.
  *
@@ -513,7 +516,7 @@ private fun JobStatusConfirmDialog(
  * The appearance travels with the message rather than being recomputed where it is drawn
  * ([JobActionSnackbarVisuals]), because the same report is drawn by whichever window is on screen: the
  * screen's own host normally, and the full-size photo viewer's host while the viewer is open
- * (`docs/tracker/031-android-photo-viewer-ui.md`). One report therefore reads identically in both.
+ * (`docs/tracker/android/031-android-photo-viewer-ui.md`). One report therefore reads identically in both.
  */
 @Composable
 internal fun JobActionSnackbar(
@@ -580,7 +583,7 @@ internal class JobActionSnackbarVisuals(
  * It is one composable rather than a block repeated per call site, so a report is never drawn two
  * different ways: the screen shows it at the bottom of its own layout, and the photo viewer shows it
  * inside its full-screen dialog while that is open
- * (`docs/tracker/031-android-photo-viewer-ui.md`).
+ * (`docs/tracker/android/031-android-photo-viewer-ui.md`).
  */
 @Composable
 internal fun JobActionSnackbarHost(hostState: SnackbarHostState, modifier: Modifier = Modifier) {
@@ -676,6 +679,7 @@ internal fun jobActionCompletionMessage(kind: JobActionKind): Int =
         JobActionKind.VISIT_STATUS_CHANGE -> R.string.job_action_done_visit_status
         JobActionKind.VISIT_COMPLETION -> R.string.job_action_done_visit_completion
         JobActionKind.FOLLOW_UP_REQUEST -> R.string.job_action_done_follow_up_request
+        JobActionKind.QUOTE_WORKFLOW -> R.string.job_action_done_quote_workflow
     }
 
 /**
@@ -1374,7 +1378,7 @@ internal fun JobReadOnlyNotice(
  * The localized label one outcome code is presented with (`BR-028`, `BR-041`).
  *
  * The codes are the API's closed catalogue (`BR-078`), so the mapping is total and a code that is not
- * one of the four cannot reach it (`BR-042`).
+ * one of the eight cannot reach it (`BR-042`).
  */
 internal fun visitOutcomeLabel(outcome: VisitOutcome): Int =
     when (outcome) {
@@ -1382,6 +1386,10 @@ internal fun visitOutcomeLabel(outcome: VisitOutcome): Int =
         VisitOutcome.NEEDS_FOLLOW_UP -> R.string.job_activity_outcome_needs_follow_up
         VisitOutcome.NEEDS_PARTS -> R.string.job_activity_outcome_needs_parts
         VisitOutcome.UNABLE_TO_COMPLETE -> R.string.job_activity_outcome_unable_to_complete
+        VisitOutcome.NO_WORK_REQUIRED -> R.string.job_activity_outcome_no_work_required
+        VisitOutcome.WORK_RECOMMENDED -> R.string.job_activity_outcome_work_recommended
+        VisitOutcome.QUOTE_REQUIRED -> R.string.job_activity_outcome_quote_required
+        VisitOutcome.UNABLE_TO_ASSESS -> R.string.job_activity_outcome_unable_to_assess
     }
 
 /**
@@ -1399,17 +1407,26 @@ internal fun visitOutcomeSupportingText(outcome: VisitOutcome): Int =
         VisitOutcome.NEEDS_PARTS -> R.string.job_visit_complete_outcome_needs_parts_support
         VisitOutcome.UNABLE_TO_COMPLETE ->
             R.string.job_visit_complete_outcome_unable_support
+        VisitOutcome.NO_WORK_REQUIRED ->
+            R.string.job_visit_complete_outcome_no_work_required_support
+        VisitOutcome.WORK_RECOMMENDED ->
+            R.string.job_visit_complete_outcome_work_recommended_support
+        VisitOutcome.QUOTE_REQUIRED ->
+            R.string.job_visit_complete_outcome_quote_required_support
+        VisitOutcome.UNABLE_TO_ASSESS ->
+            R.string.job_visit_complete_outcome_unable_to_assess_support
     }
 
 /**
  * The label the required text is asked for with (`BR-077`, `BR-078`).
  *
  * The API requires a summary with every outcome and states the same field as the **reason** when the
- * Visit could not be completed, so the sheet asks for what it is actually collecting: a reason the work
- * was not done, or a summary of what resulted from the attempt.
+ * attempt could not be performed — work not done, or an assessment that could not be made — so the
+ * sheet asks for what it is actually collecting: a reason the attempt was not done, or a summary of
+ * what resulted from it.
  */
 internal fun visitOutcomeSummaryLabel(outcome: VisitOutcome?): Int =
-    if (outcome == VisitOutcome.UNABLE_TO_COMPLETE) {
+    if (outcome?.requiresReason() == true) {
         R.string.job_visit_complete_reason_label
     } else {
         R.string.job_visit_complete_summary_label
@@ -1417,11 +1434,28 @@ internal fun visitOutcomeSummaryLabel(outcome: VisitOutcome?): Int =
 
 /** The placeholder the required text is prompted with, which follows the same reading (`BR-028`). */
 internal fun visitOutcomeSummaryPlaceholder(outcome: VisitOutcome?): Int =
-    if (outcome == VisitOutcome.UNABLE_TO_COMPLETE) {
-        R.string.job_visit_complete_reason_placeholder
-    } else {
-        R.string.job_visit_complete_summary_placeholder
+    when (outcome) {
+        VisitOutcome.UNABLE_TO_COMPLETE -> R.string.job_visit_complete_reason_placeholder
+        VisitOutcome.UNABLE_TO_ASSESS -> R.string.job_visit_complete_unable_to_assess_placeholder
+        else -> R.string.job_visit_complete_summary_placeholder
     }
+
+/** The requirement the empty field is reported with, which follows the same reading (`BR-028`). */
+internal fun visitOutcomeSummaryRequired(outcome: VisitOutcome?): Int =
+    when (outcome) {
+        VisitOutcome.UNABLE_TO_COMPLETE -> R.string.job_visit_complete_reason_required
+        VisitOutcome.UNABLE_TO_ASSESS -> R.string.job_visit_complete_unable_to_assess_required
+        else -> R.string.job_visit_complete_summary_required
+    }
+
+/**
+ * Whether the outcome's required text is asked for as a **reason** rather than a summary (`BR-028`).
+ *
+ * `BR-077` requires a summary with every outcome, but the field reads as a reason when the attempt
+ * could not be performed at all: the work could not be done, or the assessment could not be made.
+ */
+private fun VisitOutcome.requiresReason(): Boolean =
+    this == VisitOutcome.UNABLE_TO_COMPLETE || this == VisitOutcome.UNABLE_TO_ASSESS
 
 /**
  * The sheet a completion states its outcome in (`BR-077`, `BR-078`).
@@ -1431,15 +1465,19 @@ internal fun visitOutcomeSummaryPlaceholder(outcome: VisitOutcome?): Int =
  * record of what resulted from the field attempt (`BR-077`). Submitting sends the completion operation
  * itself, so the state and the outcome can never disagree.
  *
- * Each outcome is offered with one line saying what choosing it records, because the technician is in
- * the field rather than reading the catalogue (`BR-012`, `BR-028`), and the required text is asked for
- * as a **reason** when the Visit could not be completed and as a **summary** otherwise, which is what
- * the API's own answer calls it (`BR-078`). The outcome codes are the API's and their labels are
- * localized; the text is the technician's own and is never translated (`BR-028`).
+ * The outcomes offered are narrowed to the Visit's [purpose] (`BR-071`, `BR-078`): the picker never
+ * offers a conclusion the API would refuse for that purpose, while the API stays the authority for the
+ * pair (`BR-007`, `BR-041`). Each outcome is offered with one line saying what choosing it records,
+ * because the technician is in the field rather than reading the catalogue (`BR-012`, `BR-028`), and
+ * the required text is asked for as a **reason** when the attempt could not be performed and as a
+ * **summary** otherwise, which is what the API's own answer calls it (`BR-078`). The outcome codes are
+ * the API's and their labels are localized; the text is the technician's own and is never translated
+ * (`BR-028`).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun VisitCompletionSheet(
+    purpose: VisitPurpose,
     isSubmitting: Boolean,
     onConfirm: (VisitOutcome, String) -> Unit,
     onDismiss: () -> Unit,
@@ -1449,7 +1487,7 @@ internal fun VisitCompletionSheet(
     var summary by remember { mutableStateOf("") }
     val trimmed = summary.trim()
     val canConfirm = outcome != null && trimmed.isNotEmpty() && !isSubmitting
-    val requiresReason = outcome == VisitOutcome.UNABLE_TO_COMPLETE
+    val requiresReason = outcome?.requiresReason() == true
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1479,6 +1517,7 @@ internal fun VisitCompletionSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             VisitOutcomeOptions(
+                purpose = purpose,
                 selected = outcome,
                 enabled = !isSubmitting,
                 onSelect = { chosen -> outcome = chosen },
@@ -1499,15 +1538,7 @@ internal fun VisitCompletionSheet(
                 supportingText = {
                     // The text is required of every outcome, so the sheet says so rather than letting the
                     // API refuse a completion the technician believed was complete (`BR-077`, `BR-042`).
-                    Text(
-                        stringResource(
-                            if (requiresReason) {
-                                R.string.job_visit_complete_reason_required
-                            } else {
-                                R.string.job_visit_complete_summary_required
-                            },
-                        ),
-                    )
+                    Text(stringResource(visitOutcomeSummaryRequired(outcome)))
                 },
             )
         }
@@ -1515,6 +1546,8 @@ internal fun VisitCompletionSheet(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(horizontal = 20.dp)
                 .padding(top = 16.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
@@ -1536,20 +1569,25 @@ internal fun VisitCompletionSheet(
 }
 
 /**
- * The four outcome types `BR-078` defines, offered as a single-choice list.
+ * The outcome types `BR-078` defines for one purpose, offered as a single-choice list.
  *
- * Each one is stated with a single line saying what choosing it records, and the selected outcome is
- * drawn as selected rather than only as a ticked radio: the technician has to read what they are about
- * to record before they record it (`BR-012`, `BR-028`).
+ * The list is narrowed to the outcomes the Visit's purpose permits (`BR-071`, `BR-078`): a Work Visit
+ * is offered the four work conclusions and an Assessment Visit the four assessment ones, because the
+ * API refuses the other half of the catalogue. Each option is stated with a single line saying what
+ * choosing it records, and the selected outcome is drawn as selected rather than only as a ticked
+ * radio: the technician has to read what they are about to record before they record it (`BR-012`,
+ * `BR-028`). The backend stays authoritative for the pair; this filter is presentation only
+ * (`BR-007`, `BR-041`).
  */
 @Composable
 private fun VisitOutcomeOptions(
+    purpose: VisitPurpose,
     selected: VisitOutcome?,
     enabled: Boolean,
     onSelect: (VisitOutcome) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        VisitOutcome.entries.forEach { option ->
+        visitOutcomesForPurpose(purpose).forEach { option ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1758,9 +1796,9 @@ internal fun jobActionQueuedMessage(kind: JobActionKind): Int =
         JobActionKind.ACTIVITY_TEXT_EDIT,
         JobActionKind.ACTIVITY_TEXT_REMOVE,
         JobActionKind.FOLLOW_UP_REQUEST,
+        JobActionKind.QUOTE_WORKFLOW,
         -> R.string.job_action_queued_generic
     }
-
 
 
 

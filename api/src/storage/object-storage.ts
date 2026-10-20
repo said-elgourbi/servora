@@ -138,3 +138,32 @@ export function jobAudioNoteObjectKey(input: {
     `${input.audioNoteId}.${AUDIO_CONTENT_TYPES[input.contentType]}`,
   ].join('/');
 }
+
+/** The content types Servora accepts as Job documents, mapped to the key's extension. */
+export const JOB_DOCUMENT_CONTENT_TYPES = {
+  'application/pdf': 'pdf',
+} as const;
+
+export type JobDocumentContentType = keyof typeof JOB_DOCUMENT_CONTENT_TYPES;
+
+/**
+ * The key one Job document is stored under.
+ *
+ * Job documents are commercial/office artifacts, not field evidence. They therefore live outside the
+ * evidence keyspace while keeping the same provider-agnostic shape: organization, Job, and the
+ * document row's own id as stable path segments.
+ */
+export function jobDocumentObjectKey(input: {
+  readonly organizationId: string;
+  readonly jobId: string;
+  readonly documentId: string;
+  readonly contentType: JobDocumentContentType;
+}): string {
+  return [
+    'jobs',
+    'documents',
+    input.organizationId,
+    input.jobId,
+    `${input.documentId}.${JOB_DOCUMENT_CONTENT_TYPES[input.contentType]}`,
+  ].join('/');
+}

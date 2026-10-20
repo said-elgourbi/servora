@@ -175,10 +175,19 @@ describe('customer endpoint authorization (e2e)', () => {
     const allowed = await accessTokenFor([CUSTOMER_PERMISSIONS.VIEW]);
     const forbidden = await accessTokenFor([]);
 
-    await request(app.getHttpServer())
+    const listing = await request(app.getHttpServer())
       .get('/customers')
       .set('Authorization', `Bearer ${allowed}`)
       .expect(200);
+    expect(listing.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          displayName: 'Listable Customer',
+          openJobCount: 0,
+          overdueVisitCount: 0,
+        }),
+      ]),
+    );
 
     const response = await request(app.getHttpServer())
       .get('/customers')

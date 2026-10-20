@@ -5,7 +5,7 @@
 > may close the Job when no other Visit remains open; assessment recommendations derive distinct office
 > attention and do not reuse work follow-up semantics.
 >
-> **Amended 2026-09-20 by `docs/tracker/051-job-visit-lifecycle-redesign.md`.** D4's Job-consequence
+> **Amended 2026-09-20 by `docs/tracker/shared/051-job-visit-lifecycle-redesign.md`.** D4's Job-consequence
 > table was written against the six-status Job lifecycle, and the `PENDING_REVIEW` entries in it no longer
 > describe Servora: `PENDING_REVIEW` is removed (`BR-058`) and a resolving Visit completion closes the Job
 > when no other Visit remains open (`BR-062`, `BR-078`). D4's decision itself — the backend applies one
@@ -20,7 +20,7 @@ agent and accepted by product ownership in the same session, as `Project.md` §3
 **D4's Job-status vocabulary amended on 2026-09-20** (see the note above)
 
 Date: 2026-09-17
-Tracker: `docs/tracker/037-technician-field-experience.md` — Phase 1. **Every other phase of that slice
+Tracker: `docs/tracker/shared/037-technician-field-experience.md` — Phase 1. **Every other phase of that slice
 implements one of these answers**, which is why no other phase may start before this record exists.
 Contracts: `docs/api/job-details.md` §2 and `docs/api/job-activity.md` §2 (both re-guarded by D1),
 `docs/api/job-actions.md` (a new Visit section, D3–D5), `docs/api/technician-home.md` (new, once D6 is
@@ -302,7 +302,7 @@ Servora needs a paused state is left open below.
 | Permissions | `api/src/auth/permissions.ts` gains the four field codes as a named group. Nothing is invented: the codes, their bilingual catalogue rows and their default-Technician grants already exist in the database (`0004:75-78`, `:104-118`), so no catalogue row and no `BR-040` record is needed. The Android `Permission.kt` mirrors the same spellings in Phase 5 |
 | Contracts | `docs/api/job-details.md` §2 and `docs/api/job-activity.md` §2 (re-guarded), `docs/api/job-actions.md` (a new Visit section), `docs/api/technician-home.md` (new, once D6 is answered) |
 | Domain model | `docs/domain/job-visit-domain-model.md`: D4's mapping recorded beside §8.4's derived conditions, and D2's read scope beside §8.3/§10.1 |
-| Android | Phases 4–5 of `docs/tracker/037-technician-field-experience.md`: the technician entry point and home (gated on D6), the field action on Job Details, the four capabilities as UI gates, and the queued action through the existing outbox |
+| Android | Phases 4–5 of `docs/tracker/shared/037-technician-field-experience.md`: the technician entry point and home (gated on D6), the field action on Job Details, the four capabilities as UI gates, and the queued action through the existing outbox |
 | Business rules | **None amended.** `BR-009` already names the four capabilities and they are already granted to the default Technician role; D4 defines an undefined detail of `BR-058` rather than changing it (see D4) |
 
 ## Open questions not decided here

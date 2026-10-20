@@ -15,7 +15,7 @@ export type CustomerStatusFilter = (typeof CUSTOMER_STATUS_FILTERS)[number];
  * The job/visit dimension of the customer list.
  *
  * The meaning of each code is a product decision recorded in
- * `docs/tracker/008-android-customers-filter.md`:
+ * `docs/tracker/android/008-android-customers-filter.md`:
  *
  * - `HAS_OPEN_JOBS` / `NO_OPEN_JOBS` — the customer has, or does not have, at least one Job whose
  *   status is not terminal (`BR-058`). A customer with no Jobs at all has no open Jobs.

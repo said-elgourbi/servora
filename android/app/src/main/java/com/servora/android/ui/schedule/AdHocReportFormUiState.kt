@@ -50,6 +50,11 @@ data class AdHocReportFormState(
         get() = when {
             summary.isBlank() -> AdHocReportProblem.NO_SUMMARY
             !workEndedAt.isAfter(workStartedAt) -> AdHocReportProblem.END_NOT_AFTER_START
+            !unknownCustomer && selectedCustomer == null -> AdHocReportProblem.NO_CUSTOMER
+            unknownCustomer && (
+                reportedCustomerName.isBlank() || reportedCustomerPhone.isBlank() ||
+                    reportedCustomerAddress.isBlank()
+                ) -> AdHocReportProblem.INCOMPLETE_CUSTOMER_DETAILS
             else -> null
         }
 
@@ -65,4 +70,6 @@ enum class AdHocReportProblem {
 
     /** The reported end is not after its start. */
     END_NOT_AFTER_START,
+    NO_CUSTOMER,
+    INCOMPLETE_CUSTOMER_DETAILS,
 }

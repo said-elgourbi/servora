@@ -4,7 +4,12 @@ import com.servora.android.domain.model.IssuedSession
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Holds the session the backend most recently issued to this installation.
@@ -25,6 +30,10 @@ import kotlinx.coroutines.withContext
 class SessionStore @Inject constructor(
     private val storage: SessionStorage,
 ) {
+    private val persistence = Mutex()
+    private val _changes = MutableStateFlow<IssuedSession?>(null)
+    /** Observed by installation reconciliation, including rejected refresh and offline sign-out. */
+    val changes = _changes.asStateFlow()
 
     @Volatile
     private var session: IssuedSession? = null
@@ -38,14 +47,15 @@ class SessionStore @Inject constructor(
      * Called at application start by `SessionManager`, before the authenticated UI can appear, so the
      * read happens on a background dispatcher and no later read is a disk access.
      */
-    suspend fun restore() {
+    suspend fun restore() = persistence.withLock {
         if (loaded) {
-            return
+            return@withLock
         }
         val stored = withContext(Dispatchers.IO) { storage.read() }
         synchronized(this) {
             if (!loaded) {
                 session = stored
+                _changes.value = stored
                 loaded = true
             }
         }
@@ -66,20 +76,32 @@ class SessionStore @Inject constructor(
     fun refreshToken(): String? = session?.tokens?.refreshToken
 
     /** Remembers [session] as the current one and persists it. */
-    suspend fun store(session: IssuedSession) {
+    suspend fun store(session: IssuedSession) = persistence.withLock {
+        replace(session)
+    }
+
+    /** Atomically rejects a late renewal after sign-out, account switch or another token pair. */
+    suspend fun replaceIfCurrent(expected: IssuedSession, replacement: IssuedSession?): Boolean =
+        persistence.withLock {
+            if (session != expected) return@withLock false
+            replace(replacement)
+            true
+        }
+
+    private suspend fun replace(session: IssuedSession?) {
         synchronized(this) {
             this.session = session
+            _changes.value = session
             loaded = true
         }
-        withContext(Dispatchers.IO) { storage.write(session) }
+        // A cancelled registration/refresh must not keep a rotated token only in memory.
+        withContext(NonCancellable + Dispatchers.IO) {
+            if (session == null) storage.clear() else storage.write(session)
+        }
     }
 
     /** Forgets the current session, in memory and on disk. */
-    suspend fun clear() {
-        synchronized(this) {
-            session = null
-            loaded = true
-        }
-        withContext(Dispatchers.IO) { storage.clear() }
+    suspend fun clear() = persistence.withLock {
+        replace(null)
     }
 }

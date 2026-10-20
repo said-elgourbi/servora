@@ -7,6 +7,10 @@ import com.servora.android.data.session.SessionRenewal
 import com.servora.android.domain.model.AdHocReportCustomerOption
 import com.servora.android.domain.model.AdHocReportJobOption
 import com.servora.android.domain.model.AdHocReportPropertyOption
+import com.servora.android.domain.model.AdHocWorkReport
+import com.servora.android.domain.model.AdHocWorkReportStatus
+import com.servora.android.domain.model.ScheduleAddress
+import com.servora.android.domain.model.visitOutcomeOrNull
 import java.io.IOException
 import java.time.Instant
 import javax.inject.Inject
@@ -23,6 +27,9 @@ import retrofit2.HttpException
  * reused for the online attempt and for every replay, so a report is never created twice (`BR-031`).
  */
 interface AdHocWorkReportsRepository {
+    suspend fun searchReviewCustomers(query: String): AdHocReviewDataResult<List<AdHocReportCustomerOption>>
+    suspend fun listReviewProperties(customerId: String): AdHocReviewDataResult<List<AdHocReportPropertyOption>>
+    suspend fun resolveLocation(report: AdHocWorkReport, request: ResolveAdHocLocationRequestDto): AdHocReviewDataResult<AdHocWorkReport>
     /** Type-ahead Customer search; the query must be at least two characters (`BR-AH-009`). */
     suspend fun searchCustomers(query: String): AdHocReportCustomerOptionsResult
 
@@ -32,8 +39,45 @@ interface AdHocWorkReportsRepository {
     /** The Jobs of a selected Customer, the optional related-work hint. */
     suspend fun listJobs(customerId: String): AdHocReportJobOptionsResult
 
+    /**
+     * The Jobs an office reviewer may link a pending report to (`BR-AH-002`). When [customerId] is
+     * known the list is scoped to that Customer; otherwise [query] searches the whole organization.
+     */
+    suspend fun listReviewJobs(
+        customerId: String?,
+        query: String?,
+    ): AdHocReportJobOptionsResult
+
     /** Submits one report; queued when the API could not be reached (`BR-014`). */
     suspend fun submit(report: AdHocWorkReportDraft): AdHocWorkReportResult
+
+    /** Reads the reports the caller may review or read (`BR-AH-002`, `BR-AH-005`). */
+    suspend fun loadReports(): AdHocWorkReportsResult
+
+    /** Voids [report] as not legitimate Servora work, recording [note] (`BR-AH-007`). */
+    suspend fun reject(report: AdHocWorkReport, note: String): AdHocWorkReportRejectResult
+
+    /**
+     * Reconciles [report] into the existing Job [jobId], recording its completed Visit (`BR-AH-002`,
+     * `BR-AH-006`). The returned id names the Job that now carries the reconciled Visit.
+     */
+    suspend fun link(report: AdHocWorkReport, jobId: String, note: String): AdHocWorkReportReconcileResult
+
+    /**
+     * Reconciles [report] into a new Job with [title], recording its completed Visit (`BR-AH-002`).
+     * The returned id names the Job the operation created.
+     */
+    suspend fun convert(
+        report: AdHocWorkReport,
+        title: String,
+        description: String?,
+        note: String,
+    ): AdHocWorkReportReconcileResult
+}
+
+sealed interface AdHocReviewDataResult<out T> {
+    data class Success<T>(val value: T) : AdHocReviewDataResult<T>
+    data class Failure(val reason: CustomersFailureReason) : AdHocReviewDataResult<Nothing>
 }
 
 /**
@@ -89,12 +133,62 @@ sealed interface AdHocReportJobOptionsResult {
     data class Failure(val reason: CustomersFailureReason) : AdHocReportJobOptionsResult
 }
 
+sealed interface AdHocWorkReportsResult {
+    data class Success(val reports: List<AdHocWorkReport>) : AdHocWorkReportsResult
+    data class Failure(val reason: CustomersFailureReason) : AdHocWorkReportsResult
+}
+
+sealed interface AdHocWorkReportRejectResult {
+    data class Success(val report: AdHocWorkReport) : AdHocWorkReportRejectResult
+    data class Failure(val reason: CustomersFailureReason) : AdHocWorkReportRejectResult
+}
+
+sealed interface AdHocWorkReportReconcileResult {
+    data class Success(val jobId: String, val jobNumber: Int) : AdHocWorkReportReconcileResult
+    data class Failure(val reason: CustomersFailureReason) : AdHocWorkReportReconcileResult
+}
+
 class DefaultAdHocWorkReportsRepository @Inject constructor(
     private val api: AdHocWorkReportsApi,
     private val sessionAuthenticator: SessionAuthenticator,
     private val subject: AuthenticatedSubject,
     private val offline: AdHocWorkReportOfflineStore,
 ) : AdHocWorkReportsRepository {
+    override suspend fun searchReviewCustomers(query: String) = reviewData {
+        api.reviewCustomerOptions("Bearer $it", query).mapNotNull { dto -> dto.toCustomerOption() }
+    }
+
+    override suspend fun listReviewProperties(customerId: String) = reviewData {
+        api.reviewPropertyOptions("Bearer $it", customerId).mapNotNull { dto -> dto.toPropertyOption() }
+    }
+
+    override suspend fun resolveLocation(report: AdHocWorkReport, request: ResolveAdHocLocationRequestDto) = reviewData {
+        api.resolveLocation("Bearer $it", report.id, request.copy(expectedStatus = "PENDING", expectedVersion = report.version))
+            .toReport() ?: throw SerializationException("Invalid resolved report")
+    }
+
+    private suspend fun <T> reviewData(call: suspend (String) -> T): AdHocReviewDataResult<T> {
+        val token = sessionAuthenticator.accessToken()
+            ?: return AdHocReviewDataResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+        return reviewData(token, true, call)
+    }
+
+    private suspend fun <T> reviewData(token: String, allowRenewal: Boolean, call: suspend (String) -> T): AdHocReviewDataResult<T> = try {
+        AdHocReviewDataResult.Success(call(token))
+    } catch (failure: HttpException) {
+        if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+            when (val renewal = sessionAuthenticator.renew(token)) {
+                is SessionRenewal.Renewed -> reviewData(renewal.accessToken, false, call)
+                SessionRenewal.Rejected -> AdHocReviewDataResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+                SessionRenewal.Unavailable -> AdHocReviewDataResult.Failure(CustomersFailureReason.NETWORK)
+            }
+        } else AdHocReviewDataResult.Failure(failure.toFailureReason())
+    } catch (failure: IOException) {
+        AdHocReviewDataResult.Failure(CustomersFailureReason.NETWORK)
+    } catch (failure: SerializationException) {
+        AdHocReviewDataResult.Failure(CustomersFailureReason.UNEXPECTED)
+    }
+
 
     override suspend fun searchCustomers(query: String): AdHocReportCustomerOptionsResult {
         val accessToken = sessionAuthenticator.accessToken()
@@ -180,6 +274,46 @@ class DefaultAdHocWorkReportsRepository @Inject constructor(
         AdHocReportJobOptionsResult.Failure(CustomersFailureReason.UNEXPECTED)
     }
 
+    override suspend fun listReviewJobs(
+        customerId: String?,
+        query: String?,
+    ): AdHocReportJobOptionsResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return AdHocReportJobOptionsResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+        return listReviewJobs(accessToken, allowRenewal = true, customerId, query)
+    }
+
+    private suspend fun listReviewJobs(
+        accessToken: String,
+        allowRenewal: Boolean,
+        customerId: String?,
+        query: String?,
+    ): AdHocReportJobOptionsResult = try {
+        AdHocReportJobOptionsResult.Success(
+            api.reviewJobOptions("Bearer $accessToken", customerId, query)
+                .mapNotNull { it.toJobOption() },
+        )
+    } catch (failure: HttpException) {
+        if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+            when (val renewal = sessionAuthenticator.renew(accessToken)) {
+                is SessionRenewal.Renewed ->
+                    listReviewJobs(renewal.accessToken, false, customerId, query)
+
+                SessionRenewal.Rejected ->
+                    AdHocReportJobOptionsResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+
+                SessionRenewal.Unavailable ->
+                    AdHocReportJobOptionsResult.Failure(CustomersFailureReason.NETWORK)
+            }
+        } else {
+            AdHocReportJobOptionsResult.Failure(failure.toFailureReason())
+        }
+    } catch (failure: IOException) {
+        AdHocReportJobOptionsResult.Failure(CustomersFailureReason.NETWORK)
+    } catch (failure: SerializationException) {
+        AdHocReportJobOptionsResult.Failure(CustomersFailureReason.UNEXPECTED)
+    }
+
     override suspend fun submit(report: AdHocWorkReportDraft): AdHocWorkReportResult {
         val subjectId = subject.current()
             ?: return AdHocWorkReportResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
@@ -231,6 +365,147 @@ class DefaultAdHocWorkReportsRepository @Inject constructor(
         } else {
             AdHocWorkReportResult.Failure(CustomersFailureReason.NETWORK)
         }
+    }
+
+    override suspend fun loadReports(): AdHocWorkReportsResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return AdHocWorkReportsResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+        return loadReports(accessToken, allowRenewal = true)
+    }
+
+    private suspend fun loadReports(
+        accessToken: String,
+        allowRenewal: Boolean,
+    ): AdHocWorkReportsResult = try {
+        AdHocWorkReportsResult.Success(
+            api.list("Bearer $accessToken").mapNotNull { it.toReport() },
+        )
+    } catch (failure: HttpException) {
+        if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+            when (val renewal = sessionAuthenticator.renew(accessToken)) {
+                is SessionRenewal.Renewed -> loadReports(renewal.accessToken, false)
+                SessionRenewal.Rejected ->
+                    AdHocWorkReportsResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+
+                SessionRenewal.Unavailable ->
+                    AdHocWorkReportsResult.Failure(CustomersFailureReason.NETWORK)
+            }
+        } else {
+            AdHocWorkReportsResult.Failure(failure.toFailureReason())
+        }
+    } catch (failure: IOException) {
+        AdHocWorkReportsResult.Failure(CustomersFailureReason.NETWORK)
+    } catch (failure: SerializationException) {
+        AdHocWorkReportsResult.Failure(CustomersFailureReason.UNEXPECTED)
+    }
+
+    override suspend fun reject(
+        report: AdHocWorkReport,
+        note: String,
+    ): AdHocWorkReportRejectResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return AdHocWorkReportRejectResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+        val request = RejectAdHocWorkReportRequestDto(
+            note = note.trim().takeUnless { it.isEmpty() },
+            expectedStatus = AdHocWorkReportStatus.PENDING.name,
+            expectedVersion = report.version,
+        )
+        return reject(accessToken, allowRenewal = true, report.id, request)
+    }
+
+    private suspend fun reject(
+        accessToken: String,
+        allowRenewal: Boolean,
+        reportId: String,
+        request: RejectAdHocWorkReportRequestDto,
+    ): AdHocWorkReportRejectResult = try {
+        val report = api.reject("Bearer $accessToken", reportId, request).toReport()
+        if (report == null) {
+            AdHocWorkReportRejectResult.Failure(CustomersFailureReason.UNEXPECTED)
+        } else {
+            AdHocWorkReportRejectResult.Success(report)
+        }
+    } catch (failure: HttpException) {
+        if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+            when (val renewal = sessionAuthenticator.renew(accessToken)) {
+                is SessionRenewal.Renewed -> reject(renewal.accessToken, false, reportId, request)
+                SessionRenewal.Rejected ->
+                    AdHocWorkReportRejectResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+
+                SessionRenewal.Unavailable ->
+                    AdHocWorkReportRejectResult.Failure(CustomersFailureReason.NETWORK)
+            }
+        } else {
+            AdHocWorkReportRejectResult.Failure(failure.toFailureReason())
+        }
+    } catch (failure: IOException) {
+        AdHocWorkReportRejectResult.Failure(CustomersFailureReason.NETWORK)
+    } catch (failure: SerializationException) {
+        AdHocWorkReportRejectResult.Failure(CustomersFailureReason.UNEXPECTED)
+    }
+
+    override suspend fun link(
+        report: AdHocWorkReport,
+        jobId: String,
+        note: String,
+    ): AdHocWorkReportReconcileResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+        val request = LinkAdHocWorkReportRequestDto(
+            jobId = jobId,
+            note = note.trim().takeUnless { it.isEmpty() },
+            expectedStatus = AdHocWorkReportStatus.PENDING.name,
+            expectedVersion = report.version,
+        )
+        return reconcile(accessToken, allowRenewal = true) { token ->
+            api.link("Bearer $token", report.id, request)
+        }
+    }
+
+    override suspend fun convert(
+        report: AdHocWorkReport,
+        title: String,
+        description: String?,
+        note: String,
+    ): AdHocWorkReportReconcileResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+        val request = ConvertAdHocWorkReportRequestDto(
+            title = title.trim(),
+            description = description?.trim()?.takeIf { it.isNotEmpty() },
+            note = note.trim().takeUnless { it.isEmpty() },
+            expectedStatus = AdHocWorkReportStatus.PENDING.name,
+            expectedVersion = report.version,
+        )
+        return reconcile(accessToken, allowRenewal = true) { token ->
+            api.convert("Bearer $token", report.id, request)
+        }
+    }
+
+    private suspend fun reconcile(
+        accessToken: String,
+        allowRenewal: Boolean,
+        call: suspend (token: String) -> AdHocReconciliationJobDto,
+    ): AdHocWorkReportReconcileResult = try {
+        val job = call(accessToken)
+        AdHocWorkReportReconcileResult.Success(jobId = job.id, jobNumber = job.jobNumber)
+    } catch (failure: HttpException) {
+        if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+            when (val renewal = sessionAuthenticator.renew(accessToken)) {
+                is SessionRenewal.Renewed -> reconcile(renewal.accessToken, false, call)
+                SessionRenewal.Rejected ->
+                    AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNAUTHENTICATED)
+
+                SessionRenewal.Unavailable ->
+                    AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.NETWORK)
+            }
+        } else {
+            AdHocWorkReportReconcileResult.Failure(failure.toFailureReason())
+        }
+    } catch (failure: IOException) {
+        AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.NETWORK)
+    } catch (failure: SerializationException) {
+        AdHocWorkReportReconcileResult.Failure(CustomersFailureReason.UNEXPECTED)
     }
 
     private suspend fun renewAndRetrySearch(
@@ -294,7 +569,7 @@ private fun AdHocWorkReportDraft.toSubmitRequest(): SubmitAdHocWorkReportRequest
     )
 
 private fun AdHocReportCustomerOptionDto.toCustomerOption(): AdHocReportCustomerOption? =
-    if (id.isBlank() || displayName.isBlank()) null else AdHocReportCustomerOption(id, displayName)
+    if (id.isBlank() || displayName.isBlank()) null else AdHocReportCustomerOption(id, displayName, phone)
 
 private fun AdHocReportPropertyOptionDto.toPropertyOption(): AdHocReportPropertyOption? =
     if (id.isBlank()) null else {
@@ -312,6 +587,61 @@ private fun AdHocReportPropertyOptionDto.toPropertyOption(): AdHocReportProperty
 
 private fun AdHocReportJobOptionDto.toJobOption(): AdHocReportJobOption? =
     if (id.isBlank()) null else AdHocReportJobOption(id, jobNumber, title)
+
+/**
+ * Maps a report read, or `null` when this build cannot read its status or outcome.
+ *
+ * An unknown status or outcome code is a report this client cannot present truthfully, exactly as an
+ * unknown request status is not a request it can present (`BR-041`, `BR-042`): the row is dropped
+ * rather than drawn with the wrong state.
+ */
+internal fun AdHocWorkReportDto.toReport(): AdHocWorkReport? {
+    val status = AdHocWorkReportStatus.entries.firstOrNull { it.name == this.status }
+        ?: return null
+    val outcome = visitOutcomeOrNull(this.outcomeCode)
+        ?: return null
+    return AdHocWorkReport(
+        id = id,
+        reportingTechnicianMembershipId = reportingTechnicianMembershipId,
+        customerId = customerId,
+        customerName = customerName,
+        propertyId = propertyId,
+        propertyAddress = propertyAddress?.toScheduleAddress(),
+        knownJobId = knownJobId,
+        knownJobNumber = knownJobNumber,
+        knownJobTitle = knownJobTitle,
+        workStartedAt = workStartedAt,
+        workEndedAt = workEndedAt,
+        outcomeCode = outcome,
+        summary = summary,
+        notes = notes,
+        reportedCustomerName = reportedCustomerName,
+        reportedCustomerPhone = reportedCustomerPhone,
+        reportedCustomerAddress = reportedCustomerAddress,
+        status = status,
+        reviewerMembershipId = reviewerMembershipId,
+        reviewedAt = reviewedAt,
+        reviewNote = reviewNote,
+        createdJobId = createdJobId,
+        createdJobNumber = createdJobNumber,
+        createdJobTitle = createdJobTitle,
+        createdVisitId = createdVisitId,
+        version = version,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+    )
+}
+
+private fun ScheduleAddressDto.toScheduleAddress(): ScheduleAddress =
+    ScheduleAddress(
+        propertyName = propertyName,
+        addressLine1 = addressLine1,
+        addressLine2 = addressLine2,
+        city = city,
+        province = province,
+        postalCode = postalCode,
+        country = country,
+    )
 
 private const val HTTP_UNAUTHORIZED = 401
 

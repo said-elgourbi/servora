@@ -3,8 +3,9 @@
 # The API + PostgreSQL are the long-lived system of record (BR-001); MinIO provides local
 # object storage for development behind the S3 contract (ADR-013), so a deployment replaces it
 # with an S3-compatible provider by configuration and never by code.
-# This compose file provides the foundational services; Android and
-# Angular development happen on the host against these services.
+# This compose file provides the foundational services. Make also loads
+# docker-compose.local.yml to serve Angular and enable local HTTP browser sessions.
+# Android and optional Angular live-reload development run on the host.
 #
 # Configuration comes from `.env` at the repository root (see .env.example).
 name: servora
@@ -33,15 +34,21 @@ services:
 
   api:
     build:
-      context: ./api
+      context: .
+      dockerfile: api/Dockerfile
     environment:
-      # Hard-coded rather than configurable: the guarded development affordances
-      # (`PASSWORD_RESET_DELIVERY=file`, `SMS_PROVIDER=file`) are refused in production, so a
-      # local developer runs the API on the host to use them (`ADR-006` D3, D4).
+      # Production defaults refuse development delivery providers (`ADR-006` D3, D4).
+      # Make explicitly selects development mode in docker-compose.local.yml for local HTTP QA.
       NODE_ENV: production
+      WEB_ORIGIN: ${WEB_ORIGIN:-}
       PORT: 3000
       DATABASE_URL: postgres://${POSTGRES_USER:-servora}:${POSTGRES_PASSWORD:-servora}@postgres:5432/${POSTGRES_DB:-servora}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Uses ADC from the container environment; host credential paths are not mounted here.
+      PUSH_PROVIDER: ${PUSH_PROVIDER:-disabled}
+      PUSH_WORKER_ENABLED: ${PUSH_WORKER_ENABLED:-false}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      PUSH_ANDROID_APPLICATION_ID: ${PUSH_ANDROID_APPLICATION_ID:-}
       # No default: a hard-coded secret would be a committed credential (dev.md §5).
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required — set it in the repository-root .env (see .env.example)}
       # Authentication-flow configuration (BR-019, BR-043, BR-045; ADR-006). Every value has an

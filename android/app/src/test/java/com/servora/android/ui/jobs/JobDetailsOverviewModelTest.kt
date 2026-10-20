@@ -214,7 +214,7 @@ class JobDetailsOverviewModelTest {
     }
 
     @Test
-    fun `keeps administrative events out of the primary activity timeline`() {
+    fun `keeps visit activity together instead of splitting administrative history out`() {
         val events = listOf(
             event(id = "note", kind = JobActivityKind.VISIT_NOTE_ADDED, visitSequence = 1),
             event(
@@ -225,6 +225,8 @@ class JobDetailsOverviewModelTest {
             ),
             event(id = "assigned", kind = JobActivityKind.VISIT_TECHNICIAN_ASSIGNED, visitSequence = 1),
             event(id = "scheduled", kind = JobActivityKind.VISIT_SCHEDULED, visitSequence = 1),
+            event(id = "quote-approved", kind = JobActivityKind.JOB_QUOTE_APPROVED, visitSequence = 1),
+            event(id = "quote-corrected", kind = JobActivityKind.JOB_QUOTE_CORRECTED, visitSequence = 1),
             event(
                 id = "routine-status",
                 kind = JobActivityKind.VISIT_STATUS_CHANGED,
@@ -233,11 +235,12 @@ class JobDetailsOverviewModelTest {
             ),
         )
 
-        assertEquals(listOf("note", "started"), events.primaryActivity().map { it.id })
-        assertEquals(
-            listOf("assigned", "scheduled", "routine-status"),
-            events.administrativeActivity().map { it.id },
+        val groups = groupJobActivity(
+            events = events,
+            visits = listOf(visit(id = "visit-1", sequence = 1)),
         )
+
+        assertEquals(events.map { it.id }, groups.activityFor("visit-1").map { it.id })
     }
 
     @Test
@@ -288,18 +291,34 @@ class JobDetailsOverviewModelTest {
     }
 
     @Test
-    fun `gives every Visit of the Job its own group, newest first`() {
-        // Every field attempt has its own account, and the section is where a reader finds which update
-        // belongs to which: a Visit is never dropped from the groups because it has nothing recorded yet
-        // (`BR-047`, `BR-080`).
+    fun `gives every Visit with activity its own group, newest first`() {
+        // Empty Visit groups are hidden so the activity section stays scannable, while every recorded
+        // visit event remains under the Visit it belongs to (`BR-047`, `BR-080`).
+        val activity = groupJobActivity(
+            events = listOf(
+                event(id = "visit-1-note", visitSequence = 1),
+                event(id = "visit-2-note", visitSequence = 2),
+                event(id = "visit-3-note", visitSequence = 3),
+            ),
+            visits = listOf(
+                visit(id = "visit-1", sequence = 1),
+                visit(id = "visit-2", sequence = 2),
+                visit(id = "visit-3", sequence = 3),
+            ),
+        )
         val groups = visitActivityGroups(
             visits = listOf(
                 visit(id = "visit-1", sequence = 1, scheduledStart = "2026-09-07T13:00:00.000Z"),
-                visit(id = "visit-2", sequence = 2, scheduledStart = "2026-09-14T13:00:00.000Z"),
+                visit(
+                    id = "visit-2",
+                    sequence = 2,
+                    scheduledStart = "2026-09-14T13:00:00.000Z",
+                    status = VisitStatus.SCHEDULED,
+                ),
                 visit(id = "visit-3", sequence = 3, scheduledStart = "2026-09-21T13:00:00.000Z"),
             ),
             representedVisitId = "visit-2",
-            groups = groupJobActivity(events = null, visits = emptyList()),
+            groups = activity,
         )
 
         assertEquals(listOf("visit-3", "visit-2", "visit-1"), groups.map { it.visit.id })
@@ -307,19 +326,54 @@ class JobDetailsOverviewModelTest {
     }
 
     @Test
-    fun `opens the Visit the screen represents by default and leaves the others folded`() {
+    fun `opens the current Visit by default and leaves completed Visits folded`() {
+        val activity = groupJobActivity(
+            events = listOf(
+                event(id = "visit-1-note", visitSequence = 1),
+                event(id = "visit-2-note", visitSequence = 2),
+            ),
+            visits = listOf(visit(id = "visit-1", sequence = 1), visit(id = "visit-2", sequence = 2)),
+        )
         val groups = visitActivityGroups(
             visits = listOf(
-                visit(id = "visit-1", sequence = 1, scheduledStart = "2026-09-07T13:00:00.000Z"),
-                visit(id = "visit-2", sequence = 2, scheduledStart = "2026-09-14T13:00:00.000Z"),
+                visit(
+                    id = "visit-1",
+                    sequence = 1,
+                    scheduledStart = "2026-09-07T13:00:00.000Z",
+                    status = VisitStatus.COMPLETED,
+                ),
+                visit(id = "visit-2", sequence = 2, status = VisitStatus.SCHEDULED, scheduledStart = "2026-09-14T13:00:00.000Z"),
             ),
             representedVisitId = "visit-2",
-            groups = groupJobActivity(events = null, visits = emptyList()),
+            groups = activity,
         )
 
-        // Newest first, and the represented Visit is the one group that opens without a tap (`BR-012`).
+        // Newest first, and the current Visit is the one group that opens without a tap (`BR-012`).
         assertEquals(listOf("visit-2", "visit-1"), groups.map { it.visit.id })
-        assertEquals(listOf(true, false), groups.map { it.isRepresentedVisit })
+        assertEquals(listOf(true, false), groups.map { it.isCurrentVisit })
+    }
+
+    @Test
+    fun `keeps a represented completed Visit collapsed by default`() {
+        val activity = groupJobActivity(
+            events = listOf(event(id = "visit-1-note", visitSequence = 1)),
+            visits = listOf(visit(id = "visit-1", sequence = 1)),
+        )
+
+        val groups = visitActivityGroups(
+            visits = listOf(
+                visit(
+                    id = "visit-1",
+                    sequence = 1,
+                    scheduledStart = "2026-09-07T13:00:00.000Z",
+                    status = VisitStatus.COMPLETED,
+                ),
+            ),
+            representedVisitId = "visit-1",
+            groups = activity,
+        )
+
+        assertEquals(listOf(false), groups.map { it.isCurrentVisit })
     }
 
     @Test
@@ -332,7 +386,13 @@ class JobDetailsOverviewModelTest {
                 visit(id = "scheduled", sequence = 2, scheduledStart = "2026-09-07T13:00:00.000Z"),
             ),
             representedVisitId = null,
-            groups = groupJobActivity(events = null, visits = emptyList()),
+            groups = groupJobActivity(
+                events = listOf(
+                    event(id = "draft-note", visitSequence = 1),
+                    event(id = "scheduled-note", visitSequence = 2),
+                ),
+                visits = listOf(visit(id = "draft", sequence = 1), visit(id = "scheduled", sequence = 2)),
+            ),
         )
 
         assertEquals(listOf("scheduled", "draft"), groups.map { it.visit.id })
@@ -346,14 +406,20 @@ class JobDetailsOverviewModelTest {
                 visit(id = "second", sequence = 2, scheduledStart = "2026-09-07T13:00:00.000Z"),
             ),
             representedVisitId = null,
-            groups = groupJobActivity(events = null, visits = emptyList()),
+            groups = groupJobActivity(
+                events = listOf(
+                    event(id = "first-note", visitSequence = 1),
+                    event(id = "second-note", visitSequence = 2),
+                ),
+                visits = listOf(visit(id = "first", sequence = 1), visit(id = "second", sequence = 2)),
+            ),
         )
 
         assertEquals(listOf("second", "first"), groups.map { it.visit.id })
     }
 
     @Test
-    fun `attaches each Visit's own activity, and none where the Visit has none`() {
+    fun `attaches each Visit's own activity and hides Visits with no activity`() {
         val groups = groupJobActivity(
             events = listOf(
                 event(id = "visit-1-note", visitSequence = 1),
@@ -375,8 +441,7 @@ class JobDetailsOverviewModelTest {
         val byVisit = activityGroups.associateBy { group -> group.visit.id }
         assertEquals(listOf("visit-1-note"), byVisit.getValue("visit-1").activity.map { it.id })
         assertEquals(listOf("visit-2-note"), byVisit.getValue("visit-2").activity.map { it.id })
-        // A Visit with no update keeps its group and states that it has none (`BR-042`).
-        assertTrue(byVisit.getValue("visit-3").activity.isEmpty())
+        assertFalse(byVisit.containsKey("visit-3"))
     }
 
     @Test
@@ -463,7 +528,7 @@ class JobDetailsOverviewModelTest {
     }
 
     @Test
-    fun `offers follow-up scheduling only after a completed Visit with a follow-up outcome`() {
+    fun `labels API-approved scheduling as follow-up only for follow-up outcomes`() {
         val base = job()
         val completedSelected = requireNotNull(base.selectedVisit).copy(status = VisitStatus.COMPLETED)
         fun withOutcome(outcome: VisitOutcome?) = base.copy(
@@ -490,9 +555,13 @@ class JobDetailsOverviewModelTest {
             JobVisitScheduleAction.FOLLOW_UP_VISIT,
             withOutcome(VisitOutcome.UNABLE_TO_COMPLETE).visitScheduleAction(),
         )
-        assertNull(withOutcome(VisitOutcome.RESOLVED).visitScheduleAction())
-        assertNull(withOutcome(null).visitScheduleAction())
-        assertNull(withOutcome(VisitOutcome.NEEDS_FOLLOW_UP).copy(selectedVisit = completedSelected.copy(status = VisitStatus.IN_PROGRESS)).visitScheduleAction())
+        assertEquals(JobVisitScheduleAction.INITIAL_VISIT, withOutcome(VisitOutcome.RESOLVED).visitScheduleAction())
+        assertEquals(JobVisitScheduleAction.INITIAL_VISIT, withOutcome(null).visitScheduleAction())
+        assertNull(withOutcome(VisitOutcome.RESOLVED).copy(canScheduleVisit = false).visitScheduleAction())
+        assertEquals(
+            JobVisitScheduleAction.INITIAL_VISIT,
+            withOutcome(null).copy(selectedVisit = completedSelected.copy(status = VisitStatus.CANCELED)).visitScheduleAction(),
+        )
     }
 
     @Test

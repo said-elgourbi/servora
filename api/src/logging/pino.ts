@@ -22,6 +22,7 @@ export function createPinoLogger(config: AppConfig): PinoLogger {
     redact: {
       paths: [
         'req.headers.authorization',
+        'req.headers["x-push-installation-secret"]',
         'req.headers.cookie',
         'res.headers["set-cookie"]',
       ],

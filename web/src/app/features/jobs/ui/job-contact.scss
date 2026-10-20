@@ -1,0 +1,130 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.section-icon app-icon {
+  width: 18px;
+  height: 18px;
+}
+.section-icon {
+  color: var(--mat-sys-on-surface-variant);
+  display: inline-flex;
+}
+h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+h2 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0;
+  letter-spacing: -0.015em;
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+}
+.panel {
+  background: var(--mat-sys-surface);
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 3px rgb(0 0 0 / 2%);
+}
+.field-label {
+  display: block;
+  font-size: 11px;
+  color: var(--mat-sys-on-surface-variant);
+  line-height: 1.5;
+}
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  flex-shrink: 0;
+  background: var(--mat-sys-primary-container);
+  color: var(--mat-sys-on-primary-container);
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 650;
+}
+.contact-actions {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+}
+.contact-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: 4px 0;
+  text-decoration: none;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.contact-link span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.contact-link app-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--mat-sys-on-surface-variant);
+}
+.contact-link:hover span {
+  text-decoration: underline;
+}
+.contact-note {
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-line;
+  padding: 12px 14px;
+  background: var(--mat-sys-surface-container-low);
+  border-radius: 7px;
+  color: var(--mat-sys-on-surface-variant);
+  margin: 16px 0 0;
+  overflow-wrap: anywhere;
+}
+.contact-person {
+  border-top: 1px solid var(--mat-sys-outline-variant);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+.person-heading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.person-avatar {
+  width: 34px;
+  height: 34px;
+  background: var(--mat-sys-surface-container);
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 11px;
+}
+.person-heading h3 {
+  font-size: 13px;
+}
+.contact-content {
+  padding: 14px 16px;
+}
+@media (max-width: 700px) {
+  .contact-link {
+    min-height: 44px;
+  }
+  .contact-content {
+    padding: 14px 16px;
+  }
+  .panel-heading {
+    padding: 12px 16px;
+  }
+}

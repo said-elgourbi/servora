@@ -1,3 +1,4 @@
+import type { OfficeJobDetails } from '@servora/shared-types';
 import {
   readAddressSnapshot,
   type AddressSnapshot,
@@ -7,14 +8,20 @@ import type {
   AssignmentRoleCode,
   FollowUpVisitRequestStatus,
   Job,
+  JobQuoteDecisionState,
+  JobQuoteWorkflowState,
   JobStatus,
   VisitOutcomeCode,
+  VisitPurposeCode,
   VisitStatus,
 } from './job.types.js';
 import {
+  ACTIVE_VISIT_STATUSES,
   applicableJobStatusTransitions,
   applicableVisitStatusTransitions,
+  canCorrectJobQuoteDecision,
   expectsFollowUpVisit,
+  canScheduleAfterFinishedVisits,
   isReschedulableVisitStatus,
 } from './job.types.js';
 import { deriveJobAttention, type JobAttention } from './job-attention.js';
@@ -62,6 +69,7 @@ export interface JobDetailsVisitSummaryDto {
   /** The Visit's stable, human-readable sequence within the Job: `1`, `2`, … (`BR-052`). */
   sequence: number;
   status: VisitStatus;
+  purposeCode: VisitPurposeCode;
   /**
    * The outcome the Visit's completion recorded, or `null` when the Visit holds none (`BR-077`,
    * `BR-078`).
@@ -90,6 +98,14 @@ export interface JobDetailsVisitSummaryDto {
   scheduledEnd: string | null;
   /** The Visit's version, echoed back when it is rescheduled or its crew changes (`BR-086`). */
   version: number;
+  /**
+   * Whether this Visit was created from a reconciled ad-hoc work report (`BR-AH-003`, `BR-AH-006`).
+   *
+   * It is a stored fact, never inferred from the Visit's status or schedule, and it is what lets a
+   * screen label after-the-fact historical work without implying the Visit happened after a
+   * later-numbered Visit (`BR-052`, `BR-042`).
+   */
+  isAdHocWork: boolean;
   /** The technicians currently assigned to **this** Visit, Lead first; empty when none are (`BR-068`). */
   technicians: JobDetailsTechnicianDto[];
 }
@@ -98,6 +114,7 @@ export interface JobDetailsVisitSummaryDto {
 export interface JobDetailsVisitDto {
   id: string;
   status: VisitStatus;
+  purposeCode: VisitPurposeCode;
   scheduledStart: string;
   scheduledEnd: string;
   /** The Visit's version, echoed back when the Visit is rescheduled or its crew changes (`BR-086`). */
@@ -231,7 +248,7 @@ export interface JobDetailsCustomerContactDto {
   contacts: JobDetailsContactPersonDto[];
 }
 
-export interface JobDetailsDto {
+export interface JobDetailsDto extends OfficeJobDetails {
   id: string;
   /** The organization-scoped, human-readable Job number (`BR-052`). */
   jobNumber: number;
@@ -283,6 +300,10 @@ export interface JobDetailsDto {
    */
   visits: JobDetailsVisitSummaryDto[];
   /**
+   * The current Assessment quote workflow for this Job, or `null` when the Job has no quote workflow.
+   */
+  quote: JobDetailsQuoteDto | null;
+  /**
    * The newest follow-up Visit request for this Job, or `null` when none exists.
    *
    * It is a request's own status, not a Visit status: the technician can see what the office did with
@@ -297,11 +318,50 @@ export interface JobDetailsDto {
    * **Schedule a visit** action from it rather than holding a second copy of the rule (`BR-041`,
    * `BR-007`). It is `true` only when the caller holds `visits.create_schedule`, the Job is open
    * (`NEW` or `ACTIVE`), and the Job's Visit shape admits a new field attempt: no scheduled Visit, or
-   * a represented Visit that is `COMPLETED` with a follow-up outcome (`BR-078`). The Property
+   * a represented Visit that is `COMPLETED` with a follow-up outcome (`BR-078`), or only finished
+   * Visits ending in cancellation or a resolving outcome after reopening (`BR-063`). The Property
    * requirement stays a runtime refusal on the write itself (`BR-072`), never a reason to hide the
    * action.
    */
   canScheduleVisit: boolean;
+}
+
+export type JobDetailsQuoteAction =
+  | 'UPLOAD_DOCUMENT'
+  | 'READ_DOCUMENT'
+  | 'MARK_SENT'
+  | 'MARK_REQUIRED'
+  | 'MARK_APPROVED'
+  | 'MARK_REJECTED';
+
+export interface JobDetailsQuoteDocumentDto {
+  id: string;
+  displayName: string | null;
+  documentVersion: number;
+  isCurrent: boolean;
+  contentType: string;
+  byteSize: number;
+  uploadedByMembershipId: string;
+  supersededAt: string | null;
+  supersededByJobDocumentId: string | null;
+  recordedAt: string;
+}
+
+export interface JobDetailsQuoteDto {
+  id: string;
+  state: JobQuoteWorkflowState;
+  sourceVisitId: string;
+  sourceVisitSequence: number | null;
+  version: number;
+  sentAt: string | null;
+  sentByMembershipId: string | null;
+  sentNote: string | null;
+  externalReference: string | null;
+  decidedAt: string | null;
+  decidedByMembershipId: string | null;
+  decisionNote: string | null;
+  currentDocument: JobDetailsQuoteDocumentDto | null;
+  allowedActions: JobDetailsQuoteAction[];
 }
 
 export interface JobDetailsFollowUpVisitRequestDto {
@@ -394,6 +454,20 @@ export interface JobDetailsReadOptions {
    * way (`BR-041`).
    */
   readonly canCreateSchedule?: boolean;
+  /**
+   * Whether the caller holds the office capability used for quote workflow/document actions.
+   *
+   * Quote actions currently reuse `JOB_UPDATE`; the projection reports the allowed commercial actions
+   * from that same authorization answer so clients do not infer them from role names.
+   */
+  readonly canManageQuote?: boolean;
+  /**
+   * Whether the caller may read the current quote PDF when one exists.
+   *
+   * This is deliberately narrower than quote management: assigned field readers may inspect the quote
+   * attached to their Job, but only the office quote manager may upload documents or move the workflow.
+   */
+  readonly canReadQuoteDocument?: boolean;
 }
 
 /**
@@ -406,11 +480,14 @@ export interface JobVisitSummary {
   readonly visitId: string;
   readonly sequence: number;
   readonly status: VisitStatus;
+  readonly purposeCode: VisitPurposeCode;
   /** The Visit's **current** outcome, or `null` when it holds none (`BR-077`, `BR-079`). */
   readonly outcomeCode: VisitOutcomeCode | null;
   readonly scheduledStart: Date | null;
   readonly scheduledEnd: Date | null;
   readonly version: number;
+  /** `true` when the Visit was reconciled from an ad-hoc report; absent only for a caller/tests that predate it. */
+  readonly isAdHocWork?: boolean;
   readonly technicians: readonly AssignedTechnician[];
 }
 
@@ -437,6 +514,38 @@ export interface JobDetails {
    */
   readonly visits?: readonly JobVisitSummary[];
   readonly followUpVisitRequest?: JobDetailsFollowUpVisitRequestDto | null;
+  /**
+   * The current Assessment quote workflow, when one exists for this Job (`BR-QUOTE-001`).
+   *
+   * It is separate from Job status and Visit outcome. The field is optional until quote persistence is
+   * introduced; once resolved, quote-related attention and scheduling readiness derive from it rather
+   * than re-reading `QUOTE_REQUIRED` as an implicit state.
+   */
+  readonly quoteWorkflow?: {
+    readonly id: string;
+    readonly state: JobQuoteWorkflowState;
+    readonly sourceVisitId: string;
+    readonly sentAt: Date | null;
+    readonly sentByMembershipId: string | null;
+    readonly sentNote: string | null;
+    readonly externalReference: string | null;
+    readonly decidedAt: Date | null;
+    readonly decidedByMembershipId: string | null;
+    readonly decisionNote: string | null;
+    readonly version: number;
+    readonly currentDocument: {
+      readonly id: string;
+      readonly displayName: string | null;
+      readonly documentVersion: number;
+      readonly isCurrent: boolean;
+      readonly contentType: string;
+      readonly byteSize: number;
+      readonly uploadedByMembershipId: string;
+      readonly supersededAt: Date | null;
+      readonly supersededByJobDocumentId: string | null;
+      readonly recordedAt: Date;
+    } | null;
+  } | null;
 }
 
 /** One technician on the wire, which every crew in this projection is reported through (`BR-068`). */
@@ -487,15 +596,16 @@ export function toJobDetailsDto(
       ));
   // The Job-level scheduling answer (`BR-062`, `BR-071`, `BR-072`): the caller holds the schedule
   // capability, the Job is open, and the Visit shape admits a new attempt — no scheduled Visit, or a
-  // represented Visit that is `COMPLETED` with a follow-up outcome. The represented Visit's outcome
+  // represented Visit that is `COMPLETED` with a follow-up outcome, or finished history after a reopen.
+  // The represented Visit's outcome
   // is read from the Visit list that already resolves it, so this answer never disagrees with
   // `attention` (`BR-041`).
   const selectedOutcomeCode =
     details.selectedVisit === null
       ? null
       : ((details.visits ?? []).find(
-            (visit) => visit.visitId === details.selectedVisit?.visitId,
-          )?.outcomeCode ?? null);
+          (visit) => visit.visitId === details.selectedVisit?.visitId,
+        )?.outcomeCode ?? null);
   // Whether the represented Visit admits a follow-up Visit request (`BR-FV-001`, `BR-078`): the
   // attempt is over (`COMPLETED`) and its recorded outcome expects a follow-up. A `RESOLVED` attempt
   // expects none, so the request action is not offered for it. The capability the session holds stays
@@ -507,9 +617,15 @@ export function toJobDetailsDto(
   const canScheduleVisit =
     options.canCreateSchedule === true &&
     (status === 'NEW' || status === 'ACTIVE') &&
-    (details.selectedVisit === null ||
+    (canScheduleAfterFinishedVisits(details.visits ?? []) ||
+      details.selectedVisit === null ||
       (details.selectedVisit.status === 'COMPLETED' &&
-        expectsFollowUpVisit(selectedOutcomeCode)));
+        expectsFollowUpVisit(selectedOutcomeCode)) ||
+      (details.quoteWorkflow?.state === 'APPROVED' &&
+        !hasFutureActionableWorkVisit(
+          details.visits ?? [],
+          details.quoteWorkflow.sourceVisitId,
+        )));
   return {
     id: job.id,
     jobNumber: job.jobNumber,
@@ -529,8 +645,10 @@ export function toJobDetailsDto(
         visitId: visit.visitId,
         sequence: visit.sequence,
         status: visit.status,
+        purposeCode: visit.purposeCode,
         outcomeCode: visit.outcomeCode,
       })),
+      quoteWorkflow: details.quoteWorkflow ?? null,
     }),
     allowedStatusTransitions: [...applicableJobStatusTransitions(status)],
     version: job.version,
@@ -554,6 +672,7 @@ export function toJobDetailsDto(
         : {
             id: details.selectedVisit.visitId,
             status: details.selectedVisit.status,
+            purposeCode: details.selectedVisit.purposeCode,
             scheduledStart: details.selectedVisit.scheduledStart.toISOString(),
             scheduledEnd: details.selectedVisit.scheduledEnd.toISOString(),
             version: details.selectedVisit.version,
@@ -597,13 +716,132 @@ export function toJobDetailsDto(
       id: visit.visitId,
       sequence: visit.sequence,
       status: visit.status,
+      purposeCode: visit.purposeCode,
       outcomeCode: visit.outcomeCode,
       scheduledStart: visit.scheduledStart?.toISOString() ?? null,
       scheduledEnd: visit.scheduledEnd?.toISOString() ?? null,
       version: visit.version,
+      isAdHocWork: visit.isAdHocWork ?? false,
       technicians: visit.technicians.map(toTechnicianDto),
     })),
+    quote: toJobDetailsQuoteDto(details, options),
     followUpVisitRequest: details.followUpVisitRequest ?? null,
     canScheduleVisit,
   };
+}
+
+function toJobDetailsQuoteDto(
+  details: JobDetails,
+  options: JobDetailsReadOptions,
+): JobDetailsQuoteDto | null {
+  const workflow = details.quoteWorkflow ?? null;
+  if (workflow === null) {
+    return null;
+  }
+  const visits = details.visits ?? [];
+  const sourceVisit = visits.find(
+    (visit) => visit.visitId === workflow.sourceVisitId,
+  );
+
+  return {
+    id: workflow.id,
+    state: workflow.state,
+    sourceVisitId: workflow.sourceVisitId,
+    sourceVisitSequence: sourceVisit?.sequence ?? null,
+    version: workflow.version,
+    sentAt: workflow.sentAt?.toISOString() ?? null,
+    sentByMembershipId: workflow.sentByMembershipId,
+    sentNote: workflow.sentNote,
+    externalReference: workflow.externalReference,
+    decidedAt: workflow.decidedAt?.toISOString() ?? null,
+    decidedByMembershipId: workflow.decidedByMembershipId,
+    decisionNote: workflow.decisionNote,
+    currentDocument:
+      workflow.currentDocument === null
+        ? null
+        : {
+            id: workflow.currentDocument.id,
+            displayName: workflow.currentDocument.displayName,
+            documentVersion: workflow.currentDocument.documentVersion,
+            isCurrent: workflow.currentDocument.isCurrent,
+            contentType: workflow.currentDocument.contentType,
+            byteSize: workflow.currentDocument.byteSize,
+            uploadedByMembershipId:
+              workflow.currentDocument.uploadedByMembershipId,
+            supersededAt:
+              workflow.currentDocument.supersededAt?.toISOString() ?? null,
+            supersededByJobDocumentId:
+              workflow.currentDocument.supersededByJobDocumentId,
+            recordedAt: workflow.currentDocument.recordedAt.toISOString(),
+          },
+    allowedActions: quoteActionsForWorkflow(
+      workflow.state,
+      workflow.sourceVisitId,
+      workflow.currentDocument !== null,
+      visits,
+      options.canManageQuote === true,
+      options.canReadQuoteDocument === true,
+    ),
+  };
+}
+
+function quoteActionsForWorkflow(
+  state: JobQuoteWorkflowState,
+  sourceVisitId: string,
+  hasCurrentDocument: boolean,
+  visits: readonly JobVisitSummary[],
+  canManageQuote: boolean,
+  canReadQuoteDocument: boolean,
+): JobDetailsQuoteAction[] {
+  const actions: JobDetailsQuoteAction[] = [];
+  if (canManageQuote) {
+    actions.push('UPLOAD_DOCUMENT');
+  }
+  if (hasCurrentDocument && (canReadQuoteDocument || canManageQuote)) {
+    actions.push('READ_DOCUMENT');
+  }
+  if (!canManageQuote) {
+    return actions;
+  }
+
+  if (state === 'REQUIRED') {
+    actions.push('MARK_SENT');
+  }
+  if (state === 'SENT') {
+    actions.push('MARK_REQUIRED', 'MARK_APPROVED', 'MARK_REJECTED');
+  }
+  if (state === 'APPROVED' || state === 'REJECTED') {
+    const opposite: JobQuoteDecisionState =
+      state === 'APPROVED' ? 'REJECTED' : 'APPROVED';
+    if (
+      canCorrectJobQuoteDecision({
+        state,
+        sourceVisitId,
+        visits: visits.map((visit) => ({
+          visitId: visit.visitId,
+          sequence: visit.sequence,
+          purposeCode: visit.purposeCode,
+        })),
+      })
+    ) {
+      actions.push(opposite === 'APPROVED' ? 'MARK_APPROVED' : 'MARK_REJECTED');
+    }
+  }
+  return actions;
+}
+
+function hasFutureActionableWorkVisit(
+  visits: readonly JobVisitSummary[],
+  sourceVisitId: string,
+): boolean {
+  const sourceVisit = visits.find((visit) => visit.visitId === sourceVisitId);
+  if (sourceVisit === undefined) {
+    return false;
+  }
+  return visits.some(
+    (visit) =>
+      visit.sequence > sourceVisit.sequence &&
+      visit.purposeCode === 'WORK' &&
+      (ACTIVE_VISIT_STATUSES as readonly VisitStatus[]).includes(visit.status),
+  );
 }

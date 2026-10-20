@@ -1,5 +1,6 @@
 import {
   DomainValidationError,
+  optionalText,
   optionalUuid,
   requireText,
 } from '../validation/domain-validation.js';
@@ -37,6 +38,10 @@ export type AdHocReportCustomerScope =
 export interface AdHocReportCustomerOptionDto {
   readonly id: string;
   readonly displayName: string;
+}
+
+export interface AdHocReviewCustomerOptionDto extends AdHocReportCustomerOptionDto {
+  readonly phone: string | null;
 }
 
 /** One active Property of the selected Customer the reporter may select (`BR-050`, `BR-094`). */
@@ -98,9 +103,50 @@ export function parseAdHocReportCustomerContextQuery(
   input: unknown,
 ): AdHocReportCustomerContextQuery {
   const source = (input ?? {}) as Record<string, unknown>;
-  const customerId = optionalUuid(firstQueryValue(source.customerId), 'customerId');
+  const customerId = optionalUuid(
+    firstQueryValue(source.customerId),
+    'customerId',
+  );
   if (customerId === null) {
     throw new DomainValidationError(['customerId is required']);
   }
   return { customerId };
+}
+
+/** The office review's Job search: a customer-scoped list or a whole-organization query (`BR-AH-002`). */
+export interface AdHocReviewJobOptionsQuery {
+  readonly customerId: string | null;
+  readonly query: string | null;
+}
+
+/** The shortest Job number/title query the office review search answers (`BR-AH-002`). */
+export const AD_HOC_REVIEW_JOB_SEARCH_MIN_LENGTH = 2;
+
+/**
+ * Validates the office review's Job search (`BR-AH-002`).
+ *
+ * The office links a pending report to an existing Job, which may be the technician's `knownJobId` or
+ * a different Job the office chooses. When the report names a Customer, the list is scoped to that
+ * Customer's Jobs; when it does not, the office searches the whole organization by Job number or
+ * title. A request naming neither is refused rather than answered with the whole organization
+ * (`BR-042`).
+ */
+export function parseAdHocReviewJobOptionsQuery(
+  input: unknown,
+): AdHocReviewJobOptionsQuery {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const customerId = optionalUuid(
+    firstQueryValue(source.customerId),
+    'customerId',
+  );
+  const query = optionalText(firstQueryValue(source.q), 'q', 255);
+  if (customerId === null && query === null) {
+    throw new DomainValidationError(['customerId or q is required']);
+  }
+  if (query !== null && query.length < AD_HOC_REVIEW_JOB_SEARCH_MIN_LENGTH) {
+    throw new DomainValidationError([
+      `q must be at least ${AD_HOC_REVIEW_JOB_SEARCH_MIN_LENGTH} characters`,
+    ]);
+  }
+  return { customerId, query };
 }

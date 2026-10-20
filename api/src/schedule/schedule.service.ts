@@ -14,10 +14,18 @@ import {
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { DatabaseService } from '../database/database.service.js';
-import { customers, jobs, visits, visitTechnicians } from '../database/schema.js';
+import {
+  customers,
+  jobs,
+  visits,
+  visitTechnicians,
+} from '../database/schema.js';
 import { readAddressSnapshot } from '../address/address-snapshot.js';
 import type { AddressSnapshot } from '../address/address-snapshot.js';
-import { NOT_DAY_WORK_VISIT_STATUSES, isVisitOverdue } from '../home/home-visit-conditions.js';
+import {
+  NOT_DAY_WORK_VISIT_STATUSES,
+  isVisitOverdue,
+} from '../home/home-visit-conditions.js';
 import type { DayWindow } from '../home/home-day.js';
 import { readAssignedTechnicians } from '../jobs/visit-assignment.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
@@ -26,7 +34,7 @@ import type {
   AssignableTechnician,
   AssignableTechnicianDto,
 } from '../technicians/technician.dto.js';
-import type { VisitStatus } from '../jobs/job.types.js';
+import type { VisitPurposeCode, VisitStatus } from '../jobs/job.types.js';
 import {
   SCHEDULE_UNASSIGNED_LIMIT,
   UNASSIGNED_EXCLUDED_VISIT_STATUSES,
@@ -57,6 +65,7 @@ export interface ScheduleRead {
 interface ScheduleVisitRow {
   readonly visitId: string;
   readonly visitStatus: string;
+  readonly purposeCode: string;
   readonly scheduledStart: Date | null;
   readonly scheduledEnd: Date | null;
   readonly visitAddressSnapshot: unknown;
@@ -105,7 +114,10 @@ export class ScheduleService {
     scheduleScope: ScheduleScope,
   ): Promise<ScheduleRead> {
     const fieldScope = scheduleScope.kind === 'SELF';
-    const narrowedTo = scheduleScopedMembershipIds(scheduleScope, membershipIds);
+    const narrowedTo = scheduleScopedMembershipIds(
+      scheduleScope,
+      membershipIds,
+    );
     const [dayRows, unassignedRows, technicians] = await Promise.all([
       this.findDayVisits(scope, day, narrowedTo),
       fieldScope
@@ -236,6 +248,7 @@ export class ScheduleService {
     return {
       visitId: row.visitId,
       visitStatus,
+      purposeCode: row.purposeCode as VisitPurposeCode,
       scheduledStart: row.scheduledStart,
       scheduledEnd: row.scheduledEnd,
       jobId: row.jobId,
@@ -257,6 +270,7 @@ export class ScheduleService {
 const scheduleVisitSelection = {
   visitId: visits.id,
   visitStatus: visits.status,
+  purposeCode: visits.purposeCode,
   scheduledStart: visits.scheduledStart,
   scheduledEnd: visits.scheduledEnd,
   visitAddressSnapshot: visits.locationAddressSnapshot,
@@ -312,17 +326,17 @@ function assignedToAny(
         and(
           eq(visitTechnicians.visitId, visits.id),
           eq(visitTechnicians.organizationId, scope.organizationId),
-          inArray(visitTechnicians.technicianMembershipId, [
-            ...membershipIds,
-          ]),
+          inArray(visitTechnicians.technicianMembershipId, [...membershipIds]),
         ),
       ),
   );
 }
 
-
 /** Whether the same Job already has a scheduled or started Visit that is still open. */
-function jobHasScheduledOpenAttempt(scope: OrganizationScope, db: DatabaseService['db']) {
+function jobHasScheduledOpenAttempt(
+  scope: OrganizationScope,
+  db: DatabaseService['db'],
+) {
   const otherVisits = alias(visits, 'other_visits');
   return db
     .select({ one: sql`1` })
@@ -331,7 +345,10 @@ function jobHasScheduledOpenAttempt(scope: OrganizationScope, db: DatabaseServic
       and(
         eq(otherVisits.organizationId, scope.organizationId),
         eq(otherVisits.jobId, jobs.id),
-        notInArray(otherVisits.status, ['DRAFT', ...UNASSIGNED_EXCLUDED_VISIT_STATUSES]),
+        notInArray(otherVisits.status, [
+          'DRAFT',
+          ...UNASSIGNED_EXCLUDED_VISIT_STATUSES,
+        ]),
         isNotNull(otherVisits.scheduledStart),
         isNotNull(otherVisits.scheduledEnd),
       ),
@@ -350,4 +367,3 @@ function unassignedCrew(scope: OrganizationScope, db: DatabaseService['db']) {
       ),
     );
 }
-

@@ -1,0 +1,44 @@
+@if (updates.reloadBlocked()) {
+  <div class="banner form-error" role="alert">{{ i18n.text('fieldReloadBlocked') }}</div>
+}
+<a
+  class="skip-link"
+  href="#main-content"
+  (click)="$event.preventDefault(); navigationFocus.focusContent()"
+  >{{ i18n.text('skip') }}</a
+>
+@if (!connectivity.online()) {
+  <div class="banner" role="status">{{ i18n.text('offline') }}</div>
+}
+@if (updates.ready()) {
+  <div class="banner" role="status">
+    {{ i18n.text('updateReady') }}
+    <button mat-button (click)="updates.reload()">{{ i18n.text('update') }}</button>
+  </div>
+}
+@if (session.loggingOut()) {
+  <div class="banner" role="status">{{ i18n.text('signingOut') }}</div>
+}
+@if (session.logoutFailed()) {
+  <div class="banner form-error" role="alert">
+    {{ i18n.text('logoutFailed') }}
+    <button mat-button [disabled]="session.loggingOut()" (click)="session.signOut()">
+      {{ i18n.text('retry') }}
+    </button>
+  </div>
+}
+@if (session.status() === 'error') {
+  <main id="main-content" class="status-page" tabindex="-1">
+    <app-preferences />
+    <h1 [appPageTitle]="i18n.text('sessionError')">{{ i18n.text('sessionError') }}</h1>
+    <p>{{ i18n.text('connectionError') }}</p>
+    <button mat-flat-button (click)="session.restore()">{{ i18n.text('retry') }}</button
+    ><button mat-button (click)="session.signOut()">{{ i18n.text('signOut') }}</button>
+  </main>
+} @else if (session.status() === 'checking') {
+  <main id="main-content" class="status-page" tabindex="-1">
+    <p role="status" [appPageTitle]="i18n.text('checking')">{{ i18n.text('checking') }}</p>
+  </main>
+} @else {
+  <router-outlet />
+}

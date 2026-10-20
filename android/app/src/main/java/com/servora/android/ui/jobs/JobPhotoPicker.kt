@@ -10,7 +10,7 @@ import androidx.compose.runtime.Composable
  *
  * It is the second of the two sources a photo update may come from (`BR-015`). The system picker is
  * used rather than a gallery Servora reads itself, so **no storage or media-read permission** is
- * requested and nothing outside what the technician selects is read (`docs/tracker/029-photo-evidence-phases.md`
+ * requested and nothing outside what the technician selects is read (`docs/tracker/shared/029-photo-evidence-phases.md`
  * D3). It is offered only images, because v1 evidence is photos (`BR-027`, D8).
  *
  * Returns the action to call. What it hands over is each item's own address, in the order the

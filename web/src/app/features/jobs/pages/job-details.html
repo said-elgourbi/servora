@@ -1,0 +1,123 @@
+<nav
+  [appPageTitle]="i18n.text('jobDetails')"
+  class="breadcrumb"
+  [attr.aria-label]="i18n.text('navigation')"
+>
+  <a routerLink="/" [queryParams]="{ view: query()?.get('view') }"
+    ><app-icon name="back" />{{ i18n.text('backToDay') }}</a
+  >
+  <span class="breadcrumb-divider" aria-hidden="true">/</span>
+  <span>{{ i18n.text('jobDetails') }}</span>
+</nav>
+@if (fieldView()) {
+  <app-field-workflow [jobId]="jobId()" [visitId]="query()?.get('visit') ?? null" />
+} @else {
+  @if (loading()) {
+    <div class="loading-panel" role="status">
+      <app-icon name="refresh" />{{ i18n.text('busy') }}
+    </div>
+  }
+  @if (error(); as message) {
+    <div class="form-error" role="alert">
+      <p>{{ i18n.text(message) }}</p>
+      <button mat-button (click)="refresh()">{{ i18n.text('retry') }}</button>
+    </div>
+  }
+  @if (job(); as item) {
+    <app-office-job-workflow [job]="item" (changed)="refresh()" (working)="officeBusy.set($event)">
+      <header job-heading class="job-header">
+        <div class="job-heading">
+          <div class="job-reference">
+            <span>{{ i18n.text('job') }} #{{ item.jobNumber }}</span
+            ><app-work-status [code]="item.status" />
+          </div>
+          <h1>{{ item.title }}</h1>
+          <p class="customer-name">
+            <app-icon name="building" /><a [routerLink]="['/work/customers', item.customerId]">{{
+              item.customerName
+            }}</a>
+          </p>
+          @if (address(item.address); as location) {
+            <p class="job-location"><app-icon name="pin" />{{ location }}</p>
+          }
+        </div>
+      </header>
+      <button
+        job-refresh
+        class="refresh-button"
+        [attr.aria-label]="i18n.text('refresh')"
+        mat-stroked-button
+        [disabled]="officeBusy()"
+        (click)="refresh()"
+      >
+        <app-icon name="refresh" /><span class="refresh-label">{{ i18n.text('refresh') }}</span>
+      </button>
+      <div job-main class="primary-column">
+        @if (item.description) {
+          <details class="panel overview-panel">
+            <summary class="panel-heading">
+              <span class="section-icon"><app-icon name="briefcase" /></span>
+              <h2>{{ i18n.text('overview') }}</h2>
+            </summary>
+            <p class="description">{{ item.description }}</p>
+          </details>
+        }
+        <section class="panel visits-panel">
+          <div class="panel-heading">
+            <span class="section-icon"><app-icon name="calendar" /></span>
+            <h2>{{ i18n.text('visits') }}</h2>
+            <span class="section-count">{{ item.visits.length }}</span>
+          </div>
+          @if (query()?.get('visit') && !hasRequestedVisit(item)) {
+            <p class="empty-state" role="status">{{ i18n.text('visitUnavailable') }}</p>
+          }
+          <div class="visit-list">
+            @for (visit of item.visits; track visit.id) {
+              <app-job-visit
+                [id]="'visit-' + visit.id"
+                [value]="visit"
+                [attention]="visitAttention(item, visit.id)"
+                [selected]="visit.id === query()?.get('visit')"
+              />
+            } @empty {
+              <p class="empty-state">{{ i18n.text('noJobVisits') }}</p>
+            }
+          </div>
+        </section>
+      </div>
+      <div job-context class="context-column">
+        <section class="panel location-panel">
+          <div class="panel-heading">
+            <span class="section-icon"><app-icon name="pin" /></span>
+            <h2>{{ i18n.text('location') }}</h2>
+          </div>
+          <div class="location-content">
+            @if (item.address?.propertyName; as name) {
+              <h3>{{ name }}</h3>
+            }
+            @if (item.propertyId && auth.hasPermission('properties.view')) {
+              <a
+                [routerLink]="['/work/customers', item.customerId, 'properties', item.propertyId]"
+                >{{ i18n.text('propertyDetails') }}</a
+              >
+            }
+            <p class="secondary-text">{{ address(item.address) || i18n.text('noAddress') }}</p>
+            @if (directions(item.address); as url) {
+              <a
+                class="action-link directions-link"
+                [href]="url"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><app-icon name="pin" />{{ i18n.text('directions') }}<app-icon name="external"
+              /></a>
+            }
+          </div>
+        </section>
+        @if (item.customerContactDetails; as contact) {
+          <app-job-contact [value]="contact" [customer]="item.customerName" />
+        }
+      </div>
+    </app-office-job-workflow>
+    <p class="connection-note"><span aria-hidden="true"></span>{{ i18n.text('onlineOnly') }}</p>
+  }
+}

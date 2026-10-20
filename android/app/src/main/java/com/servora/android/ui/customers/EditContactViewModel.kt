@@ -197,7 +197,7 @@ class EditContactViewModel @Inject constructor(
  * The two optional fields are stated only when they hold something, because this client's wire shape
  * cannot express "clear this value": a member left out of the request is left as the contact holds it.
  * The form can therefore state a phone or an email and it can leave one alone — the limitation
- * `docs/tracker/047-customer-contact-persons.md` records rather than a decision taken here (`BR-042`).
+ * `docs/tracker/shared/047-customer-contact-persons.md` records rather than a decision taken here (`BR-042`).
  *
  * `isPrimary` is stated **only to promote**, because the route documents `isPrimary: true` and defines
  * no un-promotion; a contact that already holds the flag leaves it untouched.

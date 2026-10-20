@@ -1,3 +1,4 @@
+import type { JobActivity } from '@servora/shared-types';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { DatabaseService } from '../database/database.service.js';
 import {
@@ -35,7 +36,7 @@ import { readJobVisits } from './visit-assignment.js';
  * boundary, defined once here and re-exported (`BR-041`); clients present a localized label for a code
  * and must never invent a parallel vocabulary (`BR-028`, `BR-041`, `BR-042`). The vocabulary and the
  * derived `Visit N` sequence are recorded as a decision in `docs/api/job-activity.md` and
- * `docs/tracker/022-android-job-activity-timeline.md`.
+ * `docs/tracker/android/022-android-job-activity-timeline.md`.
  *
  * Ordering is newest-first (`BR-080`). A Job-level event carries no Visit; a Visit-level event carries
  * the Visit's stable, human-readable sequence (`Visit 1`, `Visit 2`, …), never a database id
@@ -167,7 +168,7 @@ export interface JobActivityEventDto {
 }
 
 /** The Job Activity read's response body. */
-export interface JobActivityDto {
+export interface JobActivityDto extends JobActivity {
   jobId: string;
   events: JobActivityEventDto[];
 }

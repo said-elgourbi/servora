@@ -43,6 +43,7 @@ import com.servora.android.domain.model.FollowUpVisitRequestStatus
 import com.servora.android.domain.model.JobPhotoSyncState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.isRemovable
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
@@ -949,6 +950,32 @@ private class PhotoJobRepository(
         expectedVersion: Int,
     ): JobActionResult = unsupported()
 
+
+    override suspend fun markQuoteSent(
+        jobId: String,
+        note: String?,
+        externalReference: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteRequired(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteApproved(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteRejected(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
     override suspend fun rescheduleVisit(
         jobId: String,
         visitId: String,
@@ -976,6 +1003,7 @@ private class PhotoJobRepository(
         scheduledStart: Instant,
         scheduledEnd: Instant,
         assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
         confirmConflicts: Boolean,
     ): JobActionResult = unsupported()
 

@@ -25,6 +25,7 @@
          back (`docs/architecture/offline-first-architecture.md` §6). It is a trigger, not a gate:
          an operation is queued whenever the API is unreachable. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
       Saving a photo into the device's own gallery needs no permission from Android 10 on, and Servora
@@ -48,6 +49,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Servora">
 
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_messaging_installation_id_enabled" android:value="false" />
+        <meta-data android:name="firebase_messaging_notification_delegation_enabled" android:value="false" />
+        <service android:name=".data.push.ServoraMessagingService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <!--
           AppCompat persists the language chosen inside the app across restarts; the languages the
           app ships are declared in `@xml/locales_config` so the system per-app language settings
@@ -62,8 +72,11 @@
                 android:value="true" />
         </service>
 
+        <!-- Compose observes locale changes and refreshes translated resources in place. Keeping
+             the activity alive avoids a window flash and preserves the current screen state. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="locale|layoutDirection"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

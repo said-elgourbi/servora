@@ -10,6 +10,7 @@ function visit(
 ): JobAttentionVisit {
   return {
     status: 'COMPLETED',
+    purposeCode: 'WORK',
     outcomeCode: 'RESOLVED',
     ...overrides,
   };
@@ -114,5 +115,118 @@ describe('deriveJobAttention', () => {
         reasonCode: null,
       },
     ]);
+  });
+
+  it('reports assessment recommendations as office attention without follow-up requests', () => {
+    for (const [outcomeCode, code] of [
+      ['WORK_RECOMMENDED', 'JOB_WORK_RECOMMENDED'],
+      ['QUOTE_REQUIRED', 'JOB_QUOTE_REQUIRED'],
+      ['UNABLE_TO_ASSESS', 'JOB_NEEDS_REASSESSMENT'],
+    ] as const) {
+      expect(
+        attention('ACTIVE', [
+          visit({
+            visitId: 'visit-1',
+            sequence: 1,
+            outcomeCode,
+          }),
+        ]),
+      ).toEqual([
+        {
+          code,
+          relevantVisitId: 'visit-1',
+          reasonCode: null,
+        },
+      ]);
+    }
+  });
+
+  it('derives quote attention from the explicit quote workflow when present', () => {
+    for (const [state, code] of [
+      ['REQUIRED', 'JOB_QUOTE_REQUIRED'],
+      ['SENT', 'JOB_CUSTOMER_DECISION_PENDING'],
+      ['APPROVED', 'JOB_WORK_READY_TO_SCHEDULE'],
+      ['REJECTED', 'JOB_CANCELLATION_REQUIRED'],
+    ] as const) {
+      expect(
+        deriveJobAttention({
+          jobStatus: 'ACTIVE',
+          quoteWorkflow: { state, sourceVisitId: 'visit-1' },
+          visits: [
+            visit({
+              visitId: 'visit-1',
+              sequence: 1,
+              purposeCode: 'ASSESSMENT',
+              outcomeCode: 'QUOTE_REQUIRED',
+            }),
+          ],
+        }),
+      ).toEqual([
+        {
+          code,
+          relevantVisitId: 'visit-1',
+          reasonCode: null,
+        },
+      ]);
+    }
+  });
+
+  it('clears approved quote scheduling attention once a future Work Visit exists', () => {
+    expect(
+      deriveJobAttention({
+        jobStatus: 'ACTIVE',
+        quoteWorkflow: { state: 'APPROVED', sourceVisitId: 'visit-1' },
+        visits: [
+          visit({
+            visitId: 'visit-1',
+            sequence: 1,
+            purposeCode: 'ASSESSMENT',
+            outcomeCode: 'QUOTE_REQUIRED',
+          }),
+          visit({
+            visitId: 'visit-2',
+            sequence: 2,
+            status: 'SCHEDULED',
+            purposeCode: 'WORK',
+            outcomeCode: null,
+          }),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('does not derive quote attention from the latest Visit outcome when workflow state exists', () => {
+    expect(
+      deriveJobAttention({
+        jobStatus: 'ACTIVE',
+        quoteWorkflow: { state: 'SENT', sourceVisitId: 'visit-1' },
+        visits: [
+          visit({
+            visitId: 'visit-1',
+            sequence: 1,
+            purposeCode: 'ASSESSMENT',
+            outcomeCode: 'QUOTE_REQUIRED',
+          }),
+        ],
+      }),
+    ).toEqual([
+      {
+        code: 'JOB_CUSTOMER_DECISION_PENDING',
+        relevantVisitId: 'visit-1',
+        reasonCode: null,
+      },
+    ]);
+  });
+
+  it('does not report attention for no-work-required assessments', () => {
+    expect(
+      attention('COMPLETED', [
+        visit({
+          visitId: 'visit-1',
+          sequence: 1,
+          outcomeCode: 'NO_WORK_REQUIRED',
+        }),
+      ]),
+    ).toEqual([]);
   });
 });

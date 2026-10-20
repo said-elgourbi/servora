@@ -679,6 +679,7 @@ describe('job photos (e2e)', () => {
       CUSTOMER_PERMISSIONS.VIEW,
       EVIDENCE_PERMISSIONS.PHOTO_ADD,
       EVIDENCE_PERMISSIONS.VIEW,
+      EVIDENCE_PERMISSIONS.AUDIO_REMOVE,
     ]);
     const job = await newJobInOrganization();
     const clientOperationId = randomUUID();
@@ -686,7 +687,9 @@ describe('job photos (e2e)', () => {
       clientOperationId,
     }).expect(201);
 
-    await removePhoto(job.id, clientOperationId, session.accessToken).expect(403);
+    await removePhoto(job.id, clientOperationId, session.accessToken).expect(
+      403,
+    );
 
     const removals = await database.db
       .select()
@@ -719,7 +722,29 @@ describe('job photos (e2e)', () => {
       clientOperationId,
     }).expect(201);
 
-    await removePhoto(job.id, clientOperationId, session.accessToken).expect(403);
+    await removePhoto(job.id, clientOperationId, session.accessToken).expect(
+      403,
+    );
+  });
+
+  it('allows the dedicated removal capability without upload or read permissions', async () => {
+    const recorder = await signInFor([EVIDENCE_PERMISSIONS.PHOTO_ADD]);
+    const remover = await signInFor([EVIDENCE_PERMISSIONS.PHOTO_REMOVE]);
+    const job = await newJobInOrganization();
+    const clientOperationId = randomUUID();
+    await uploadPhoto(job.id, recorder.accessToken, {
+      clientOperationId,
+    }).expect(201);
+
+    await removePhoto(job.id, clientOperationId, remover.accessToken).expect(
+      201,
+    );
+
+    const removals = await database.db
+      .select()
+      .from(jobPhotoRemovals)
+      .where(eq(jobPhotoRemovals.jobPhotoId, clientOperationId));
+    expect(removals).toHaveLength(1);
   });
 
   it('records the removal and excludes the evidence from the ordinary reads', async () => {
@@ -754,7 +779,9 @@ describe('job photos (e2e)', () => {
 
     // The removal is history, and Activity does not silently drop it (`BR-080`, `BR-089`).
     const events = response.body.events as Array<Record<string, unknown>>;
-    expect(events.some((event) => event.kind === 'JOB_PHOTO_ADDED')).toBe(false);
+    expect(events.some((event) => event.kind === 'JOB_PHOTO_ADDED')).toBe(
+      false,
+    );
     const removal = events.find((event) => event.kind === 'JOB_PHOTO_REMOVED');
     expect(removal).toMatchObject({
       kind: 'JOB_PHOTO_REMOVED',
@@ -886,7 +913,9 @@ describe('job photos (e2e)', () => {
       clientOperationId,
     }).expect(201);
 
-    await removePhoto(job.id, clientOperationId, session.accessToken).expect(201);
+    await removePhoto(job.id, clientOperationId, session.accessToken).expect(
+      201,
+    );
     const repeated = await removePhoto(
       job.id,
       clientOperationId,
@@ -980,4 +1009,3 @@ describe('job photos (e2e)', () => {
     expect(permission?.descriptionFr).not.toBe('');
   });
 });
-

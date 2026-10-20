@@ -22,15 +22,26 @@ import com.servora.android.domain.model.JobDetailsFollowUpVisitRequest
 import com.servora.android.domain.model.JobDetailsTechnician
 import com.servora.android.domain.model.JobDetailsVisit
 import com.servora.android.domain.model.JobDetailsVisitSummary
+import com.servora.android.domain.model.JobQuote
+import com.servora.android.domain.model.JobQuoteAction
+import com.servora.android.domain.model.JobQuoteDocument
+import com.servora.android.domain.model.JobQuoteWorkflowState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.VisitStatus
 import com.servora.android.domain.model.jobReadOnlyReasonOrNull
 import com.servora.android.domain.model.visitOutcomeOrNull
+import com.servora.android.domain.model.visitPurposeOrNull
 import java.io.IOException
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Instant
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException
@@ -144,6 +155,50 @@ interface JobDetailsRepository {
     ): JobActionResult
 
     /**
+     * Marks the current Assessment quote as sent to the customer (`BR-QUOTE-001`).
+     *
+     * The write is online-only: quote workflow conflicts and idempotency have no offline policy yet, so
+     * a network failure is reported instead of queued.
+     */
+    suspend fun markQuoteSent(
+        jobId: String,
+        note: String?,
+        externalReference: String?,
+        expectedVersion: Int,
+    ): JobActionResult
+
+    /** Corrects an accidentally recorded sent quote back to required. */
+    suspend fun markQuoteRequired(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult
+
+    /** Records the customer's quote approval decision. Online-only for the same reason as sent. */
+    suspend fun markQuoteApproved(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult
+
+    /** Records the customer's quote rejection decision. Online-only for the same reason as sent. */
+    suspend fun markQuoteRejected(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult
+
+    /** Replaces the current quote PDF. Online-only until document outbox semantics are defined. */
+    suspend fun uploadQuoteDocument(
+        jobId: String,
+        document: PickedJobQuoteDocument,
+    ): JobActionResult = JobActionResult.Failure(JobActionFailure.UNEXPECTED)
+
+    /** Reads the current quote PDF bytes. Online-only: PDFs are not cached as working-set data. */
+    suspend fun readQuoteDocument(jobId: String): JobQuoteDocumentReadResult =
+        JobQuoteDocumentReadResult.Failure(JobActionFailure.UNEXPECTED)
+
+    /**
      * Edits the represented Visit's schedule (`BR-073`).
      *
      * [confirmConflicts] is `true` only when the user has been shown the availability conflicts the
@@ -196,6 +251,7 @@ interface JobDetailsRepository {
         scheduledStart: Instant,
         scheduledEnd: Instant,
         assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
         confirmConflicts: Boolean,
     ): JobActionResult
 
@@ -719,6 +775,185 @@ class DefaultJobDetailsRepository @Inject constructor(
         )
     }
 
+    override suspend fun markQuoteSent(
+        jobId: String,
+        note: String?,
+        externalReference: String?,
+        expectedVersion: Int,
+    ): JobActionResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        val request = MarkQuoteSentRequestDto(
+            note = note?.takeIf { it.isNotBlank() },
+            externalReference = externalReference?.takeIf { it.isNotBlank() },
+            expectedVersion = expectedVersion,
+        )
+        return perform(
+            accessToken = accessToken,
+            allowRenewal = true,
+            call = { token -> api.markQuoteSent("Bearer $token", jobId, request) },
+        )
+    }
+
+    override suspend fun markQuoteRequired(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        val request = CorrectQuoteToRequiredRequestDto(
+            note = note?.takeIf { it.isNotBlank() },
+            expectedVersion = expectedVersion,
+        )
+        return perform(
+            accessToken = accessToken,
+            allowRenewal = true,
+            call = { token -> api.markQuoteRequired("Bearer $token", jobId, request) },
+        )
+    }
+
+    override suspend fun markQuoteApproved(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult =
+        markQuoteDecision(
+            jobId = jobId,
+            note = note,
+            expectedVersion = expectedVersion,
+            call = { token, request -> api.markQuoteApproved("Bearer $token", jobId, request) },
+        )
+
+    override suspend fun markQuoteRejected(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult =
+        markQuoteDecision(
+            jobId = jobId,
+            note = note,
+            expectedVersion = expectedVersion,
+            call = { token, request -> api.markQuoteRejected("Bearer $token", jobId, request) },
+        )
+
+    private suspend fun markQuoteDecision(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+        call: suspend (token: String, request: MarkQuoteDecisionRequestDto) -> JobDetailsDto,
+    ): JobActionResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+        val request = MarkQuoteDecisionRequestDto(
+            note = note?.takeIf { it.isNotBlank() },
+            expectedVersion = expectedVersion,
+        )
+        return perform(
+            accessToken = accessToken,
+            allowRenewal = true,
+            call = { token -> call(token, request) },
+        )
+    }
+
+    override suspend fun uploadQuoteDocument(
+        jobId: String,
+        document: PickedJobQuoteDocument,
+    ): JobActionResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+        if (!document.bytes.isPdf()) {
+            return JobActionResult.Failure(JobActionFailure.VALIDATION)
+        }
+        return uploadQuoteDocument(jobId, document, accessToken, allowRenewal = true)
+    }
+
+    private suspend fun uploadQuoteDocument(
+        jobId: String,
+        document: PickedJobQuoteDocument,
+        accessToken: String,
+        allowRenewal: Boolean,
+    ): JobActionResult =
+        try {
+            api.uploadQuoteDocument(
+                authorization = "Bearer $accessToken",
+                jobId = jobId,
+                documentType = QUOTE_DOCUMENT_TYPE.toRequestBody(TEXT_PART.toMediaType()),
+                displayName = document.fileName.toRequestBody(TEXT_PART.toMediaType()),
+                file = MultipartBody.Part.createFormData(
+                    name = FILE_PART,
+                    filename = document.fileName,
+                    body = document.bytes.toRequestBody(QUOTE_DOCUMENT_MEDIA_TYPE.toMediaType()),
+                ),
+            )
+            val details = api.jobDetails("Bearer $accessToken", jobId).toJobDetails()
+            if (details == null) {
+                JobActionResult.Failure(JobActionFailure.UNEXPECTED)
+            } else {
+                JobActionResult.Success(details)
+            }
+        } catch (failure: HttpException) {
+            if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+                when (val renewal = sessionAuthenticator.renew(accessToken)) {
+                    is SessionRenewal.Renewed ->
+                        uploadQuoteDocument(jobId, document, renewal.accessToken, allowRenewal = false)
+
+                    SessionRenewal.Rejected ->
+                        JobActionResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+                    SessionRenewal.Unavailable ->
+                        JobActionResult.Failure(JobActionFailure.NETWORK)
+                }
+            } else {
+                failure.toActionOutcome(json)
+            }
+        } catch (failure: IOException) {
+            JobActionResult.Failure(JobActionFailure.NETWORK)
+        } catch (failure: SerializationException) {
+            JobActionResult.Failure(JobActionFailure.UNEXPECTED)
+        }
+
+    override suspend fun readQuoteDocument(jobId: String): JobQuoteDocumentReadResult {
+        val accessToken = sessionAuthenticator.accessToken()
+            ?: return JobQuoteDocumentReadResult.Failure(JobActionFailure.UNAUTHENTICATED)
+        return readQuoteDocument(jobId, accessToken, allowRenewal = true)
+    }
+
+    private suspend fun readQuoteDocument(
+        jobId: String,
+        accessToken: String,
+        allowRenewal: Boolean,
+    ): JobQuoteDocumentReadResult =
+        try {
+            withContext(Dispatchers.IO) {
+                api.quoteDocumentContent("Bearer $accessToken", jobId).use { body ->
+                    JobQuoteDocumentReadResult.Success(body.bytes())
+                }
+            }
+        } catch (failure: HttpException) {
+            if (allowRenewal && failure.code() == HTTP_UNAUTHORIZED) {
+                when (val renewal = sessionAuthenticator.renew(accessToken)) {
+                    is SessionRenewal.Renewed ->
+                        readQuoteDocument(jobId, renewal.accessToken, allowRenewal = false)
+
+                    SessionRenewal.Rejected ->
+                        JobQuoteDocumentReadResult.Failure(JobActionFailure.UNAUTHENTICATED)
+
+                    SessionRenewal.Unavailable ->
+                        JobQuoteDocumentReadResult.Failure(JobActionFailure.NETWORK)
+                }
+            } else {
+                JobQuoteDocumentReadResult.Failure(failure.toActionFailure(json))
+            }
+        } catch (failure: IOException) {
+            JobQuoteDocumentReadResult.Failure(JobActionFailure.NETWORK)
+        } catch (failure: SerializationException) {
+            JobQuoteDocumentReadResult.Failure(JobActionFailure.UNEXPECTED)
+        }
+
     override suspend fun rescheduleVisit(
         jobId: String,
         visitId: String,
@@ -784,6 +1019,7 @@ class DefaultJobDetailsRepository @Inject constructor(
         scheduledStart: Instant,
         scheduledEnd: Instant,
         assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
         confirmConflicts: Boolean,
     ): JobActionResult {
         val accessToken = sessionAuthenticator.accessToken()
@@ -793,6 +1029,7 @@ class DefaultJobDetailsRepository @Inject constructor(
             scheduledStart = scheduledStart.toString(),
             scheduledEnd = scheduledEnd.toString(),
             technicians = assignments.toRequestedTechnicians(),
+            purposeCode = purpose.name,
             confirmConflicts = confirmConflicts,
         )
         return perform(
@@ -1168,6 +1405,19 @@ private sealed interface ActivityRead {
     data class Failed(val reason: CustomersFailureReason) : ActivityRead
 }
 
+private const val FILE_PART = "file"
+private const val TEXT_PART = "text/plain"
+private const val QUOTE_DOCUMENT_TYPE = "QUOTE"
+private const val QUOTE_DOCUMENT_MEDIA_TYPE = "application/pdf"
+
+private fun ByteArray.isPdf(): Boolean =
+    size >= 5 &&
+        this[0] == 0x25.toByte() &&
+        this[1] == 0x50.toByte() &&
+        this[2] == 0x44.toByte() &&
+        this[3] == 0x46.toByte() &&
+        this[4] == 0x2d.toByte()
+
 private const val HTTP_BAD_REQUEST = 400
 private const val HTTP_UNAUTHORIZED = 401
 private const val HTTP_FORBIDDEN = 403
@@ -1355,6 +1605,17 @@ private fun HttpException.toActionFailure(errorCode: String? = null): JobActionF
             }
     }
 
+sealed interface JobQuoteDocumentReadResult {
+    data class Success(val bytes: ByteArray) : JobQuoteDocumentReadResult {
+        override fun equals(other: Any?): Boolean =
+            this === other || (other is Success && bytes.contentEquals(other.bytes))
+
+        override fun hashCode(): Int = bytes.contentHashCode()
+    }
+
+    data class Failure(val reason: JobActionFailure) : JobQuoteDocumentReadResult
+}
+
 /**
  * Maps the wire payload onto the domain model, or reports a contract mismatch.
  *
@@ -1376,6 +1637,10 @@ private fun JobDetailsDto.toJobDetails(): JobDetails? {
     val jobVisits = visits.map { summary -> summary.toVisitSummary() ?: return null }
     val mappedFollowUpVisitRequest = followUpVisitRequest?.toRequestSummary()
     if (followUpVisitRequest != null && mappedFollowUpVisitRequest == null) {
+        return null
+    }
+    val mappedQuote = quote?.toJobQuote()
+    if (quote != null && mappedQuote == null) {
         return null
     }
     return JobDetails(
@@ -1407,6 +1672,7 @@ private fun JobDetailsDto.toJobDetails(): JobDetails? {
         technicians = assigned,
         visits = jobVisits,
         followUpVisitRequest = mappedFollowUpVisitRequest,
+        quote = mappedQuote,
         canScheduleVisit = canScheduleVisit,
     )
 }
@@ -1430,10 +1696,14 @@ private fun JobDetailsVisitSummaryDto.toVisitSummary(): JobDetailsVisitSummary? 
         id = id,
         sequence = sequence,
         status = visitStatus,
+        // A purpose the API did not send is read as a Work Visit, exactly as the represented Visit's
+        // mapping reads it (`BR-042`, `offline-first-architecture.md` §10).
+        purpose = visitPurposeOrNull(purposeCode) ?: VisitPurpose.WORK,
         outcome = visitOutcomeOrNull(outcomeCode),
         scheduledStart = scheduledStart,
         scheduledEnd = scheduledEnd,
         version = version,
+        isAdHocWork = isAdHocWork,
         technicians = crew,
     )
 }
@@ -1451,6 +1721,43 @@ private fun JobDetailsFollowUpVisitRequestDto.toRequestSummary(): JobDetailsFoll
         version = version,
     )
 }
+
+private fun JobDetailsQuoteDto.toJobQuote(): JobQuote? {
+    val workflowState = JobQuoteWorkflowState.entries.firstOrNull { it.name == state } ?: return null
+    return JobQuote(
+        id = id,
+        state = workflowState,
+        sourceVisitId = sourceVisitId,
+        sourceVisitSequence = sourceVisitSequence,
+        version = version,
+        sentAt = sentAt,
+        sentByMembershipId = sentByMembershipId,
+        sentNote = sentNote,
+        externalReference = externalReference,
+        decidedAt = decidedAt,
+        decidedByMembershipId = decidedByMembershipId,
+        decisionNote = decisionNote,
+        currentDocument = currentDocument?.toJobQuoteDocument(),
+        // Unknown future actions are ignored rather than presented as a different command (`BR-042`).
+        allowedActions = allowedActions.mapNotNull { code ->
+            JobQuoteAction.entries.firstOrNull { it.name == code }
+        },
+    )
+}
+
+private fun JobDetailsQuoteDocumentDto.toJobQuoteDocument() =
+    JobQuoteDocument(
+        id = id,
+        displayName = displayName,
+        documentVersion = documentVersion,
+        isCurrent = isCurrent,
+        contentType = contentType,
+        byteSize = byteSize,
+        uploadedByMembershipId = uploadedByMembershipId,
+        supersededAt = supersededAt,
+        supersededByJobDocumentId = supersededByJobDocumentId,
+        recordedAt = recordedAt,
+    )
 
 /**
  * Maps the Customer's contact block as the API reported it (`BR-092`).
@@ -1484,6 +1791,10 @@ private fun JobDetailsVisitDto.toVisit(): JobDetailsVisit? {
     return JobDetailsVisit(
         id = id,
         status = visitStatus,
+        // A purpose the API did not send — a cached answer from an earlier build — is read as a Work
+        // Visit, because every Visit that existed before purpose was introduced is one (`BR-042`,
+        // `offline-first-architecture.md` §10).
+        purpose = visitPurposeOrNull(purposeCode) ?: VisitPurpose.WORK,
         scheduledStart = scheduledStart,
         scheduledEnd = scheduledEnd,
         version = version,
@@ -1555,5 +1866,13 @@ private fun JobActivityEventDto.toJobActivityEvent(): JobActivityEvent? {
         audioPhase = audioPhase,
         audioDurationSeconds = audioDurationSeconds,
         audioRemovalReason = audioRemovalReason,
+        quoteFromState = quoteFromState,
+        quoteToState = quoteToState,
+        quoteNote = quoteNote,
+        quoteDocumentId = quoteDocumentId,
+        quoteDocumentDisplayName = quoteDocumentDisplayName,
+        quoteDocumentVersion = quoteDocumentVersion,
+        quoteDocumentIsCurrent = quoteDocumentIsCurrent,
+        quoteDocumentByteSize = quoteDocumentByteSize,
     )
 }

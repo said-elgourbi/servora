@@ -1,6 +1,7 @@
 package com.servora.android.ui.jobs
 
 import com.servora.android.R
+import com.servora.android.domain.model.JobActivityKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -47,5 +48,29 @@ class JobActivityTitleTest {
         assertNull(activityVisitStatusTitle("DRAFT"))
         assertNull(activityVisitStatusTitle("NO_SHOW"))
         assertNull(activityVisitStatusTitle("IN_PROGRESS_ISH"))
+    }
+
+    @Test
+    fun `states quote workflow activity with quote language`() {
+        assertEquals(
+            R.string.job_activity_quote_required,
+            activityQuoteWorkflowTitle(JobActivityKind.JOB_QUOTE_REQUIRED),
+        )
+        assertEquals(
+            R.string.job_activity_quote_sent,
+            activityQuoteWorkflowTitle(JobActivityKind.JOB_QUOTE_SENT),
+        )
+        assertEquals(
+            R.string.job_activity_quote_approved,
+            activityQuoteWorkflowTitle(JobActivityKind.JOB_QUOTE_APPROVED),
+        )
+        assertEquals(
+            R.string.job_activity_quote_rejected,
+            activityQuoteWorkflowTitle(JobActivityKind.JOB_QUOTE_REJECTED),
+        )
+        assertEquals(
+            R.string.job_activity_quote_corrected,
+            activityQuoteWorkflowTitle(JobActivityKind.JOB_QUOTE_CORRECTED),
+        )
     }
 }

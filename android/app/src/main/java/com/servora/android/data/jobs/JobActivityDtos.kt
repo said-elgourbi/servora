@@ -43,4 +43,12 @@ data class JobActivityEventDto(
     val audioPhase: String? = null,
     val audioDurationSeconds: Int? = null,
     val audioRemovalReason: String? = null,
+    val quoteFromState: String? = null,
+    val quoteToState: String? = null,
+    val quoteNote: String? = null,
+    val quoteDocumentId: String? = null,
+    val quoteDocumentDisplayName: String? = null,
+    val quoteDocumentVersion: Int? = null,
+    val quoteDocumentIsCurrent: Boolean? = null,
+    val quoteDocumentByteSize: Long? = null,
 )

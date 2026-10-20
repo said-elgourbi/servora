@@ -14,8 +14,8 @@ References: `BR-001`, `BR-006`, `BR-007`, `BR-021`, `BR-023`, `BR-028`, `BR-041`
 `BR-059`, `BR-068`, `BR-072`, `BR-074`, `BR-077`, `BR-078`, `BR-079`, `BR-080`, `BR-081`, `BR-092`,
 `BR-094`, `dev.md` §7, `Project.md` §15,
 `docs/decisions/019-technician-field-experience.md`, `docs/decisions/021-technician-customer-read.md`,
-`docs/tracker/017-android-job-details.md`, `docs/tracker/043-create-job.md`,
-`docs/tracker/048-android-job-activity-visit-outcome.md`.
+`docs/tracker/android/017-android-job-details.md`, `docs/tracker/shared/043-create-job.md`,
+`docs/tracker/android/048-android-job-activity-visit-outcome.md`.
 
 ## 1. Conventions
 
@@ -78,7 +78,7 @@ route at all.
 > **OPEN QUESTION (product ownership).** When the Jobs feature lands with its own capability set
 > (`BR-008` names create/view/update/delete jobs as Manager defaults), this route must be re-reviewed
 > and guarded by whatever that feature defines. Recorded in
-> `docs/tracker/017-android-job-details.md` rather than guessed.
+> `docs/tracker/android/017-android-job-details.md` rather than guessed.
 
 This controller exposes the read here and the Job and Visit **actions** in the same module. Every Job
 and Visit action is an explicit authorized action (`BR-066`, `BR-067`) and is specified in
@@ -89,7 +89,7 @@ capabilities `BR-009` gives the technician (`docs/api/job-actions.md` §2, §7).
 covers the office actions.
 
 > **OPEN QUESTION (product ownership).** The Job capability set — including what each action requires —
-> is recorded in `docs/api/job-actions.md` §2 and `docs/tracker/018-android-job-actions.md` rather than
+> is recorded in `docs/api/job-actions.md` §2 and `docs/tracker/android/018-android-job-actions.md` rather than
 > guessed.
 
 The backend is the authorization authority; a client that hides a section is not authorization
@@ -200,7 +200,34 @@ One Job with the Visit that represents it and the technicians assigned to that V
         }
       ]
     }
-  ]
+  ],
+  "quote": {
+    "id": "5d2e3f4a-6b7c-4d8e-9f0a-1b2c3d4e5f60",
+    "state": "SENT",
+    "sourceVisitId": "8d7c6b5a-4e3f-4d2c-9b1a-0f9e8d7c6b5a",
+    "sourceVisitSequence": 1,
+    "version": 3,
+    "sentAt": "2026-09-08T16:00:00.000Z",
+    "sentByMembershipId": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+    "sentNote": "Sent by email.",
+    "externalReference": "Q-1042",
+    "decidedAt": null,
+    "decidedByMembershipId": null,
+    "decisionNote": null,
+    "currentDocument": {
+      "id": "7e6d5c4b-3a2f-4e1d-9c8b-0a1b2c3d4e5f",
+      "displayName": "Assessment quote.pdf",
+      "documentVersion": 2,
+      "isCurrent": true,
+      "contentType": "application/pdf",
+      "byteSize": 1234,
+      "uploadedByMembershipId": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+      "supersededAt": null,
+      "supersededByJobDocumentId": null,
+      "recordedAt": "2026-09-08T15:45:00.000Z"
+    },
+    "allowedActions": ["UPLOAD_DOCUMENT", "READ_DOCUMENT", "MARK_APPROVED", "MARK_REJECTED"]
+  }
 }
 ```
 
@@ -231,7 +258,8 @@ One Job with the Visit that represents it and the technicians assigned to that V
 | `visits[].technicians` | That **one Visit's** current assignments, Lead first, in the same shape as `technicians` (`BR-068`, `BR-069`). A Visit's crew is never merged with another Visit's, and a member without a profile keeps `name` as `null` (`BR-020`). |
 | `visits[].version` | That Visit's version, which its own reschedule and crew routes echo back (`BR-086`). |
 | `visits[].status` | That Visit's own field lifecycle status (`BR-074`). It carries no field action and no reschedule permission: those are answered once on `selectedVisit`, which is the Visit the screen's Visit actions address (`BR-073`, `BR-093`). |
-| `canScheduleVisit` | Whether **this caller** may schedule a new Visit on this Job right now (`BR-062`, `BR-071`, `BR-072`). It is the backend's own answer to the Job-level scheduling question, so a client draws its **Schedule a visit** action from it rather than holding a second copy of the rule (`BR-041`, `BR-007`). `true` only when the caller holds `visits.create_schedule`, the Job is `NEW` or `ACTIVE`, and the Job's Visit shape admits a new attempt — no represented Visit, or a represented Work Visit that is `COMPLETED` with a follow-up outcome (`BR-078`). Assessment recommendations surface attention instead of making this a follow-up-request shortcut. A `COMPLETED`/`CANCELED` Job reports `false` until reopened (`BR-063`), and an already scheduled/active represented Visit reports `false`, because that Visit's own Reschedule/Manage technicians actions address it. The Property requirement stays a runtime refusal on the write itself, never a reason to hide the action (`BR-072`). |
+| `canScheduleVisit` | Whether this caller may schedule a new Visit on this Job right now (`BR-062`, `BR-071`, `BR-072`). It is the backend answer to the Job-level scheduling question, so a client draws its Schedule a visit action from it rather than holding a second copy of the rule (`BR-041`, `BR-007`). `true` only when the caller holds `visits.create_schedule`, the Job is `NEW` or `ACTIVE`, and the Job shape admits a new attempt: no represented Visit, only finished Visits with the latest canceled or completed as `RESOLVED`/`NO_WORK_REQUIRED` (including reopened Jobs), a represented Work Visit that is `COMPLETED` with a follow-up outcome (`BR-078`), or an approved quote workflow that has not yet produced a later active Work Visit. Quote-approved scheduling creates a Work Visit through `POST /jobs/:id/visits`; Assessment recommendations that still need quote approval surface attention instead. A `COMPLETED`/`CANCELED` Job reports `false` until reopened (`BR-063`), and an already scheduled/active represented Visit reports `false`, because that Visit's own Reschedule/Manage technicians actions address it. The Property requirement stays a runtime refusal on the write itself, never a reason to hide the action (`BR-072`). |
+| `quote` | The current Assessment quote workflow, or `null` when the Job has no quote workflow. It is separate from Job lifecycle status and Visit outcome: `state` is one of `REQUIRED`, `SENT`, `APPROVED` or `REJECTED`; `sourceVisitId` and `sourceVisitSequence` identify the Assessment Visit that required quote handling; sent/decision timestamps, actor membership ids, notes and external reference report the current workflow metadata; `version` is the value clients may pass as `expectedVersion` to quote mutation routes; `currentDocument` reports the current quote PDF metadata when one exists, without embedding file bytes. `allowedActions` is this caller's quote action answer from the backend and currently derives from the reused `JOB_UPDATE` capability: `UPLOAD_DOCUMENT`, `READ_DOCUMENT`, `MARK_SENT`, `MARK_APPROVED`, and `MARK_REJECTED`. Decision correction actions are omitted once a downstream Work Visit exists after the source Assessment Visit. |
 | `address`    | The Job's preserved property address snapshot (`BR-056`). `null` when the Job has no Property yet. A partly known snapshot keeps its absent parts as `null`.                                                                   |
 | `jobNumber`  | The organization-scoped, human-readable number (`BR-052`). It is never a cross-system key.                                                                                                                                     |
 | `customerId` / `customerName` | The Customer the Job belongs to (`BR-048`). Both are always present, whatever the caller holds: the Job always names its customer.                             |
@@ -273,7 +301,7 @@ reason (`ADR-019` D2) — the route never uses `403` to say "not yours".
 
 ## 5. Open questions
 
-Recorded rather than guessed (`BR-042`); `docs/tracker/017-android-job-details.md` carries the same
+Recorded rather than guessed (`BR-042`); `docs/tracker/android/017-android-job-details.md` carries the same
 list with what each one blocks.
 
 1. **The `jobs.*` capability set** (`BR-006`, `BR-008`): this read and `GET /home/manager` reuse
@@ -283,7 +311,7 @@ list with what each one blocks.
    that already exists for it. The question covers the rest of the Job and Visit writes.
 2. **Job Activity** (`BR-080`): the unified, chronological read over a Job's status, notes, evidence,
    assignment and schedule events is a projection of its own, exposed as `GET /jobs/:id/activity` with
-   the event vocabulary recorded in `docs/api/job-activity.md` (`docs/tracker/022-android-job-activity-timeline.md`).
+   the event vocabulary recorded in `docs/api/job-activity.md` (`docs/tracker/android/022-android-job-activity-timeline.md`).
 3. **Job deletion** (`BR-021`): how deleting a Job relates to preserved business history is an open
    product question, so no deletion capability, route or behaviour is implied by this read.
 4. **The Job category catalogue** (`BR-053`): `typeCode` is carried as stored and is not validated
@@ -303,7 +331,7 @@ list with what each one blocks.
    implemented (`BR-042`).
 8. **Tap-to-call and tap-to-email affordances** on the block. **Decided** on 2026-09-18: both surfaces are
    tappable, reusing the affordances the repository already has (`ADR-022` D6; `ADR-021`'s decision
-   update). The Android surfaces are implemented by `docs/tracker/047-customer-contact-persons.md`; the
+   update). The Android surfaces are implemented by `docs/tracker/shared/047-customer-contact-persons.md`; the
    visual detail remains the design system's (`docs/design/android-design-system.md`).
 
 ## 6. `POST /jobs` — create a Job (`BR-047` – `BR-056`, `BR-094`)

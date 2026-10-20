@@ -1,26 +1,26 @@
 package com.servora.android.ui.jobs
 
 import androidx.annotation.StringRes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,7 +47,6 @@ import com.servora.android.domain.model.evidencePhaseOrNull
 import com.servora.android.domain.model.visitOutcomeOrNull
 import com.servora.android.ui.components.OfflineNotice
 import com.servora.android.ui.components.SectionLabel
-import com.servora.android.ui.components.initials
 import com.servora.android.ui.components.jobStatusLabel
 import java.time.Instant
 import java.time.ZoneId
@@ -72,24 +71,12 @@ const val JobActivityLastReportedTag = "job-activity-last-reported"
 /** Identifies one activity entry. */
 fun jobActivityEventTag(eventId: String): String = "job-activity-event-$eventId"
 
-private val ActivityRailWidth = 28.dp
-private val ActivityMarkerSize = 28.dp
-private val ActivityDotSize = 8.dp
-private val ActivityLineWidth = 2.dp
-private val ActivityRailSpacing = 8.dp
-private val ActivityRowSpacing = 20.dp
-
 /*
  * The Job Activity section of the Job Details screen (`BR-080`).
  *
  * It is a projection of authoritative records and is never a second list of its own: the photo gallery
  * it draws is built from the `JOB_PHOTO_ADDED` entries the API returned, and the timeline below it is
  * the API's own order (`BR-001`, `BR-080`).
- *
- * Adding an update is the technician's action, and it is offered as the screen's one Add update
- * action rather than beside the Activity: an update is a note or a photo, and two entry points for
- * one job made the technician choose a place before choosing what they were recording (`BR-012`,
- * `BR-015`, `BR-027`).
  */
 
 /**
@@ -99,10 +86,7 @@ private val ActivityRowSpacing = 20.dp
  * single account of what happened rather than one list per Visit. A Job-level entry carries no Visit;
  * a Visit-level entry states its Visit as the human-readable sequence `Visit 1`, `Visit 2`, … — never
  * a database id. Each entry is a title/action, with the member, time and Visit context as secondary
- * metadata, and a marker on a connecting vertical line (`Figma/src/screens/JobDetails.tsx`).
- *
- * The rail is deliberately quiet and narrow: it organizes the entries rather than competing with
- * them, and the content it introduces keeps the width a phone can read (`BR-012`).
+ * metadata.
  *
  * Photos the backend accepted are gathered into a collapsible gallery above the timeline, because a
  * photo is browsed as a collection (`BR-015`); each photo's entry also draws the photo itself, since
@@ -129,7 +113,7 @@ internal fun JobActivitySection(
     Column(modifier = modifier.fillMaxWidth().testTag(JobActivityTag)) {
         SectionLabel(
             label = stringResource(R.string.job_activity_label),
-            count = state.activity?.takeIf { it.isNotEmpty() }?.size,
+            count = null,
         )
 
         if (state.activitySource == ReadSource.WORKING_SET && state.activity != null) {
@@ -221,7 +205,7 @@ internal fun JobActivitySection(
 }
 
 @Composable
-private fun VisitNoteEditDialog(
+internal fun VisitNoteEditDialog(
     body: String,
     isSubmitting: Boolean,
     onBodyChange: (String) -> Unit,
@@ -230,6 +214,7 @@ private fun VisitNoteEditDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.imePadding(),
         title = { Text(stringResource(R.string.job_activity_note_edit_title)) },
         text = {
             OutlinedTextField(
@@ -257,7 +242,7 @@ private fun VisitNoteEditDialog(
 }
 
 @Composable
-private fun VisitNoteRemovalDialog(
+internal fun VisitNoteRemovalDialog(
     reason: String,
     isSubmitting: Boolean,
     onReasonChange: (String) -> Unit,
@@ -266,6 +251,7 @@ private fun VisitNoteRemovalDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.imePadding(),
         title = { Text(stringResource(R.string.job_activity_note_delete_title)) },
         text = {
             OutlinedTextField(
@@ -335,7 +321,7 @@ private fun ActivityEmpty() {
     }
 }
 /**
- * The timeline itself: one marker and connecting line per entry, newest first.
+ * The activity list itself, newest first.
  *
  * It is reusable because more than one section of the Job Details screen draws one: the Job's own
  * timeline, and — once the Job and its Visits are presented apart — each Visit's own events beside that
@@ -383,34 +369,47 @@ private fun ActivityEventRow(
     onRemoveVisitNote: (String, String) -> Unit,
     audio: JobActivityAudio,
 ) {
-    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-        // The rail draws the connecting line behind the marker, so the line runs marker to marker
-        // rather than being a separate list decoration (`Figma/src/screens/JobDetails.tsx`).
-        Box(
-            modifier = Modifier.width(ActivityRailWidth).fillMaxHeight(),
-            contentAlignment = Alignment.TopCenter,
-        ) {
-            if (!isLast) {
-                Box(
-                    modifier = Modifier
-                        .width(ActivityLineWidth)
-                        .fillMaxHeight()
-                        .padding(top = ActivityMarkerSize)
-                        .background(MaterialTheme.colorScheme.outlineVariant),
-                )
-            }
-            ActivityMarker(event)
-        }
-        Spacer(Modifier.width(ActivityRailSpacing))
+    if (event.isHumanAuthoredUpdate()) {
+        HumanAuthoredActivityCard(
+            event = event,
+            isLast = isLast,
+            jobId = jobId,
+            photoImages = photoImages,
+            onOpenPhoto = onOpenPhoto,
+            canManageVisitNotes = canManageVisitNotes,
+            onEditVisitNote = onEditVisitNote,
+            onRemoveVisitNote = onRemoveVisitNote,
+            audio = audio,
+        )
+        return
+    }
+
+    SystemGeneratedActivityCard(event = event, isLast = isLast)
+}
+
+@Composable
+private fun SystemGeneratedActivityCard(
+    event: JobActivityEvent,
+    isLast: Boolean,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = if (isLast) 0.dp else 4.dp)
+            .testTag(jobActivityEventTag(event.id)),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+    ) {
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(bottom = if (isLast) 0.dp else ActivityRowSpacing)
-                .testTag(jobActivityEventTag(event.id)),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
                 text = activityTitle(event),
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
@@ -418,37 +417,103 @@ private fun ActivityEventRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // A photo is evidence, so it is drawn in the entry that recorded it rather than described
-            // by it (`BR-015`, `BR-080`); every other entry carries its own text.
-            if (event.kind == JobActivityKind.JOB_PHOTO_ADDED) {
-                ActivityPhotoEvidence(
-                    event = event,
-                    jobId = jobId,
-                    photoImages = photoImages,
-                    onOpenPhoto = onOpenPhoto,
+            activityContent(event)?.let { content ->
+                Text(
+                    text = content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else if (event.kind == JobActivityKind.JOB_AUDIO_ADDED) {
-                // A recording cannot be drawn the way a photo is, so the entry carries what stands for
-                // it: the control that plays it back, its length and its phase (`BR-091`, `ADR-018` A9).
-                ActivityAudioEvidence(event = event, audio = audio)
-            } else {
-                activityContent(event)?.let { content ->
+            }
+        }
+    }
+}
+
+@Composable
+private fun HumanAuthoredActivityCard(
+    event: JobActivityEvent,
+    isLast: Boolean,
+    jobId: String,
+    photoImages: JobPhotoImages,
+    onOpenPhoto: (String) -> Unit,
+    canManageVisitNotes: Boolean,
+    onEditVisitNote: (String, String) -> Unit,
+    onRemoveVisitNote: (String, String) -> Unit,
+    audio: JobActivityAudio,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = if (isLast) 0.dp else 8.dp)
+            .testTag(jobActivityEventTag(event.id)),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text(
+                    modifier = Modifier.weight(1f),
+                    text = event.actorName?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.job_details_technician_name_unknown),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = activityCardTimestamp(event),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            when (event.kind) {
+                JobActivityKind.VISIT_NOTE_ADDED -> {
                     Text(
-                        text = content,
+                        text = event.body.orEmpty(),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
+
+                JobActivityKind.JOB_PHOTO_ADDED -> {
+                    Text(
+                        text = activityTitle(event),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    ActivityPhotoEvidence(
+                        event = event,
+                        jobId = jobId,
+                        photoImages = photoImages,
+                        onOpenPhoto = onOpenPhoto,
+                    )
+                }
+
+                JobActivityKind.JOB_AUDIO_ADDED -> {
+                    Text(
+                        text = activityTitle(event),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    ActivityAudioEvidence(event = event, audio = audio)
+                }
+
+                else -> Unit
             }
             if (
                 event.kind == JobActivityKind.VISIT_NOTE_ADDED &&
                 event.noteRemovedAt == null &&
                 canManageVisitNotes
             ) {
-                Row(
-                    modifier = Modifier.padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { onEditVisitNote(event.id, event.body.orEmpty()) }) {
                         Text(stringResource(R.string.job_activity_note_edit))
                     }
@@ -460,6 +525,11 @@ private fun ActivityEventRow(
         }
     }
 }
+
+private fun JobActivityEvent.isHumanAuthoredUpdate(): Boolean =
+    kind == JobActivityKind.VISIT_NOTE_ADDED ||
+        kind == JobActivityKind.JOB_PHOTO_ADDED ||
+        kind == JobActivityKind.JOB_AUDIO_ADDED
 
 /**
  * The photo one Activity entry carries (`BR-015`, `BR-027`, `BR-080`).
@@ -487,7 +557,7 @@ private fun ActivityPhotoEvidence(
     val photoId = event.photoId ?: return
 
     Column(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(
@@ -526,38 +596,6 @@ private fun ActivityPhotoEvidence(
     }
 }
 
-/**
- * The marker each entry aligns to: a technician's initials for a note, a quiet dot for a system event
- * (`BR-020`, `Figma/src/screens/JobDetails.tsx`).
- */
-@Composable
-private fun ActivityMarker(event: JobActivityEvent) {
-    if (event.kind == JobActivityKind.VISIT_NOTE_ADDED) {
-        Box(
-            modifier = Modifier
-                .size(ActivityMarkerSize)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.secondary),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = initials(event.actorName.orEmpty()),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSecondary,
-            )
-        }
-    } else {
-        Box(modifier = Modifier.size(ActivityMarkerSize), contentAlignment = Alignment.Center) {
-            Box(
-                modifier = Modifier
-                    .size(ActivityDotSize)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant),
-            )
-        }
-    }
-}
 /** The primary text: the action the entry records, or a note's own text (`BR-080`). */
 @Composable
 private fun activityTitle(event: JobActivityEvent): String =
@@ -638,6 +676,16 @@ private fun activityTitle(event: JobActivityEvent): String =
         // Removing a recording is its own event for the same reason a photo's is (`BR-089`); the
         // recording is not drawn, because it is no longer in ordinary use.
         JobActivityKind.JOB_AUDIO_REMOVED -> stringResource(R.string.job_audio_activity_removed)
+
+        JobActivityKind.JOB_QUOTE_REQUIRED,
+        JobActivityKind.JOB_QUOTE_SENT,
+        JobActivityKind.JOB_QUOTE_APPROVED,
+        JobActivityKind.JOB_QUOTE_REJECTED,
+        JobActivityKind.JOB_QUOTE_CORRECTED,
+        -> stringResource(activityQuoteWorkflowTitle(event.kind))
+
+        JobActivityKind.JOB_QUOTE_DOCUMENT_UPLOADED ->
+            stringResource(R.string.job_activity_quote_document_uploaded)
     }
 
 /** The optional secondary text an entry carries: an outcome's summary, or a removal's reason. */
@@ -662,8 +710,27 @@ private fun activityContent(event: JobActivityEvent): String? =
         // A recording's note is drawn under the recording itself (`ActivityAudioEvidence`).
         JobActivityKind.JOB_AUDIO_ADDED -> null
 
+        JobActivityKind.JOB_QUOTE_REQUIRED,
+        JobActivityKind.JOB_QUOTE_SENT,
+        JobActivityKind.JOB_QUOTE_APPROVED,
+        JobActivityKind.JOB_QUOTE_REJECTED,
+        JobActivityKind.JOB_QUOTE_CORRECTED,
+        -> event.quoteNote?.takeIf { it.isNotBlank() }
+
+        JobActivityKind.JOB_QUOTE_DOCUMENT_UPLOADED -> quoteDocumentActivityContent(event)
+
         else -> null
     }
+
+@Composable
+private fun quoteDocumentActivityContent(event: JobActivityEvent): String? {
+    val version = event.quoteDocumentVersion ?: return event.quoteDocumentDisplayName
+        ?.takeIf { it.isNotBlank() }
+    val name = event.quoteDocumentDisplayName
+        ?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.job_details_quote_document_default_name)
+    return stringResource(R.string.job_activity_quote_document_uploaded_detail, name, version)
+}
 
 /** The secondary metadata: the Visit context (when there is one), the member and the time. */
 @Composable
@@ -678,6 +745,21 @@ private fun activityMetadata(event: JobActivityEvent): String {
         event.actorName?.takeIf { it.isNotBlank() }?.let { add(it) }
         add(time)
     }.joinToString(" · ")
+}
+
+@Composable
+private fun activityCardTimestamp(event: JobActivityEvent): String {
+    val zone = remember { ZoneId.systemDefault() }
+    val recordedAt = runCatching { Instant.parse(event.recordedAt).atZone(zone) }.getOrNull()
+        ?: return stringResource(R.string.job_details_time_unknown)
+    val locale = deviceLocale()
+    val date = recordedAt.format(
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale),
+    )
+    val time = recordedAt.format(
+        DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale),
+    )
+    return stringResource(R.string.job_details_date_time_format, date, time)
 }
 
 /** A technician's name, with the profile-less fallback a missing member already uses (`BR-020`). */
@@ -710,12 +792,23 @@ internal fun activityVisitStatusTitle(code: String?): Int? =
         else -> null
     }
 
+@StringRes
+internal fun activityQuoteWorkflowTitle(kind: JobActivityKind): Int =
+    when (kind) {
+        JobActivityKind.JOB_QUOTE_REQUIRED -> R.string.job_activity_quote_required
+        JobActivityKind.JOB_QUOTE_SENT -> R.string.job_activity_quote_sent
+        JobActivityKind.JOB_QUOTE_APPROVED -> R.string.job_activity_quote_approved
+        JobActivityKind.JOB_QUOTE_REJECTED -> R.string.job_activity_quote_rejected
+        JobActivityKind.JOB_QUOTE_CORRECTED -> R.string.job_activity_quote_corrected
+        else -> R.string.job_activity_quote_updated
+    }
+
 @Composable
 private fun localizedRole(code: String?): String =
     when (code) {
         "LEAD" -> stringResource(R.string.assignment_role_lead)
         "TECHNICIAN" -> stringResource(R.string.assignment_role_technician)
-        else -> code.orEmpty()
+        else -> stringResource(R.string.assignment_role_unknown)
     }
 
 /**
@@ -728,5 +821,3 @@ private fun localizedRole(code: String?): String =
 @Composable
 private fun localizedOutcome(code: String?): String? =
     visitOutcomeOrNull(code)?.let { outcome -> stringResource(visitOutcomeLabel(outcome)) }
-
-

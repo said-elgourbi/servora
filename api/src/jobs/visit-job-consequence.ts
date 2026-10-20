@@ -3,6 +3,7 @@ import type {
   VisitOutcomeCode,
   VisitStatus,
 } from './job.types.js';
+import { closesJobWhenLastOpenVisit } from './job.types.js';
 
 /**
  * What the Job's **other** Visits say about the event being applied (`BR-062`).
@@ -64,7 +65,7 @@ export function jobStatusConsequenceForVisitTransition(
     case 'IN_PROGRESS':
       return 'ACTIVE';
     case 'COMPLETED':
-      if (outcomeCode !== 'RESOLVED') {
+      if (!closesJobWhenLastOpenVisit(outcomeCode)) {
         return 'ACTIVE';
       }
       return context.hasOtherOpenVisit ? 'ACTIVE' : 'COMPLETED';
@@ -109,14 +110,14 @@ export function adHocReconciliationJobConsequence(
   switch (jobStatus) {
     case 'NEW':
     case 'ACTIVE':
-      if (outcomeCode !== 'RESOLVED') {
+      if (!closesJobWhenLastOpenVisit(outcomeCode)) {
         return 'ACTIVE';
       }
       return hasOtherOpenVisit ? 'ACTIVE' : 'COMPLETED';
     case 'COMPLETED':
-      return outcomeCode === 'RESOLVED' ? null : 'ACTIVE';
+      return closesJobWhenLastOpenVisit(outcomeCode) ? null : 'ACTIVE';
     case 'CANCELED':
-      return outcomeCode === 'RESOLVED' ? 'COMPLETED' : 'ACTIVE';
+      return closesJobWhenLastOpenVisit(outcomeCode) ? 'COMPLETED' : 'ACTIVE';
     default:
       return null;
   }

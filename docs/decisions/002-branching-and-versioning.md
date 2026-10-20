@@ -2,11 +2,11 @@
 
 - Status: Accepted
 - Date: 2026-09-09
-- Milestone: `docs/tracker/002-repository-foundation.md`
+- Milestone: `docs/tracker/shared/002-repository-foundation.md`
 
 ## Context
 
-The API foundation milestone (`docs/tracker/001-foundation.md`) was completed and verified on
+The API foundation milestone (`docs/tracker/api/001-foundation.md`) was completed and verified on
 disk but was never placed under version control: the working directory had no Git repository,
 and the canonical GitHub repository (`https://github.com/said-elgourbi/servora.git`) was empty.
 

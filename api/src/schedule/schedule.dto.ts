@@ -1,6 +1,10 @@
 import type { AddressSnapshot } from '../address/address-snapshot.js';
 import { TERMINAL_VISIT_STATUSES } from '../jobs/job.types.js';
-import type { AssignmentRoleCode, VisitStatus } from '../jobs/job.types.js';
+import type {
+  AssignmentRoleCode,
+  VisitPurposeCode,
+  VisitStatus,
+} from '../jobs/job.types.js';
 import type { ScheduleScope, ScheduleScopeKind } from './schedule-scope.js';
 import type { AssignableTechnicianDto } from '../technicians/technician.dto.js';
 
@@ -53,6 +57,7 @@ export interface ScheduleTechnician {
 export interface ScheduleVisit {
   readonly visitId: string;
   readonly visitStatus: VisitStatus;
+  readonly purposeCode: VisitPurposeCode;
   readonly scheduledStart: Date | null;
   readonly scheduledEnd: Date | null;
   readonly jobId: string;
@@ -77,6 +82,7 @@ export interface ScheduleTechnicianDto {
 export interface ScheduleVisitDto {
   visitId: string;
   visitStatus: VisitStatus;
+  purposeCode: VisitPurposeCode;
   scheduledStart: string | null;
   scheduledEnd: string | null;
   jobId: string;
@@ -155,11 +161,14 @@ export interface ScheduleDto {
   } | null;
 }
 
-
 export function toScheduleDto(input: {
   readonly generatedAt: Date;
   readonly localDate: string;
-  readonly day: { readonly timeZone: string; readonly start: Date; readonly end: Date };
+  readonly day: {
+    readonly timeZone: string;
+    readonly start: Date;
+    readonly end: Date;
+  };
   readonly scope: ScheduleScope;
   readonly technicians: readonly AssignableTechnicianDto[];
   readonly visits: readonly ScheduleVisit[];
@@ -199,6 +208,7 @@ export function toScheduleVisitDto(visit: ScheduleVisit): ScheduleVisitDto {
   return {
     visitId: visit.visitId,
     visitStatus: visit.visitStatus,
+    purposeCode: visit.purposeCode,
     scheduledStart: visit.scheduledStart?.toISOString() ?? null,
     scheduledEnd: visit.scheduledEnd?.toISOString() ?? null,
     jobId: visit.jobId,
@@ -229,7 +239,8 @@ export function compareScheduleVisits(
   right: ScheduleVisit,
 ): number {
   if (left.scheduledStart !== null && right.scheduledStart !== null) {
-    const byStart = left.scheduledStart.getTime() - right.scheduledStart.getTime();
+    const byStart =
+      left.scheduledStart.getTime() - right.scheduledStart.getTime();
     if (byStart !== 0) {
       return byStart;
     }
@@ -240,4 +251,3 @@ export function compareScheduleVisits(
   }
   return left.jobNumber - right.jobNumber;
 }
-

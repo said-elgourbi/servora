@@ -1,7 +1,7 @@
 # Servora — Authentication Domain Model
 
 Reference for the authentication persistence model introduced by
-`docs/tracker/004-authentication-domain-model.md` and `docs/decisions/004-authentication-domain-model.md`.
+`docs/tracker/shared/004-authentication-domain-model.md` and `docs/decisions/004-authentication-domain-model.md`.
 
 It extends `docs/domain/foundation-domain-model.md` (organizations, users, profiles,
 memberships/roles, customers): authentication answers *"who is this user and on which

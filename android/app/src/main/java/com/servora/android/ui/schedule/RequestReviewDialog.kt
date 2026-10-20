@@ -2,6 +2,7 @@ package com.servora.android.ui.schedule
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -51,7 +52,7 @@ const val ScheduleRejectRequestDialogTag = "schedule-request-reject-dialog"
  * Both decisions are business decisions about a request someone else raised, so both are confirmed
  * explicitly and both carry the office's own words: a clarification says what is still needed, and a
  * rejection says why the request was refused. The note was previously never sent
- * (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.2), which recorded the decision without its
+ * (`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.2), which recorded the decision without its
  * reason and left *Clarify* with nothing to say for itself beyond a row that disappeared.
  *
  * **A rejection requires its reason; a clarification does not.** `BR-FV-013` requires a rejection to
@@ -78,6 +79,7 @@ internal fun RequestReviewDialog(
 
     AlertDialog(
         onDismissRequest = { if (!isSending) onDismiss() },
+        modifier = Modifier.imePadding(),
         title = {
             Text(
                 text = stringResource(decision.titleRes()),

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -30,6 +31,10 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonColors
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,12 +49,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.servora.android.R
 import com.servora.android.data.jobs.JobActionFailure
 import com.servora.android.domain.model.AssignableTechnician
 import com.servora.android.domain.model.AssignmentRole
 import com.servora.android.domain.model.TechnicianAssignment
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.ui.home.deviceLocale
 import java.time.Instant
 import java.time.ZoneId
@@ -97,7 +104,14 @@ internal fun ScheduleVisitSheet(
     crewFailure: JobActionFailure?,
     isSubmitting: Boolean,
     onRetryCrew: () -> Unit,
-    onConfirm: (start: Instant, end: Instant, assignments: List<TechnicianAssignment>) -> Unit,
+    /** Whether the form offers the Visit purpose selector; a follow-up approval never does (`BR-FV-005`). */
+    showPurposeSelector: Boolean = false,
+    onConfirm: (
+        start: Instant,
+        end: Instant,
+        assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
+    ) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val zone = remember { ZoneId.systemDefault() }
@@ -129,6 +143,10 @@ internal fun ScheduleVisitSheet(
     // and telling someone who has just opened it what they have not chosen yet reads as an error they
     // made (`BR-042`); it says why it cannot be submitted once they have actually changed something.
     var touched by rememberSaveable { mutableStateOf(false) }
+    // The purpose defaults to Work, because most operational Visits are Work Visits (`BR-071`);
+    // Assessment is the intentional override the selector makes visible. It is held as the wire code so
+    // the choice survives a configuration change, exactly as the crew's order does.
+    var purposeCode by rememberSaveable { mutableStateOf(VisitPurpose.WORK.name) }
 
     val window = scheduleVisitWindow(
         date = visitDate,
@@ -201,6 +219,16 @@ internal fun ScheduleVisitSheet(
                     pickingEndTime = true
                 },
             )
+
+            if (showPurposeSelector) {
+                ScheduleVisitPurposeSelector(
+                    selected = VisitPurpose.valueOf(purposeCode),
+                    onSelect = { purpose ->
+                        touched = true
+                        purposeCode = purpose.name
+                    },
+                )
+            }
 
             problem?.let { refusal ->
                 Text(
@@ -288,7 +316,7 @@ internal fun ScheduleVisitSheet(
                 enabled = !isSubmitting && draft?.problem == null,
                 onClick = {
                     val ready = draft ?: return@Button
-                    onConfirm(ready.start, ready.end, ready.crew)
+                    onConfirm(ready.start, ready.end, ready.crew, VisitPurpose.valueOf(purposeCode))
                 },
             ) {
                 Text(stringResource(confirmRes))
@@ -341,10 +369,14 @@ const val ScheduleVisitEndTimeTag = "schedule-visit-end-time"
 const val ScheduleVisitProblemTag = "schedule-visit-problem"
 const val ScheduleVisitCrewFailureTag = "schedule-visit-crew-failure"
 const val ScheduleVisitConfirmTag = "schedule-visit-confirm"
+const val ScheduleVisitPurposeSelectorTag = "schedule-visit-purpose-selector"
 
 /** Identifies one technician the sheet may include, and the Lead choice among the included ones. */
 fun scheduleVisitTechnicianTag(membershipId: String): String =
     "schedule-visit-technician-$membershipId"
+
+/** Identifies one purpose the sheet offers, so a test can select or assert it (`BR-041`). */
+fun scheduleVisitPurposeOptionTag(code: String): String = "schedule-visit-purpose-$code"
 
 fun scheduleVisitLeadTag(membershipId: String): String = "schedule-visit-lead-$membershipId"
 
@@ -418,7 +450,77 @@ private fun crewOf(
         )
     }
 
+/**
+ * The two purposes a Visit may be scheduled for (`BR-071`, `BR-078`).
+ *
+ * It is drawn as one segmented bar, the same shape the Visit's working-status control uses (`BR-041`),
+ * so the default Work is the obvious answer and Assessment remains a deliberate, visible override. Both
+ * segments are always selectable: purpose is not gated by the Visit's status here, because the sheet only
+ * ever schedules a brand-new Visit whose purpose the backend then locks once execution starts.
+ */
+@Composable
+private fun ScheduleVisitPurposeSelector(
+    selected: VisitPurpose,
+    onSelect: (VisitPurpose) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = stringResource(R.string.schedule_visit_purpose_label),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier.fillMaxWidth().testTag(ScheduleVisitPurposeSelectorTag),
+        ) {
+            VisitPurpose.options.forEachIndexed { index, purpose ->
+                SegmentedButton(
+                    selected = purpose == selected,
+                    onClick = { onSelect(purpose) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = VisitPurpose.options.size,
+                    ),
+                    colors = purposeSelectorColors(),
+                    icon = {},
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                    modifier = Modifier.testTag(scheduleVisitPurposeOptionTag(purpose.name)),
+                    label = {
+                        Text(
+                            text = stringResource(visitPurposeLabel(purpose)),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
 
+/**
+ * The colours the purpose selector is drawn with.
+ *
+ * The selected segment is the purpose the form is holding, so it uses the app's own `primaryContainer` fill
+ * and never fades — the same convention as the Visit's working-status control (`BR-012`, `BR-041`).
+ */
+@Composable
+private fun purposeSelectorColors(): SegmentedButtonColors =
+    SegmentedButtonDefaults.colors(
+        activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+        activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        disabledActiveContainerColor = MaterialTheme.colorScheme.primaryContainer,
+        disabledActiveContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    )
+
+/** The localized label a purpose code is presented with (`BR-028`, `BR-041`). */
+@StringRes
+private fun visitPurposeLabel(purpose: VisitPurpose): Int =
+    when (purpose) {
+        VisitPurpose.WORK -> R.string.visit_purpose_work
+        VisitPurpose.ASSESSMENT -> R.string.visit_purpose_assessment
+    }
 
 /**
  * One technician the sheet may include, and the Lead choice among the included ones.

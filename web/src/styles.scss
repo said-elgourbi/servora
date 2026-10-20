@@ -1,0 +1,99 @@
+@use '@angular/material' as mat;
+@use './styles/theme';
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--mat-sys-background);
+  color: var(--mat-sys-on-surface);
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+a {
+  color: var(--mat-sys-primary);
+}
+:focus-visible {
+  outline: 3px solid var(--mat-sys-primary);
+  outline-offset: 3px;
+}
+.wordmark {
+  font-size: 1.65rem;
+  font-weight: 750;
+  text-decoration: none;
+  letter-spacing: -0.06em;
+  color: var(--mat-sys-on-surface);
+}
+.wordmark span {
+  color: var(--mat-sys-primary);
+}
+.form-error {
+  color: var(--mat-sys-on-error-container);
+  background: var(--mat-sys-error-container);
+  padding: 1rem;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.banner {
+  padding: 0.75rem 1.5rem;
+  background: var(--mat-sys-surface-container-high);
+  line-height: 1.5;
+}
+.status-page {
+  max-width: 700px;
+  margin: 10vh auto;
+  padding: 1.5rem;
+  line-height: 1.6;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.skip-link {
+  position: fixed;
+  top: -100px;
+  left: 1rem;
+  z-index: 100;
+  padding: 1rem;
+  background: var(--mat-sys-surface);
+}
+.skip-link:focus {
+  top: 1rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html {
+  --mat-button-outlined-container-shape: 8px;
+  --mat-button-filled-container-shape: 8px;
+  --mat-button-text-container-shape: 8px;
+}
+button[mat-stroked-button] {
+  background: var(--mat-sys-surface);
+}

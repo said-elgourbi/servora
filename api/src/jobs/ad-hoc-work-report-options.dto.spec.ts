@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { DomainValidationError } from '../validation/domain-validation.js';
 import {
   AD_HOC_CUSTOMER_SEARCH_MIN_LENGTH,
+  AD_HOC_REVIEW_JOB_SEARCH_MIN_LENGTH,
   parseAdHocCustomerSearchQuery,
   parseAdHocReportCustomerContextQuery,
+  parseAdHocReviewJobOptionsQuery,
 } from './ad-hoc-work-report-options.dto.js';
 
 describe('ad-hoc work report option DTOs', () => {
@@ -53,5 +55,39 @@ describe('ad-hoc work report option DTOs', () => {
 
   it('exposes the minimum search length as a constant', () => {
     expect(AD_HOC_CUSTOMER_SEARCH_MIN_LENGTH).toBe(2);
+  });
+
+  it('parses a review Job search scoped to a customer', () => {
+    expect(
+      parseAdHocReviewJobOptionsQuery({
+        customerId: '00000000-0000-4000-8000-000000000001',
+      }),
+    ).toEqual({
+      customerId: '00000000-0000-4000-8000-000000000001',
+      query: null,
+    });
+  });
+
+  it('parses a review Job search by query when no customer is known', () => {
+    expect(parseAdHocReviewJobOptionsQuery({ q: '1042' })).toEqual({
+      customerId: null,
+      query: '1042',
+    });
+  });
+
+  it('refuses a review Job search naming neither a customer nor a query', () => {
+    expect(() => parseAdHocReviewJobOptionsQuery({})).toThrow(
+      DomainValidationError,
+    );
+  });
+
+  it('refuses a review Job query below the minimum length', () => {
+    expect(() => parseAdHocReviewJobOptionsQuery({ q: '1' })).toThrow(
+      DomainValidationError,
+    );
+  });
+
+  it('exposes the review Job search minimum length as a constant', () => {
+    expect(AD_HOC_REVIEW_JOB_SEARCH_MIN_LENGTH).toBe(2);
   });
 });

@@ -3,12 +3,12 @@
 **Status:** Accepted (product-owner decision, 2026-09-15; **Phases 4c and 4d implemented 2026-09-15**)
 
 Date: 2026-09-15
-Tracker: `docs/tracker/029-photo-evidence-phases.md` (Phase 0 D4b ✓ and D9 ✓; Phase 4c landed the stack,
+Tracker: `docs/tracker/shared/029-photo-evidence-phases.md` (Phase 0 D4b ✓ and D9 ✓; Phase 4c landed the stack,
 Phase 4d the gestures)
 Contract: **none.** The API, its routes, its answers and `docs/api/job-photos.md` are unchanged by either
 decision.
-Predecessors: `docs/tracker/027-android-job-photo-updates.md` (the first evidence slice),
-`docs/tracker/029-photo-evidence-phases.md` Phase 4 (the hand-rolled viewer and thumbnail decode this ADR
+Predecessors: `docs/tracker/android/027-android-job-photo-updates.md` (the first evidence slice),
+`docs/tracker/shared/029-photo-evidence-phases.md` Phase 4 (the hand-rolled viewer and thumbnail decode this ADR
 replaces)
 
 References: `BR-001`, `BR-007`, `BR-015`, `BR-027`, `BR-028`, `BR-042`, `ADR-013` (the store the evidence

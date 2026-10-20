@@ -6,7 +6,7 @@ import org.junit.Test
 
 /**
  * What the temporary development sign-in shortcut offers in a build that carries accounts
- * (`docs/tracker/049-android-dev-sign-in-buttons.md`).
+ * (`docs/tracker/android/049-android-dev-sign-in-buttons.md`).
  *
  * These assertions run against the `debug` source set, which is the one `testDebugUnitTest`
  * compiles. The `release` counterpart declares the same type with an empty list, so "no development

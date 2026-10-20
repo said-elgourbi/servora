@@ -1,0 +1,122 @@
+<div
+  class="board-scroll"
+  tabindex="0"
+  role="region"
+  [attr.aria-label]="i18n.text('scheduleGridRegion')"
+>
+  <div class="board" [style.--columns]="board().columns.length">
+    <div class="corner">{{ i18n.text('scheduleTime') }}</div>
+    @for (column of columns(); track column.id) {
+      <div class="column-heading">
+        <span class="avatar" aria-hidden="true">{{
+          (column.name || i18n.text('noCrew')).slice(0, 1)
+        }}</span>
+        <div>
+          <strong>{{
+            column.id ? column.name || i18n.text('unnamedMember') : i18n.text('noCrew')
+          }}</strong
+          ><small>{{ column.entries.length }} {{ i18n.text('scheduleVisitsLabel') }}</small>
+        </div>
+      </div>
+    }
+    <div class="time-axis" [style.height.px]="board().height">
+      @for (mark of board().ticks; track mark.instant) {
+        <span [style.top.px]="mark.top">{{ tick(mark.instant) }}</span>
+      }
+    </div>
+    @for (column of columns(); track column.id) {
+      <div
+        class="technician-column"
+        [style.height.px]="board().height"
+        [attr.aria-label]="column.name || i18n.text('noCrew')"
+      >
+        @for (mark of board().ticks; track mark.instant) {
+          <div class="hour-line" [style.top.px]="mark.top" aria-hidden="true"></div>
+        }
+        @for (entry of column.entries; track entry.visit.visitId) {
+          <a
+            class="appointment"
+            [class.related]="active() === entry.visit.visitId"
+            (mouseenter)="hovered.set(entry.visit.visitId)"
+            (mouseleave)="hovered.set(null)"
+            (focus)="focused.set(entry.visit.visitId)"
+            (blur)="focused.set(null)"
+            [class.assessment]="entry.visit.purposeCode === 'ASSESSMENT'"
+            [class.overlap]="entry.overlap"
+            [class.short]="entry.height < 65"
+            [class.completed]="entry.visit.visitStatus === 'COMPLETED'"
+            [style.top.px]="entry.top"
+            [style.height.px]="entry.height"
+            [style.left.%]="(entry.slot * 100) / entry.slots"
+            [style.width.%]="100 / entry.slots"
+            [routerLink]="['/work/jobs', entry.visit.jobId]"
+            [queryParams]="{ visit: entry.visit.visitId, view: 'office' }"
+            [attr.data-visit]="entry.visit.visitId"
+            [attr.aria-label]="
+              entry.visit.jobTitle +
+              ' #' +
+              entry.visit.jobNumber +
+              ', ' +
+              entry.exactTime +
+              ', ' +
+              entry.visit.customerName +
+              ', ' +
+              (entry.visit.visitStatus | workLabel) +
+              (entry.overlap ? ', ' + i18n.text('scheduleOverlap') : '')
+            "
+            [matTooltip]="
+              entry.exactTime +
+              ' · ' +
+              entry.visit.jobTitle +
+              ' · ' +
+              entry.visit.customerName +
+              ' · ' +
+              entry.location +
+              ' · ' +
+              entry.crew +
+              ' · ' +
+              (entry.visit.visitStatus | workLabel) +
+              (entry.overlap ? ' · ' + i18n.text('scheduleOverlap') : '')
+            "
+            matTooltipShowDelay="250"
+          >
+            <div class="event-heading">
+              <span>#{{ entry.visit.jobNumber }}</span>
+              @if (entry.visit.technicians.length > 1) {
+                <span class="shared"
+                  >{{ i18n.text('scheduleSharedCrew') }} ·
+                  {{ entry.visit.technicians.length }}</span
+                >
+              }
+              @if (entry.overlap) {
+                <strong class="warning" [attr.aria-label]="i18n.text('scheduleOverlap')">!</strong>
+              }
+              @if (entry.visit.overdue) {
+                <strong class="warning">{{ i18n.text('overdue') }}</strong>
+              }
+            </div>
+            <span class="event-time"
+              >{{ entry.clockTime }}
+              @if (entry.continues) {
+                <span class="continuation" [attr.aria-label]="i18n.text('scheduleContinues')"
+                  >↳</span
+                >
+              }
+            </span>
+            <h2>{{ entry.visit.jobTitle }}</h2>
+            <span class="event-tags"
+              >{{ entry.visit.purposeCode | workLabel }} ·
+              {{ entry.visit.visitStatus | workLabel }}</span
+            >
+            @if (entry.height >= 100) {
+              <span class="customer">{{ entry.visit.customerName }}</span>
+            }
+            @if (entry.height >= 135) {
+              <span class="location">{{ entry.location || i18n.text('noAddress') }}</span>
+            }
+          </a>
+        }
+      </div>
+    }
+  </div>
+</div>

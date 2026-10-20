@@ -4,6 +4,7 @@
 // `gradle/libs.versions.toml` and each module opts in explicitly (`dev.md` §4).
 
 plugins {
+    alias(libs.plugins.google.services) apply false
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.kotlin.serialization) apply false

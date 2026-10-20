@@ -429,6 +429,32 @@ Operations that fundamentally require current server information may require con
 
 ---
 
+## BR-013-WEB — Bounded Angular field offline workflow
+
+**Applies to:** Angular, API. **Status: IMPLEMENTED — initial API/web workflow; physical field acceptance remains pending.**
+
+The owner selected the offline design recommendation. [ADR-027](../docs/decisions/027-angular-field-offline-workflow.md)
+is the authoritative scope, retention and conflict decision for tracker 064 Phase 2:
+
+- Support assigned-field snapshots, durable drafts/pending evidence and provisional Visit
+  status/completion, notes, evidence upload and ad-hoc submission during an established session.
+- Require server-verified user/organization/membership scope. Offline persistence/replay initially
+  requires exactly one active membership; multiple memberships retain existing online behavior.
+- After closure/reload, require online authentication and matching scope before opening retained work.
+  Keep credentials, identity profiles and permission grants out of local persistence.
+- Retain unsent work/refusals until accepted or explicitly discarded; lock it across logout/account
+  changes. Confirm discard of never-submitted work; reconcile ambiguous submissions first.
+- Expire unpinned read snapshots after seven days, with at most 50 unpinned Jobs. Pending work pins
+  required context. Accepted evidence bytes remain online-only initially; metadata stays in activity.
+- Apply BR-014's preservation principle and BR-031/BR-032's integrity/conflict principles within this
+  browser scope. Browser eviction/site-data clearing remains a disclosed platform limitation.
+- Refuse stale versioned commands for review; append/upload retries preserve their operation IDs.
+  Follow-up requests/replies and office writes remain online-only. No protected service-worker caching.
+
+Android's existing offline capabilities and retention are unchanged.
+
+---
+
 ## BR-014 — Offline work must not be silently lost
 
 **Description:**
@@ -1210,7 +1236,7 @@ This rule defines the lifecycle required by BR-022. Job cancellation appears abo
 
 **Changed decision (recorded under BR-040):** the transition list previously permitted only the next step forward, so a manager had to move a Job through every status in order and could not move one backwards. Product ownership confirmed that an authorized user selects any permitted destination in one operation, and that `NEW` is not a destination for an open Job. BR-062 remains a runtime eligibility condition over this list, and BR-062 carries the completion invariant.
 
-**Changed decision (recorded under BR-040, 2026-09-20):** product ownership replaced the six-status Job lifecycle with the four statuses above. `SCHEDULED` and `IN_PROGRESS` were two names for *the request is open and work has entered execution* and were collapsed into `ACTIVE`; `PENDING_REVIEW` was a business-review status with no decision behind it and is removed, because the review product ownership wanted is a **derived** attention condition rather than lifecycle state (`BR-060`), and a resolving Visit completion now closes the Job (BR-062, BR-078). The decision, its rationale and the migration are recorded in `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+**Changed decision (recorded under BR-040, 2026-09-20):** product ownership replaced the six-status Job lifecycle with the four statuses above. `SCHEDULED` and `IN_PROGRESS` were two names for *the request is open and work has entered execution* and were collapsed into `ACTIVE`; `PENDING_REVIEW` was a business-review status with no decision behind it and is removed, because the review product ownership wanted is a **derived** attention condition rather than lifecycle state (`BR-060`), and a resolving Visit completion now closes the Job (BR-062, BR-078). The decision, its rationale and the migration are recorded in `docs/tracker/shared/051-job-visit-lifecycle-redesign.md`.
 
 **Status:**
 **CONFIRMED**
@@ -1283,7 +1309,7 @@ itself is unchanged.
 > business review it described is reported as **derived** operational attention (`BR-060`) rather than
 > as a Job status. The rule is kept here as a record of what it said, and nothing in Servora may
 > implement it. The changed decision is recorded under `BR-040` in
-> `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+> `docs/tracker/shared/051-job-visit-lifecycle-redesign.md`.
 
 **Description:**
 `PENDING_REVIEW` was a business-review state, not automatic completion.
@@ -1380,7 +1406,7 @@ Manager/authorized office user could close a Job and that `PENDING_REVIEW → CO
 path. Product ownership removed the review status (`BR-058`) and confirmed that a resolving Visit
 completion closes the Job automatically. The open-Visit invariant is unchanged and now binds the
 consequence as well, so a resolving completion that leaves another Visit open keeps the Job `ACTIVE`.
-Recorded in `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+Recorded in `docs/tracker/shared/051-job-visit-lifecycle-redesign.md`.
 
 **Status:**
 **CONFIRMED** — the two ways a Job is closed, and the open-Visit invariant that binds both
@@ -1417,7 +1443,7 @@ None.
 `COMPLETED → NEW` / `CANCELED → NEW`. Product ownership's review status was removed and `NEW` was narrowed
 to "has not entered execution" (`BR-058`), so reopening returns a terminal Job to `ACTIVE` — the status a
 Job with historical Visits really has. Recorded in
-`docs/tracker/051-job-visit-lifecycle-redesign.md`; the API applies `ACTIVE`.
+`docs/tracker/shared/051-job-visit-lifecycle-redesign.md`; the API applies `ACTIVE`.
 
 **Status:**
 **CONFIRMED**
@@ -1834,7 +1860,7 @@ None.
   **OPEN QUESTION** and are not implemented.
 - Recorded under `BR-040`: this is a new Product decision about the create operation. It is implemented by
   `POST /jobs` (`docs/api/job-details.md` §6), the Android Create Job screen
-  (`docs/tracker/043-create-job.md`) and the domain model's create section
+  (`docs/tracker/shared/043-create-job.md`) and the domain model's create section
   (`docs/domain/job-visit-domain-model.md` §6.5).
 
 **Status:**
@@ -2460,7 +2486,7 @@ the structured reason BR-076 requires, and having both meant a Visit could be "o
 rule told apart. A field attempt that could not be performed is canceled with the reason that explains it.
 `COMPLETED` is also no longer obtainable through the ordinary status selector: completing a Visit is the
 operation that carries its outcome (BR-077). Recorded in
-`docs/tracker/051-job-visit-lifecycle-redesign.md`.
+`docs/tracker/shared/051-job-visit-lifecycle-redesign.md`.
 
 **Status:**
 **CONFIRMED**
@@ -2620,7 +2646,7 @@ Whether additional outcome types may be added is a future product decision.
 renamed `NEEDS_FOLLOW_UP`, because a stored business value must not be written with a spelling that does
 not read as the two words it stands for (`BR-041`); `NEEDS_QUOTE_APPROVAL` is removed, because a quote or
 an approval is a **business** follow-up rather than a result of the field attempt, and no rule or surface
-served it. Recorded in `docs/tracker/051-job-visit-lifecycle-redesign.md`.
+served it. Recorded in `docs/tracker/shared/051-job-visit-lifecycle-redesign.md`.
 
 **Status:**
 **CONFIRMED**
@@ -2986,7 +3012,7 @@ Android, Angular, API, Database
 **Notes:**
 **Changed decision (recorded under `BR-040`, 2026-09-29):** product ownership decided that a request
 returned for clarification is **answerable**, which is option 1 of the choice
-`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.3.3 recorded as open: the office's *Clarify*
+`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.3.3 recorded as open: the office's *Clarify*
 means "we need more from you", the technician can answer it, and the answer returns the request to the
 office's review. The rule previously stated the lifecycle as `PENDING → APPROVED | REJECTED` and that a
 clarified request "remains unresolved until it is later approved or rejected" — both of which remain
@@ -3315,11 +3341,27 @@ Android, Angular, API
 **Expected behavior:**
 Notification behavior must be defined per event and audience.
 
+The first approved event is `VISIT_ASSIGNED` (2026-10-16):
+
+- Notify each newly added Visit crew member, including the initial crew of a newly scheduled
+  Visit. Role-only changes, crew removal, rescheduling, cancellation and historical ad-hoc
+  reconciliation do not produce this event. Removing and later readding a member is a new event.
+- Exclude the actor's user. Deliver to all currently eligible enabled installations of the
+  recipient; preference is per installation. Recheck current session, membership, assignment,
+  resource access, permission and channel state before delivery. Push grants no resource access.
+- Use generic localized English/French presentation without customer details. Taps open the
+  relevant Job through authenticated navigation and normal authorized reads.
+- Events expire after 24 hours. Each device delivery may attempt at most 8 times. Retain terminal
+  delivery records for 30 days; invalidate registrations after 30 days without registration refresh.
+  Provider acceptance does not prove display or reading.
+
+Additional notification events and audiences remain open questions.
+
 **Exceptions:**
 None.
 
 **Status:**
-**OPEN QUESTION**
+**CONFIRMED for `VISIT_ASSIGNED`; OPEN QUESTION for additional events and audiences.**
 
 ---
 

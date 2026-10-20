@@ -1,5 +1,13 @@
 import type { AddressSnapshot } from '../address/address-snapshot.js';
 import {
+  parseCreateCustomerDto,
+  type CreateCustomerDto,
+} from '../customers/customer.dto.js';
+import {
+  parseCreatePropertyDto,
+  type CreatePropertyDto,
+} from '../customers/property.dto.js';
+import {
   DomainValidationError,
   optionalInstant,
   optionalPositiveInteger,
@@ -95,6 +103,59 @@ export interface ConvertAdHocWorkReportDto extends AdHocWorkReportReviewDto {
   readonly description: string | null;
 }
 
+export interface ResolveAdHocWorkReportLocationDto extends AdHocWorkReportReviewDto {
+  readonly existingCustomerId: string | null;
+  readonly newCustomer: CreateCustomerDto | null;
+  readonly existingPropertyId: string | null;
+  readonly newProperty: CreatePropertyDto | null;
+}
+
+export function parseResolveAdHocWorkReportLocationDto(
+  input: unknown,
+): ResolveAdHocWorkReportLocationDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const review = parseAdHocWorkReportReviewDto(input);
+  if (review.expectedVersion === null) fail('expectedVersion', 'is required');
+  if (review.expectedStatus !== 'PENDING')
+    fail('expectedStatus', 'must be PENDING');
+  const existingCustomerId = optionalUuid(
+    source.existingCustomerId,
+    'existingCustomerId',
+  );
+  const existingPropertyId = optionalUuid(
+    source.existingPropertyId,
+    'existingPropertyId',
+  );
+  if ((existingCustomerId !== null) === (source.newCustomer != null)) {
+    fail(
+      'customer',
+      'requires exactly one of existingCustomerId or newCustomer',
+    );
+  }
+  if ((existingPropertyId !== null) === (source.newProperty != null)) {
+    fail(
+      'property',
+      'requires exactly one of existingPropertyId or newProperty',
+    );
+  }
+  if (source.newCustomer != null && existingPropertyId !== null) {
+    fail('existingPropertyId', 'cannot be used with a new customer');
+  }
+  return {
+    ...review,
+    existingCustomerId,
+    existingPropertyId,
+    newCustomer:
+      source.newCustomer == null
+        ? null
+        : parseCreateCustomerDto(source.newCustomer),
+    newProperty:
+      source.newProperty == null
+        ? null
+        : parseCreatePropertyDto(source.newProperty),
+  };
+}
+
 /** The office's rejection of a report that was not legitimate Servora work (`BR-AH-007`). */
 export type RejectAdHocWorkReportDto = AdHocWorkReportReviewDto;
 
@@ -107,8 +168,10 @@ export function parseSubmitAdHocWorkReportDto(
   if (workEndedAt.getTime() <= workStartedAt.getTime()) {
     fail('workEndedAt', 'must be after workStartedAt');
   }
+  const customerId = optionalUuid(source.customerId, 'customerId');
+  const customerText = customerId === null ? requireText : optionalText;
   return {
-    customerId: optionalUuid(source.customerId, 'customerId'),
+    customerId,
     propertyId: optionalUuid(source.propertyId, 'propertyId'),
     knownJobId: optionalUuid(source.knownJobId, 'knownJobId'),
     workStartedAt,
@@ -120,17 +183,17 @@ export function parseSubmitAdHocWorkReportDto(
     ),
     summary: requireText(source.summary, 'summary', 2000),
     notes: optionalText(source.notes, 'notes', 4000),
-    reportedCustomerName: optionalText(
+    reportedCustomerName: customerText(
       source.reportedCustomerName,
       'reportedCustomerName',
       255,
     ),
-    reportedCustomerPhone: optionalText(
+    reportedCustomerPhone: customerText(
       source.reportedCustomerPhone,
       'reportedCustomerPhone',
       50,
     ),
-    reportedCustomerAddress: optionalText(
+    reportedCustomerAddress: customerText(
       source.reportedCustomerAddress,
       'reportedCustomerAddress',
       2000,

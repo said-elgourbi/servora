@@ -12,7 +12,7 @@ true of the signed-in area, which now has one because it has a back stack to kee
 
 References: `BR-001`, `BR-007`, `BR-028`, `BR-041`, `BR-042`, `Project.md` §6, §9, §11, §23 and
 §31, `dev.md` §2, §4, §9 and §15, `qa.md` §6 and §13,
-`docs/design/android-design-system.md`, `docs/tracker/010-customer-detail.md`.
+`docs/design/android-design-system.md`, `docs/tracker/shared/010-customer-detail.md`.
 
 ## Context
 

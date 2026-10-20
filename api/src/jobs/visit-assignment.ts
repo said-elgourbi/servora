@@ -11,6 +11,7 @@ import type { OrganizationScope } from '../tenancy/tenant-scope.js';
 import type {
   AssignmentRoleCode,
   VisitOutcomeCode,
+  VisitPurposeCode,
   VisitStatus,
 } from './job.types.js';
 
@@ -36,6 +37,7 @@ export interface AssignedTechnician {
 export interface SelectedVisit {
   readonly visitId: string;
   readonly status: VisitStatus;
+  readonly purposeCode: VisitPurposeCode;
   readonly scheduledStart: Date;
   readonly scheduledEnd: Date;
   /** The Visit's version, which a reschedule or assignment echoes back (`BR-086`). */
@@ -66,6 +68,7 @@ export async function selectVisitsForJobs(
     jobId: visits.jobId,
     visitId: visits.id,
     status: visits.status,
+    purposeCode: visits.purposeCode,
     scheduledStart: visits.scheduledStart,
     scheduledEnd: visits.scheduledEnd,
     version: visits.version,
@@ -102,6 +105,7 @@ export async function selectVisitsForJobs(
     selected.set(row.jobId, {
       visitId: row.visitId,
       status: row.status as VisitStatus,
+      purposeCode: row.purposeCode as VisitPurposeCode,
       scheduledStart: row.scheduledStart as Date,
       scheduledEnd: row.scheduledEnd as Date,
       version: row.version,
@@ -132,6 +136,7 @@ export interface JobVisit {
    * "what once resulted from it" — a distinction only the authoritative record can make (`BR-001`).
    */
   readonly outcomeCode: VisitOutcomeCode | null;
+  readonly purposeCode: VisitPurposeCode;
   /**
    * The Visit's stable, human-readable sequence within the Job — `1` for the Job's first Visit, `2`
    * for the second, and so on.
@@ -145,6 +150,12 @@ export interface JobVisit {
   readonly scheduledStart: Date | null;
   readonly scheduledEnd: Date | null;
   readonly version: number;
+  /**
+   * Whether the Visit was created from a reconciled ad-hoc work report rather than the normal
+   * scheduling path (`BR-AH-003`, `BR-AH-006`). It is a stored fact, never inferred from the
+   * Visit's status or schedule (`BR-042`).
+   */
+  readonly isAdHocWork: boolean;
 }
 
 /**
@@ -167,10 +178,12 @@ export async function readJobVisits(
     .select({
       visitId: visits.id,
       status: visits.status,
+      purposeCode: visits.purposeCode,
       scheduledStart: visits.scheduledStart,
       scheduledEnd: visits.scheduledEnd,
       version: visits.version,
       outcomeCode: visits.outcomeCode,
+      isAdHocWork: visits.isAdHocWork,
     })
     .from(visits)
     .where(
@@ -185,10 +198,12 @@ export async function readJobVisits(
     visitId: row.visitId,
     sequence: index + 1,
     status: row.status as VisitStatus,
+    purposeCode: row.purposeCode as VisitPurposeCode,
     scheduledStart: row.scheduledStart,
     scheduledEnd: row.scheduledEnd,
     version: row.version,
     outcomeCode: row.outcomeCode as VisitOutcomeCode | null,
+    isAdHocWork: row.isAdHocWork,
   }));
 }
 

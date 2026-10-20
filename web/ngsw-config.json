@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/@angular/service-worker/config/schema.json",
+  "index": "/index.html",
+  "assetGroups": [
+    {
+      "name": "app-shell",
+      "installMode": "prefetch",
+      "resources": {
+        "files": [
+          "/index.html",
+          "/*.css",
+          "/*.js",
+          "/manifest.webmanifest",
+          "/icons/**"
+        ]
+      }
+    }
+  ],
+  "dataGroups": [],
+  "navigationUrls": [
+    "/**",
+    "!/**/*.*",
+    "!/**/*__*",
+    "!/**/*__*/**",
+    "!/health",
+    "!/auth",
+    "!/auth/**",
+    "!/jobs",
+    "!/jobs/**",
+    "!/customers",
+    "!/customers/**",
+    "!/properties",
+    "!/properties/**",
+    "!/home",
+    "!/home/**",
+    "!/schedule",
+    "!/schedule/**",
+    "!/technicians",
+    "!/technicians/**",
+    "!/push",
+    "!/push/**"
+  ]
+}

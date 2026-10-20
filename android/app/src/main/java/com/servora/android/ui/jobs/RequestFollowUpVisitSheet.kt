@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -222,7 +223,11 @@ internal fun RequestFollowUpVisitSheet(
 
         Spacer(Modifier.height(12.dp))
         Button(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 20.dp)
                 .testTag(RequestFollowUpConfirmTag),
             // The route requires a reason and an end after the start, so the form does not ask a
             // question whose answer it already knows (`BR-042`).

@@ -9,11 +9,13 @@ import {
   lt,
   notExists,
   notInArray,
+  or,
   sql,
 } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
   customers,
+  jobQuoteWorkflows,
   jobs,
   organizationMembers,
   userProfiles,
@@ -25,8 +27,10 @@ import type { AddressSnapshot } from '../address/address-snapshot.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
 import type {
   AssignmentRoleCode,
+  JobQuoteWorkflowState,
   JobStatus,
   VisitOutcomeCode,
+  VisitPurposeCode,
   VisitStatus,
 } from '../jobs/job.types.js';
 import { deriveJobAttention } from '../jobs/job-attention.js';
@@ -39,6 +43,7 @@ import {
 } from './manager-home.dto.js';
 import {
   NOT_DAY_WORK_VISIT_STATUSES,
+  STARTED_VISIT_STATUSES,
   hasVisitStarted,
   isVisitOverdue,
 } from './home-visit-conditions.js';
@@ -64,6 +69,7 @@ export interface ManagerHomeRead {
 interface VisitContextRow {
   readonly visitId: string;
   readonly visitStatus: string;
+  readonly purposeCode: string;
   /**
    * The Visit's schedule. The day and overdue reads both require it, so it is present for every row
    * they return; the mapper still checks it rather than asserting it.
@@ -94,7 +100,10 @@ interface JobConditionRow {
 interface JobAttentionVisitRow extends JobConditionRow {
   readonly visitId: string;
   readonly visitStatus: string;
+  readonly purposeCode: string;
   readonly outcomeCode: string | null;
+  readonly quoteWorkflowState: string | null;
+  readonly quoteWorkflowSourceVisitId: string | null;
 }
 
 /**
@@ -126,20 +135,20 @@ export class ManagerHomeService {
     const [
       viewerDisplayName,
       dayVisits,
-      overdueVisits,
+      attentionVisits,
       schedulingJobs,
       operationalAttentionRows,
     ] = await Promise.all([
       readViewerDisplayName(this.db, scope, userId),
       this.findDayVisits(scope, day),
-      this.findOverdueVisits(scope, now),
+      this.findAttentionVisits(scope, day, now),
       this.findSchedulingCandidates(scope),
       this.findOperationalAttentionVisits(scope),
     ]);
 
     const technicians = await this.techniciansForVisits(scope, [
       ...dayVisits.map((row) => row.visitId),
-      ...overdueVisits.map((row) => row.visitId),
+      ...attentionVisits.map((row) => row.visitId),
     ]);
 
     const visits = dayVisits.flatMap((row) => {
@@ -155,7 +164,7 @@ export class ManagerHomeService {
     );
 
     const attention = [
-      ...overdueVisits.map((row) => toOverdueItem(row)),
+      ...attentionVisits.map(toVisitAttentionItem),
       ...operationalAttention,
       ...schedulingJobs
         .map((row) => toJobConditionItem('JOB_NEEDS_SCHEDULING', row))
@@ -208,15 +217,15 @@ export class ManagerHomeService {
   }
 
   /**
-   * Every Visit still `SCHEDULED` after the window it was scheduled for has ended (`BR-072`,
-   * `BR-074`).
+   * Scheduled work past its window, and started work still open after its scheduled local day.
    *
    * The condition is not restricted to the requested day: a Visit scheduled for an earlier day that
    * never advanced is still work that has gone wrong, and hiding it because its day has passed would
    * hide exactly the exception the manager has to resolve.
    */
-  private async findOverdueVisits(
+  private async findAttentionVisits(
     scope: OrganizationScope,
+    day: DayWindow,
     now: Date,
   ): Promise<VisitContextRow[]> {
     return this.db
@@ -234,9 +243,14 @@ export class ManagerHomeService {
         and(
           visitScope(scope),
           activeCustomer(),
-          eq(visits.status, 'SCHEDULED'),
           isNotNull(visits.scheduledEnd),
-          lt(visits.scheduledEnd, now),
+          or(
+            and(eq(visits.status, 'SCHEDULED'), lt(visits.scheduledEnd, now)),
+            and(
+              inArray(visits.status, [...STARTED_VISIT_STATUSES]),
+              lt(visits.scheduledEnd, day.start),
+            ),
+          ),
         ),
       )
       .orderBy(asc(visits.scheduledStart), asc(jobs.jobNumber));
@@ -301,7 +315,10 @@ export class ManagerHomeService {
         ...jobConditionSelection,
         visitId: visits.id,
         visitStatus: visits.status,
+        purposeCode: visits.purposeCode,
         outcomeCode: visits.outcomeCode,
+        quoteWorkflowState: jobQuoteWorkflows.state,
+        quoteWorkflowSourceVisitId: jobQuoteWorkflows.sourceVisitId,
         visitCreatedAt: visits.createdAt,
       })
       .from(jobs)
@@ -317,6 +334,13 @@ export class ManagerHomeService {
         and(
           eq(visits.jobId, jobs.id),
           eq(visits.organizationId, scope.organizationId),
+        ),
+      )
+      .leftJoin(
+        jobQuoteWorkflows,
+        and(
+          eq(jobQuoteWorkflows.jobId, jobs.id),
+          eq(jobQuoteWorkflows.organizationId, scope.organizationId),
         ),
       )
       .where(and(jobScope(scope), activeCustomer(), eq(jobs.status, 'ACTIVE')))
@@ -384,6 +408,7 @@ export class ManagerHomeService {
 const visitContextSelection = {
   visitId: visits.id,
   visitStatus: visits.status,
+  purposeCode: visits.purposeCode,
   scheduledStart: visits.scheduledStart,
   scheduledEnd: visits.scheduledEnd,
   visitAddressSnapshot: visits.locationAddressSnapshot,
@@ -438,6 +463,7 @@ function toVisit(
   return {
     visitId: row.visitId,
     visitStatus,
+    purposeCode: row.purposeCode as VisitPurposeCode,
     scheduledStart: row.scheduledStart,
     scheduledEnd: row.scheduledEnd,
     jobId: row.jobId,
@@ -469,10 +495,12 @@ function visitAddress(row: VisitContextRow): AddressSnapshot | null {
   );
 }
 
-/** The overdue condition as an attention item (`BR-072`, `BR-074`). */
-function toOverdueItem(row: VisitContextRow): ManagerAttentionItem {
+/** A derived Visit condition as an attention item. */
+function toVisitAttentionItem(row: VisitContextRow): ManagerAttentionItem {
   return {
-    kind: 'VISIT_OVERDUE',
+    kind: hasVisitStarted(row.visitStatus as VisitStatus)
+      ? 'VISIT_STALE_STARTED'
+      : 'VISIT_OVERDUE',
     jobId: row.jobId,
     jobNumber: row.jobNumber,
     jobTitle: row.jobTitle,
@@ -522,10 +550,19 @@ function toOperationalAttentionItems(
     }
     for (const attention of deriveJobAttention({
       jobStatus: first.jobStatus as JobStatus,
+      quoteWorkflow:
+        first.quoteWorkflowState === null ||
+        first.quoteWorkflowSourceVisitId === null
+          ? null
+          : {
+              state: first.quoteWorkflowState as JobQuoteWorkflowState,
+              sourceVisitId: first.quoteWorkflowSourceVisitId,
+            },
       visits: jobRows.map((row, index) => ({
         visitId: row.visitId,
         sequence: index + 1,
         status: row.visitStatus as VisitStatus,
+        purposeCode: row.purposeCode as VisitPurposeCode,
         outcomeCode: row.outcomeCode as VisitOutcomeCode | null,
       })),
     })) {

@@ -10,6 +10,7 @@ import com.servora.android.data.schedule.AdHocReportPropertyOptionsResult
 import com.servora.android.data.schedule.AdHocWorkReportDraft
 import com.servora.android.data.schedule.AdHocWorkReportResult
 import com.servora.android.data.schedule.AdHocWorkReportsRepository
+import com.servora.android.data.schedule.AdHocWorkReportsResult
 import com.servora.android.data.schedule.ScheduleRepository
 import com.servora.android.data.schedule.ScheduleResult
 import com.servora.android.data.schedule.VisitRequestReviewResult
@@ -57,7 +58,7 @@ import kotlinx.coroutines.launch
  * (`BR-007`). That read is **online-only** and holds no local copy — a request's answer is only useful
  * while it is current, and presenting a stored "rejected" as the office's answer is exactly what must
  * not happen (`BR-001`, `BR-014`) — so a read the backend could not answer reports its failure and
- * leaves the list it already had in place (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.8).
+ * leaves the list it already had in place (`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.8).
  */
 @HiltViewModel
 class TechnicianScheduleViewModel @Inject constructor(
@@ -85,6 +86,14 @@ class TechnicianScheduleViewModel @Inject constructor(
      */
     private var requestsGeneration = 0
 
+    /**
+     * Identifies the ad-hoc report read a result belongs to.
+     *
+     * A report read takes the next one too, so an answer that arrives after the session has ended is
+     * dropped rather than written into the next session's state (`BR-001`, `BR-067`).
+     */
+    private var adHocReportsGeneration = 0
+
     /** The type-ahead Customer search in flight, cancelled when a newer query arrives. */
     private var customerSearchJob: Job? = null
 
@@ -100,6 +109,10 @@ class TechnicianScheduleViewModel @Inject constructor(
         _uiState.update { it.copy(timeZoneId = timeZoneId, firstDayOfWeek = firstDayOfWeek) }
         if (_uiState.value.tab == TechnicianScheduleTab.REQUESTS) {
             readRequests()
+            return
+        }
+        if (_uiState.value.tab == TechnicianScheduleTab.AD_HOC_REPORTS) {
+            readAdHocReports()
             return
         }
         val hadADate = _uiState.value.selectedDate != null
@@ -118,15 +131,15 @@ class TechnicianScheduleViewModel @Inject constructor(
      * (`BR-012`).
      */
     fun retry() {
-        if (_uiState.value.tab == TechnicianScheduleTab.REQUESTS) {
-            readRequests()
-        } else {
-            read()
+        when (_uiState.value.tab) {
+            TechnicianScheduleTab.SCHEDULE -> read()
+            TechnicianScheduleTab.REQUESTS -> readRequests()
+            TechnicianScheduleTab.AD_HOC_REPORTS -> readAdHocReports()
         }
     }
 
     /**
-     * Opens one of the screen's two views.
+     * Opens one of the screen's views.
      *
      * The requests view is read when it is entered. Returning to the schedule does **not** read the day
      * again: the day on screen is the answer the read already gave for the selected date, and the
@@ -138,8 +151,10 @@ class TechnicianScheduleViewModel @Inject constructor(
             return
         }
         _uiState.update { it.copy(tab = tab) }
-        if (tab == TechnicianScheduleTab.REQUESTS) {
-            readRequests()
+        when (tab) {
+            TechnicianScheduleTab.SCHEDULE -> Unit
+            TechnicianScheduleTab.REQUESTS -> readRequests()
+            TechnicianScheduleTab.AD_HOC_REPORTS -> readAdHocReports()
         }
     }
 
@@ -226,6 +241,7 @@ class TechnicianScheduleViewModel @Inject constructor(
     fun reset() {
         generation += 1
         requestsGeneration += 1
+        adHocReportsGeneration += 1
         _uiState.value = TechnicianScheduleUiState()
     }
 
@@ -696,6 +712,41 @@ class TechnicianScheduleViewModel @Inject constructor(
 
                     is VisitRequestsResult.Failure ->
                         current.copy(requestsFailureReason = result.reason)
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads the caller's own ad-hoc work reports.
+     *
+     * The read is the API's own scope answer: a reporter receives their own reports and nobody else's
+     * (`BR-AH-001`, `BR-AH-002`, `BR-007`). It is **online-only** — there is no local copy of a report's
+     * reconciliation state, because the office's decision is only meaningful while it is current and a
+     * stored one would present a decision the backend may have replaced (`BR-001`, `BR-014`) — so a
+     * failure is reported rather than answered from the device, and a list already read stays on screen
+     * under that notice (`BR-013`).
+     */
+    private fun readAdHocReports() {
+        adHocReportsGeneration += 1
+        val readGeneration = adHocReportsGeneration
+        _uiState.update { it.copy(adHocReportsFailureReason = null) }
+        viewModelScope.launch {
+            val result = adHocWorkReportsRepository.loadReports()
+            if (readGeneration != adHocReportsGeneration) {
+                return@launch
+            }
+            _uiState.update { current ->
+                when (result) {
+                    is AdHocWorkReportsResult.Success ->
+                        current.copy(
+                            adHocReportsRead = true,
+                            adHocReports = result.reports,
+                            adHocReportsFailureReason = null,
+                        )
+
+                    is AdHocWorkReportsResult.Failure ->
+                        current.copy(adHocReportsFailureReason = result.reason)
                 }
             }
         }

@@ -49,11 +49,11 @@ An AI agent must never silently resolve a contradiction by changing an establish
 * Product type: Field-service management platform.
 * Repository: one monorepo.
 * API + PostgreSQL form the long-lived system of record.
-* Angular is the management/office client.
+* Angular is the web/PWA client for management/office users and technicians, including iPhone users without a native iOS app.
 * Android is the native technician field application.
 * Android is **offline-first**.
 * Android must support **phone and tablet form factors where applicable**.
-* Angular will be the dashboard for Managers and Admins, should use the same database and api as mobile
+* Angular provides office dashboards and technician field workflows using the same API and authoritative database as Android.
 * Initial supported languages are **English and French**.
 * The architecture must be designed so additional languages can be introduced later without redesigning the application or database.
 * Product design and UX are defined by the approved Figma/design documentation.

@@ -2,7 +2,9 @@
 # Run `make help` for an overview of available targets.
 
 SHELL := /bin/bash
-COMPOSE := docker compose
+COMPOSE := docker compose -f docker-compose.yml -f docker-compose.local.yml
+# Preserve a private local Firebase credential mount when recreating services.
+COMPOSE += $(foreach override,$(wildcard .secrets/compose.push.yml),-f $(override))
 API_DIR := api
 GRADLEW := gradlew
 
@@ -14,17 +16,20 @@ help: ## Show this overview of available targets
 
 # ---------------------------------------------------------------- foundation
 
-.PHONY: up down down-v restart logs ps
-up: ## Build and start the full foundation (PostgreSQL + API + MinIO) in the background
+.PHONY: up down down-v reboot restart logs ps
+up: ## Build and start Angular, API, PostgreSQL and MinIO in the background
 	$(COMPOSE) up -d --build
 
-down: ## Stop and remove foundation containers and networks (database data is kept)
+reboot: ## Rebuild and recreate the local stack to load current API and Angular changes (keeps data)
+	$(COMPOSE) up -d --build --force-recreate
+
+down: ## Stop and remove local containers and networks (database and uploaded files are kept)
 	$(COMPOSE) down
 
 down-v: ## Stop foundation AND delete the PostgreSQL and MinIO data volumes (destructive)
 	$(COMPOSE) down -v
 
-restart: ## Restart all foundation services
+restart: ## Restart local services without rebuilding (use reboot after code changes)
 	$(COMPOSE) restart
 
 logs: ## Follow logs of all foundation services
@@ -143,5 +148,26 @@ lint: ## Alias for api-lint
 build: ## Alias for api-build
 	$(MAKE) api-build
 
-# Note: there is intentionally no `e2e-web` target yet — the Angular client
-# does not exist in this foundation milestone (see docs/tracker/001-foundation.md).
+# ------------------------------------------------------------------ Angular
+
+.PHONY: web-install web-start web-build web-lint web-typecheck web-test web-test-e2e
+web-install: ## Install Angular dependencies and local shared packages (npm ci)
+	cd web && npm ci
+
+web-start: ## Start Angular with the same-origin API proxy (SERVORA_API_TARGET overrides target)
+	cd web && npm start
+
+web-build: ## Build the production Angular PWA
+	cd web && npm run build
+
+web-lint: ## Lint Angular TypeScript, templates and dependency boundaries
+	cd web && npm run lint
+
+web-typecheck: ## Strict Angular TypeScript and template checks
+	cd web && npm run typecheck
+
+web-test: ## Run Angular unit/component tests
+	cd web && npm test
+
+web-test-e2e: web-build ## Run Playwright against the production PWA (requires Chromium)
+	cd web && npm run test:e2e

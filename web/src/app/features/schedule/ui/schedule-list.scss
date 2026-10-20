@@ -1,0 +1,125 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.table-scroll {
+  overflow: auto;
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: 10px;
+  background: var(--mat-sys-surface);
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  font-size: 12px;
+  text-align: left;
+}
+th {
+  padding: 11px 12px;
+  background: var(--mat-sys-surface-container-low);
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 11px;
+  font-weight: 650;
+}
+th:first-child {
+  width: 15%;
+}
+th:nth-child(2) {
+  width: 21%;
+}
+th:nth-child(4) {
+  width: 18%;
+}
+td {
+  border-top: 1px solid var(--mat-sys-outline-variant);
+  padding: 12px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+tr:hover,
+tr:focus-within {
+  background: var(--mat-sys-surface-container-low);
+}
+.time,
+.agenda-time {
+  font-size: 11px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  color: var(--mat-sys-on-surface-variant);
+}
+a {
+  color: var(--mat-sys-on-surface);
+  text-decoration: none;
+}
+a:hover h2 {
+  color: var(--mat-sys-primary);
+}
+a:focus-visible {
+  outline: 2px solid var(--mat-sys-primary);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+h2 {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+h2 span {
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 11px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+.crew {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+small {
+  font-size: 10px;
+  color: var(--mat-sys-on-surface-variant);
+  margin-left: 4px;
+}
+.warning {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--mat-sys-error);
+  font-weight: 650;
+  margin-right: 6px;
+}
+.agenda {
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: 10px;
+  background: var(--mat-sys-surface);
+  overflow: hidden;
+}
+.agenda-row {
+  display: block;
+  padding: 14px;
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+}
+.agenda-row:last-child {
+  border: 0;
+}
+.agenda-row h2 {
+  font-size: 14px;
+  margin-block: 3px;
+}
+.agenda-row p {
+  margin: 5px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mat-sys-on-surface-variant);
+  overflow-wrap: anywhere;
+}
+.agenda-row .crew {
+  display: block;
+}
+.tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+}

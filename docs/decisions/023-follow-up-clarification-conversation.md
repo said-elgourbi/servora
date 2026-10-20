@@ -4,11 +4,11 @@
 produced this record — extend the technician-side *Follow-up Visit Request Details* flow into a
 request-scoped, append-only clarification conversation in which a technician's reply atomically moves
 `NEEDS_CLARIFICATION` → `PENDING` — and it answers option 1 of the open choice
-`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.3.3 recorded, under the `BR-040` change procedure)
+`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.3.3 recorded, under the `BR-040` change procedure)
 
 Date: 2026-09-29
 
-Tracker: `docs/tracker/057-qa-issue-list-visit-workflow.md` — §5.3.3 is the open question this record
+Tracker: `docs/tracker/shared/057-qa-issue-list-visit-workflow.md` — §5.3.3 is the open question this record
 decides, and §5.11 is the implementation
 
 Rule produced: the `BR-FV-012` change record in `.clinerules/Business Rules.md` §12A Follow-Up Visit
@@ -125,7 +125,7 @@ second authorization question §5.3.1 is still open about.
 
 **Decided:** the answer is sent to the API — never queued in the outbox — and a failure is reported. The
 conversation is read with the request read, which is already online-only
-(`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.8: "a stored answer could present a decision the
+(`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.8: "a stored answer could present a decision the
 backend has since replaced").
 
 **Reasoning:** `POST …/reply` accepts no client-generated idempotency key, and no conflict policy has been

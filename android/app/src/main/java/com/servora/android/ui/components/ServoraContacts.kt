@@ -43,7 +43,7 @@ private const val ContactIntentLogTag = "ServoraContact"
  * The line is a link only when [onClick] is supplied — Customer Details and Job Details pass the
  * `tel:`/`mailto:` action for the phone and the email, while the customers list passes none so that a tap on
  * a contact value opens the customer rather than dialling or composing
- * (`docs/tracker/007-android-customers-list.md`).
+ * (`docs/tracker/android/007-android-customers-list.md`).
  */
 @Composable
 internal fun CustomerContactLine(

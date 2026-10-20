@@ -80,6 +80,16 @@ data class JobCustomerContact(
 data class JobDetailsVisit(
     val id: String,
     val status: VisitStatus,
+    /**
+     * Why the technician is attending this Visit (`BR-071`, `BR-078`).
+     *
+     * It decides which outcomes the completion sheet offers, because a Work Visit and an Assessment
+     * Visit record different conclusions (`BR-078`). It defaults to [VisitPurpose.WORK] so an answer
+     * that predates the field — a working-set row an earlier build wrote — is read as a Work Visit,
+     * which is what every Visit that existed before purpose was introduced is (`BR-042`,
+     * `offline-first-architecture.md` §10).
+     */
+    val purpose: VisitPurpose = VisitPurpose.WORK,
     /** ISO-8601 UTC instant the Visit is scheduled to start. */
     val scheduledStart: String,
     val scheduledEnd: String,
@@ -161,6 +171,14 @@ data class JobDetailsVisitSummary(
     val sequence: Int,
     val status: VisitStatus,
     /**
+     * Why the technician is attending this Visit (`BR-071`, `BR-078`), as the API reported it.
+     *
+     * It defaults to [VisitPurpose.WORK] for an answer that predates the field, because a Visit that
+     * existed before purpose was introduced is a historical Work Visit (`BR-042`,
+     * `offline-first-architecture.md` §10).
+     */
+    val purpose: VisitPurpose = VisitPurpose.WORK,
+    /**
      * What the Visit's completion recorded, or `null` when the Visit holds no outcome (`BR-077`,
      * `BR-078`).
      *
@@ -176,6 +194,12 @@ data class JobDetailsVisitSummary(
     /** ISO-8601 UTC instant the Visit is scheduled to end, or `null` when it has no schedule. */
     val scheduledEnd: String?,
     val version: Int,
+    /**
+     * Whether this Visit was created from a reconciled ad-hoc work report rather than the normal
+     * scheduling path (`BR-AH-003`, `BR-AH-006`). It is a stored fact the API reports, never a client
+     * inference from the Visit's status or schedule (`BR-042`).
+     */
+    val isAdHocWork: Boolean = false,
     /** The technicians currently assigned to **this** Visit, Lead first (`BR-068`). */
     val technicians: List<JobDetailsTechnician>,
 )
@@ -222,6 +246,61 @@ data class ScheduleConflict(
     /** ISO-8601 UTC instant the conflicting Visit starts. */
     val scheduledStart: String,
     val scheduledEnd: String,
+)
+
+/** The current commercial quote workflow state for an Assessment Visit (`BR-QUOTE-001`). */
+enum class JobQuoteWorkflowState {
+    REQUIRED,
+    SENT,
+    APPROVED,
+    REJECTED,
+}
+
+/** A quote workflow or quote PDF action the API says this caller may perform. */
+enum class JobQuoteAction {
+    UPLOAD_DOCUMENT,
+    READ_DOCUMENT,
+    MARK_SENT,
+    MARK_REQUIRED,
+    MARK_APPROVED,
+    MARK_REJECTED,
+}
+
+/** The current quote PDF metadata attached to a Job, without file bytes. */
+data class JobQuoteDocument(
+    val id: String,
+    val displayName: String?,
+    val documentVersion: Int,
+    val isCurrent: Boolean,
+    val contentType: String,
+    val byteSize: Long,
+    val uploadedByMembershipId: String,
+    val supersededAt: String?,
+    val supersededByJobDocumentId: String?,
+    val recordedAt: String,
+)
+
+/**
+ * The current Assessment quote workflow, separate from Job lifecycle status and Visit outcome.
+ *
+ * The backend owns the workflow and reports the actions this caller may take; the client carries that
+ * answer through rather than deriving quote state from whether a PDF exists (`BR-QUOTE-001`, `BR-041`).
+ */
+data class JobQuote(
+    val id: String,
+    val state: JobQuoteWorkflowState,
+    val sourceVisitId: String,
+    val sourceVisitSequence: Int?,
+    val version: Int,
+    val sentAt: String?,
+    val sentByMembershipId: String?,
+    val sentNote: String?,
+    val externalReference: String?,
+    val decidedAt: String?,
+    val decidedByMembershipId: String?,
+    val decisionNote: String?,
+    val currentDocument: JobQuoteDocument?,
+    val allowedActions: List<JobQuoteAction>,
 )
 
 /**
@@ -286,6 +365,8 @@ data class JobDetails(
     val visits: List<JobDetailsVisitSummary> = emptyList(),
     /** The newest follow-up Visit request on this Job, when the Job Details read included one. */
     val followUpVisitRequest: JobDetailsFollowUpVisitRequest? = null,
+    /** The current Assessment quote workflow, when this Job has one (`BR-QUOTE-001`). */
+    val quote: JobQuote? = null,
     /**
      * Whether the API answered that this caller may schedule a new Visit on this Job right now
      * (`BR-062`, `BR-071`, `BR-072`).

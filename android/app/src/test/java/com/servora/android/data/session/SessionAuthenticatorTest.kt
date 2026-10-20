@@ -33,6 +33,28 @@ import retrofit2.Response
 class SessionAuthenticatorTest {
 
     @Test
+    fun `late refresh response cannot restore a signed-out session`() = runTest {
+        val store = sessionStore("access-1", "refresh-1")
+        val api = FakeAuthApi(refreshAnswer = {
+            store.clear()
+            SignInResponseDto("session-1", "late-access", "2026-01-01T00:15:00Z", "late-refresh")
+        })
+        assertEquals(SessionRenewal.Rejected, DefaultSessionAuthenticator(api, store).renew("access-1"))
+        assertNull(store.current())
+    }
+
+    @Test
+    fun `refused old refresh cannot clear a newly signed-in account`() = runTest {
+        val store = sessionStore("access-1", "refresh-1")
+        val api = FakeAuthApi(refreshAnswer = {
+            store.store(store.current()!!.copy(sessionId = "new-session"))
+            throw httpFailure(401)
+        })
+        assertEquals(SessionRenewal.Rejected, DefaultSessionAuthenticator(api, store).renew("access-1"))
+        assertEquals("new-session", store.current()!!.sessionId)
+    }
+
+    @Test
     fun `returns the stored access token`() = runTest {
         val authenticator = DefaultSessionAuthenticator(
             FakeAuthApi(),

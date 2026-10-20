@@ -1,3 +1,5 @@
+import { FieldContextService } from './field-context.service.js';
+import { FIELD_SCOPED, fieldError, readFieldScope } from './field-scope.js';
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthApiError } from './auth-error.js';
@@ -13,6 +15,7 @@ export interface PermissionedRequest extends AuthenticatedRequest {
   authorization?: {
     readonly organizationId: string;
     readonly membershipId: string;
+    readonly fieldScoped?: boolean;
     readonly permissions: readonly PermissionCode[];
   };
 }
@@ -22,6 +25,7 @@ export class PermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly authorization: AuthorizationService,
+    private readonly fieldContext: FieldContextService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -37,21 +41,32 @@ export class PermissionsGuard implements CanActivate {
         handlers,
       ) ?? [];
 
-    if (required.length === 0 && anyOf.length === 0) {
+    const request = context.switchToHttp().getRequest<PermissionedRequest>();
+    const fieldScope = readFieldScope(request.headers ?? {});
+    if (
+      fieldScope &&
+      !this.reflector.getAllAndOverride<boolean>(FIELD_SCOPED, handlers)
+    ) {
+      throw fieldError(400, 'FIELD_SCOPE_UNSUPPORTED');
+    }
+    if (!fieldScope && required.length === 0 && anyOf.length === 0) {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<PermissionedRequest>();
     if (request.auth === undefined) {
       throw AuthApiError.unauthenticated();
     }
 
-    const membership = await this.resolveMembership(
-      request.auth.userId,
-      required,
-      anyOf,
-    );
-    if (membership === null) {
+    const membership = fieldScope
+      ? await this.fieldContext.resolve(request.auth.userId, fieldScope)
+      : await this.resolveMembership(request.auth.userId, required, anyOf);
+    if (
+      membership === null ||
+      (fieldScope &&
+        (!this.authorization.hasAllPermissions(membership, required) ||
+          (anyOf.length > 0 &&
+            !this.authorization.hasAnyPermission(membership, anyOf))))
+    ) {
       throw AuthApiError.forbidden();
     }
 

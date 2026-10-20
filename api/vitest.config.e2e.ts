@@ -16,6 +16,7 @@ export default defineConfig({
     env: {
       JWT_SECRET: 'servora-e2e-jwt-secret-not-for-production',
       STORAGE_PROVIDER: 'noop',
+      PUSH_WORKER_ENABLED: 'false',
     },
 
     include: ['**/*.e2e-spec.ts'],

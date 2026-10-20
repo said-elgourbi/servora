@@ -303,6 +303,10 @@ describe('CustomersService (e2e)', () => {
     expect(countedRow?.jobCount).toBe(2);
     expect(emptyRow?.propertyCount).toBe(0);
     expect(emptyRow?.jobCount).toBe(0);
+    expect(countedRow?.openJobCount).toBe(2);
+    expect(countedRow?.overdueVisitCount).toBe(0);
+    expect(emptyRow?.openJobCount).toBe(0);
+    expect(emptyRow?.overdueVisitCount).toBe(0);
   });
 
   it('filters the list by customer status', async () => {
@@ -363,6 +367,10 @@ describe('CustomersService (e2e)', () => {
     });
 
     const scope = { organizationId: organization.id };
+    const summaries = await service.listCustomersInOrganization(scope);
+    expect(summaries.find((row) => row.customer.id === open.id)?.openJobCount).toBe(1);
+    expect(summaries.find((row) => row.customer.id === closed.id)?.openJobCount).toBe(0);
+    expect(summaries.find((row) => row.customer.id === none.id)?.openJobCount).toBe(0);
 
     expect(
       ids(
@@ -437,6 +445,9 @@ describe('CustomersService (e2e)', () => {
         ),
       ),
     ).toEqual([overdue.id]);
+    const summaries = await service.listCustomersInOrganization({ organizationId: organization.id });
+    expect(summaries.find((row) => row.customer.id === overdue.id)?.overdueVisitCount).toBe(1);
+    expect(summaries.find((row) => row.customer.id === upcoming.id)?.overdueVisitCount).toBe(0);
   });
 
   it("refuses to read or add contacts for another organization's customer", async () => {

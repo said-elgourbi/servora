@@ -19,6 +19,7 @@ function visit(
   return {
     visitId: 'visit-1',
     visitStatus: 'SCHEDULED',
+    purposeCode: 'WORK',
     scheduledStart: new Date('2026-09-14T13:00:00.000Z'),
     scheduledEnd: new Date('2026-09-14T14:00:00.000Z'),
     jobId: 'job-1',
@@ -30,6 +31,7 @@ function visit(
     address: null,
     technicians: [],
     overdue: false,
+    staleStarted: false,
     ...overrides,
   };
 }
@@ -227,6 +229,7 @@ describe('toTechnicianHomeDto', () => {
         viewerDisplayName: 'Mike Johnson',
         nextVisit: visit({
           visitStatus: 'EN_ROUTE',
+          staleStarted: true,
           address: {
             propertyName: 'Cedar Lane Building',
             addressLine1: '987 Cedar Lane',
@@ -273,6 +276,7 @@ describe('toTechnicianHomeDto', () => {
     });
     expect(dto.viewer).toEqual({ displayName: 'Mike Johnson' });
     expect(dto.nextVisit?.visitStatus).toBe('EN_ROUTE');
+    expect(dto.nextVisit?.staleStarted).toBe(true);
     expect(dto.nextVisit?.scheduledStart).toBe('2026-09-14T13:00:00.000Z');
     expect(dto.nextVisit?.address?.city).toBe('Montreal');
     expect(dto.nextVisit?.technicians).toEqual([
@@ -310,4 +314,3 @@ describe('toTechnicianHomeDto', () => {
     expect(dto.attention).toEqual({ total: 0, items: [] });
   });
 });
-

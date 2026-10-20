@@ -21,7 +21,7 @@ sealed interface JobPhotoRecordResult {
  * Why a photo could not be recorded.
  *
  * The first two are the local session's own conditions; the last three are the preparation steps a
- * photo goes through before it becomes a draft (`docs/tracker/029-photo-evidence-phases.md` D3b, D3c).
+ * photo goes through before it becomes a draft (`docs/tracker/shared/029-photo-evidence-phases.md` D3b, D3c).
  */
 enum class JobPhotoRefusal {
     /** No session is held, so the photo cannot be attributed to anyone or uploaded (`§10`). */

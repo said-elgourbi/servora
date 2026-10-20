@@ -5,7 +5,7 @@ ownership in the planning session that produced tracker 047, and this record is 
 `BR-040` change procedure)
 
 Date: 2026-09-18
-Tracker: `docs/tracker/047-customer-contact-persons.md` — this ADR is its Item 1
+Tracker: `docs/tracker/shared/047-customer-contact-persons.md` — this ADR is its Item 1
 Rule produced: `BR-095` (new, §9 Customers), with the `BR-040` change records amending `BR-023` and `BR-092`
 Contracts: `docs/api/customers.md` §3.2 and §5.2 (two new write routes, the contact's own phone and email,
 the primary rule), `docs/api/job-details.md` §3.2/§3.3 (the contacts inside the existing customer block)
@@ -51,7 +51,7 @@ recorded as `BR-095` (with the `BR-040` change records amending `BR-023` and `BR
 the decisions behind it.
 
 The client scope is **Android only**: the Angular application does not exist in this repository yet, so
-`BR-002`'s consistency requirement is a later slice (`docs/tracker/047-customer-contact-persons.md`).
+`BR-002`'s consistency requirement is a later slice (`docs/tracker/shared/047-customer-contact-persons.md`).
 
 ## Decisions
 

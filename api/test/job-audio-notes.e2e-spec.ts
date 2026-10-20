@@ -65,7 +65,10 @@ function audioMp4(seconds = 18): Buffer {
     ),
     box(
       'moov',
-      Buffer.concat([box('mvhd', mvhd), box('trak', box('mdia', box('hdlr', hdlr)))]),
+      Buffer.concat([
+        box('mvhd', mvhd),
+        box('trak', box('mdia', box('hdlr', hdlr))),
+      ]),
     ),
   ]);
 }
@@ -424,7 +427,9 @@ describe('job audio notes (e2e)', () => {
       .expect(200);
 
     // Taking accepted evidence out of ordinary use is a Manager capability (`BR-089`, `ADR-018` A7).
-    await removeAudio(job.id, clientOperationId, session.accessToken).expect(403);
+    await removeAudio(job.id, clientOperationId, session.accessToken).expect(
+      403,
+    );
   });
 
   it('stores the recording under an API-derived key and projects it into the activity', async () => {
@@ -752,7 +757,9 @@ describe('job audio notes (e2e)', () => {
       clientOperationId,
     }).expect(201);
 
-    await removeAudio(job.id, clientOperationId, session.accessToken).expect(403);
+    await removeAudio(job.id, clientOperationId, session.accessToken).expect(
+      403,
+    );
 
     const removals = await database.db
       .select()
@@ -761,6 +768,26 @@ describe('job audio notes (e2e)', () => {
     expect(removals).toHaveLength(0);
     // The evidence is untouched: it is still readable and still in the timeline.
     expect(await readActivity(job.id, session.accessToken)).toHaveLength(1);
+  });
+
+  it('allows the dedicated removal capability without upload or read permissions', async () => {
+    const recorder = await signInFor([EVIDENCE_PERMISSIONS.AUDIO_ADD]);
+    const remover = await signInFor([EVIDENCE_PERMISSIONS.AUDIO_REMOVE]);
+    const job = await newJobInOrganization();
+    const clientOperationId = randomUUID();
+    await uploadAudio(job.id, recorder.accessToken, {
+      clientOperationId,
+    }).expect(201);
+
+    await removeAudio(job.id, clientOperationId, remover.accessToken).expect(
+      201,
+    );
+
+    const removals = await database.db
+      .select()
+      .from(jobAudioNoteRemovals)
+      .where(eq(jobAudioNoteRemovals.jobAudioNoteId, clientOperationId));
+    expect(removals).toHaveLength(1);
   });
 
   it('records the removal and excludes the recording from the ordinary reads', async () => {
@@ -793,7 +820,9 @@ describe('job audio notes (e2e)', () => {
 
     // The removal is history, and Activity does not silently drop it (`BR-080`, `BR-089`).
     const events = response.body.events as Array<Record<string, unknown>>;
-    expect(events.some((event) => event.kind === 'JOB_AUDIO_ADDED')).toBe(false);
+    expect(events.some((event) => event.kind === 'JOB_AUDIO_ADDED')).toBe(
+      false,
+    );
     expect(events[0]).toMatchObject({
       kind: 'JOB_AUDIO_REMOVED',
       audioNoteId: clientOperationId,
@@ -803,8 +832,12 @@ describe('job audio notes (e2e)', () => {
 
     // Ordinary reads exclude it, and the bytes are refused (`BR-089`).
     const ordinary = await readActivity(job.id, session.accessToken);
-    expect(ordinary.some((event) => event.kind === 'JOB_AUDIO_ADDED')).toBe(false);
-    expect(ordinary.some((event) => event.kind === 'JOB_AUDIO_REMOVED')).toBe(true);
+    expect(ordinary.some((event) => event.kind === 'JOB_AUDIO_ADDED')).toBe(
+      false,
+    );
+    expect(ordinary.some((event) => event.kind === 'JOB_AUDIO_REMOVED')).toBe(
+      true,
+    );
 
     await request(app.getHttpServer())
       .get(`/jobs/${job.id}/audio-notes/${clientOperationId}/content`)
@@ -846,7 +879,9 @@ describe('job audio notes (e2e)', () => {
       session.accessToken,
       '?includeRemovedEvidence=true',
     );
-    expect(events.find((event) => event.kind === 'JOB_AUDIO_ADDED')).toMatchObject({
+    expect(
+      events.find((event) => event.kind === 'JOB_AUDIO_ADDED'),
+    ).toMatchObject({
       audioNoteId: clientOperationId,
       audioPhase: 'AFTER_WORK',
       audioDurationSeconds: 18,
@@ -895,7 +930,9 @@ describe('job audio notes (e2e)', () => {
     await uploadAudio(job.id, session.accessToken, {
       clientOperationId,
     }).expect(201);
-    await removeAudio(job.id, clientOperationId, session.accessToken).expect(201);
+    await removeAudio(job.id, clientOperationId, session.accessToken).expect(
+      201,
+    );
 
     // One recording has one removal and no restore is defined, so the repeat is a conflict with the
     // evidence's own state rather than a second removal (`BR-089`).

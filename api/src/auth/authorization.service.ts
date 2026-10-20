@@ -12,6 +12,7 @@ import type { PermissionCode } from './permissions.js';
 
 export interface AuthorizedMembership extends OrganizationScope {
   readonly membershipId: string;
+  readonly fieldScoped?: boolean;
   readonly permissions: readonly PermissionCode[];
 }
 

@@ -16,8 +16,11 @@ import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.JobActivityKind
 import com.servora.android.domain.model.JobContactPerson
 import com.servora.android.domain.model.JobCustomerContact
+import com.servora.android.domain.model.JobQuoteAction
+import com.servora.android.domain.model.JobQuoteWorkflowState
 import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.VisitStatus
 import java.io.IOException
 import java.time.Instant
@@ -29,6 +32,10 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
+import okio.ForwardingSource
+import okio.buffer
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -46,6 +53,40 @@ import retrofit2.Response
  * that a response this build cannot interpret is reported rather than shown partially (`BR-042`).
  */
 class JobDetailsRepositoryTest {
+
+    @Test
+    fun `reads and closes the streaming quote document off the caller thread`() = runTest {
+        val callerThread = Thread.currentThread()
+        val bytes = "%PDF-1.7\nquote".toByteArray()
+        var closed = false
+        val source = object : ForwardingSource(Buffer().write(bytes)) {
+            override fun read(sink: Buffer, byteCount: Long): Long {
+                assertTrue(Thread.currentThread() !== callerThread)
+                return super.read(sink, byteCount)
+            }
+
+            override fun close() {
+                assertTrue(Thread.currentThread() !== callerThread)
+                closed = true
+                super.close()
+            }
+        }.buffer()
+        val body = object : ResponseBody() {
+            override fun contentType() = "application/pdf".toMediaType()
+            override fun contentLength() = bytes.size.toLong()
+            override fun source() = source
+        }
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() }, quoteBody = body)
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.readQuoteDocument(JOB_ID)
+
+        assertTrue(result is JobQuoteDocumentReadResult.Success)
+        assertArrayEquals(bytes, (result as JobQuoteDocumentReadResult.Success).bytes)
+        assertTrue(closed)
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals(JOB_ID, api.lastJobId)
+    }
 
     @Test
     fun `sends the session and maps the payload with the represented Visit and its crew`() = runTest {
@@ -84,6 +125,72 @@ class JobDetailsRepositoryTest {
         // reported as none rather than failing the whole read (`BR-042`,
         // `offline-first-architecture.md` §10).
         assertTrue(details.visits.isEmpty())
+    }
+
+    @Test
+    fun `maps the current Assessment quote workflow and document metadata`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    quote = quoteDto(
+                        state = "SENT",
+                        allowedActions = listOf(
+                            "UPLOAD_DOCUMENT",
+                            "READ_DOCUMENT",
+                            "MARK_APPROVED",
+                            "INVENTED_ACTION",
+                        ),
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        val quote = details.quote
+        requireNotNull(quote)
+        assertEquals("quote-1", quote.id)
+        assertEquals(JobQuoteWorkflowState.SENT, quote.state)
+        assertEquals("visit-assessment", quote.sourceVisitId)
+        assertEquals(1, quote.sourceVisitSequence)
+        assertEquals(3, quote.version)
+        assertEquals("2026-09-08T16:00:00.000Z", quote.sentAt)
+        assertEquals("Sent by email.", quote.sentNote)
+        assertEquals("Q-1042", quote.externalReference)
+        assertNull(quote.decidedAt)
+        assertEquals(
+            listOf(
+                JobQuoteAction.UPLOAD_DOCUMENT,
+                JobQuoteAction.READ_DOCUMENT,
+                JobQuoteAction.MARK_APPROVED,
+            ),
+            quote.allowedActions,
+        )
+        val document = quote.currentDocument
+        requireNotNull(document)
+        assertEquals("quote-document-1", document.id)
+        assertEquals("Assessment quote.pdf", document.displayName)
+        assertEquals(2, document.documentVersion)
+        assertTrue(document.isCurrent)
+        assertEquals("application/pdf", document.contentType)
+        assertEquals(1234L, document.byteSize)
+    }
+
+    @Test
+    fun `maps an older Job Details payload with no quote block`() = runTest {
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        assertNull(details.quote)
     }
 
     @Test
@@ -151,6 +258,92 @@ class JobDetailsRepositoryTest {
         assertEquals("Dave Past", details.visits[0].technicians.single().name)
         assertEquals(listOf("Mike Lead"), details.visits[1].technicians.map { it.name })
         assertEquals("visit-1", details.selectedVisit?.id)
+    }
+
+    @Test
+    fun `maps each Visit's purpose from the wire code`() = runTest {
+        // A Work Visit and an Assessment Visit travel with their own purpose (`BR-071`, `BR-078`), so the
+        // completion sheet offers the right half of the outcome catalogue for each (`BR-041`).
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    selectedVisit = visitDto().copy(purposeCode = "ASSESSMENT"),
+                    visits = listOf(
+                        listedVisitDto(
+                            id = "visit-1",
+                            sequence = 2,
+                            status = "SCHEDULED",
+                            purposeCode = "ASSESSMENT",
+                        ),
+                        listedVisitDto(
+                            id = "visit-0",
+                            sequence = 1,
+                            status = "COMPLETED",
+                            purposeCode = "ASSESSMENT",
+                            outcomeCode = "NO_WORK_REQUIRED",
+                        ),
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        assertEquals(VisitPurpose.ASSESSMENT, details.selectedVisit?.purpose)
+        assertEquals(
+            listOf(VisitPurpose.ASSESSMENT, VisitPurpose.ASSESSMENT),
+            details.visits.map { it.purpose },
+        )
+        assertEquals(VisitOutcome.NO_WORK_REQUIRED, details.visits[1].outcome)
+    }
+
+    @Test
+    fun `reads a Visit without a purpose code as a Work Visit`() = runTest {
+        // A payload predating the purpose field carries no code, which is a historical Work Visit rather
+        // than a failed read (`BR-042`, `offline-first-architecture.md` §10).
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+
+        assertEquals(VisitPurpose.WORK, details.selectedVisit?.purpose)
+    }
+
+    @Test
+    fun `marks a Visit reconciled from an ad-hoc report as ad-hoc work`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = {
+                jobDetailsDto().copy(
+                    visits = listOf(
+                        listedVisitDto(
+                            id = "visit-ad-hoc",
+                            sequence = 3,
+                            status = "COMPLETED",
+                            outcomeCode = "RESOLVED",
+                            scheduledStart = "2026-09-01T13:00:00.000Z",
+                            scheduledEnd = "2026-09-01T15:00:00.000Z",
+                            isAdHocWork = true,
+                        ),
+                    ),
+                )
+            },
+        )
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+        )
+
+        val details = assertSuccess(repository.loadJobDetails(JOB_ID))
+        // The flag is a stored fact the API reported, carried through the mapping rather than inferred
+        // from the Visit's status or date (`BR-AH-003`, `BR-AH-006`, `BR-042`).
+        assertTrue(details.visits.single().isAdHocWork)
     }
 
     @Test
@@ -591,6 +784,88 @@ class JobDetailsRepositoryTest {
     }
 
     @Test
+    fun `sends quote sent with optional metadata and the workflow version`() = runTest {
+        val api = FakeJobDetailsApi(answer = {
+            jobDetailsDto().copy(quote = quoteDto(state = "SENT"))
+        })
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.markQuoteSent(
+            jobId = JOB_ID,
+            note = "  Sent by email.  ",
+            externalReference = "  Q-1042  ",
+            expectedVersion = 3,
+        )
+
+        assertEquals("Bearer access-token", api.lastAuthorization)
+        assertEquals(JOB_ID, api.lastJobId)
+        assertEquals(
+            MarkQuoteSentRequestDto(
+                note = "  Sent by email.  ",
+                externalReference = "  Q-1042  ",
+                expectedVersion = 3,
+            ),
+            api.lastQuoteSentRequest,
+        )
+        assertEquals(JobQuoteWorkflowState.SENT, assertActionSuccess(result).quote?.state)
+    }
+
+    @Test
+    fun `sends quote approval and rejection decisions with the workflow version`() = runTest {
+        val api = FakeJobDetailsApi(answer = {
+            jobDetailsDto().copy(quote = quoteDto(state = "APPROVED"))
+        })
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val approval = repository.markQuoteApproved(
+            jobId = JOB_ID,
+            note = "Customer approved.",
+            expectedVersion = 4,
+        )
+
+        assertEquals(MarkQuoteDecisionRequestDto("Customer approved.", 4), api.lastQuoteDecisionRequest)
+        assertEquals("approval", api.lastQuoteDecisionRoute)
+        assertEquals(JobQuoteWorkflowState.APPROVED, assertActionSuccess(approval).quote?.state)
+
+        api.answer = { jobDetailsDto().copy(quote = quoteDto(state = "REJECTED")) }
+        val rejection = repository.markQuoteRejected(
+            jobId = JOB_ID,
+            note = "  ",
+            expectedVersion = 5,
+        )
+
+        assertEquals(MarkQuoteDecisionRequestDto(null, 5), api.lastQuoteDecisionRequest)
+        assertEquals("rejection", api.lastQuoteDecisionRoute)
+        assertEquals(JobQuoteWorkflowState.REJECTED, assertActionSuccess(rejection).quote?.state)
+    }
+
+    @Test
+    fun `reports unreachable quote workflow writes without queueing them`() = runTest {
+        // Quote workflow writes remain online-only: without an idempotency/conflict policy for offline
+        // quote decisions, the repository reports the network failure and leaves the outbox untouched.
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            failFirstWith = IOException("no connection"),
+        )
+        val outbox = InMemoryOutboxStore()
+        val repository = repository(
+            api,
+            FakeSessionAuthenticator(accessToken = "access-token"),
+            outbox = outbox,
+        )
+
+        val result = repository.markQuoteSent(
+            jobId = JOB_ID,
+            note = null,
+            externalReference = null,
+            expectedVersion = 3,
+        )
+
+        assertEquals(JobActionFailure.NETWORK, (result as JobActionResult.Failure).reason)
+        assertTrue(outbox.stored.isEmpty())
+    }
+
+    @Test
     fun `sends a reschedule with the window and the conflict decision`() = runTest {
         val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
         val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
@@ -648,6 +923,7 @@ class JobDetailsRepositoryTest {
                 TechnicianAssignment("member-2", AssignmentRole.LEAD),
                 TechnicianAssignment("member-1", AssignmentRole.TECHNICIAN),
             ),
+            purpose = VisitPurpose.WORK,
             confirmConflicts = false,
         )
 
@@ -660,8 +936,29 @@ class JobDetailsRepositoryTest {
             listOf("member-2:LEAD", "member-1:TECHNICIAN"),
             api.lastCreateVisitRequest?.technicians?.map { "${it.membershipId}:${it.roleCode}" },
         )
+        assertEquals("WORK", api.lastCreateVisitRequest?.purposeCode)
         assertFalse(api.lastCreateVisitRequest?.confirmConflicts == true)
         // And the answer is the Job the backend now holds, not a locally assembled copy (`BR-001`).
+        assertTrue(result is JobActionResult.Success)
+    }
+
+    @Test
+    fun `sends an Assessment Visit's purpose as the override it is`() = runTest {
+        // `ASSESSMENT` is the intentional override rather than the default (`BR-071`), so it must travel
+        // as its own wire code rather than silently becoming `WORK`.
+        val api = FakeJobDetailsApi(answer = { jobDetailsDto() })
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val result = repository.createVisit(
+            jobId = JOB_ID,
+            scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
+            scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
+            assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+            purpose = VisitPurpose.ASSESSMENT,
+            confirmConflicts = false,
+        )
+
+        assertEquals("ASSESSMENT", api.lastCreateVisitRequest?.purposeCode)
         assertTrue(result is JobActionResult.Success)
     }
 
@@ -698,6 +995,7 @@ class JobDetailsRepositoryTest {
             scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
             scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
             assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+            purpose = VisitPurpose.WORK,
             confirmConflicts = false,
         )
 
@@ -1810,6 +2108,58 @@ class JobDetailsRepositoryTest {
     }
 
     @Test
+    fun `maps quote workflow and document activity fields`() = runTest {
+        val api = FakeJobDetailsApi(
+            answer = { jobDetailsDto() },
+            activityAnswer = {
+                jobActivityDto(
+                    jobActivityEventDto(
+                        id = "quote-approved-1",
+                        kind = "JOB_QUOTE_APPROVED",
+                        visitSequence = 1,
+                        body = null,
+                        quoteFromState = "SENT",
+                        quoteToState = "APPROVED",
+                        quoteNote = "Customer approved by email.",
+                    ),
+                    jobActivityEventDto(
+                        id = "quote-document-1",
+                        kind = "JOB_QUOTE_DOCUMENT_UPLOADED",
+                        visitSequence = null,
+                        body = null,
+                        quoteDocumentId = "document-1",
+                        quoteDocumentDisplayName = "October quote.pdf",
+                        quoteDocumentVersion = 2,
+                        quoteDocumentIsCurrent = true,
+                        quoteDocumentByteSize = 42_000L,
+                    ),
+                )
+            },
+        )
+        val repository = repository(api, FakeSessionAuthenticator(accessToken = "access-token"))
+
+        val events = when (val result = repository.loadJobActivity(JOB_ID)) {
+            is JobActivityResult.Success -> result.events
+            is JobActivityResult.Failure ->
+                throw AssertionError("expected activity, got ${result.reason}")
+        }
+
+        assertEquals(JobActivityKind.JOB_QUOTE_APPROVED, events[0].kind)
+        assertEquals(1, events[0].visitSequence)
+        assertEquals("SENT", events[0].quoteFromState)
+        assertEquals("APPROVED", events[0].quoteToState)
+        assertEquals("Customer approved by email.", events[0].quoteNote)
+
+        assertEquals(JobActivityKind.JOB_QUOTE_DOCUMENT_UPLOADED, events[1].kind)
+        assertNull(events[1].visitSequence)
+        assertEquals("document-1", events[1].quoteDocumentId)
+        assertEquals("October quote.pdf", events[1].quoteDocumentDisplayName)
+        assertEquals(2, events[1].quoteDocumentVersion)
+        assertEquals(true, events[1].quoteDocumentIsCurrent)
+        assertEquals(42_000L, events[1].quoteDocumentByteSize)
+    }
+
+    @Test
     fun `drops an event whose kind this build does not know`() = runTest {
         val api = FakeJobDetailsApi(
             answer = { jobDetailsDto() },
@@ -1902,6 +2252,37 @@ internal fun jobDetailsDto(): JobDetailsDto =
         ),
     )
 
+internal fun quoteDto(
+    state: String = "REQUIRED",
+    allowedActions: List<String> = listOf("UPLOAD_DOCUMENT", "MARK_SENT"),
+) = JobDetailsQuoteDto(
+    id = "quote-1",
+    state = state,
+    sourceVisitId = "visit-assessment",
+    sourceVisitSequence = 1,
+    version = 3,
+    sentAt = "2026-09-08T16:00:00.000Z",
+    sentByMembershipId = "member-1",
+    sentNote = "Sent by email.",
+    externalReference = "Q-1042",
+    decidedAt = null,
+    decidedByMembershipId = null,
+    decisionNote = null,
+    currentDocument = JobDetailsQuoteDocumentDto(
+        id = "quote-document-1",
+        displayName = "Assessment quote.pdf",
+        documentVersion = 2,
+        isCurrent = true,
+        contentType = "application/pdf",
+        byteSize = 1234L,
+        uploadedByMembershipId = "member-1",
+        supersededAt = null,
+        supersededByJobDocumentId = null,
+        recordedAt = "2026-09-08T15:55:00.000Z",
+    ),
+    allowedActions = allowedActions,
+)
+
 internal fun visitDto() = JobDetailsVisitDto(
     id = "visit-1",
     status = "SCHEDULED",
@@ -1939,19 +2320,23 @@ internal fun listedVisitDto(
     id: String = "visit-1",
     sequence: Int = 1,
     status: String = "SCHEDULED",
+    purposeCode: String? = null,
     outcomeCode: String? = null,
     scheduledStart: String? = "2026-09-14T13:00:00.000Z",
     scheduledEnd: String? = "2026-09-14T15:00:00.000Z",
     version: Int = 2,
+    isAdHocWork: Boolean = false,
     technicians: List<JobDetailsTechnicianDto> = listOf(technicianDto()),
 ) = JobDetailsVisitSummaryDto(
     id = id,
     sequence = sequence,
     status = status,
+    purposeCode = purposeCode,
     outcomeCode = outcomeCode,
     scheduledStart = scheduledStart,
     scheduledEnd = scheduledEnd,
     version = version,
+    isAdHocWork = isAdHocWork,
     technicians = technicians,
 )
 
@@ -1976,6 +2361,14 @@ internal fun jobActivityEventDto(
     audioPhase: String? = null,
     audioDurationSeconds: Int? = null,
     audioRemovalReason: String? = null,
+    quoteFromState: String? = null,
+    quoteToState: String? = null,
+    quoteNote: String? = null,
+    quoteDocumentId: String? = null,
+    quoteDocumentDisplayName: String? = null,
+    quoteDocumentVersion: Int? = null,
+    quoteDocumentIsCurrent: Boolean? = null,
+    quoteDocumentByteSize: Long? = null,
 ) = JobActivityEventDto(
     id = id,
     kind = kind,
@@ -1997,6 +2390,14 @@ internal fun jobActivityEventDto(
     audioPhase = audioPhase,
     audioDurationSeconds = audioDurationSeconds,
     audioRemovalReason = audioRemovalReason,
+    quoteFromState = quoteFromState,
+    quoteToState = quoteToState,
+    quoteNote = quoteNote,
+    quoteDocumentId = quoteDocumentId,
+    quoteDocumentDisplayName = quoteDocumentDisplayName,
+    quoteDocumentVersion = quoteDocumentVersion,
+    quoteDocumentIsCurrent = quoteDocumentIsCurrent,
+    quoteDocumentByteSize = quoteDocumentByteSize,
 )
 
 internal fun jobActivityDto(vararg events: JobActivityEventDto) =
@@ -2019,7 +2420,8 @@ internal fun followUpRequestDto() = FollowUpVisitRequestDto(
 )
 
 private class FakeJobDetailsApi(
-    private val answer: () -> JobDetailsDto,
+    var answer: () -> JobDetailsDto,
+    private val quoteBody: ResponseBody? = null,
     private val failFirstWith: Throwable? = null,
     private val activityAnswer: () -> JobActivityDto = { JobActivityDto(jobId = "") },
     /** What the follow-up request route answers with (`BR-FV-001`). */
@@ -2048,6 +2450,15 @@ private class FakeJobDetailsApi(
         private set
 
     var lastRescheduleRequest: RescheduleVisitRequestDto? = null
+        private set
+
+    var lastQuoteSentRequest: MarkQuoteSentRequestDto? = null
+        private set
+
+    var lastQuoteDecisionRequest: MarkQuoteDecisionRequestDto? = null
+        private set
+
+    var lastQuoteDecisionRoute: String? = null
         private set
 
     var lastAssignmentRequest: AssignVisitTechniciansRequestDto? = null
@@ -2104,6 +2515,7 @@ private class FakeJobDetailsApi(
     override suspend fun jobDetails(
         authorization: String,
         jobId: String,
+        visitId: String?,
     ): JobDetailsDto {
         calls += 1
         lastAuthorization = authorization
@@ -2139,6 +2551,85 @@ private class FakeJobDetailsApi(
             throw failFirstWith
         }
         return answer()
+    }
+
+    override suspend fun markQuoteSent(
+        authorization: String,
+        jobId: String,
+        request: MarkQuoteSentRequestDto,
+    ): JobDetailsDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastQuoteSentRequest = request
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return answer()
+    }
+
+    override suspend fun markQuoteRequired(
+        authorization: String,
+        jobId: String,
+        request: CorrectQuoteToRequiredRequestDto,
+    ): JobDetailsDto = run {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        answer()
+    }
+
+    override suspend fun markQuoteApproved(
+        authorization: String,
+        jobId: String,
+        request: MarkQuoteDecisionRequestDto,
+    ): JobDetailsDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastQuoteDecisionRoute = "approval"
+        lastQuoteDecisionRequest = request
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return answer()
+    }
+
+    override suspend fun markQuoteRejected(
+        authorization: String,
+        jobId: String,
+        request: MarkQuoteDecisionRequestDto,
+    ): JobDetailsDto {
+        calls += 1
+        lastAuthorization = authorization
+        lastJobId = jobId
+        lastQuoteDecisionRoute = "rejection"
+        lastQuoteDecisionRequest = request
+        if (calls == 1 && failFirstWith != null) {
+            throw failFirstWith
+        }
+        return answer()
+    }
+
+
+    override suspend fun uploadQuoteDocument(
+        authorization: String,
+        jobId: String,
+        documentType: RequestBody,
+        displayName: RequestBody?,
+        file: MultipartBody.Part,
+    ): JobDetailsQuoteDocumentDto = throw AssertionError("these tests do not upload quote documents")
+
+    override suspend fun quoteDocumentContent(
+        authorization: String,
+        jobId: String,
+    ): ResponseBody {
+        lastAuthorization = authorization
+        lastJobId = jobId
+        return quoteBody ?: throw AssertionError("these tests do not read quote documents")
     }
 
     override suspend fun rescheduleVisit(

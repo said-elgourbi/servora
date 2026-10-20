@@ -81,6 +81,45 @@ class PhotoUploadApi : JobDetailsApi {
         request: ChangeVisitStatusRequestDto,
     ): JobDetailsDto = throw AssertionError("these tests do not apply a Visit transition")
 
+
+    override suspend fun markQuoteSent(
+        authorization: String,
+        jobId: String,
+        request: MarkQuoteSentRequestDto,
+    ): JobDetailsDto = throw AssertionError("these tests do not update quotes")
+
+    override suspend fun markQuoteRequired(
+        authorization: String,
+        jobId: String,
+        request: CorrectQuoteToRequiredRequestDto,
+    ): JobDetailsDto = throw AssertionError("these tests do not update quotes")
+
+    override suspend fun markQuoteApproved(
+        authorization: String,
+        jobId: String,
+        request: MarkQuoteDecisionRequestDto,
+    ): JobDetailsDto = throw AssertionError("these tests do not update quotes")
+
+    override suspend fun markQuoteRejected(
+        authorization: String,
+        jobId: String,
+        request: MarkQuoteDecisionRequestDto,
+    ): JobDetailsDto = throw AssertionError("these tests do not update quotes")
+
+
+    override suspend fun uploadQuoteDocument(
+        authorization: String,
+        jobId: String,
+        documentType: RequestBody,
+        displayName: RequestBody?,
+        file: MultipartBody.Part,
+    ): JobDetailsQuoteDocumentDto = throw AssertionError("these tests do not upload quote documents")
+
+    override suspend fun quoteDocumentContent(
+        authorization: String,
+        jobId: String,
+    ): ResponseBody = throw AssertionError("these tests do not read quote documents")
+
     override suspend fun completeVisit(
         authorization: String,
         jobId: String,
@@ -147,7 +186,11 @@ class PhotoUploadApi : JobDetailsApi {
         return contentAnswer()
     }
 
-    override suspend fun jobDetails(authorization: String, jobId: String): JobDetailsDto =
+    override suspend fun jobDetails(
+        authorization: String,
+        jobId: String,
+        visitId: String?,
+    ): JobDetailsDto =
         throw NotImplementedError("Not used by these tests.")
 
     override suspend fun jobActivity(authorization: String, jobId: String): JobActivityDto =

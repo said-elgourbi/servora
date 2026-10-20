@@ -14,6 +14,7 @@ import {
 import {
   customers,
   followUpVisitRequests,
+  jobQuoteWorkflows,
   jobStatusHistory,
   jobs,
   organizationMemberPermissions,
@@ -200,7 +201,9 @@ describe('visit requests and scheduling (e2e)', () => {
 
   async function newJob(status = 'NEW') {
     const actor = await signInFor([CUSTOMER_PERMISSIONS.VIEW]);
-    const customer = await newCustomer(`Visit Request Customer ${jobNumberSequence}`);
+    const customer = await newCustomer(
+      `Visit Request Customer ${jobNumberSequence}`,
+    );
     const property = await newProperty(customer.id, actor.membershipId);
     jobNumberSequence += 1;
     const [job] = await database.db
@@ -370,7 +373,9 @@ describe('visit requests and scheduling (e2e)', () => {
       .send({
         expectedStatus: 'PENDING',
         expectedVersion: 1,
-        technicians: [{ membershipId: requester.membershipId, roleCode: 'LEAD' }],
+        technicians: [
+          { membershipId: requester.membershipId, roleCode: 'LEAD' },
+        ],
       })
       .expect(403);
 
@@ -380,7 +385,9 @@ describe('visit requests and scheduling (e2e)', () => {
       .send({
         scheduledStart: '2026-10-13T14:00:00.000Z',
         scheduledEnd: '2026-10-13T15:00:00.000Z',
-        technicians: [{ membershipId: requester.membershipId, roleCode: 'LEAD' }],
+        technicians: [
+          { membershipId: requester.membershipId, roleCode: 'LEAD' },
+        ],
       })
       .expect(403);
   });
@@ -501,31 +508,88 @@ describe('visit requests and scheduling (e2e)', () => {
     });
   });
 
-  it('schedules a Visit again once a closed Job is reopened', async () => {
-    const { job } = await newJob('COMPLETED');
-    const office = await signInFor([JOB_PERMISSIONS.UPDATE]);
+  it.each([
+    {
+      jobStatus: 'COMPLETED',
+      visitStatus: 'COMPLETED',
+      purposeCode: 'WORK',
+      outcomeCode: 'RESOLVED',
+    },
+    {
+      jobStatus: 'COMPLETED',
+      visitStatus: 'COMPLETED',
+      purposeCode: 'ASSESSMENT',
+      outcomeCode: 'NO_WORK_REQUIRED',
+    },
+    {
+      jobStatus: 'CANCELED',
+      visitStatus: 'CANCELED',
+      purposeCode: 'WORK',
+      outcomeCode: null,
+    },
+  ])(
+    'schedules another Visit after reopening $jobStatus with a $outcomeCode historical Visit',
+    async ({ jobStatus, visitStatus, purposeCode, outcomeCode }) => {
+      const { job, property } = await newJob(jobStatus);
+      const office = await signInFor([
+        JOB_PERMISSIONS.UPDATE,
+        VISIT_PERMISSIONS.CREATE_SCHEDULE,
+      ]);
+      const [historical] = await database.db
+        .insert(visits)
+        .values({
+          organizationId,
+          jobId: job.id,
+          propertyId: property.id,
+          locationAddressSnapshot: { addressLine1: property.addressLine1 },
+          status: visitStatus,
+          purposeCode,
+          outcomeCode,
+          outcomeSummary:
+            outcomeCode === null ? null : 'Previous attempt finished.',
+          outcomeRecordedAt:
+            outcomeCode === null ? null : new Date('2026-10-13T15:00:00Z'),
+          outcomeRecordedByMembershipId:
+            outcomeCode === null ? null : office.membershipId,
+          scheduledStart: new Date('2026-10-13T14:00:00Z'),
+          scheduledEnd: new Date('2026-10-13T15:00:00Z'),
+        })
+        .returning();
 
-    // Reopening returns the Job to `ACTIVE` (`BR-063`), which is the only way a closed Job accepts a
-    // new field attempt again.
-    await request(app.getHttpServer())
-      .patch(`/jobs/${job.id}/status`)
-      .set('Authorization', `Bearer ${office.accessToken}`)
-      .send({ status: 'ACTIVE', note: 'Reopened for a return visit.' })
-      .expect(200);
+      // Reopening returns the Job to `ACTIVE` (`BR-063`), which is the only way a closed Job accepts a
+      // new field attempt again.
+      await request(app.getHttpServer())
+        .patch(`/jobs/${job.id}/status`)
+        .set('Authorization', `Bearer ${office.accessToken}`)
+        .send({ status: 'ACTIVE', note: 'Reopened for a return visit.' })
+        .expect(200)
+        .expect((response) =>
+          expect(response.body.canScheduleVisit).toBe(true),
+        );
 
-    const creator = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
-    const technician = await newTechnician('Reopened', 'Job');
+      const creator = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
+      const technician = await newTechnician('Reopened', 'Job');
 
-    await request(app.getHttpServer())
-      .post(`/jobs/${job.id}/visits`)
-      .set('Authorization', `Bearer ${creator.accessToken}`)
-      .send({
-        scheduledStart: '2026-10-14T14:00:00.000Z',
-        scheduledEnd: '2026-10-14T15:00:00.000Z',
-        technicians: [{ membershipId: technician.id, roleCode: 'LEAD' }],
-      })
-      .expect(201);
-  });
+      await request(app.getHttpServer())
+        .post(`/jobs/${job.id}/visits`)
+        .set('Authorization', `Bearer ${creator.accessToken}`)
+        .send({
+          scheduledStart: '2026-10-14T14:00:00.000Z',
+          scheduledEnd: '2026-10-14T15:00:00.000Z',
+          technicians: [{ membershipId: technician.id, roleCode: 'LEAD' }],
+        })
+        .expect(201)
+        .expect((response) => {
+          expect(response.body.canScheduleVisit).toBe(false);
+          expect(response.body.visits).toHaveLength(2);
+        });
+      const [preserved] = await database.db
+        .select()
+        .from(visits)
+        .where(eq(visits.id, historical.id));
+      expect(preserved).toEqual(historical);
+    },
+  );
 
   it('approves a request into one scheduled Visit and makes approval retry idempotent', async () => {
     const { job } = await newJob();
@@ -733,6 +797,63 @@ describe('visit requests and scheduling (e2e)', () => {
     });
   });
 
+  it('creates a Work Visit directly after quote approval', async () => {
+    const { job, property } = await newJob('ACTIVE');
+    const scheduler = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
+    const technician = await newTechnician('Quinn', 'Quote');
+    const [assessmentVisit] = await database.db
+      .insert(visits)
+      .values({
+        organizationId,
+        jobId: job.id,
+        propertyId: property.id,
+        locationAddressSnapshot: { addressLine1: '412 Visit Request Road' },
+        status: 'COMPLETED',
+        purposeCode: 'ASSESSMENT',
+        outcomeCode: 'QUOTE_REQUIRED',
+        outcomeSummary: 'Needs customer quote approval.',
+        outcomeRecordedAt: new Date('2026-10-16T15:05:00.000Z'),
+        outcomeRecordedByMembershipId: scheduler.membershipId,
+        scheduledStart: new Date('2026-10-16T14:00:00.000Z'),
+        scheduledEnd: new Date('2026-10-16T15:00:00.000Z'),
+      })
+      .returning();
+    await database.db.insert(jobQuoteWorkflows).values({
+      organizationId,
+      jobId: job.id,
+      sourceVisitId: assessmentVisit.id,
+      state: 'APPROVED',
+      sentAt: new Date('2026-10-16T15:30:00.000Z'),
+      sentByMembershipId: scheduler.membershipId,
+      decidedAt: new Date('2026-10-16T16:00:00.000Z'),
+      decidedByMembershipId: scheduler.membershipId,
+      decisionNote: 'Customer approved the quote.',
+    });
+
+    await request(app.getHttpServer())
+      .post('/jobs/' + job.id + '/visits')
+      .set('Authorization', 'Bearer ' + scheduler.accessToken)
+      .send({
+        scheduledStart: '2026-10-17T16:00:00.000Z',
+        scheduledEnd: '2026-10-17T17:00:00.000Z',
+        technicians: [{ membershipId: technician.id, roleCode: 'LEAD' }],
+      })
+      .expect(201);
+
+    const storedVisits = await database.db
+      .select({ status: visits.status, purposeCode: visits.purposeCode })
+      .from(visits)
+      .where(eq(visits.jobId, job.id));
+    expect(storedVisits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'SCHEDULED',
+          purposeCode: 'WORK',
+        }),
+      ]),
+    );
+  });
+
   it('refuses an inactive or outside technician and hides another organization’s job', async () => {
     const { job } = await newJob();
     const scheduler = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
@@ -762,7 +883,9 @@ describe('visit requests and scheduling (e2e)', () => {
       .send({
         scheduledStart: '2026-10-18T14:00:00.000Z',
         scheduledEnd: '2026-10-18T15:00:00.000Z',
-        technicians: [{ membershipId: scheduler.membershipId, roleCode: 'LEAD' }],
+        technicians: [
+          { membershipId: scheduler.membershipId, roleCode: 'LEAD' },
+        ],
       })
       .expect(404);
   });
@@ -770,7 +893,9 @@ describe('visit requests and scheduling (e2e)', () => {
   it('records a clarification conversation and lets the requester answer it back into review', async () => {
     const { job } = await newJob();
     const requester = await signInFor([VISIT_PERMISSIONS.REQUEST_FOLLOW_UP]);
-    const otherRequester = await signInFor([VISIT_PERMISSIONS.REQUEST_FOLLOW_UP]);
+    const otherRequester = await signInFor([
+      VISIT_PERMISSIONS.REQUEST_FOLLOW_UP,
+    ]);
     const reviewer = await signInFor(REVIEW_AND_CREATE);
     const created = await submitFollowUpRequest({
       token: requester.accessToken,
@@ -850,10 +975,12 @@ describe('visit requests and scheduling (e2e)', () => {
       version: 3,
     });
     expect(
-      answer.body.messages.map((message: { authorKind: string; body: string }) => [
-        message.authorKind,
-        message.body,
-      ]),
+      answer.body.messages.map(
+        (message: { authorKind: string; body: string }) => [
+          message.authorKind,
+          message.body,
+        ],
+      ),
     ).toEqual([
       ['OFFICE', 'Which part number?'],
       ['REQUESTER', 'PN-4471.'],
@@ -891,7 +1018,9 @@ describe('visit requests and scheduling (e2e)', () => {
       .send({
         expectedStatus: 'PENDING',
         expectedVersion: 3,
-        technicians: [{ membershipId: requester.membershipId, roleCode: 'LEAD' }],
+        technicians: [
+          { membershipId: requester.membershipId, roleCode: 'LEAD' },
+        ],
       })
       .expect(201);
 

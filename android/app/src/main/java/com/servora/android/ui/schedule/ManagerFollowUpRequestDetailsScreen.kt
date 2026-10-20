@@ -137,7 +137,7 @@ internal fun ManagerFollowUpRequestDetailsScreen(
             crewFailure = state.assignableFailure,
             isSubmitting = state.isApproving,
             onRetryCrew = { onStartApproval(schedulingRequest) },
-            onConfirm = { start, end, assignments ->
+            onConfirm = { start, end, assignments, _ ->
                 onApproveRequest(schedulingRequest, start, end, assignments)
             },
             onDismiss = onDismissApproval,

@@ -11,8 +11,8 @@ records, and stores nothing. The day resolution it uses is the same one the two 
 References: `BR-001`, `BR-006`, `BR-007`, `BR-023`, `BR-024`, `BR-028`, `BR-041`, `BR-042`, `BR-056`,
 `BR-057`, `BR-062`, `BR-068`, `BR-071`, `BR-072`, `BR-074`, `BR-080`, `dev.md` §7, `Project.md` §15,
 `docs/decisions/020-manager-schedule-and-unassigned-lane.md`,
-`docs/tracker/038-android-manager-schedule.md`,
-`docs/tracker/040-android-manager-schedule-density.md`.
+`docs/tracker/android/038-android-manager-schedule.md`,
+`docs/tracker/android/040-android-manager-schedule-density.md`.
 
 ## 1. Conventions
 
@@ -242,8 +242,8 @@ organization employs (`BR-042`, `BR-044`).
 
 ## 5. Open questions
 
-Recorded rather than guessed (`BR-042`); `docs/tracker/038-android-manager-schedule.md` and
-`docs/tracker/041-android-technician-schedule.md` carry the same list with what each one blocks.
+Recorded rather than guessed (`BR-042`); `docs/tracker/android/038-android-manager-schedule.md` and
+`docs/tracker/android/041-android-technician-schedule.md` carry the same list with what each one blocks.
 
 1. **Whether the unassigned lane should be day-scoped.** It is not, because a Visit with no agreed
    time has no day to belong to. If product ownership decides the lane belongs to the selected day,

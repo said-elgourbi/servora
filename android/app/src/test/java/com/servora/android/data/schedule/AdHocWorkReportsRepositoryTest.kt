@@ -7,6 +7,10 @@ import com.servora.android.data.offline.ReplayOutcome
 import com.servora.android.data.session.FakeAuthenticatedSubject
 import com.servora.android.data.session.SessionAuthenticator
 import com.servora.android.data.session.SessionRenewal
+import com.servora.android.domain.model.AdHocWorkReport
+import com.servora.android.domain.model.AdHocWorkReportStatus
+import com.servora.android.domain.model.ScheduleAddress
+import com.servora.android.domain.model.VisitOutcome
 import java.io.IOException
 import java.time.Clock
 import java.time.Instant
@@ -40,6 +44,34 @@ class AdHocWorkReportsRepositoryTest {
         subject = subject,
         offline = offline,
     )
+
+    @Test
+    fun `resolution sends the report version and keeps the resolved report pending`() = runTest {
+        val original = report().copy(customerId = null, propertyId = null, reportedCustomerName = "Reported")
+        api.resolutionAnswer = { reportDto().copy(customerId = "matched", propertyId = "location", version = 4, reportedCustomerName = "Reported") }
+        val result = repository.resolveLocation(original, ResolveAdHocLocationRequestDto(existingCustomerId = "matched", existingPropertyId = "location", expectedVersion = 99))
+        assertEquals(3, api.lastResolution?.expectedVersion)
+        assertEquals("PENDING", api.lastResolution?.expectedStatus)
+        val wire = Json.encodeToString(api.lastResolution!!)
+        assertTrue(wire.contains("\"expectedStatus\":\"PENDING\""))
+        assertTrue(wire.contains("\"expectedVersion\":3"))
+        val resolved = (result as AdHocReviewDataResult.Success).value
+        assertEquals(AdHocWorkReportStatus.PENDING, resolved.status)
+        assertEquals("Reported", resolved.reportedCustomerName)
+        assertEquals("matched", resolved.customerId)
+        assertTrue(outbox.stored.isEmpty())
+    }
+
+    @Test
+    fun `failed resolution is never queued and stale versions are reported`() = runTest {
+        api.resolutionAnswer = { throw IOException() }
+        val request = ResolveAdHocLocationRequestDto(existingCustomerId = "matched", existingPropertyId = "location", expectedVersion = 3)
+        assertTrue(repository.resolveLocation(report(), request) is AdHocReviewDataResult.Failure)
+        assertTrue(outbox.stored.isEmpty())
+        api.resolutionAnswer = { throw HttpException(Response.error<AdHocWorkReportDto>(409, "{}".toResponseBody())) }
+        val result = repository.resolveLocation(report(), request) as AdHocReviewDataResult.Failure
+        assertEquals(com.servora.android.data.customers.CustomersFailureReason.VERSION_CONFLICT, result.reason)
+    }
 
     @Test
     fun `submits online and reuses the draft's idempotency key`() = runTest {
@@ -94,6 +126,129 @@ class AdHocWorkReportsRepositoryTest {
         assertEquals("operation-9", api.lastRequest?.clientOperationId)
     }
 
+    @Test
+    fun `loads reports and maps their facts`() = runTest {
+        api.listAnswer = { listOf(reportDto()) }
+
+        val result = repository.loadReports()
+
+        assertTrue(result is AdHocWorkReportsResult.Success)
+        val report = (result as AdHocWorkReportsResult.Success).reports.single()
+        assertEquals("report-1", report.id)
+        assertEquals("Maple Leaf Bakery", report.customerName)
+        assertEquals(AdHocWorkReportStatus.PENDING, report.status)
+        assertEquals(VisitOutcome.RESOLVED, report.outcomeCode)
+    }
+
+    @Test
+    fun `rejects with the pending status and the report version`() = runTest {
+        api.rejectAnswer = { reportDto(status = "REJECTED") }
+
+        val result = repository.reject(report(), "Not legitimate work")
+
+        assertTrue(result is AdHocWorkReportRejectResult.Success)
+        assertEquals(
+            AdHocWorkReportStatus.REJECTED,
+            (result as AdHocWorkReportRejectResult.Success).report.status,
+        )
+        assertEquals("PENDING", api.lastRejectRequest?.expectedStatus)
+        assertEquals(3, api.lastRejectRequest?.expectedVersion)
+        assertEquals("Not legitimate work", api.lastRejectRequest?.note)
+    }
+
+    @Test
+    fun `links to the known job and returns the reconciled job id`() = runTest {
+        val result = repository.link(report(), "job-9", "Linked to the seasonal job")
+
+        assertTrue(result is AdHocWorkReportReconcileResult.Success)
+        assertEquals("job-1", (result as AdHocWorkReportReconcileResult.Success).jobId)
+        assertEquals("job-9", api.lastLinkRequest?.jobId)
+        assertEquals("PENDING", api.lastLinkRequest?.expectedStatus)
+        assertEquals(3, api.lastLinkRequest?.expectedVersion)
+    }
+
+    @Test
+    fun `converts into a new job with its title and description`() = runTest {
+        val result = repository.convert(
+            report = report(),
+            title = "Emergency valve replacement",
+            description = "From ad-hoc report",
+            note = "New work request was needed",
+        )
+
+        assertTrue(result is AdHocWorkReportReconcileResult.Success)
+        assertEquals("Emergency valve replacement", api.lastConvertRequest?.title)
+        assertEquals("From ad-hoc report", api.lastConvertRequest?.description)
+        assertEquals("New work request was needed", api.lastConvertRequest?.note)
+    }
+
+    private fun report() = AdHocWorkReport(
+        id = "report-1",
+        reportingTechnicianMembershipId = "tech-1",
+        customerId = "customer-1",
+        customerName = "Maple Leaf Bakery",
+        propertyId = "property-1",
+        propertyAddress = ScheduleAddress(
+            propertyName = "Main bakery",
+            addressLine1 = "210 Sparks Street",
+            addressLine2 = null,
+            city = "Ottawa",
+            province = "ON",
+            postalCode = "K1P 5B4",
+            country = "CA",
+        ),
+        knownJobId = "job-9",
+        knownJobNumber = 1042,
+        knownJobTitle = "Seasonal maintenance",
+        workStartedAt = "2026-10-01T13:00:00Z",
+        workEndedAt = "2026-10-01T15:00:00Z",
+        outcomeCode = VisitOutcome.RESOLVED,
+        summary = "Replaced the leaking valve.",
+        notes = null,
+        reportedCustomerName = null,
+        reportedCustomerPhone = null,
+        reportedCustomerAddress = null,
+        status = AdHocWorkReportStatus.PENDING,
+        reviewerMembershipId = null,
+        reviewedAt = null,
+        reviewNote = null,
+        createdJobId = null,
+        createdJobNumber = null,
+        createdJobTitle = null,
+        createdVisitId = null,
+        version = 3,
+        createdAt = "2026-10-01T12:00:00Z",
+        updatedAt = "2026-10-01T12:00:00Z",
+    )
+
+    private fun reportDto(status: String = "PENDING") = AdHocWorkReportDto(
+        id = "report-1",
+        workStartedAt = "2026-10-01T13:00:00Z",
+        workEndedAt = "2026-10-01T15:00:00Z",
+        outcomeCode = "RESOLVED",
+        summary = "Replaced the leaking valve.",
+        notes = null,
+        status = status,
+        version = 3,
+        createdAt = "2026-10-01T12:00:00Z",
+        reportingTechnicianMembershipId = "tech-1",
+        customerId = "customer-1",
+        customerName = "Maple Leaf Bakery",
+        propertyId = "property-1",
+        propertyAddress = ScheduleAddressDto(
+            propertyName = "Main bakery",
+            addressLine1 = "210 Sparks Street",
+            city = "Ottawa",
+            province = "ON",
+            postalCode = "K1P 5B4",
+            country = "CA",
+        ),
+        knownJobId = "job-9",
+        knownJobNumber = 1042,
+        knownJobTitle = "Seasonal maintenance",
+        updatedAt = "2026-10-01T12:00:00Z",
+    )
+
     private fun draft(clientOperationId: String = "operation-1") = AdHocWorkReportDraft(
         clientOperationId = clientOperationId,
         customerId = null,
@@ -137,6 +292,14 @@ class AdHocWorkReportsRepositoryTest {
 
 /** An [AdHocWorkReportsApi] that answers the results a test scripts. */
 private class FakeAdHocWorkReportsApi : AdHocWorkReportsApi {
+    var lastResolution: ResolveAdHocLocationRequestDto? = null
+    var resolutionAnswer: () -> AdHocWorkReportDto = { submitAnswer().copy(customerId = "customer-1", propertyId = "property-1", version = 2) }
+    override suspend fun reviewCustomerOptions(authorization: String, query: String) = listOf(AdHocReportCustomerOptionDto("customer-1", "Match"))
+    override suspend fun reviewPropertyOptions(authorization: String, customerId: String) = emptyList<AdHocReportPropertyOptionDto>()
+    override suspend fun resolveLocation(authorization: String, reportId: String, request: ResolveAdHocLocationRequestDto): AdHocWorkReportDto {
+        lastResolution = request
+        return resolutionAnswer()
+    }
     var submitAnswer: () -> AdHocWorkReportDto = {
         AdHocWorkReportDto(
             id = "report-1",
@@ -175,6 +338,53 @@ private class FakeAdHocWorkReportsApi : AdHocWorkReportsApi {
         authorization: String,
         customerId: String,
     ): List<AdHocReportJobOptionDto> = emptyList()
+
+    override suspend fun reviewJobOptions(
+        authorization: String,
+        customerId: String?,
+        query: String?,
+    ): List<AdHocReportJobOptionDto> = emptyList()
+
+    var listAnswer: () -> List<AdHocWorkReportDto> = { emptyList() }
+    var rejectAnswer: () -> AdHocWorkReportDto = { submitAnswer() }
+    var reconcileAnswer: () -> AdHocReconciliationJobDto = {
+        AdHocReconciliationJobDto(id = "job-1", jobNumber = 42)
+    }
+    var lastRejectRequest: RejectAdHocWorkReportRequestDto? = null
+        private set
+    var lastLinkRequest: LinkAdHocWorkReportRequestDto? = null
+        private set
+    var lastConvertRequest: ConvertAdHocWorkReportRequestDto? = null
+        private set
+
+    override suspend fun list(authorization: String): List<AdHocWorkReportDto> = listAnswer()
+
+    override suspend fun reject(
+        authorization: String,
+        reportId: String,
+        request: RejectAdHocWorkReportRequestDto,
+    ): AdHocWorkReportDto {
+        lastRejectRequest = request
+        return rejectAnswer()
+    }
+
+    override suspend fun link(
+        authorization: String,
+        reportId: String,
+        request: LinkAdHocWorkReportRequestDto,
+    ): AdHocReconciliationJobDto {
+        lastLinkRequest = request
+        return reconcileAnswer()
+    }
+
+    override suspend fun convert(
+        authorization: String,
+        reportId: String,
+        request: ConvertAdHocWorkReportRequestDto,
+    ): AdHocReconciliationJobDto {
+        lastConvertRequest = request
+        return reconcileAnswer()
+    }
 }
 
 /** A [SessionAuthenticator] that answers with a fixed token and refuses renewal. */

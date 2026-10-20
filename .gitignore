@@ -2,6 +2,11 @@
 .env
 .env.*
 !.env.example
+# Local Firebase client configuration and server credentials.
+android/app/**/google-services.json
+**/firebase-adminsdk-*.json
+**/*-firebase-adminsdk-*.json
+.secrets/
 
 # Node.js / API
 node_modules/

@@ -142,6 +142,8 @@ export interface CustomerWithCounts {
   readonly customer: Customer;
   readonly propertyCount: number;
   readonly jobCount: number;
+  readonly openJobCount: number;
+  readonly overdueVisitCount: number;
 }
 
 /**
@@ -163,6 +165,7 @@ export class CustomersService {
   async createIndividualCustomer(
     organizationId: string,
     input: CreateIndividualCustomerDto,
+    executor?: Executor,
   ): Promise<IndividualCustomer> {
     assertCustomerSubtypeIntegrity({
       type: 'INDIVIDUAL',
@@ -170,7 +173,7 @@ export class CustomersService {
       hasCompany: false,
     });
 
-    return this.db.transaction(async (tx) => {
+    const create = async (tx: Executor) => {
       const [customer] = await tx
         .insert(customers)
         .values(this.headerValues(organizationId, 'INDIVIDUAL', input))
@@ -185,13 +188,15 @@ export class CustomersService {
         })
         .returning();
       return { customer, individual };
-    });
+    };
+    return executor ? create(executor) : this.db.transaction(create);
   }
 
   /** Creates a customer header plus its required company subtype record atomically. */
   async createCompanyCustomer(
     organizationId: string,
     input: CreateCompanyCustomerDto,
+    executor?: Executor,
   ): Promise<CompanyCustomer> {
     assertCustomerSubtypeIntegrity({
       type: 'COMPANY',
@@ -199,7 +204,7 @@ export class CustomersService {
       hasCompany: Boolean(input.company),
     });
 
-    return this.db.transaction(async (tx) => {
+    const create = async (tx: Executor) => {
       const [customer] = await tx
         .insert(customers)
         .values(this.headerValues(organizationId, 'COMPANY', input))
@@ -214,7 +219,8 @@ export class CustomersService {
         })
         .returning();
       return { customer, company };
-    });
+    };
+    return executor ? create(executor) : this.db.transaction(create);
   }
 
   /** Fetches one customer scoped to the caller's organization. */
@@ -307,6 +313,18 @@ export class CustomersService {
     return this.db
       .select({
         customer: getTableColumns(customers),
+        openJobCount: sql<number>`count(distinct ${jobs.id}) filter (where ${inArray(jobs.status, [...OPEN_JOB_STATUSES])})`.mapWith(
+          Number,
+        ),
+        overdueVisitCount: sql<number>`(
+          select count(*) from ${visits}
+          inner join ${jobs} as overdue_job on overdue_job.id = ${visits.jobId}
+            and overdue_job.organization_id = ${scope.organizationId}
+          where overdue_job.customer_id = ${customers.id}
+            and ${visits.organizationId} = ${scope.organizationId}
+            and ${visits.status} = 'SCHEDULED'
+            and ${visits.scheduledEnd} < now()
+        )`.mapWith(Number),
         // `distinct` stops the two left joins from multiplying each other's rows.
         propertyCount: sql<number>`count(distinct ${properties.id})`.mapWith(
           Number,
@@ -1106,8 +1124,9 @@ export class CustomersService {
     scope: OrganizationScope & { membershipId: string },
     customerId: string,
     input: CreatePropertyDto,
+    executor?: Executor,
   ): Promise<CustomerPropertySummary> {
-    return this.db.transaction(async (tx) => {
+    const create = async (tx: Executor) => {
       const [customer] = await tx
         .select({ id: customers.id })
         .from(customers)
@@ -1146,7 +1165,8 @@ export class CustomersService {
       });
 
       return { property, jobCount: 0, lastServiceAt: null };
-    });
+    };
+    return executor ? create(executor) : this.db.transaction(create);
   }
 
   /**

@@ -59,6 +59,7 @@ import com.servora.android.domain.model.JobStatus
 import com.servora.android.domain.model.ScheduleConflict
 import com.servora.android.domain.model.TechnicianAssignment
 import com.servora.android.domain.model.VisitOutcome
+import com.servora.android.domain.model.VisitPurpose
 import com.servora.android.domain.model.VisitStatus
 import java.time.Clock
 import java.time.Duration
@@ -100,6 +101,18 @@ class JobDetailsViewModelTest {
     @After
     fun restoreMainDispatcher() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `notification tap rereads an already open Job through the normal repository`() = runTest(dispatcher) {
+        val repository = RecordingJobDetailsRepository(JobDetailsResult.Success(job()))
+        val viewModel = viewModel(repository)
+        viewModel.start(JOB_ID)
+        advanceUntilIdle()
+        viewModel.openAssignment(JOB_ID, "visit-1")
+        advanceUntilIdle()
+        assertEquals(listOf(JOB_ID, JOB_ID), repository.requestedJobIds)
+        assertEquals(JOB_ID, viewModel.uiState.value.details?.id)
     }
 
     @Test
@@ -365,13 +378,14 @@ class JobDetailsViewModelTest {
                 TechnicianAssignment("member-1", AssignmentRole.LEAD),
                 TechnicianAssignment("member-2", AssignmentRole.TECHNICIAN),
             ),
+            purpose = VisitPurpose.WORK,
         )
         advanceUntilIdle()
 
         assertEquals(
             listOf(
                 "create-visit:$JOB_ID:2026-09-15T13:00:00Z:2026-09-15T15:00:00Z:" +
-                    "member-1=LEAD, member-2=TECHNICIAN:false",
+                    "member-1=LEAD, member-2=TECHNICIAN:false:WORK",
             ),
             repository.actions,
         )
@@ -395,13 +409,14 @@ class JobDetailsViewModelTest {
             scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
             scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
             assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+            purpose = VisitPurpose.WORK,
         )
         advanceUntilIdle()
 
         assertEquals(
             listOf(
                 "create-visit:$JOB_ID:2026-09-15T13:00:00Z:2026-09-15T15:00:00Z:" +
-                    "member-1=LEAD:false",
+                    "member-1=LEAD:false:WORK",
             ),
             repository.actions,
         )
@@ -437,6 +452,7 @@ class JobDetailsViewModelTest {
                 scheduledStart = Instant.parse("2026-09-15T13:00:00Z"),
                 scheduledEnd = Instant.parse("2026-09-15T15:00:00Z"),
                 assignments = listOf(TechnicianAssignment("member-1", AssignmentRole.LEAD)),
+                purpose = VisitPurpose.WORK,
             )
             advanceUntilIdle()
 
@@ -453,9 +469,9 @@ class JobDetailsViewModelTest {
             assertEquals(
                 listOf(
                     "create-visit:$JOB_ID:2026-09-15T13:00:00Z:2026-09-15T15:00:00Z:" +
-                        "member-1=LEAD:false",
+                        "member-1=LEAD:false:WORK",
                     "create-visit:$JOB_ID:2026-09-15T13:00:00Z:2026-09-15T15:00:00Z:" +
-                        "member-1=LEAD:true",
+                        "member-1=LEAD:true:WORK",
                 ),
                 repository.actions,
             )
@@ -2279,15 +2295,53 @@ private class RecordingJobDetailsRepository(
      * The action names no Visit — the Visit does not exist until the API creates it — so what is recorded
      * is the Job, the window and the crew, which is what the API is asked to schedule.
      */
+    override suspend fun markQuoteSent(
+        jobId: String,
+        note: String?,
+        externalReference: String?,
+        expectedVersion: Int,
+    ): JobActionResult {
+        actions += "quote-sent:$jobId:$note:$externalReference:$expectedVersion"
+        return nextAction()
+    }
+
+    override suspend fun markQuoteRequired(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult {
+        actions += "quote-required:$jobId:$note:$expectedVersion"
+        return nextAction()
+    }
+
+    override suspend fun markQuoteApproved(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult {
+        actions += "quote-approved:$jobId:$note:$expectedVersion"
+        return nextAction()
+    }
+
+    override suspend fun markQuoteRejected(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult {
+        actions += "quote-rejected:$jobId:$note:$expectedVersion"
+        return nextAction()
+    }
+
     override suspend fun createVisit(
         jobId: String,
         scheduledStart: Instant,
         scheduledEnd: Instant,
         assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
         confirmConflicts: Boolean,
     ): JobActionResult {
         actions += "create-visit:$jobId:$scheduledStart:$scheduledEnd:" +
-            "${assignments.joinToString { "${it.membershipId}=${it.role}" }}:$confirmConflicts"
+            "${assignments.joinToString { "${it.membershipId}=${it.role}" }}:$confirmConflicts:$purpose"
         return nextAction()
     }
 
@@ -2493,11 +2547,38 @@ private class ScriptedJobDetailsRepository(
     ): JobActionResult = unsupported()
 
     /** These tests only read a Job, so scheduling one is not exercised here. */
+
+    override suspend fun markQuoteSent(
+        jobId: String,
+        note: String?,
+        externalReference: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteRequired(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteApproved(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
+    override suspend fun markQuoteRejected(
+        jobId: String,
+        note: String?,
+        expectedVersion: Int,
+    ): JobActionResult = unsupported()
+
     override suspend fun createVisit(
         jobId: String,
         scheduledStart: Instant,
         scheduledEnd: Instant,
         assignments: List<TechnicianAssignment>,
+        purpose: VisitPurpose,
         confirmConflicts: Boolean,
     ): JobActionResult = unsupported()
 

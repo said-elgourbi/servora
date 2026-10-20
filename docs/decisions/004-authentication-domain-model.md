@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-10
-- Milestone: `docs/tracker/004-authentication-domain-model.md`
+- Milestone: `docs/tracker/shared/004-authentication-domain-model.md`
 - Supersedes: nothing
 
 ## Context

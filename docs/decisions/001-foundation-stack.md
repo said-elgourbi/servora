@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-09
-- Milestone: docs/tracker/001-foundation.md
+- Milestone: docs/tracker/api/001-foundation.md
 
 ## Context
 

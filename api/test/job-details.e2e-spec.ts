@@ -465,12 +465,14 @@ describe('job details (e2e)', () => {
         id: fixture.pastVisit.id,
         sequence: 1,
         status: 'COMPLETED',
+        purposeCode: 'WORK',
         // The Visit's own **current** outcome travels with it, so a screen can state what resulted
         // from a field attempt beside that attempt's date and crew (`BR-077`, `BR-078`).
         outcomeCode: 'RESOLVED',
         scheduledStart: fixture.pastStart.toISOString(),
         scheduledEnd: fixture.pastEnd.toISOString(),
         version: fixture.pastVisit.version,
+        isAdHocWork: false,
         technicians: [
           {
             membershipId: fixture.pastCrew.id,
@@ -483,12 +485,14 @@ describe('job details (e2e)', () => {
         id: fixture.upcomingVisit.id,
         sequence: 2,
         status: 'SCHEDULED',
+        purposeCode: 'WORK',
         // A Visit that has not been completed holds no outcome, and none is invented for it
         // (`BR-042`).
         outcomeCode: null,
         scheduledStart: fixture.upcomingStart.toISOString(),
         scheduledEnd: fixture.upcomingEnd.toISOString(),
         version: fixture.upcomingVisit.version,
+        isAdHocWork: false,
         technicians: [
           {
             membershipId: fixture.lead.id,
@@ -567,11 +571,13 @@ describe('job details (e2e)', () => {
         id: draft.id,
         sequence: 1,
         status: 'DRAFT',
+        purposeCode: 'WORK',
         // A Visit that has not been completed holds no outcome (`BR-077`, `BR-079`).
         outcomeCode: null,
         scheduledStart: null,
         scheduledEnd: null,
         version: draft.version,
+        isAdHocWork: false,
         technicians: [],
       },
     ]);
@@ -929,9 +935,7 @@ describe('job details (e2e)', () => {
   it('refuses a caller holding a field write capability but no read capability with 403', async () => {
     // The guard asks one question — which **read** capability admitted the caller — and a write
     // capability is not a substitute for it (`BR-006`, `BR-009`).
-    const session = await signInFor([
-      VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS,
-    ]);
+    const session = await signInFor([VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS]);
     const other = await newMembership(organizationId);
     const { job } = await jobWithCrew(other.id);
 

@@ -1,3 +1,4 @@
+import type { FieldContextService } from './field-context.service.js';
 import { ExecutionContext, HttpStatus } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
@@ -54,7 +55,11 @@ describe('PermissionsGuard', () => {
       ),
     } as unknown as AuthorizationService;
     return {
-      guard: new PermissionsGuard(reflector, authorization),
+      guard: new PermissionsGuard(
+        reflector,
+        authorization,
+        {} as FieldContextService,
+      ),
       authorization,
     };
   }
@@ -84,10 +89,7 @@ describe('PermissionsGuard', () => {
 
   it('admits a caller holding one of the capabilities an any-of route lists', async () => {
     const { guard, authorization } = build({
-      anyOf: [
-        CUSTOMER_PERMISSIONS.VIEW,
-        VISIT_PERMISSIONS.VIEW_ASSIGNED,
-      ],
+      anyOf: [CUSTOMER_PERMISSIONS.VIEW, VISIT_PERMISSIONS.VIEW_ASSIGNED],
       resolved: membership,
     });
     const request = contextWithAuth();
@@ -109,9 +111,9 @@ describe('PermissionsGuard', () => {
       resolved: membership,
     });
 
-    await expect(guard.canActivate(contextFor(contextWithAuth()))).resolves.toBe(
-      true,
-    );
+    await expect(
+      guard.canActivate(contextFor(contextWithAuth())),
+    ).resolves.toBe(true);
     expect(
       authorization.resolveMembershipForUserWithPermissions,
     ).toHaveBeenCalledWith('user-1', [CUSTOMER_PERMISSIONS.VIEW]);

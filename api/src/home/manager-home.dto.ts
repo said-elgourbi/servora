@@ -1,8 +1,10 @@
+import type { ManagerHomeResponse } from '@servora/shared-types';
 import type { AddressSnapshot } from '../address/address-snapshot.js';
 import { VISIT_STATUSES } from '../jobs/job.types.js';
 import type {
   AssignmentRoleCode,
   JobStatus,
+  VisitPurposeCode,
   VisitStatus,
 } from '../jobs/job.types.js';
 import type { JobAttentionCode } from '../jobs/job-attention.js';
@@ -31,18 +33,29 @@ export type { VisitStatus };
  * | Kind                   | Condition                                                                          |
  * | ---------------------- | ---------------------------------------------------------------------------------- |
  * | `VISIT_OVERDUE`        | A Visit still `SCHEDULED` after its scheduled window ended (`BR-072`, `BR-074`).    |
+ * | `VISIT_STALE_STARTED` | Started work still open after the local day of its scheduled end.                    |
  * | `JOB_NEEDS_SCHEDULING` | A Job with no active Visit, so it needs scheduling (`BR-060`).                      |
  * | outcome-derived codes  | The latest completed Visit outcome requires office action.                          |
  */
 export const MANAGER_ATTENTION_KINDS = [
   'VISIT_OVERDUE',
+  'VISIT_STALE_STARTED',
   'JOB_NEEDS_SCHEDULING',
   'FOLLOW_UP_NEEDS_SCHEDULING',
   'PARTS_REQUIRED',
   'UNABLE_TO_COMPLETE',
+  'JOB_WORK_RECOMMENDED',
+  'JOB_QUOTE_REQUIRED',
+  'JOB_CUSTOMER_DECISION_PENDING',
+  'JOB_WORK_READY_TO_SCHEDULE',
+  'JOB_CANCELLATION_REQUIRED',
+  'JOB_NEEDS_REASSESSMENT',
 ] as const;
 export type ManagerAttentionKind =
-  'VISIT_OVERDUE' | 'JOB_NEEDS_SCHEDULING' | JobAttentionCode;
+  | 'VISIT_OVERDUE'
+  | 'VISIT_STALE_STARTED'
+  | 'JOB_NEEDS_SCHEDULING'
+  | JobAttentionCode;
 
 /**
  * The Visit statuses that count as a Job's active work for the derived scheduling signal
@@ -89,6 +102,7 @@ export interface ManagerHomeTechnician {
 export interface ManagerHomeVisit {
   readonly visitId: string;
   readonly visitStatus: VisitStatus;
+  readonly purposeCode: VisitPurposeCode;
   readonly scheduledStart: Date;
   readonly scheduledEnd: Date;
   readonly jobId: string;
@@ -158,10 +172,17 @@ export interface ManagerHomeDaySummary {
  */
 const ATTENTION_KIND_RANK: Record<ManagerAttentionKind, number> = {
   VISIT_OVERDUE: 0,
-  FOLLOW_UP_NEEDS_SCHEDULING: 1,
-  PARTS_REQUIRED: 2,
-  UNABLE_TO_COMPLETE: 3,
-  JOB_NEEDS_SCHEDULING: 4,
+  VISIT_STALE_STARTED: 1,
+  FOLLOW_UP_NEEDS_SCHEDULING: 2,
+  PARTS_REQUIRED: 3,
+  UNABLE_TO_COMPLETE: 4,
+  JOB_WORK_RECOMMENDED: 5,
+  JOB_QUOTE_REQUIRED: 6,
+  JOB_CUSTOMER_DECISION_PENDING: 7,
+  JOB_WORK_READY_TO_SCHEDULE: 8,
+  JOB_CANCELLATION_REQUIRED: 9,
+  JOB_NEEDS_REASSESSMENT: 10,
+  JOB_NEEDS_SCHEDULING: 11,
 };
 
 export function compareAttentionItems(
@@ -240,6 +261,7 @@ export type ManagerHomeAddressDto = AddressSnapshot;
 export interface ManagerHomeVisitDto {
   visitId: string;
   visitStatus: VisitStatus;
+  purposeCode: VisitPurposeCode;
   scheduledStart: string;
   scheduledEnd: string;
   jobId: string;
@@ -281,7 +303,7 @@ export interface ManagerHomeDayDto {
  * records (`BR-001`, `BR-080`). Stable codes travel, never display text (`BR-028`, `BR-041`), and
  * every instant is ISO-8601 UTC (`Project.md` §15).
  */
-export interface ManagerHomeDto {
+export interface ManagerHomeDto extends ManagerHomeResponse {
   generatedAt: string;
   day: ManagerHomeDayDto;
   /**
@@ -349,6 +371,7 @@ function toManagerHomeVisitDto(visit: ManagerHomeVisit): ManagerHomeVisitDto {
   return {
     visitId: visit.visitId,
     visitStatus: visit.visitStatus,
+    purposeCode: visit.purposeCode,
     scheduledStart: visit.scheduledStart.toISOString(),
     scheduledEnd: visit.scheduledEnd.toISOString(),
     jobId: visit.jobId,

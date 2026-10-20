@@ -38,6 +38,22 @@ class TechnicianHomeScreenTest {
     @get:Rule val composeTestRule = createComposeRule()
 
     @Test
+    fun flagsAnUnfinishedCurrentVisitWithoutDuplicatingItInAttention() {
+        render(
+            TechnicianHomeUiState(
+                home = day(
+                    nextVisit = visit(status = VisitStatus.IN_PROGRESS).copy(isStaleStarted = true),
+                ),
+            ),
+        )
+
+        composeTestRule.onNodeWithText(string(R.string.home_visit_stale_started)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.visit_status_in_progress)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.home_attention_title), substring = true)
+            .assertDoesNotExist()
+    }
+
+    @Test
     fun leadsWithTheNextVisitAndShowsTheRestOfTheDay() {
         render(
             TechnicianHomeUiState(
@@ -209,7 +225,11 @@ private fun TechnicianHomeScreenTest.render(
 ) {
     composeTestRule.setContent {
         ServoraTheme {
-            TechnicianHomeScreen(state = state, onOpenJob = onOpenJob, onRetry = onRetry)
+            TechnicianHomeScreen(
+                state = state,
+                onOpenJob = { jobId, _ -> onOpenJob(jobId) },
+                onRetry = onRetry,
+            )
         }
     }
 }
@@ -271,4 +291,3 @@ private fun attentionItem() = TechnicianAttentionItem(
     scheduledStart = "2026-09-16T09:00:00.000Z",
     scheduledEnd = "2026-09-16T10:00:00.000Z",
 )
-

@@ -1,3 +1,9 @@
+import type {
+  AuthDeviceContext,
+  SignInRequestDto,
+  SmsOtpRequestDto,
+  SmsOtpVerifyRequestDto,
+} from '@servora/shared-types';
 import {
   AUTH_SESSION_PLATFORMS,
   type AuthSessionPlatform,
@@ -30,18 +36,12 @@ const MAX_CODE_LENGTH = 16;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Device/installation context a client reports when it signs in. */
-export interface AuthDeviceContext {
-  readonly platform: AuthSessionPlatform;
-  readonly deviceId: string;
-  readonly deviceName: string | null;
-  readonly appVersion: string | null;
-}
-
-export interface SignInRequestDto {
-  readonly email: string;
-  readonly password: string;
-  readonly device: AuthDeviceContext;
-}
+export type {
+  AuthDeviceContext,
+  SignInRequestDto,
+  SmsOtpRequestDto,
+  SmsOtpVerifyRequestDto,
+} from '@servora/shared-types';
 
 export interface RefreshRequestDto {
   readonly refreshToken: string;
@@ -133,17 +133,6 @@ export interface PasswordResetCompleteRequestDto {
 }
 
 /** `POST /auth/sms/request` (`BR-019`). */
-export interface SmsOtpRequestDto {
-  readonly phone: string;
-}
-
-/** `POST /auth/sms/verify` (`BR-019`); the device context opens the resulting session. */
-export interface SmsOtpVerifyRequestDto {
-  readonly phone: string;
-  readonly code: string;
-  readonly device: AuthDeviceContext;
-}
-
 export function parsePasswordResetRequest(
   body: unknown,
 ): PasswordResetRequestDto {

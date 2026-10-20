@@ -46,14 +46,16 @@ import com.servora.android.ui.jobs.CreateJobScreen
 import com.servora.android.ui.jobs.CreateJobViewModel
 // The destination draws the redesigned Job Details screen, which presents the Job and its Visits
 // apart. `JobDetailsScreen` remains in the package as the screen it replaces: restoring the previous
-// presentation is this import and the call below (`docs/tracker/044-job-details-job-visit-separation.md`).
+// presentation is this import and the call below (`docs/tracker/shared/044-job-details-job-visit-separation.md`).
 import com.servora.android.ui.jobs.JobDetailsOverviewScreen
 import com.servora.android.ui.jobs.JobDetailsViewModel
 import com.servora.android.ui.jobs.rememberJobPhotoCapture
 import com.servora.android.ui.jobs.rememberJobPhotoPicker
+import com.servora.android.ui.jobs.rememberJobQuoteDocumentPicker
 // The technician's own requests are read by the technician schedule's ViewModel, which is where their
 // own read lives (`BR-009`, `BR-FV-001`); the request details destination shows one of them.
 import com.servora.android.ui.schedule.FollowUpRequestDetailsScreen
+import com.servora.android.ui.schedule.AdHocWorkReportReviewDetailScreen
 import com.servora.android.ui.schedule.ManagerFollowUpRequestDetailsScreen
 import com.servora.android.ui.schedule.ScheduleViewModel
 import com.servora.android.ui.schedule.TechnicianScheduleViewModel
@@ -78,6 +80,8 @@ object ServoraRoutes {
     const val JOB_ID = "jobId"
 
     const val REQUEST_ID = "requestId"
+
+    const val AD_HOC_REPORT_ID = "adHocReportId"
 
     const val VISIT_ID = "visitId"
 
@@ -104,13 +108,16 @@ object ServoraRoutes {
 
     /**
      * One of the technician's own follow-up Visit requests, read in full
-     * (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.12).
+     * (`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.12).
      *
      * A request is a proposal about another field attempt rather than the work itself (`BR-FV-002`), so
      * touching its row in My Schedule's Requests view opens the request, and the Job it was raised on is
      * one action away from there (`BR-066`).
      */
     const val REQUEST_DETAIL = "request/detail/{$REQUEST_ID}"
+
+    /** One ad-hoc work report the office reviews (`BR-AH-002`). */
+    const val AD_HOC_REPORT_DETAIL = "ad-hoc-report/detail/{$AD_HOC_REPORT_ID}"
 
     fun customerDetail(customerId: String): String = "customer/detail/${Uri.encode(customerId)}"
 
@@ -142,6 +149,9 @@ object ServoraRoutes {
 
     /** One of the technician's own follow-up Visit requests, read in full (`BR-FV-002`, `BR-012`). */
     fun requestDetail(requestId: String): String = "request/detail/${Uri.encode(requestId)}"
+
+    /** One ad-hoc work report the office reviews (`BR-AH-002`). */
+    fun adHocReportDetail(reportId: String): String = "ad-hoc-report/detail/${Uri.encode(reportId)}"
 
     /**
      * Create Job, optionally for [customerId].
@@ -176,6 +186,9 @@ private fun NavBackStackEntry.jobId(): String =
 private fun NavBackStackEntry.requestId(): String =
     arguments?.getString(ServoraRoutes.REQUEST_ID).orEmpty()
 
+private fun NavBackStackEntry.adHocReportId(): String =
+    arguments?.getString(ServoraRoutes.AD_HOC_REPORT_ID).orEmpty()
+
 private fun NavBackStackEntry.visitId(): String? =
     arguments?.getString(ServoraRoutes.VISIT_ID)
 
@@ -209,6 +222,9 @@ private fun jobIdArgument() =
 
 private fun requestIdArgument() =
     listOf(navArgument(ServoraRoutes.REQUEST_ID) { type = NavType.StringType })
+
+private fun adHocReportIdArgument() =
+    listOf(navArgument(ServoraRoutes.AD_HOC_REPORT_ID) { type = NavType.StringType })
 
 private fun propertyArguments() = listOf(
     navArgument(ServoraRoutes.CUSTOMER_ID) { type = NavType.StringType },
@@ -265,6 +281,20 @@ fun ServoraNavHost(
     rootContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val assignmentNotifications = com.servora.android.ui.notifications.LocalAssignmentNotifications.current
+    if (assignmentNotifications != null) {
+        val pending by assignmentNotifications.pending.collectAsState()
+        LaunchedEffect(pending) {
+            pending?.let { message ->
+                assignmentNotifications.consumeTap(message)?.let { destination ->
+                    jobDetailsViewModel.openAssignment(destination.jobId, destination.visitId)
+                    navController.navigate(ServoraRoutes.jobDetail(destination.jobId, destination.visitId)) {
+                        launchSingleTop = true
+                    }
+                }
+            }
+        }
+    }
     NavHost(
         navController = navController,
         startDestination = ServoraRoutes.ROOT,
@@ -549,6 +579,10 @@ fun ServoraNavHost(
                 // a cancellation (`BR-042`).
                 onUnavailable = jobDetailsViewModel::photoPickerUnavailable,
             )
+            val chooseQuoteDocument = rememberJobQuoteDocumentPicker(
+                onPicked = jobDetailsViewModel::uploadQuoteDocument,
+                onUnavailable = jobDetailsViewModel::quoteDocumentPickerUnavailable,
+            )
             JobDetailsOverviewScreen(
                 state = state,
                 canUpdateJob = permissions.canUpdateJob,
@@ -583,6 +617,12 @@ fun ServoraNavHost(
                 onOpenInMaps = { address -> openAddressInMaps(context, address) },
                 onLoadAssignableTechnicians = jobDetailsViewModel::loadAssignableTechnicians,
                 onChangeJobStatus = { status -> jobDetailsViewModel.changeJobStatus(status) },
+                onMarkQuoteSent = { jobDetailsViewModel.markQuoteSent() },
+                onMarkQuoteRequired = { jobDetailsViewModel.markQuoteRequired() },
+                onMarkQuoteApproved = { jobDetailsViewModel.markQuoteApproved() },
+                onMarkQuoteRejected = { jobDetailsViewModel.markQuoteRejected() },
+                onUploadQuoteDocument = chooseQuoteDocument,
+                onOpenQuoteDocument = jobDetailsViewModel::openQuoteDocument,
                 onChangeVisitStatus = { status -> jobDetailsViewModel.changeVisitStatus(status) },
                 onCompleteVisit = { outcome, summary ->
                     jobDetailsViewModel.completeVisit(outcome, summary)
@@ -687,6 +727,42 @@ fun ServoraNavHost(
                     onOpenJob = { jobId -> navController.push(ServoraRoutes.jobDetail(jobId)) },
                     onRetry = technicianScheduleViewModel::retry,
                 )
+            }
+        }
+
+        composable(ServoraRoutes.AD_HOC_REPORT_DETAIL, adHocReportIdArgument()) { entry ->
+            val reportId = entry.adHocReportId()
+            if (permissions.canReviewAdHocWork) {
+                val timeZoneId = rememberRequestTimeZoneId()
+                LaunchedEffect(reportId) { scheduleViewModel.openAdHocReports(timeZoneId) }
+                val state by scheduleViewModel.uiState.collectAsState()
+                AdHocWorkReportReviewDetailScreen(
+                    state = state,
+                    reportId = reportId,
+                    onReject = scheduleViewModel::rejectAdHocReport,
+                    onLink = scheduleViewModel::linkAdHocReport,
+                    onConvert = scheduleViewModel::convertAdHocReport,
+                    onOpenJob = { jobId -> navController.push(ServoraRoutes.jobDetail(jobId)) },
+                    onAcknowledgeReview = scheduleViewModel::acknowledgeAdHocReview,
+                    onRetry = { scheduleViewModel.openAdHocReports(timeZoneId) },
+                    onOpenLinkJobs = scheduleViewModel::openAdHocLink,
+                    onSearchLinkJobs = scheduleViewModel::searchAdHocReviewJobs,
+                    onSelectLinkJob = scheduleViewModel::selectAdHocReviewJob,
+                    permissions = permissions,
+                    onOpenLocation = scheduleViewModel::openAdHocLocation,
+                    onSearchCustomers = scheduleViewModel::searchAdHocLocationCustomers,
+                    onLoadProperties = scheduleViewModel::loadAdHocLocationProperties,
+                    onResolveLocation = scheduleViewModel::resolveAdHocLocation,
+                )
+                // A successful link or convert produced the Job the reconciled Visit now belongs to
+                // (`BR-AH-008`); the screen opens it rather than leaving the reviewer in the report.
+                LaunchedEffect(state.reconciledAdHocJobId) {
+                    val jobId = state.reconciledAdHocJobId ?: return@LaunchedEffect
+                    scheduleViewModel.acknowledgeAdHocReconciliation()
+                    navController.push(ServoraRoutes.jobDetail(jobId))
+                }
+            } else {
+                LaunchedEffect(Unit) { navController.popBackStack() }
             }
         }
 
@@ -874,6 +950,13 @@ fun servoraTopBarState(
         // technician's own request rather than as the Job it is about (`BR-041`).
         ServoraRoutes.REQUEST_DETAIL -> pushedScreenTopBar(
             title = stringResource(R.string.technician_request_detail_title),
+            navController = navController,
+        )
+
+        // An ad-hoc report is read in its own destination (`BR-AH-002`), and the header names it as a
+        // report the office reviews rather than as a Job (`BR-AH-004`).
+        ServoraRoutes.AD_HOC_REPORT_DETAIL -> pushedScreenTopBar(
+            title = stringResource(R.string.ad_hoc_report_detail_title),
             navController = navController,
         )
 

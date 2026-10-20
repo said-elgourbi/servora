@@ -19,6 +19,7 @@ import { relations, sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   boolean,
+  foreignKey,
   check,
   date,
   index,
@@ -204,6 +205,15 @@ export const organizationMembers = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    unique('organization_members_scope_owner_unique').on(
+      table.organizationId,
+      table.id,
+      table.userId,
+    ),
+    unique('organization_members_scope_id_unique').on(
+      table.organizationId,
+      table.id,
+    ),
     unique('organization_members_organization_id_user_id_unique').on(
       table.organizationId,
       table.userId,
@@ -684,6 +694,7 @@ export const jobs = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    unique('jobs_scope_id_unique').on(table.organizationId, table.id),
     unique('jobs_organization_job_number_unique').on(
       table.organizationId,
       table.jobNumber,
@@ -1109,6 +1120,83 @@ export const jobAudioNoteRemovals = pgTable(
   ],
 );
 
+// ------------------------------------------------------------- job documents
+
+/**
+ * One office/commercial document attached to a Job.
+ *
+ * The first document type is `QUOTE`, used by the Assessment quote workflow. A quote PDF is a
+ * Job-level artifact, not Visit evidence: it has no evidence phase, no field-work Visit requirement,
+ * and no appearance in the evidence removal tables. The row stores the object key rather than a URL,
+ * matching the object-storage boundary used by evidence while keeping documents in their own domain.
+ */
+export const jobDocuments = pgTable(
+  'job_documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    documentType: varchar('document_type', { length: 30 }).notNull(),
+    displayName: varchar('display_name', { length: 255 }),
+    documentVersion: integer('document_version').notNull().default(1),
+    isCurrent: boolean('is_current').notNull().default(true),
+    objectKey: varchar('object_key', { length: 512 }).notNull(),
+    contentType: varchar('content_type', { length: 100 }).notNull(),
+    byteSize: integer('byte_size').notNull(),
+    uploadedByMembershipId: uuid('uploaded_by_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    supersededByJobDocumentId: uuid('superseded_by_job_document_id').references(
+      (): AnyPgColumn => jobDocuments.id,
+    ),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check('job_documents_type_check', sql`${table.documentType} in ('QUOTE')`),
+    check(
+      'job_documents_content_type_check',
+      sql`${table.contentType} in ('application/pdf')`,
+    ),
+    check(
+      'job_documents_display_name_check',
+      sql`${table.displayName} is null or btrim(${table.displayName}) <> ''`,
+    ),
+    check('job_documents_version_check', sql`${table.documentVersion} > 0`),
+    check('job_documents_byte_size_check', sql`${table.byteSize} > 0`),
+    check(
+      'job_documents_supersession_check',
+      sql`(${table.isCurrent} = true and ${table.supersededAt} is null and ${table.supersededByJobDocumentId} is null) or (${table.isCurrent} = false and ${table.supersededAt} is not null and ${table.supersededByJobDocumentId} is not null)`,
+    ),
+    index('job_documents_organization_job_recorded_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.recordedAt,
+    ),
+    index('job_documents_organization_job_type_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.documentType,
+    ),
+    uniqueIndex('job_documents_current_unique')
+      .on(table.organizationId, table.jobId, table.documentType)
+      .where(sql`${table.isCurrent} = true`),
+    uniqueIndex('job_documents_version_unique').on(
+      table.organizationId,
+      table.jobId,
+      table.documentType,
+      table.documentVersion,
+    ),
+  ],
+);
+
 // ------------------------------------------------------------------- visits
 
 export const visits = pgTable(
@@ -1124,6 +1212,9 @@ export const visits = pgTable(
     propertyId: uuid('property_id').references(() => properties.id),
     locationAddressSnapshot: jsonb('location_address_snapshot'),
     status: varchar('status', { length: 20 }).notNull().default('DRAFT'),
+    purposeCode: varchar('purpose_code', { length: 20 })
+      .notNull()
+      .default('WORK'),
     scheduledStart: timestamp('scheduled_start', { withTimezone: true }),
     scheduledEnd: timestamp('scheduled_end', { withTimezone: true }),
     arrivalWindowStart: timestamp('arrival_window_start', {
@@ -1136,14 +1227,24 @@ export const visits = pgTable(
     outcomeRecordedByMembershipId: uuid(
       'outcome_recorded_by_membership_id',
     ).references(() => organizationMembers.id),
+    isAdHocWork: boolean('is_ad_hoc_work').notNull().default(false),
     version: integer('version').notNull().default(1),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
+    unique('visits_scope_job_id_unique').on(
+      table.organizationId,
+      table.jobId,
+      table.id,
+    ),
     check(
       'visits_status_check',
       sql`${table.status} in ('DRAFT', 'SCHEDULED', 'EN_ROUTE', 'ON_SITE', 'IN_PROGRESS', 'COMPLETED', 'CANCELED')`,
+    ),
+    check(
+      'visits_purpose_code_check',
+      sql`${table.purposeCode} in ('WORK', 'ASSESSMENT')`,
     ),
     check(
       'visits_schedule_pair_check',
@@ -1171,7 +1272,11 @@ export const visits = pgTable(
     ),
     check(
       'visits_outcome_code_check',
-      sql`${table.outcomeCode} is null or ${table.outcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE')`,
+      sql`${table.outcomeCode} is null or ${table.outcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE', 'NO_WORK_REQUIRED', 'WORK_RECOMMENDED', 'QUOTE_REQUIRED', 'UNABLE_TO_ASSESS')`,
+    ),
+    check(
+      'visits_purpose_outcome_check',
+      sql`${table.outcomeCode} is null or (${table.purposeCode} = 'WORK' and ${table.outcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE')) or (${table.purposeCode} = 'ASSESSMENT' and ${table.outcomeCode} in ('NO_WORK_REQUIRED', 'WORK_RECOMMENDED', 'QUOTE_REQUIRED', 'UNABLE_TO_ASSESS'))`,
     ),
     check(
       'visits_outcome_recorded_pair_check',
@@ -1195,6 +1300,163 @@ export const visits = pgTable(
       table.organizationId,
       table.scheduledStart,
     ),
+  ],
+);
+
+// --------------------------------------------------- job quote workflows
+
+/**
+ * The current commercial decision state for an Assessment Visit that required a quote.
+ *
+ * This table is intentionally separate from the Job lifecycle: a rejected quote does not cancel the
+ * Job, and an approved quote makes Work scheduling available without becoming a Job status. History
+ * rows below preserve each transition while this row answers the current office action.
+ */
+export const jobQuoteWorkflows = pgTable(
+  'job_quote_workflows',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    sourceVisitId: uuid('source_visit_id')
+      .notNull()
+      .references(() => visits.id),
+    state: varchar('state', { length: 30 }).notNull().default('REQUIRED'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    sentByMembershipId: uuid('sent_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    sentNote: text('sent_note'),
+    externalReference: varchar('external_reference', { length: 255 }),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decidedByMembershipId: uuid('decided_by_membership_id').references(
+      () => organizationMembers.id,
+    ),
+    decisionNote: text('decision_note'),
+    version: integer('version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      'job_quote_workflows_state_check',
+      sql`${table.state} in ('REQUIRED', 'SENT', 'APPROVED', 'REJECTED')`,
+    ),
+    check(
+      'job_quote_workflows_sent_pair_check',
+      sql`(${table.sentAt} is null) = (${table.sentByMembershipId} is null)`,
+    ),
+    check(
+      'job_quote_workflows_decision_pair_check',
+      sql`(${table.decidedAt} is null) = (${table.decidedByMembershipId} is null)`,
+    ),
+    check(
+      'job_quote_workflows_required_check',
+      sql`${table.state} <> 'REQUIRED' or (${table.sentAt} is null and ${table.decidedAt} is null)`,
+    ),
+    check(
+      'job_quote_workflows_sent_check',
+      sql`${table.state} <> 'SENT' or (${table.sentAt} is not null and ${table.decidedAt} is null)`,
+    ),
+    check(
+      'job_quote_workflows_decided_check',
+      sql`${table.state} not in ('APPROVED', 'REJECTED') or (${table.sentAt} is not null and ${table.decidedAt} is not null)`,
+    ),
+    check(
+      'job_quote_workflows_sent_note_check',
+      sql`${table.sentNote} is null or btrim(${table.sentNote}) <> ''`,
+    ),
+    check(
+      'job_quote_workflows_external_reference_check',
+      sql`${table.externalReference} is null or btrim(${table.externalReference}) <> ''`,
+    ),
+    check(
+      'job_quote_workflows_decision_note_check',
+      sql`${table.decisionNote} is null or btrim(${table.decisionNote}) <> ''`,
+    ),
+    check('job_quote_workflows_version_check', sql`${table.version} > 0`),
+    unique('job_quote_workflows_job_unique').on(
+      table.organizationId,
+      table.jobId,
+    ),
+    index('job_quote_workflows_organization_state_idx').on(
+      table.organizationId,
+      table.state,
+    ),
+    index('job_quote_workflows_source_visit_idx').on(
+      table.organizationId,
+      table.sourceVisitId,
+    ),
+  ],
+);
+
+export const jobQuoteHistory = pgTable(
+  'job_quote_history',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    quoteWorkflowId: uuid('quote_workflow_id')
+      .notNull()
+      .references(() => jobQuoteWorkflows.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id, { onDelete: 'cascade' }),
+    sourceVisitId: uuid('source_visit_id')
+      .notNull()
+      .references(() => visits.id),
+    event: varchar('event', { length: 30 }).notNull(),
+    fromState: varchar('from_state', { length: 30 }),
+    toState: varchar('to_state', { length: 30 }).notNull(),
+    note: text('note'),
+    actorMembershipId: uuid('actor_membership_id')
+      .notNull()
+      .references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check(
+      'job_quote_history_event_check',
+      sql`${table.event} in ('REQUIRED', 'SENT', 'APPROVED', 'REJECTED', 'CORRECTED')`,
+    ),
+    check(
+      'job_quote_history_from_state_check',
+      sql`${table.fromState} is null or ${table.fromState} in ('REQUIRED', 'SENT', 'APPROVED', 'REJECTED')`,
+    ),
+    check(
+      'job_quote_history_to_state_check',
+      sql`${table.toState} in ('REQUIRED', 'SENT', 'APPROVED', 'REJECTED')`,
+    ),
+    check(
+      'job_quote_history_event_to_state_check',
+      sql`${table.event} = 'CORRECTED' or ${table.event} = ${table.toState}`,
+    ),
+    check(
+      'job_quote_history_note_check',
+      sql`${table.note} is null or btrim(${table.note}) <> ''`,
+    ),
+    index('job_quote_history_organization_job_recorded_idx').on(
+      table.organizationId,
+      table.jobId,
+      table.recordedAt,
+    ),
+    index('job_quote_history_workflow_recorded_idx').on(
+      table.quoteWorkflowId,
+      table.recordedAt,
+    ),
+    uniqueIndex('job_quote_history_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
   ],
 );
 
@@ -1771,11 +2033,11 @@ export const visitOutcomeHistory = pgTable(
   (table) => [
     check(
       'visit_outcome_history_outcome_code_check',
-      sql`${table.outcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE')`,
+      sql`${table.outcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE', 'NO_WORK_REQUIRED', 'WORK_RECOMMENDED', 'QUOTE_REQUIRED', 'UNABLE_TO_ASSESS')`,
     ),
     check(
       'visit_outcome_history_previous_outcome_code_check',
-      sql`${table.previousOutcomeCode} is null or ${table.previousOutcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE')`,
+      sql`${table.previousOutcomeCode} is null or ${table.previousOutcomeCode} in ('RESOLVED', 'NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE', 'NO_WORK_REQUIRED', 'WORK_RECOMMENDED', 'QUOTE_REQUIRED', 'UNABLE_TO_ASSESS')`,
     ),
     check(
       'visit_outcome_history_previous_pair_check',
@@ -1974,6 +2236,7 @@ export const authSessions = pgTable(
       'auth_sessions_platform_check',
       sql`${table.platform} in ('ANDROID', 'WEB')`,
     ),
+    unique('auth_sessions_id_user_unique').on(table.id, table.userId),
     index('auth_sessions_user_id_idx').on(table.userId),
     index('auth_sessions_device_id_idx').on(table.deviceId),
     index('auth_sessions_expires_at_idx').on(table.expiresAt),
@@ -2229,4 +2492,247 @@ export const phoneOtpChallengesRelations = relations(
       references: [users.id],
     }),
   }),
+);
+
+// Durable recipient intent. Device expansion and delivery are separate worker responsibilities.
+export const pushAssignmentEvents = pgTable(
+  'push_assignment_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id').notNull(),
+    visitId: uuid('visit_id').notNull(),
+    recipientMembershipId: uuid('recipient_membership_id').notNull(),
+    actorUserId: uuid('actor_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    assignmentVersion: integer('assignment_version').notNull(),
+    eventType: varchar('event_type', { length: 30 })
+      .notNull()
+      .default('VISIT_ASSIGNED'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now() + interval '24 hours'`),
+    expandedAt: timestamp('expanded_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('push_assignment_events_scope_id_unique').on(
+      table.organizationId,
+      table.id,
+    ),
+    unique('push_assignment_events_business_key_unique').on(
+      table.organizationId,
+      table.visitId,
+      table.assignmentVersion,
+      table.recipientMembershipId,
+      table.eventType,
+    ),
+    foreignKey({
+      name: 'push_assignment_events_job_scope_fk',
+      columns: [table.organizationId, table.jobId],
+      foreignColumns: [jobs.organizationId, jobs.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'push_assignment_events_visit_job_scope_fk',
+      columns: [table.organizationId, table.jobId, table.visitId],
+      foreignColumns: [visits.organizationId, visits.jobId, visits.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'push_assignment_events_recipient_scope_fk',
+      columns: [table.organizationId, table.recipientMembershipId],
+      foreignColumns: [
+        organizationMembers.organizationId,
+        organizationMembers.id,
+      ],
+    }).onDelete('cascade'),
+    check(
+      'push_assignment_events_version_check',
+      sql`${table.assignmentVersion} > 0`,
+    ),
+    check(
+      'push_assignment_events_type_check',
+      sql`${table.eventType} = 'VISIT_ASSIGNED'`,
+    ),
+    check(
+      'push_assignment_events_expiry_check',
+      sql`${table.expiresAt} > ${table.occurredAt}`,
+    ),
+    index('push_assignment_events_unexpanded_idx')
+      .on(table.occurredAt)
+      .where(sql`${table.expandedAt} is null`),
+  ],
+);
+
+// An installation's current binding is replaced atomically on account/session changes.
+export const pushInstallations = pgTable(
+  'push_installations',
+  {
+    id: uuid('id').primaryKey(),
+    secretDigest: varchar('secret_digest', { length: 64 }).notNull(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    membershipId: uuid('membership_id').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sessionId: uuid('session_id').notNull(),
+    bindingId: uuid('binding_id').notNull().defaultRandom(),
+    revision: integer('revision').notNull().default(1),
+    projectId: varchar('project_id', { length: 30 }).notNull(),
+    applicationId: varchar('application_id', { length: 200 }).notNull(),
+    targetKind: varchar('target_kind', { length: 20 })
+      .notNull()
+      .default('FCM_TOKEN'),
+    targetValue: text('target_value'),
+    targetDigest: varchar('target_digest', { length: 64 }),
+    locale: varchar('locale', { length: 10 }).notNull(),
+    alertsEnabled: boolean('alerts_enabled').notNull(),
+    notificationPermission: varchar('notification_permission', {
+      length: 20,
+    }).notNull(),
+    channelEnabled: boolean('channel_enabled').notNull(),
+    state: varchar('state', { length: 20 }).notNull(),
+    // Start of continuous presentation eligibility; null until refreshed after migration.
+    eligibleSince: timestamp('eligible_since', { withTimezone: true }),
+    registeredAt: timestamp('registered_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'push_installations_membership_owner_fk',
+      columns: [table.organizationId, table.membershipId, table.userId],
+      foreignColumns: [
+        organizationMembers.organizationId,
+        organizationMembers.id,
+        organizationMembers.userId,
+      ],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'push_installations_session_owner_fk',
+      columns: [table.sessionId, table.userId],
+      foreignColumns: [authSessions.id, authSessions.userId],
+    }).onDelete('cascade'),
+    check('push_installations_revision_check', sql`${table.revision} > 0`),
+    check(
+      'push_installations_digests_check',
+      sql`${table.secretDigest} ~ '^[0-9a-f]{64}$' and (${table.targetDigest} is null or ${table.targetDigest} ~ '^[0-9a-f]{64}$')`,
+    ),
+    check(
+      'push_installations_target_kind_check',
+      sql`${table.targetKind} = 'FCM_TOKEN'`,
+    ),
+    check(
+      'push_installations_locale_check',
+      sql`${table.locale} in ('en-CA', 'fr-CA')`,
+    ),
+    check(
+      'push_installations_permission_check',
+      sql`${table.notificationPermission} in ('GRANTED', 'DENIED', 'NOT_REQUESTED')`,
+    ),
+    check(
+      'push_installations_state_check',
+      sql`${table.state} in ('ACTIVE', 'DISABLED', 'INVALID', 'UNREGISTERED')`,
+    ),
+    check(
+      'push_installations_target_check',
+      sql`(${table.state} in ('ACTIVE', 'DISABLED') and ${table.targetValue} is not null and ${table.targetDigest} is not null and octet_length(${table.targetValue}) between 1 and 4096) or (${table.state} in ('INVALID', 'UNREGISTERED') and ${table.targetValue} is null and ${table.targetDigest} is null)`,
+    ),
+    uniqueIndex('push_installations_target_unique')
+      .on(
+        table.projectId,
+        table.applicationId,
+        table.targetKind,
+        table.targetDigest,
+      )
+      .where(sql`${table.targetDigest} is not null`),
+    index('push_installations_session_idx').on(table.sessionId),
+    index('push_installations_member_idx').on(
+      table.organizationId,
+      table.membershipId,
+    ),
+    index('push_installations_freshness_idx').on(table.registeredAt),
+  ],
+);
+
+// Binding snapshots deliberately survive installation rebinding across organizations.
+export const pushDeliveries = pgTable(
+  'push_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    installationId: uuid('installation_id')
+      .notNull()
+      .references(() => pushInstallations.id, { onDelete: 'cascade' }),
+    bindingId: uuid('binding_id').notNull(),
+    state: varchar('state', { length: 20 }).notNull().default('PENDING'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    claimId: uuid('claim_id'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    registrationRevision: integer('registration_revision'),
+    lastFailure: varchar('last_failure', { length: 30 }),
+    terminalAt: timestamp('terminal_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    unique('push_deliveries_scope_id_unique').on(
+      table.organizationId,
+      table.id,
+    ),
+    unique('push_deliveries_binding_unique').on(
+      table.eventId,
+      table.installationId,
+      table.bindingId,
+    ),
+    foreignKey({
+      name: 'push_deliveries_event_scope_fk',
+      columns: [table.organizationId, table.eventId],
+      foreignColumns: [
+        pushAssignmentEvents.organizationId,
+        pushAssignmentEvents.id,
+      ],
+    }).onDelete('cascade'),
+    check(
+      'push_deliveries_state_check',
+      sql`${table.state} in ('PENDING', 'CLAIMED', 'ACCEPTED', 'SUPPRESSED', 'EXPIRED', 'FAILED')`,
+    ),
+    check(
+      'push_deliveries_attempts_check',
+      sql`${table.attempts} between 0 and 8 and (${table.state} <> 'PENDING' or ${table.attempts} < 8) and (${table.state} not in ('CLAIMED', 'ACCEPTED') or ${table.attempts} > 0)`,
+    ),
+    check(
+      'push_deliveries_claim_check',
+      sql`(${table.state} = 'CLAIMED' and ${table.claimId} is not null and ${table.leaseExpiresAt} is not null and ${table.registrationRevision} is not null and ${table.registrationRevision} > 0) or (${table.state} <> 'CLAIMED' and ${table.claimId} is null and ${table.leaseExpiresAt} is null and ${table.registrationRevision} is null)`,
+    ),
+    check(
+      'push_deliveries_terminal_check',
+      sql`(${table.state} in ('ACCEPTED', 'SUPPRESSED', 'EXPIRED', 'FAILED')) = (${table.terminalAt} is not null)`,
+    ),
+    check(
+      'push_deliveries_failure_check',
+      sql`${table.lastFailure} is null or ${table.lastFailure} in ('invalid-registration', 'retryable', 'configuration', 'rejected', 'disabled')`,
+    ),
+    index('push_deliveries_pending_idx')
+      .on(table.nextAttemptAt)
+      .where(sql`${table.state} = 'PENDING'`),
+    index('push_deliveries_lease_idx')
+      .on(table.leaseExpiresAt)
+      .where(sql`${table.state} = 'CLAIMED'`),
+    index('push_deliveries_terminal_idx')
+      .on(table.terminalAt)
+      .where(sql`${table.terminalAt} is not null`),
+  ],
 );

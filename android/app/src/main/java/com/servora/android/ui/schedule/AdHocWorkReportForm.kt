@@ -3,12 +3,15 @@ package com.servora.android.ui.schedule
 import android.text.format.DateFormat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -25,6 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -32,6 +38,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -91,156 +99,196 @@ internal fun AdHocWorkReportForm(
     onSubmit: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var problemToReport by remember { mutableStateOf<AdHocReportProblem?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val dismissLabel = stringResource(R.string.job_action_dismiss)
+    val problemMessage = problemToReport?.let { stringResource(adHocReportProblemMessage(it)) }
+    LaunchedEffect(problemToReport) {
+        val message = problemMessage ?: return@LaunchedEffect
+        try {
+            snackbarHostState.showSnackbar(
+                message = message,
+                actionLabel = dismissLabel,
+                withDismissAction = true,
+                duration = SnackbarDuration.Long,
+            )
+        } finally {
+            problemToReport = null
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetGesturesEnabled = false,
+        dragHandle = null,
         modifier = Modifier.testTag(AdHocReportFormTag),
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .fillMaxHeight()
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .imePadding(),
         ) {
-            Text(
-                text = stringResource(R.string.technician_ad_hoc_report_title),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-
-            if (!state.unknownCustomer) {
-                AdHocCustomerSearch(
-                    query = state.customerQuery,
-                    options = state.customerOptions,
-                    isSearching = state.isSearchingCustomers,
-                    selected = state.selectedCustomer,
-                    onQueryChange = onCustomerQueryChange,
-                    onSelect = onSelectCustomer,
-                )
-            }
-
-            TextButton(
-                onClick = { onUnknownCustomerChange(!state.unknownCustomer) },
-                modifier = Modifier.testTag(AdHocReportUnknownCustomerTag),
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(
-                    text = stringResource(
-                        if (state.unknownCustomer) {
-                            R.string.technician_ad_hoc_report_use_customer_search
-                        } else {
-                            R.string.technician_ad_hoc_report_unknown_customer
-                        },
-                    ),
-                )
-            }
-
-            if (state.unknownCustomer) {
-                OutlinedTextField(
-                    value = state.reportedCustomerName,
-                    onValueChange = onReportedCustomerNameChange,
-                    label = { Text(stringResource(R.string.technician_ad_hoc_report_reported_name)) },
-                    singleLine = true,
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag(AdHocReportCustomerNameTag),
-                )
-                OutlinedTextField(
-                    value = state.reportedCustomerPhone,
-                    onValueChange = onReportedCustomerPhoneChange,
-                    label = { Text(stringResource(R.string.technician_ad_hoc_report_reported_phone)) },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag(AdHocReportCustomerPhoneTag),
-                )
-                OutlinedTextField(
-                    value = state.reportedCustomerAddress,
-                    onValueChange = onReportedCustomerAddressChange,
-                    label = { Text(stringResource(R.string.technician_ad_hoc_report_reported_address)) },
-                    minLines = 2,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag(AdHocReportCustomerAddressTag),
-                )
-            } else if (state.selectedCustomer != null) {
-                AdHocPropertyPicker(
-                    options = state.propertyOptions,
-                    isReading = state.isReadingProperties,
-                    selected = state.selectedProperty,
-                    onSelect = onSelectProperty,
-                )
-                AdHocJobPicker(
-                    options = state.jobOptions,
-                    isReading = state.isReadingJobs,
-                    selected = state.selectedJob,
-                    onSelect = onSelectJob,
-                )
-            }
-
-            AdHocWorkWindow(
-                startedAt = state.workStartedAt,
-                endedAt = state.workEndedAt,
-                zone = zone,
-                onStartedAtChange = onWorkStartedAtChange,
-                onEndedAtChange = onWorkEndedAtChange,
-            )
-
-            AdHocOutcomePicker(
-                selected = state.outcome,
-                onSelect = onOutcomeChange,
-            )
-
-
-            OutlinedTextField(
-                value = state.summary,
-                onValueChange = onSummaryChange,
-                label = { Text(stringResource(R.string.technician_ad_hoc_report_summary)) },
-                minLines = 2,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(AdHocReportSummaryTag),
-            )
-            OutlinedTextField(
-                value = state.notes,
-                onValueChange = onNotesChange,
-                label = { Text(stringResource(R.string.technician_ad_hoc_report_notes)) },
-                minLines = 2,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(AdHocReportNotesTag),
-            )
-
-            state.problem?.let { problem ->
-                Text(
-                    text = stringResource(adHocReportProblemMessage(problem)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-
-            Row(modifier = Modifier.fillMaxWidth()) {
-                TextButton(enabled = !isSubmitting, onClick = onDismiss) {
-                    Text(stringResource(R.string.schedule_date_picker_cancel))
-                }
-                Spacer(Modifier.weight(1f))
-                Button(
-                    enabled = state.canSubmit && !isSubmitting,
-                    onClick = onSubmit,
-                    modifier = Modifier.testTag(AdHocReportSubmitTag),
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    if (isSubmitting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.height(18.dp).width(18.dp),
-                            strokeWidth = 2.dp,
+                    Text(
+                        text = stringResource(R.string.technician_ad_hoc_report_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+
+                    if (!state.unknownCustomer) {
+                        AdHocCustomerSearch(
+                            query = state.customerQuery,
+                            options = state.customerOptions,
+                            isSearching = state.isSearchingCustomers,
+                            selected = state.selectedCustomer,
+                            onQueryChange = onCustomerQueryChange,
+                            onSelect = onSelectCustomer,
                         )
-                    } else {
-                        Text(stringResource(R.string.technician_ad_hoc_report_submit))
+                    }
+
+                    TextButton(
+                        onClick = { onUnknownCustomerChange(!state.unknownCustomer) },
+                        modifier = Modifier.testTag(AdHocReportUnknownCustomerTag),
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (state.unknownCustomer) {
+                                    R.string.technician_ad_hoc_report_use_customer_search
+                                } else {
+                                    R.string.technician_ad_hoc_report_unknown_customer
+                                },
+                            ),
+                        )
+                    }
+
+                    if (state.unknownCustomer) {
+                        OutlinedTextField(
+                            value = state.reportedCustomerName,
+                            onValueChange = onReportedCustomerNameChange,
+                            label = { Text(stringResource(R.string.technician_ad_hoc_report_reported_name)) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(AdHocReportCustomerNameTag),
+                        )
+                        OutlinedTextField(
+                            value = state.reportedCustomerPhone,
+                            onValueChange = onReportedCustomerPhoneChange,
+                            label = { Text(stringResource(R.string.technician_ad_hoc_report_reported_phone)) },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(AdHocReportCustomerPhoneTag),
+                        )
+                        OutlinedTextField(
+                            value = state.reportedCustomerAddress,
+                            onValueChange = onReportedCustomerAddressChange,
+                            label = { Text(stringResource(R.string.technician_ad_hoc_report_reported_address)) },
+                            minLines = 2,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(AdHocReportCustomerAddressTag),
+                        )
+                    } else if (state.selectedCustomer != null) {
+                        AdHocPropertyPicker(
+                            options = state.propertyOptions,
+                            isReading = state.isReadingProperties,
+                            selected = state.selectedProperty,
+                            onSelect = onSelectProperty,
+                        )
+                        AdHocJobPicker(
+                            options = state.jobOptions,
+                            isReading = state.isReadingJobs,
+                            selected = state.selectedJob,
+                            onSelect = onSelectJob,
+                        )
+                    }
+
+                    AdHocWorkWindow(
+                        startedAt = state.workStartedAt,
+                        endedAt = state.workEndedAt,
+                        zone = zone,
+                        onStartedAtChange = onWorkStartedAtChange,
+                        onEndedAtChange = onWorkEndedAtChange,
+                        onProblem = { problemToReport = it },
+                    )
+
+                    AdHocOutcomePicker(
+                        selected = state.outcome,
+                        onSelect = onOutcomeChange,
+                    )
+
+
+                    OutlinedTextField(
+                        value = state.summary,
+                        onValueChange = onSummaryChange,
+                        label = { Text(stringResource(R.string.technician_ad_hoc_report_summary)) },
+                        minLines = 2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(AdHocReportSummaryTag),
+                    )
+                    OutlinedTextField(
+                        value = state.notes,
+                        onValueChange = onNotesChange,
+                        label = { Text(stringResource(R.string.technician_ad_hoc_report_notes)) },
+                        minLines = 2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(AdHocReportNotesTag),
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 24.dp),
+                ) {
+                    TextButton(enabled = !isSubmitting, onClick = onDismiss) {
+                        Text(stringResource(R.string.schedule_date_picker_cancel))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Button(
+                        enabled = !isSubmitting,
+                        onClick = {
+                            state.problem?.let { problemToReport = it } ?: onSubmit()
+                        },
+                        modifier = Modifier.testTag(AdHocReportSubmitTag),
+                    ) {
+                        if (isSubmitting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.height(18.dp).width(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Text(stringResource(R.string.technician_ad_hoc_report_submit))
+                        }
                     }
                 }
             }
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 24.dp, vertical = 88.dp),
+            )
         }
     }
 }
@@ -250,6 +298,8 @@ internal fun adHocReportProblemMessage(problem: AdHocReportProblem): Int =
     when (problem) {
         AdHocReportProblem.NO_SUMMARY -> R.string.technician_ad_hoc_report_problem_summary
         AdHocReportProblem.END_NOT_AFTER_START -> R.string.schedule_visit_problem_end
+        AdHocReportProblem.NO_CUSTOMER -> R.string.technician_ad_hoc_report_problem_customer
+        AdHocReportProblem.INCOMPLETE_CUSTOMER_DETAILS -> R.string.technician_ad_hoc_report_problem_customer_details
     }
 
 const val AdHocReportFormTag = "ad-hoc-report-form"
@@ -408,7 +458,7 @@ private fun AdHocOutcomePicker(
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
-        VisitOutcome.entries.forEach { option ->
+        VisitOutcome.workOptions.forEach { option ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -448,6 +498,7 @@ private fun AdHocWorkWindow(
     zone: ZoneId,
     onStartedAtChange: (Instant) -> Unit,
     onEndedAtChange: (Instant) -> Unit,
+    onProblem: (AdHocReportProblem) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -461,14 +512,23 @@ private fun AdHocWorkWindow(
             zone = zone,
             onDateChange = { date ->
                 val zoned = startedAt.atZone(zone)
-                onStartedAtChange(ZonedDateTime.of(date, zoned.toLocalTime(), zone).toInstant())
+                val nextStartedAt = ZonedDateTime.of(date, zoned.toLocalTime(), zone).toInstant()
+                onStartedAtChange(nextStartedAt)
+                if (!endedAt.isAfter(nextStartedAt)) {
+                    onProblem(AdHocReportProblem.END_NOT_AFTER_START)
+                }
             },
             onTimeChange = { hour, minute ->
                 val zoned = startedAt.atZone(zone)
-                onStartedAtChange(
-                    ZonedDateTime.of(zoned.toLocalDate(), java.time.LocalTime.of(hour, minute), zone)
-                        .toInstant(),
-                )
+                val nextStartedAt = ZonedDateTime.of(
+                    zoned.toLocalDate(),
+                    java.time.LocalTime.of(hour, minute),
+                    zone,
+                ).toInstant()
+                onStartedAtChange(nextStartedAt)
+                if (!endedAt.isAfter(nextStartedAt)) {
+                    onProblem(AdHocReportProblem.END_NOT_AFTER_START)
+                }
             },
         )
         AdHocDateTimeRow(
@@ -477,14 +537,23 @@ private fun AdHocWorkWindow(
             zone = zone,
             onDateChange = { date ->
                 val zoned = endedAt.atZone(zone)
-                onEndedAtChange(ZonedDateTime.of(date, zoned.toLocalTime(), zone).toInstant())
+                val nextEndedAt = ZonedDateTime.of(date, zoned.toLocalTime(), zone).toInstant()
+                onEndedAtChange(nextEndedAt)
+                if (!nextEndedAt.isAfter(startedAt)) {
+                    onProblem(AdHocReportProblem.END_NOT_AFTER_START)
+                }
             },
             onTimeChange = { hour, minute ->
                 val zoned = endedAt.atZone(zone)
-                onEndedAtChange(
-                    ZonedDateTime.of(zoned.toLocalDate(), java.time.LocalTime.of(hour, minute), zone)
-                        .toInstant(),
-                )
+                val nextEndedAt = ZonedDateTime.of(
+                    zoned.toLocalDate(),
+                    java.time.LocalTime.of(hour, minute),
+                    zone,
+                ).toInstant()
+                onEndedAtChange(nextEndedAt)
+                if (!nextEndedAt.isAfter(startedAt)) {
+                    onProblem(AdHocReportProblem.END_NOT_AFTER_START)
+                }
             },
         )
     }
@@ -502,6 +571,7 @@ private fun AdHocDateTimeRow(
     var pickingDate by rememberSaveable { mutableStateOf(false) }
     var pickingTime by rememberSaveable { mutableStateOf(false) }
     val locale = Locale.getDefault()
+    val focusManager = LocalFocusManager.current
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -512,14 +582,20 @@ private fun AdHocDateTimeRow(
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.width(96.dp),
         )
-        TextButton(onClick = { pickingDate = true }) {
+        TextButton(onClick = {
+            focusManager.clearFocus(force = true)
+            pickingDate = true
+        }) {
             Text(
                 text = zoned.toLocalDate().format(
                     DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale),
                 ),
             )
         }
-        TextButton(onClick = { pickingTime = true }) {
+        TextButton(onClick = {
+            focusManager.clearFocus(force = true)
+            pickingTime = true
+        }) {
             Text(
                 text = zoned.toLocalTime().format(
                     DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale),
@@ -529,13 +605,23 @@ private fun AdHocDateTimeRow(
     }
 
     if (pickingDate) {
-        AdHocDatePicker(initialDate = zoned.toLocalDate(), onPick = { onDateChange(it) }, onDismiss = { pickingDate = false })
+        AdHocDatePicker(
+            initialDate = zoned.toLocalDate(),
+            onPick = {
+                onDateChange(it)
+                pickingDate = false
+            },
+            onDismiss = { pickingDate = false },
+        )
     }
     if (pickingTime) {
         AdHocTimePicker(
             initialHour = zoned.hour,
             initialMinute = zoned.minute,
-            onPick = { hour, minute -> onTimeChange(hour, minute) },
+            onPick = { hour, minute ->
+                onTimeChange(hour, minute)
+                pickingTime = false
+            },
             onDismiss = { pickingTime = false },
         )
     }
@@ -561,6 +647,8 @@ private fun AdHocDatePicker(
                     }
                     if (picked != null) {
                         onPick(picked)
+                    } else {
+                        onDismiss()
                     }
                 },
             ) {
@@ -595,7 +683,9 @@ private fun AdHocTimePicker(
                 Text(stringResource(R.string.job_action_ok))
             }
         },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.job_action_cancel)) }
+        },
         text = { TimePicker(state = state) },
     )
 }
-

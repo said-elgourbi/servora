@@ -19,7 +19,7 @@ An audio note is **evidence a technician recorded on a Job** (`BR-091`), of its 
 field, not a Visit status and not a photo. It is recorded against the **Visit** the technician was working,
 exactly as a photo is: the request names that Visit and the API refuses one that names none or one that is
 not on this Job (`BR-042`, `BR-047`, `BR-080`,
-`docs/tracker/056-evidence-belongs-to-a-visit.md`). It is **appended only** — nothing in this contract edits a
+`docs/tracker/shared/056-evidence-belongs-to-a-visit.md`). It is **appended only** — nothing in this contract edits a
 recording, and there is no edit-evidence operation in Servora at all (`BR-067`, `BR-088`). A recording is
 draft material until this API records it and immutable historical evidence from that moment. The explicit,
 audited **removal** operation (`BR-089`) appends a removal record beside it, which takes the evidence out
@@ -122,7 +122,7 @@ note, and `audioDurationSeconds` is the length the API read from the container. 
 `null` on every event but `JOB_AUDIO_REMOVED`, which carries no `body` (`docs/api/job-activity.md` §3.2).
 The entry is **Visit-level** — `visitSequence` names the Visit the recording was made during, which is what
 makes it read beside that field attempt in Job Activity (`BR-047`, `BR-080`,
-`docs/tracker/056-evidence-belongs-to-a-visit.md`). A recording made before the link existed carries no
+`docs/tracker/shared/056-evidence-belongs-to-a-visit.md`). A recording made before the link existed carries no
 Visit, and that is the only case in which the entry is Job-level (`visitSequence: null`).
 
 ### 3.2 Idempotency (`BR-031`, offline standard §5)

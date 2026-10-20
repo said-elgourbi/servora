@@ -3,11 +3,11 @@
 **Status: Accepted** (product-owner decisions, 2026-09-13)
 
 > **Implementation note.** The Property lifecycle endpoints this ADR anticipates are implemented,
-> together with their Android flows: see `docs/tracker/013-property-lifecycle.md`. Where the
+> together with their Android flows: see `docs/tracker/shared/013-property-lifecycle.md`. Where the
 > consequences below describe `properties.edit`, `properties.archive` and `properties.delete` as
 > "not enforced by a route yet", that tracker supersedes them. The **client** half of D7's
 > offline/outbox standard — the Room working set and outbox — is now implemented as well: see
-> `docs/decisions/014-android-offline-engine.md` and `docs/tracker/025-android-offline-room-outbox.md`.
+> `docs/decisions/014-android-offline-engine.md` and `docs/tracker/android/025-android-offline-room-outbox.md`.
 > D7 itself remains the decision that governs it.
 
 Extends `ADR-009` (Android session persistence) by naming the offline/outbox standard it builds on.
@@ -16,7 +16,7 @@ No earlier decision is superseded.
 References: `BR-001`, `BR-006`, `BR-007`, `BR-011`, `BR-031`, `BR-032`, `BR-041`, `BR-057`,
 `BR-060`, `BR-081`, `BR-082`, `BR-083`, `BR-084`, `BR-085`, `BR-086`, `Project.md` §8, §9, §13,
 §14, §15, §31, `dev.md` §4, §6, §7, §10, §18, `docs/architecture/offline-first-architecture.md`,
-`docs/domain/job-visit-domain-model.md`, `docs/tracker/011-android-add-property.md`.
+`docs/domain/job-visit-domain-model.md`, `docs/tracker/android/011-android-add-property.md`.
 
 ## Context
 

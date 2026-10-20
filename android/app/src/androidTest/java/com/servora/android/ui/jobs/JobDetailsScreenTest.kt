@@ -280,7 +280,7 @@ class JobDetailsScreenTest {
      * The note is typed into, so the keyboard shortens the sheet and the body scrolls: an action inside that
      * scrolling region leaves the screen with the body, and the technician has to dismiss the keyboard to
      * reach **Discard** or **Add** — the defect reported in
-     * `docs/tracker/057-qa-issue-list-visit-workflow.md` §3. The keyboard cannot be shown or hidden from an
+     * `docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §3. The keyboard cannot be shown or hidden from an
      * instrumentation test, so what is asserted is where each part sits
      * (`docs/design/android-design-system.md`, "Keyboard (IME) inset"): the note is inside the region that
      * shrinks, and the two decisions are not.
@@ -1303,11 +1303,18 @@ class JobDetailsScreenTest {
                     onOpenInMaps = onOpenInMaps,
                     onLoadAssignableTechnicians = onLoadAssignableTechnicians,
                     onChangeJobStatus = onChangeJobStatus,
+                    onMarkQuoteSent = {},
+                    onMarkQuoteRequired = {},
+                    onMarkQuoteApproved = {},
+                    onMarkQuoteRejected = {},
                     onChangeVisitStatus = onChangeVisitStatus,
                     onCompleteVisit = onCompleteVisit,
                     onDiscardQueuedVisitAction = onDiscardQueuedVisitAction,
                     onDiscardQueuedVisitNote = onDiscardQueuedVisitNote,
                     onAddActivityText = onAddActivityText,
+                    onEditVisitNote = { _, _ -> },
+                    onRemoveVisitNote = { _, _ -> },
+                    canManageVisitNotes = false,
                     onRescheduleVisit = onRescheduleVisit,
                     onAssignTechnicians = onAssignTechnicians,
                     onConfirmPendingAction = onConfirmPendingAction,
@@ -2818,7 +2825,7 @@ private class RecordingJobPhotoImages(private val context: Context) : JobPhotoIm
  * A field is typed into inside a sheet's body, which shrinks and scrolls while the keyboard is up, and the
  * sheet's decisions are its own foot — drawn under that body rather than inside it, so the keyboard cannot
  * carry them off the screen (`docs/design/android-design-system.md`, "Keyboard (IME) inset";
- * `docs/tracker/057-qa-issue-list-visit-workflow.md` §3). The keyboard itself cannot be shown or hidden from
+ * `docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §3). The keyboard itself cannot be shown or hidden from
  * an instrumentation test, so the contract is asserted in this structural form.
  */
 private fun hasNoScrollableAncestor(): SemanticsMatcher {
@@ -2827,4 +2834,3 @@ private fun hasNoScrollableAncestor(): SemanticsMatcher {
         !insideAScrollingRegion.matches(node)
     }
 }
-

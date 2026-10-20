@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Post,
@@ -76,6 +77,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @Header('Cache-Control', 'no-store')
   @UseGuards(AuthGuard)
   async me(@Req() request: AuthenticatedRequest): Promise<AuthMeDto> {
     const auth = requireAuth(request);

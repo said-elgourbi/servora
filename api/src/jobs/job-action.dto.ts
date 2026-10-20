@@ -329,7 +329,6 @@ export function parseAddVisitNoteDto(input: unknown): AddVisitNoteDto {
   };
 }
 
-
 export interface EditVisitNoteDto {
   readonly body: string;
 }
@@ -354,6 +353,62 @@ export function parseRemoveVisitNoteDto(input: unknown): RemoveVisitNoteDto {
     fail('reason', 'is required');
   }
   return { reason };
+}
+
+export interface MarkQuoteSentDto {
+  readonly note: string | null;
+  readonly externalReference: string | null;
+  readonly expectedVersion: number | null;
+}
+
+export function parseMarkQuoteSentDto(input: unknown): MarkQuoteSentDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  return {
+    note: optionalText(source.note, 'note', 2000),
+    externalReference: optionalText(
+      source.externalReference,
+      'externalReference',
+      255,
+    ),
+    expectedVersion: optionalPositiveInteger(
+      source.expectedVersion,
+      'expectedVersion',
+    ),
+  };
+}
+
+export interface DecideQuoteDto {
+  readonly note: string | null;
+  readonly expectedVersion: number | null;
+}
+
+export function parseDecideQuoteDto(input: unknown): DecideQuoteDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  return {
+    note: optionalText(source.note, 'note', 2000),
+    expectedVersion: optionalPositiveInteger(
+      source.expectedVersion,
+      'expectedVersion',
+    ),
+  };
+}
+
+export interface CorrectQuoteToRequiredDto {
+  readonly note: string | null;
+  readonly expectedVersion: number | null;
+}
+
+export function parseCorrectQuoteToRequiredDto(
+  input: unknown,
+): CorrectQuoteToRequiredDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  return {
+    note: optionalText(source.note, 'note', 2000),
+    expectedVersion: optionalPositiveInteger(
+      source.expectedVersion,
+      'expectedVersion',
+    ),
+  };
 }
 
 /** Validates untrusted input into an `AssignVisitTechniciansDto`. */

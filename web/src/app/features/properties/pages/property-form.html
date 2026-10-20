@@ -1,0 +1,108 @@
+<section
+  [appPageTitle]="i18n.text(saved() ? 'propertySaved' : id() ? 'propertyEdit' : 'propertyNew')"
+>
+  <a class="back-link" [routerLink]="back()"
+    >←
+    {{
+      i18n.text(
+        id()
+          ? 'propertyBackProperty'
+          : auth.hasPermission('customers.view')
+            ? 'propertyBackCustomer'
+            : 'propertyBackHome'
+      )
+    }}</a
+  >
+  <h1>{{ i18n.text(saved() ? 'propertySaved' : id() ? 'propertyEdit' : 'propertyNew') }}</h1>
+  <p class="context">{{ customerName() || i18n.text('propertyCustomerContext') }}</p>
+  <p class="muted">{{ i18n.text('customerOnlineOnly') }}</p>
+  @if (saved(); as accepted) {
+    <div class="panel" role="status">
+      <p>{{ i18n.text('propertySavedDescription') }}</p>
+      <p>
+        {{ accepted.name }} · {{ accepted.addressLine1 }}, {{ accepted.city }},
+        {{ accepted.province }} {{ accepted.postalCode }}
+      </p>
+    </div>
+  }
+  @if (loading()) {
+    <p role="status">{{ i18n.text('busy') }}</p>
+  }
+  @if (readError(); as message) {
+    <div role="alert" class="notice">
+      <p>{{ i18n.text(message) }}</p>
+      @if (allowed()) {
+        <button mat-stroked-button (click)="reload()">{{ i18n.text('retry') }}</button>
+      }
+    </div>
+  }
+  @if (allowed() && !saved() && !loading() && !readError() && (!id() || property())) {
+    @if (property()?.status === 'ARCHIVED') {
+      <p class="notice">{{ i18n.text('propertyArchivedEdit') }}</p>
+    }
+    <form [formGroup]="form" (ngSubmit)="save()">
+      <fieldset [disabled]="busy()" class="editor">
+        <legend>{{ i18n.text('propertyServiceAddress') }}</legend>
+        <mat-form-field class="wide"
+          ><mat-label>{{ i18n.text('propertyName') }}</mat-label
+          ><input matInput formControlName="name" maxlength="255"
+        /></mat-form-field>
+        <mat-form-field
+          ><mat-label>{{ i18n.text('propertyStreet') }}</mat-label
+          ><input matInput formControlName="addressLine1" maxlength="255" required /><mat-error>{{
+            i18n.text('customerRequired')
+          }}</mat-error></mat-form-field
+        >
+        <mat-form-field
+          ><mat-label>{{ i18n.text('propertyUnit') }}</mat-label
+          ><input matInput formControlName="addressLine2" maxlength="255"
+        /></mat-form-field>
+        <mat-form-field
+          ><mat-label>{{ i18n.text('propertyCity') }}</mat-label
+          ><input matInput formControlName="city" maxlength="100" required /><mat-error>{{
+            i18n.text('customerRequired')
+          }}</mat-error></mat-form-field
+        >
+        <label
+          >{{ i18n.text('propertyProvince')
+          }}<select
+            formControlName="province"
+            [attr.aria-label]="i18n.text('propertyProvince')"
+            required
+          >
+            <option value="">{{ i18n.text('propertyChooseProvince') }}</option>
+            @for (province of provinces; track province.code) {
+              <option [value]="province.code">{{ i18n.text(province.label) }}</option>
+            }
+          </select></label
+        >
+        <mat-form-field
+          ><mat-label>{{ i18n.text('propertyPostalCode') }}</mat-label
+          ><input matInput formControlName="postalCode" maxlength="20" required /><mat-error>{{
+            i18n.text('customerRequired')
+          }}</mat-error></mat-form-field
+        >
+        <mat-form-field class="wide"
+          ><mat-label>{{ i18n.text('customerNotes') }}</mat-label
+          ><textarea matInput formControlName="notes" maxlength="4000" rows="4"></textarea>
+        </mat-form-field>
+      </fieldset>
+      @if (attempted() && form.invalid) {
+        <p role="alert">{{ i18n.text('propertyFormInvalid') }}</p>
+      }
+      @if (error(); as message) {
+        <p role="alert" class="notice">{{ i18n.text(message) }}</p>
+      }
+      <div class="actions">
+        <button mat-flat-button type="submit" [disabled]="busy() || blocked()">
+          {{ i18n.text(busy() ? 'customerSaving' : 'propertySave') }}</button
+        ><a mat-button [routerLink]="back()">{{ i18n.text('cancel') }}</a>
+        @if (blocked() && id()) {
+          <button mat-stroked-button type="button" (click)="reload()">
+            {{ i18n.text('customerReloadDiscard') }}
+          </button>
+        }
+      </div>
+    </form>
+  }
+</section>

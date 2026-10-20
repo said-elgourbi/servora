@@ -43,7 +43,7 @@ const PASSWORD = 'servora-e2e-password';
 /**
  * The Job and Visit management actions (`BR-058` – `BR-079`).
  *
- * The lifecycle asserted here is the one `docs/tracker/051-job-visit-lifecycle-redesign.md` defines:
+ * The lifecycle asserted here is the one `docs/tracker/shared/051-job-visit-lifecycle-redesign.md` defines:
  * a Job is `NEW`, `ACTIVE`, `COMPLETED` or `CANCELED`, and operational attention is derived rather
  * than stored. Authorization is asserted per route (`401` / `403` / `200`), and so is the business
  * rule each action exists for: the lifecycle table refuses a destination `BR-058` does not permit,
@@ -868,7 +868,7 @@ describe('job actions (e2e)', () => {
   it('reopens a completed Job to ACTIVE with the reopen note recorded', async () => {
     // Reopening is the only way out of a terminal status (`BR-058`, `BR-063`), and it returns the
     // request to execution — `ACTIVE`, the status a Job with historical Visits really has
-    // (`docs/tracker/051-job-visit-lifecycle-redesign.md`; an `OPEN QUESTION` in `BR-063`).
+    // (`docs/tracker/shared/051-job-visit-lifecycle-redesign.md`; an `OPEN QUESTION` in `BR-063`).
     const customer = await newCustomer('Close Co');
     const job = await newJob(customer.id, 'ACTIVE');
     const session = await signInFor([JOB_PERMISSIONS.UPDATE]);

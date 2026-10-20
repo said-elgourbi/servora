@@ -85,6 +85,7 @@ describe('job details projection', () => {
       selectedVisit: {
         visitId: 'visit-1',
         status: 'SCHEDULED',
+        purposeCode: 'WORK',
         scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
         scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
         version: 4,
@@ -120,6 +121,7 @@ describe('job details projection', () => {
       selectedVisit: {
         id: 'visit-1',
         status: 'SCHEDULED',
+        purposeCode: 'WORK',
         scheduledStart: '2026-09-08T13:00:00.000Z',
         scheduledEnd: '2026-09-08T15:00:00.000Z',
         // `BR-073` permits rescheduling only while the Visit is `SCHEDULED`.
@@ -171,6 +173,7 @@ describe('job details projection', () => {
           selectedVisit: {
             visitId: 'visit-1',
             status,
+            purposeCode: 'WORK',
             scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
             scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
             version: 1,
@@ -257,6 +260,7 @@ describe('job details projection', () => {
       selectedVisit: {
         visitId: 'visit-1',
         status: 'DRAFT',
+        purposeCode: 'WORK',
         scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
         scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
         version: 1,
@@ -283,6 +287,7 @@ describe('job details projection', () => {
       selectedVisit: {
         visitId: 'visit-1',
         status: 'SCHEDULED',
+        purposeCode: 'WORK',
         scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
         scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
         version: 1,
@@ -571,6 +576,7 @@ describe('job details projection', () => {
       selectedVisit: {
         visitId: 'visit-1',
         status: 'COMPLETED',
+        purposeCode: 'WORK',
         scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
         scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
         version: 3,
@@ -581,6 +587,7 @@ describe('job details projection', () => {
           visitId: 'visit-1',
           sequence: 1,
           status: 'COMPLETED',
+          purposeCode: 'WORK',
           outcomeCode,
           scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
           scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
@@ -651,6 +658,7 @@ describe('job details projection', () => {
       selectedVisit: {
         visitId: 'visit-2',
         status: 'SCHEDULED',
+        purposeCode: 'WORK',
         scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
         scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
         version: 2,
@@ -663,6 +671,7 @@ describe('job details projection', () => {
           visitId: 'visit-1',
           sequence: 1,
           status: 'COMPLETED',
+          purposeCode: 'WORK',
           // The Visit's own **current** outcome (`BR-077`): a Visit that has one reports it, and a
           // Visit that holds none reports `null` rather than the outcome its history once recorded
           // (`BR-079`, `BR-042`).
@@ -678,6 +687,7 @@ describe('job details projection', () => {
           visitId: 'visit-2',
           sequence: 2,
           status: 'SCHEDULED',
+          purposeCode: 'WORK',
           outcomeCode: null,
           scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
           scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
@@ -695,10 +705,12 @@ describe('job details projection', () => {
         id: 'visit-1',
         sequence: 1,
         status: 'COMPLETED',
+        purposeCode: 'WORK',
         outcomeCode: 'RESOLVED',
         scheduledStart: '2026-09-01T13:00:00.000Z',
         scheduledEnd: '2026-09-01T15:00:00.000Z',
         version: 7,
+        isAdHocWork: false,
         technicians: [
           { membershipId: 'member-9', name: 'Dave Past', roleCode: 'LEAD' },
         ],
@@ -707,10 +719,12 @@ describe('job details projection', () => {
         id: 'visit-2',
         sequence: 2,
         status: 'SCHEDULED',
+        purposeCode: 'WORK',
         outcomeCode: null,
         scheduledStart: '2026-09-08T13:00:00.000Z',
         scheduledEnd: '2026-09-08T15:00:00.000Z',
         version: 2,
+        isAdHocWork: false,
         technicians: [
           { membershipId: 'member-1', name: 'Mike Lead', roleCode: 'LEAD' },
           // A member with no profile yet is reported by assignment, without a fabricated name
@@ -722,6 +736,53 @@ describe('job details projection', () => {
     // The represented Visit is not privileged in the list: which Visit it is stays `selectedVisit`'s
     // answer (`BR-081`, `BR-041`).
     expect(dto.selectedVisit?.id).toBe(dto.visits[1]?.id);
+  });
+
+  it('marks a Visit reconciled from an ad-hoc report as ad-hoc work', () => {
+    const base: JobDetails = {
+      job: jobRow({ status: 'ACTIVE' }),
+      customerId: CUSTOMER_ID,
+      customerName: 'Martha Reynolds',
+      customerContactDetails: {
+        email: null,
+        phone: null,
+        notes: null,
+        contacts: [],
+      },
+      selectedVisit: null,
+      technicians: [],
+      visits: [
+        {
+          visitId: 'visit-1',
+          sequence: 1,
+          status: 'COMPLETED',
+          purposeCode: 'WORK',
+          outcomeCode: 'RESOLVED',
+          scheduledStart: new Date('2026-09-01T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-01T15:00:00.000Z'),
+          version: 1,
+          isAdHocWork: true,
+          technicians: [],
+        },
+      ],
+    };
+
+    // The flag is a stored fact, reported verbatim rather than inferred from the Visit's status or
+    // date (`BR-AH-003`, `BR-AH-006`, `BR-042`).
+    expect(toJobDetailsDto(base).visits).toEqual([
+      {
+        id: 'visit-1',
+        sequence: 1,
+        status: 'COMPLETED',
+        purposeCode: 'WORK',
+        outcomeCode: 'RESOLVED',
+        scheduledStart: '2026-09-01T13:00:00.000Z',
+        scheduledEnd: '2026-09-01T15:00:00.000Z',
+        version: 1,
+        isAdHocWork: true,
+        technicians: [],
+      },
+    ]);
   });
 
   it('reports a Visit with no schedule as both ends null, and no Visits as an empty list', () => {
@@ -749,6 +810,7 @@ describe('job details projection', () => {
             visitId: 'visit-1',
             sequence: 1,
             status: 'DRAFT',
+            purposeCode: 'WORK',
             outcomeCode: null,
             scheduledStart: null,
             scheduledEnd: null,
@@ -762,10 +824,12 @@ describe('job details projection', () => {
         id: 'visit-1',
         sequence: 1,
         status: 'DRAFT',
+        purposeCode: 'WORK',
         outcomeCode: null,
         scheduledStart: null,
         scheduledEnd: null,
         version: 1,
+        isAdHocWork: false,
         technicians: [],
       },
     ]);
@@ -805,6 +869,7 @@ describe('job details projection', () => {
         selectedVisit: {
           visitId: 'visit-1',
           status: 'COMPLETED',
+          purposeCode: 'WORK',
           scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
           scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
           version: 1,
@@ -814,6 +879,7 @@ describe('job details projection', () => {
             visitId: 'visit-1',
             sequence: 1,
             status: 'COMPLETED',
+            purposeCode: 'WORK',
             outcomeCode: 'NEEDS_FOLLOW_UP',
             scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
             scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
@@ -825,6 +891,66 @@ describe('job details projection', () => {
       { canCreateSchedule: true },
     );
     expect(completedFollowUp.canScheduleVisit).toBe(true);
+    for (const outcomeCode of ['RESOLVED', 'NO_WORK_REQUIRED'] as const) {
+      const finishedVisit = {
+        visitId: 'finished-visit',
+        sequence: 1,
+        status: 'COMPLETED' as const,
+        purposeCode:
+          outcomeCode === 'RESOLVED'
+            ? ('WORK' as const)
+            : ('ASSESSMENT' as const),
+        outcomeCode,
+        scheduledStart: new Date('2026-09-08T13:00:00Z'),
+        scheduledEnd: new Date('2026-09-08T15:00:00Z'),
+        version: 1,
+        technicians: [],
+      };
+      const reopened = {
+        ...base,
+        selectedVisit: finishedVisit,
+        visits: [finishedVisit],
+      };
+      expect(
+        toJobDetailsDto(reopened, { canCreateSchedule: true }).canScheduleVisit,
+      ).toBe(true);
+      expect(toJobDetailsDto(reopened).canScheduleVisit).toBe(false);
+      expect(
+        toJobDetailsDto(
+          { ...reopened, job: jobRow({ status: 'COMPLETED' }) },
+          { canCreateSchedule: true },
+        ).canScheduleVisit,
+      ).toBe(false);
+      expect(
+        toJobDetailsDto(
+          {
+            ...reopened,
+            visits: [
+              { ...finishedVisit, status: 'CANCELED', outcomeCode: null },
+            ],
+          },
+          { canCreateSchedule: true },
+        ).canScheduleVisit,
+      ).toBe(true);
+      expect(
+        toJobDetailsDto(
+          {
+            ...reopened,
+            visits: [
+              finishedVisit,
+              {
+                ...finishedVisit,
+                visitId: 'open',
+                sequence: 2,
+                status: 'SCHEDULED',
+                outcomeCode: null,
+              },
+            ],
+          },
+          { canCreateSchedule: true },
+        ).canScheduleVisit,
+      ).toBe(false);
+    }
 
     // A represented Visit that is still scheduled/active is not a scheduling opportunity.
     const activeVisit = toJobDetailsDto(
@@ -833,6 +959,7 @@ describe('job details projection', () => {
         selectedVisit: {
           visitId: 'visit-2',
           status: 'SCHEDULED',
+          purposeCode: 'WORK',
           scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
           scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
           version: 1,
@@ -842,6 +969,7 @@ describe('job details projection', () => {
             visitId: 'visit-2',
             sequence: 1,
             status: 'SCHEDULED',
+            purposeCode: 'WORK',
             outcomeCode: null,
             scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
             scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
@@ -884,6 +1012,7 @@ describe('job details projection', () => {
         selectedVisit: {
           visitId: 'visit-1',
           status: 'COMPLETED',
+          purposeCode: 'WORK',
           scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
           scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
           version: 1,
@@ -893,6 +1022,7 @@ describe('job details projection', () => {
             visitId: 'visit-1',
             sequence: 1,
             status: 'COMPLETED',
+            purposeCode: 'WORK',
             outcomeCode,
             scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
             scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
@@ -903,11 +1033,19 @@ describe('job details projection', () => {
       });
 
     // A completed attempt whose outcome expects a follow-up admits a request (`BR-078`).
-    expect(completed('NEEDS_FOLLOW_UP').selectedVisit?.requestFollowUpAllowed).toBe(true);
-    expect(completed('NEEDS_PARTS').selectedVisit?.requestFollowUpAllowed).toBe(true);
-    expect(completed('UNABLE_TO_COMPLETE').selectedVisit?.requestFollowUpAllowed).toBe(true);
+    expect(
+      completed('NEEDS_FOLLOW_UP').selectedVisit?.requestFollowUpAllowed,
+    ).toBe(true);
+    expect(completed('NEEDS_PARTS').selectedVisit?.requestFollowUpAllowed).toBe(
+      true,
+    );
+    expect(
+      completed('UNABLE_TO_COMPLETE').selectedVisit?.requestFollowUpAllowed,
+    ).toBe(true);
     // A resolved attempt declares no follow-up is required, so no request action is offered.
-    expect(completed('RESOLVED').selectedVisit?.requestFollowUpAllowed).toBe(false);
+    expect(completed('RESOLVED').selectedVisit?.requestFollowUpAllowed).toBe(
+      false,
+    );
     // A completed attempt that holds no outcome holds no expectation either (`BR-077`, `BR-079`).
     expect(completed(null).selectedVisit?.requestFollowUpAllowed).toBe(false);
 
@@ -917,6 +1055,7 @@ describe('job details projection', () => {
       selectedVisit: {
         visitId: 'visit-2',
         status: 'SCHEDULED',
+        purposeCode: 'WORK',
         scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
         scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
         version: 1,
@@ -926,6 +1065,7 @@ describe('job details projection', () => {
           visitId: 'visit-2',
           sequence: 1,
           status: 'SCHEDULED',
+          purposeCode: 'WORK',
           outcomeCode: null,
           scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
           scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
@@ -938,5 +1078,159 @@ describe('job details projection', () => {
 
     // A Job with no represented Visit has no field attempt to request another Visit for.
     expect(toJobDetailsDto(base).selectedVisit).toBeNull();
+  });
+
+  it('projects the current quote workflow block and manager actions', () => {
+    const details: JobDetails = {
+      job: jobRow({ status: 'ACTIVE' }),
+      customerId: CUSTOMER_ID,
+      customerName: 'Martha Reynolds',
+      customerContactDetails: {
+        email: null,
+        phone: null,
+        notes: null,
+        contacts: [],
+      },
+      selectedVisit: null,
+      technicians: [],
+      visits: [
+        {
+          visitId: 'assessment-visit',
+          sequence: 1,
+          status: 'COMPLETED',
+          purposeCode: 'ASSESSMENT',
+          outcomeCode: 'QUOTE_REQUIRED',
+          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          version: 1,
+          technicians: [],
+        },
+      ],
+      quoteWorkflow: {
+        id: 'quote-workflow-1',
+        state: 'SENT',
+        sourceVisitId: 'assessment-visit',
+        sentAt: new Date('2026-09-08T16:00:00.000Z'),
+        sentByMembershipId: 'manager-1',
+        sentNote: 'Sent by email.',
+        externalReference: 'Q-1042',
+        decidedAt: null,
+        decidedByMembershipId: null,
+        decisionNote: null,
+        version: 3,
+        currentDocument: {
+          id: 'quote-document-1',
+          displayName: 'Assessment quote.pdf',
+          documentVersion: 2,
+          isCurrent: true,
+          contentType: 'application/pdf',
+          byteSize: 1234,
+          uploadedByMembershipId: 'manager-1',
+          supersededAt: null,
+          supersededByJobDocumentId: null,
+          recordedAt: new Date('2026-09-08T15:45:00.000Z'),
+        },
+      },
+    };
+
+    expect(toJobDetailsDto(details).quote).toMatchObject({
+      id: 'quote-workflow-1',
+      state: 'SENT',
+      sourceVisitId: 'assessment-visit',
+      sourceVisitSequence: 1,
+      version: 3,
+      sentAt: '2026-09-08T16:00:00.000Z',
+      sentByMembershipId: 'manager-1',
+      sentNote: 'Sent by email.',
+      externalReference: 'Q-1042',
+      decidedAt: null,
+      decidedByMembershipId: null,
+      decisionNote: null,
+      currentDocument: {
+        id: 'quote-document-1',
+        displayName: 'Assessment quote.pdf',
+        documentVersion: 2,
+        isCurrent: true,
+        contentType: 'application/pdf',
+        byteSize: 1234,
+        uploadedByMembershipId: 'manager-1',
+        supersededAt: null,
+        supersededByJobDocumentId: null,
+        recordedAt: '2026-09-08T15:45:00.000Z',
+      },
+      allowedActions: [],
+    });
+
+    expect(
+      toJobDetailsDto(details, { canManageQuote: true }).quote?.allowedActions,
+    ).toEqual([
+      'UPLOAD_DOCUMENT',
+      'READ_DOCUMENT',
+      'MARK_REQUIRED',
+      'MARK_APPROVED',
+      'MARK_REJECTED',
+    ]);
+    expect(
+      toJobDetailsDto(details, { canReadQuoteDocument: true }).quote
+        ?.allowedActions,
+    ).toEqual(['READ_DOCUMENT']);
+  });
+
+  it('does not offer quote decision correction after downstream Work exists', () => {
+    const details: JobDetails = {
+      job: jobRow({ status: 'ACTIVE' }),
+      customerId: CUSTOMER_ID,
+      customerName: 'Martha Reynolds',
+      customerContactDetails: {
+        email: null,
+        phone: null,
+        notes: null,
+        contacts: [],
+      },
+      selectedVisit: null,
+      technicians: [],
+      visits: [
+        {
+          visitId: 'assessment-visit',
+          sequence: 1,
+          status: 'COMPLETED',
+          purposeCode: 'ASSESSMENT',
+          outcomeCode: 'QUOTE_REQUIRED',
+          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          version: 1,
+          technicians: [],
+        },
+        {
+          visitId: 'work-visit',
+          sequence: 2,
+          status: 'SCHEDULED',
+          purposeCode: 'WORK',
+          outcomeCode: null,
+          scheduledStart: new Date('2026-09-09T13:00:00.000Z'),
+          scheduledEnd: new Date('2026-09-09T15:00:00.000Z'),
+          version: 1,
+          technicians: [],
+        },
+      ],
+      quoteWorkflow: {
+        id: 'quote-workflow-1',
+        state: 'APPROVED',
+        sourceVisitId: 'assessment-visit',
+        sentAt: new Date('2026-09-08T16:00:00.000Z'),
+        sentByMembershipId: 'manager-1',
+        sentNote: null,
+        externalReference: null,
+        decidedAt: new Date('2026-09-08T17:00:00.000Z'),
+        decidedByMembershipId: 'manager-1',
+        decisionNote: 'Approved by phone.',
+        version: 4,
+        currentDocument: null,
+      },
+    };
+
+    expect(
+      toJobDetailsDto(details, { canManageQuote: true }).quote?.allowedActions,
+    ).toEqual(['UPLOAD_DOCUMENT']);
   });
 });

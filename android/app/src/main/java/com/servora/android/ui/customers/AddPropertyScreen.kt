@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -624,7 +625,7 @@ internal fun PropertyFormActions(
     saveTag: String = AddPropertySaveTag,
     cancelTag: String = AddPropertyCancelTag,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.fillMaxWidth().imePadding()) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(
             modifier = Modifier
@@ -720,5 +721,4 @@ private fun provinceLabelRes(province: PropertyProvince): Int =
         PropertyProvince.SK -> R.string.property_province_sk
         PropertyProvince.YT -> R.string.property_province_yt
     }
-
 

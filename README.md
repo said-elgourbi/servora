@@ -13,19 +13,24 @@ Servora is a monorepo built feature by feature as controlled vertical slices.
   over that same stack (`docs/decisions/016-android-image-stack-and-viewer-zoom.md`). The Job and its
   Activity — and so the evidence it holds — are readable offline through the working set, and a photo
   that is on neither the device nor the image stack's cache is reported as not available offline
-  (`docs/tracker/029-photo-evidence-phases.md`, Phase 5).
-- **Angular** — management/office client. *Not yet implemented.*
+  (`docs/tracker/shared/029-photo-evidence-phases.md`, Phase 5).
+- **Angular** — client-rendered office and technician PWA in `web/`, including iPhone field use. Foundation, authentication and the initial scoped field workflow implemented; physical field acceptance remains pending.
+  Responsive, mobile-friendly, EN/FR, Android brand colors and permission-based access.
+  First slice: [foundation and authentication](docs/tracker/angular/063-angular-foundation-and-authentication.md)
+  through email/password or phone/SMS OTP. [Web setup and architecture](web/README.md).
+  [Tracker index](docs/tracker/README.md).
+  [Web delivery roadmap](docs/tracker/angular/064-web-app-delivery-roadmap.md).
 
 Initial supported languages are **English** and **French**. Development rules live in
 `Project.md`, `dev.md`, `qa.md` and the application rules in the project ruleset.
 
 > The repository currently contains the API foundation and the **foundation domain model**
 > (organizations, users, profiles, memberships, customers and their contacts/addresses).
-> See `docs/tracker/001-foundation.md`, `docs/tracker/002-repository-foundation.md`,
-> `docs/tracker/003-foundation-domain-model.md` and
-> `docs/tracker/004-authentication-domain-model.md` for status.
+> See `docs/tracker/api/001-foundation.md`, `docs/tracker/shared/002-repository-foundation.md`,
+> `docs/tracker/shared/003-foundation-domain-model.md` and
+> `docs/tracker/shared/004-authentication-domain-model.md` for status.
 > Android app appearance controls (app language, light/dark) are covered by
-> `docs/tracker/005-android-appearance-controls.md`.
+> `docs/tracker/android/005-android-appearance-controls.md`.
 >
 > Authentication persistence (sessions, refresh tokens, password reset tokens) is modelled in
 > `docs/domain/authentication-domain-model.md`.
@@ -36,29 +41,29 @@ Initial supported languages are **English** and **French**. Development rules li
 > `0003`; their first read is `GET /jobs/:id`.
 >
 > Customer, Property-permission and Property-lifecycle work is tracked in
-> `docs/tracker/006-customers-feature-permissions.md` … `docs/tracker/013-property-lifecycle.md`.
+> `docs/tracker/shared/006-customers-feature-permissions.md` … `docs/tracker/shared/013-property-lifecycle.md`.
 > The Property permission set and the lifecycle decisions are recorded in
 > `docs/decisions/012-property-lifecycle-and-permissions.md`, and the offline/outbox standard the
 > Property lifecycle follows is `docs/architecture/offline-first-architecture.md`.
 >
-> Add Customer is `docs/tracker/014-android-add-customer.md`; Edit Customer, including converting a
-> customer between individual and company (`BR-087`), is `docs/tracker/015-android-edit-customer.md`.
+> Add Customer is `docs/tracker/android/014-android-add-customer.md`; Edit Customer, including converting a
+> customer between individual and company (`BR-087`), is `docs/tracker/android/015-android-edit-customer.md`.
 >
 > The Android Manager Home and the operational read behind it (`GET /home/manager`) are
-> `docs/tracker/016-android-manager-home.md`; the wire contract is `docs/api/manager-home.md`.
+> `docs/tracker/android/016-android-manager-home.md`; the wire contract is `docs/api/manager-home.md`.
 >
 > The Android Manager Job Details screen and the job read behind it (`GET /jobs/:id`) are
-> `docs/tracker/017-android-job-details.md`; the wire contract is `docs/api/job-details.md`.
+> `docs/tracker/android/017-android-job-details.md`; the wire contract is `docs/api/job-details.md`.
 >
 > Local object storage — MinIO behind an S3-only application contract, so production can use a
-> third-party S3-compatible provider — is `docs/tracker/023-object-storage-minio.md`
+> third-party S3-compatible provider — is `docs/tracker/shared/023-object-storage-minio.md`
 > (decision: `docs/decisions/013-object-storage-minio-and-s3.md`). The storage adapter and the first
-> evidence feature, technician Job photo updates, are `docs/tracker/027-android-job-photo-updates.md`
+> evidence feature, technician Job photo updates, are `docs/tracker/android/027-android-job-photo-updates.md`
 > (wire contract: `docs/api/job-photos.md`), consolidated into one entry point by
-> `docs/tracker/028-android-unified-job-update.md`.
+> `docs/tracker/android/028-android-unified-job-update.md`.
 >
 > The photo-evidence work that follows — the capability set, a photo picker, a viewer, offline evidence
-> and the lifecycle questions — is planned in `docs/tracker/029-photo-evidence-phases.md`. **Its Phase 1,
+> and the lifecycle questions — is planned in `docs/tracker/shared/029-photo-evidence-phases.md`. **Its Phase 1,
 > the evidence capability set (`evidence.view`/`evidence.photo.add`), Phase 2, the content-type-aware
 > capture pipeline, Phase 3, the two photo sources (camera and the system photo picker) with the client
 > permission gate, Phase 4, the full-size viewer, Phase 4b, which turns a re-encoded photo's pixels so
@@ -93,7 +98,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > and its **API half landed on 2026-09-16** — `job_audio_notes` + `job_audio_note_removals`,
 > `evidence.audio.add`/`evidence.audio.remove`, the three `/jobs/:id/audio-notes` routes and the
 > `JOB_AUDIO_ADDED`/`JOB_AUDIO_REMOVED` Activity kinds, contracted in `docs/api/job-audio.md`
-> (`docs/tracker/035-android-audio-evidence.md`). **Its Android half landed on 2026-09-16 (Phase 9b)**: the
+> (`docs/tracker/android/035-android-audio-evidence.md`). **Its Android half landed on 2026-09-16 (Phase 9b)**: the
 > microphone as a runtime permission, the audio kind's own controls in the Add update sheet (record, stop,
 > review, delete/re-record, attach), a durable Room draft for a take the API has not accepted, the queued
 > offline upload (`job.audio.add`, beside the photo handler) and the notice that reports an unaccepted take
@@ -112,7 +117,7 @@ Initial supported languages are **English** and **French**. Development rules li
 >
 > The technician's field experience — the field read (`GET /home/technician`), the Visit field
 > lifecycle (`BR-074`'s free movement, with the outcome a completion requires) and the technician
-> home — is `docs/tracker/037-technician-field-experience.md`, with its decisions in
+> home — is `docs/tracker/shared/037-technician-field-experience.md`, with its decisions in
 > `docs/decisions/019-technician-field-experience.md` (the field capability, the assignment scope,
 > the offline posture) and its contracts in `docs/api/job-actions.md` and
 > `docs/api/technician-home.md`.
@@ -121,10 +126,10 @@ Initial supported languages are **English** and **French**. Development rules li
 > the late work the Up-next card and today's own rows are not already carrying, most overdue first, drawn
 > above the preview of the days after today — and the action-oriented redesign of that home is proposed
 > and awaiting a product decision, in
-> `docs/tracker/058-technician-home-classification-and-redesign.md`.
+> `docs/tracker/shared/058-technician-home-classification-and-redesign.md`.
 >
 > The **Manager Schedule** — the week strip and the selected day's agenda, the technician filter and
-> the work that still has no crew — is `docs/tracker/038-android-manager-schedule.md`, served by a new
+> the work that still has no crew — is `docs/tracker/android/038-android-manager-schedule.md`, served by a new
 > `GET /schedule` read contracted in `docs/api/schedule.md` and decided in
 > `docs/decisions/020-manager-schedule-and-unassigned-lane.md`. The month calendar is a
 > jump-to-date mechanism only; the screen schedules nothing (assignment, rescheduling and status
@@ -133,7 +138,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > The schedule's **density pass** — one compact control row instead of two stacked rows, a collapsing
 > week strip, a multi-technician filter (which made `GET /schedule`'s `membershipId` repeatable and its
 > ids a union) and a tighter card/timeline — is
-> `docs/tracker/040-android-manager-schedule-density.md`. It also carries the two defects
+> `docs/tracker/android/040-android-manager-schedule-density.md`. It also carries the two defects
 > physical-device QA reported and their fixes (2026-09-17): the technician sheet's **Apply** now closes
 > the sheet, and an action's report is drawn **above** whatever a screen pins to the bottom — the floating
 > **Add update** action and the evidence waiting to be saved — so its whole text is readable (`BR-042`).
@@ -141,7 +146,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > The **technician's own schedule** ("My Schedule") — the same `GET /schedule` read resolved for the
 > caller's own work, presented as a week strip and a day of the Visits assigned to that technician, with
 > the crew line (`You + 2`), an emphasised next Visit, quieter completed Visits, and the day kept in the
-> existing offline working set — is `docs/tracker/041-android-technician-schedule.md`, with the read's
+> existing offline working set — is `docs/tracker/android/041-android-technician-schedule.md`, with the read's
 > scope decided in `docs/decisions/020-manager-schedule-and-unassigned-lane.md` (decision update) and
 > contracted in `docs/api/schedule.md`. **A field member cannot read a colleague's schedule**: no
 > capability authorizes it, the API refuses an off-scope request with `403`, and the question is recorded
@@ -149,7 +154,7 @@ Initial supported languages are **English** and **French**. Development rules li
 >
 > The **technician's read of the Customer behind an assigned Job** — the customer's own phone, email and
 > notes on the Job card, view-only, reached only through a Job the technician's own crew includes — is
-> `docs/tracker/042-technician-customer-read.md`, decided in
+> `docs/tracker/shared/042-technician-customer-read.md`, decided in
 > `docs/decisions/021-technician-customer-read.md` (a dedicated `customers.view_assigned` capability,
 > granted to the default Technician role by migration `0013`) and contracted in `docs/api/job-details.md`.
 > A session without it reads the same Job with the block reported **absent**, never a refused Job, and the
@@ -157,7 +162,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > `BR-092`).
 >
 > **Create Job** — `POST /jobs` and the Android Create Job form — is
-> `docs/tracker/043-create-job.md`. The supported create operation requires both an active Customer and an
+> `docs/tracker/shared/043-create-job.md`. The supported create operation requires both an active Customer and an
 > active Property that Customer currently holds (`BR-094`, new), which the Job & Visit model itself does
 > not: a property-less Job remains valid (`BR-051`, `BR-056`), and nothing in the schema changed. The route
 > is guarded by the existing `JOB_CREATE` capability and allocates the organization-scoped Job number under
@@ -167,15 +172,16 @@ Initial supported languages are **English** and **French**. Development rules li
 >
 > **Job Details presents the Job and its Visits apart** — the Job's own overview, the Visit that
 > represents it with **its own** activity, the Job's other Visits as folded history, and the Job's own
-> events in their own section — is `docs/tracker/044-job-details-job-visit-separation.md`. `GET /jobs/:id`
+> events in their own section — is `docs/tracker/shared/044-job-details-job-visit-separation.md`. `GET /jobs/:id`
 > gained one additive field (`visits`) because a history row needs each Visit's date, status and crew and
 > nothing in the contract carried them (`BR-042`, `BR-047`, `BR-071`); which event belongs to which Visit
 > is the API's own `visitSequence` answer and not a client's guess (`BR-080`,
 > `docs/api/job-activity.md` §3.3). The previous screen is retained unmodified as the restore point.
 >
 > **Its activity is grouped by the Visit each update belongs to** — one foldable group per Visit, headed
-> `Visit N · date`, opened on the Visit the page represents, plus a **General job updates** group for the
-> events that belong to no Visit — is `docs/tracker/045-android-job-activity-visit-groups.md`. Grouping
+> `Visit N · date`, opened on the current Visit and folded for completed Visits, plus a **Job history**
+> group for the events that belong to no Visit — is
+> `docs/tracker/android/045-android-job-activity-visit-groups.md`. Grouping
 > uses the read's own `visitSequence` because no Visit id crosses the activity contract, and each group's
 > crew comes from that Visit's own crew list, which is **assignment** and is labelled as such (`BR-068`;
 > Servora records no attendance, `BR-034`).
@@ -183,26 +189,26 @@ Initial supported languages are **English** and **French**. Development rules li
 > **The represented Visit is stated by when it is for** — the section is labelled `Current visit` only while
 > that field attempt is under way or its window is running, and otherwise `Today's visit`, `Tomorrow's
 > visit`, an `Upcoming visit` or a `Previous visit` — is
-> `docs/tracker/046-android-job-details-visit-period-and-card.md`. The period is read from the Visit's own
+> `docs/tracker/android/046-android-job-details-visit-period-and-card.md`. The period is read from the Visit's own
 > schedule and field status plus the device's clock, and it re-selects nothing: which Visit represents the
 > Job stays the API's answer (`BR-081`).
 >
 > **That card also states what the field attempt resulted in** — one **Outcome** row between the scheduled
 > window and the crew, drawn only when the Visit holds one — is
-> `docs/tracker/048-android-job-activity-visit-outcome.md`. It is the Visit's **current** outcome, so
+> `docs/tracker/android/048-android-job-activity-visit-outcome.md`. It is the Visit's **current** outcome, so
 > `GET /jobs/:id` gained one additive field (`visits[].outcomeCode`): a Visit that was reopened after
 > completion holds none (`BR-079`), which is exactly why the row is read from the Visit and not derived from
 > the timeline, where the outcome recorded stays as history (`BR-001`). **The Visit facts card this bullet and
-> the one above describe was removed by `docs/tracker/052-android-technician-job-details-redesign.md`**: the
+> the one above describe was removed by `docs/tracker/android/052-android-technician-job-details-redesign.md`**: the
 > date and the outcome are the group heading's summary, and the schedule and crew belong to the Visit section,
 > so the group reveals that Visit's own activity and evidence and nothing already on screen.
 >
 > **The page is the technician's seven questions** — what the work is (a heading, not a card), where it is,
 > who can be reached there, what the office recorded, the Visit being worked with its four working states and
 > its two field actions, and the Job's activity grouped by Visit — is
-> `docs/tracker/052-android-technician-job-details-redesign.md`. A routine `ACTIVE` Job status is no longer
+> `docs/tracker/android/052-android-technician-job-details-redesign.md`. A routine `ACTIVE` Job status is no longer
 > drawn: it is the control that changes it for a session that may (the Manager's own path,
-> `docs/tracker/020-android-job-details-status-control.md`) and is otherwise carried by the notice that
+> `docs/tracker/android/020-android-job-details-status-control.md`) and is otherwise carried by the notice that
 > reports a canceled or completed Job (`BR-058`, `BR-062`). The customer's contact persons are one
 > **Contacts** section leading with the effective primary contact and its own tappable phone and email
 > (`BR-095`, `ADR-022` D6), the address is its own **Location** section, the office's notes are their own
@@ -214,7 +220,7 @@ Initial supported languages are **English** and **French**. Development rules li
 >
 > **Two temporary one-tap sign-in buttons for local device QA** — Manager and Technician, present only in a
 > debug build because the release source set carries no accounts — is
-> `docs/tracker/049-android-dev-sign-in-buttons.md`. Development tooling rather than product behaviour: each
+> `docs/tracker/android/049-android-dev-sign-in-buttons.md`. Development tooling rather than product behaviour: each
 > button submits the seeded account's real credentials through the ordinary sign-in path.
 >
 > **The home asks the backend for the day again when the bottom-navigation area is entered again**, which is
@@ -222,9 +228,9 @@ Initial supported languages are **English** and **French**. Development rules li
 > Job, returned to the home, and the old status stayed on screen until they signed out and back in. The read
 > was issued only when the selected tab changed, so leaving a drill-down never asked for the day; it is now
 > asked for on both events, from one `readHome` the session's own capability resolves (`BR-001`, `BR-013`) —
-> `docs/tracker/055-android-home-refresh-on-return.md`.
+> `docs/tracker/android/055-android-home-refresh-on-return.md`.
 >
-> **Evidence belongs to the Visit it was recorded on** (`docs/tracker/056-evidence-belongs-to-a-visit.md`).
+> **Evidence belongs to the Visit it was recorded on** (`docs/tracker/shared/056-evidence-belongs-to-a-visit.md`).
 > Product ownership reported that a text note landed in the right Visit's group of Job Activity while photos
 > and recordings landed in **General job updates**, and asked for both to be linked to Visits only. They were
 > recorded on the Job (`visit_id` did not exist), which is what put them in the Job-level group; now
@@ -246,7 +252,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > explicit confirmation before the same request is resent confirmed, and a successful approval re-reads
 > both the requests and the day (`BR-001`, `BR-FV-005`). Both writes are online-only: neither route takes a
 > idempotency key, so neither is queued (`offline-first-architecture.md` §13.2) —
-> `docs/tracker/050-visit-follow-up-requests.md`.
+> `docs/tracker/shared/050-visit-follow-up-requests.md`.
 >
 > **The technician's half of that workflow exists too** — **Request another visit** on Job Details
 > (`POST /jobs/:id/visit-requests`, `visits.request_follow_up`). A request is the technician's own proposal
@@ -262,7 +268,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > nothing wrote a request. It is online-only for the same reason the approval is, and nothing is drawn as a
 > confirmed appointment before the office approves it (`BR-FV-002`, `BR-FV-010`).
 >
-> **The Visit workflow has an open QA issue list** (`docs/tracker/057-qa-issue-list-visit-workflow.md`):
+> **The Visit workflow has an open QA issue list** (`docs/tracker/shared/057-qa-issue-list-visit-workflow.md`):
 > five issues product ownership found in one physical-device pass of that journey — a completed Visit
 > still reading `Scheduled` when a screen is returned to, the request window not offered where the
 > technician chooses *Follow up required*, the sheets' Save/Cancel sitting under the keyboard, the
@@ -277,7 +283,7 @@ Initial supported languages are **English** and **French**. Development rules li
 > the keyboard and what was missing was the pin, not an inset — the rule is now written into the Android
 > design system, so every later sheet is checked against it.
 
-> **Item 5's remaining half has landed too** (`docs/tracker/057-qa-issue-list-visit-workflow.md` §5.11):
+> **Item 5's remaining half has landed too** (`docs/tracker/shared/057-qa-issue-list-visit-workflow.md` §5.11):
 > a request the office returns for clarification is now **answered by its requester**, and the answer is
 > the one transition `NEEDS_CLARIFICATION → PENDING` — taken in a single operation that appends the answer
 > to the request's own **append-only conversation** and puts the request back in front of the office. The
@@ -289,13 +295,16 @@ Initial supported languages are **English** and **French**. Development rules li
 
 ```text
 api/        NestJS REST API (system of record)
-android/    Android client (scaffold — not yet implemented)
+android/    Native Kotlin/Compose Android client
+web/        Angular management/office PWA
+packages/   Public TypeScript contracts and shared browser compiler defaults
 docs/
   decisions/     Architecture decision records
   architecture/  Architecture standards
-  tracker/       Feature milestone tracker
+  tracker/       Feature trackers grouped into angular/, android/, api/ and shared/
   domain/        Domain model documentation
-docker-compose.yml   Foundation local stack (PostgreSQL + API + MinIO)
+docker-compose.yml   Foundation stack (PostgreSQL + API + MinIO)
+docker-compose.local.yml   Local Angular server and development API settings used by Make
 Makefile             Local development orchestration
 ```
 
@@ -310,8 +319,9 @@ Makefile             Local development orchestration
 
 ```bash
 cp .env.example .env        # then adjust local values if ports 5432/3000/9000/9001 are taken
-make up                     # build + start PostgreSQL, the API and MinIO
+make up                     # build + start Angular, the API, PostgreSQL and MinIO
 curl http://localhost:3000/health
+# Open http://localhost:4200 for Angular (WEB_PORT overrides the port).
 ```
 
 `/health` reports API and database status:
@@ -329,6 +339,8 @@ The API boots even when PostgreSQL is down (the database pool is lazy) and repor
 ```bash
 make ps                  # foundation service status
 make logs                # follow foundation logs
+make reboot              # rebuild + recreate API/Angular and restart the stack; keeps stored data
+make down                # stop the local stack; keeps database and uploaded files
 make migrate             # apply pending migrations (host tooling → .env DATABASE_URL)
 make migration NAME=…    # generate a new Drizzle migration
 make db-shell            # psql shell into the development PostgreSQL
@@ -346,8 +358,12 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
 
 ## Configuration
 
+- Firebase push setup and required project details: [development runbook](docs/development/firebase.md).
+  The backend transport is implemented; registration and Android delivery are pending.
 - `docker-compose.yml` is driven by `.env` at the repository root (copy from `.env.example`).
 - `POSTGRES_PORT` / `API_PORT` select the host ports published by the stack.
+- `WEB_PORT` selects Angular's local browser port (default 4200). Make uses the local Compose
+  overlay with development-mode browser authentication; the base Compose file retains production defaults.
 - `DATABASE_URL` is used by **host-side** tooling (`make migrate`, `npm run start:prod`,
   `npm run test:e2e`). The compose `api` service ignores it and reaches PostgreSQL over
   the compose network.
@@ -372,41 +388,41 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
 - Canonical repository: `https://github.com/said-elgourbi/servora.git` (remote `origin`).
 - `main` — stable, release-ready; releases are tagged from `main` (`v0.1.0`, …).
 - `develop` — primary integration and development branch (default working branch).
-- Foundation status: `docs/tracker/001-foundation.md`,
-  `docs/tracker/002-repository-foundation.md`, `docs/tracker/003-foundation-domain-model.md`,
-  `docs/tracker/004-authentication-domain-model.md`.
+- Foundation status: `docs/tracker/api/001-foundation.md`,
+  `docs/tracker/shared/002-repository-foundation.md`, `docs/tracker/shared/003-foundation-domain-model.md`,
+  `docs/tracker/shared/004-authentication-domain-model.md`.
 - Domain model: `docs/domain/foundation-domain-model.md`.
 - Authentication domain model: `docs/domain/authentication-domain-model.md`
   (decision: `docs/decisions/004-authentication-domain-model.md`).
-- Android appearance controls: `docs/tracker/005-android-appearance-controls.md`
+- Android appearance controls: `docs/tracker/android/005-android-appearance-controls.md`
   (decision: `docs/decisions/007-android-appearance-controls.md`).
 - Android customers, customer detail and Add Property: `docs/tracker/006-…` – `docs/tracker/012-…`.
 - Property permissions, the archived projection and the Property lifecycle schema:
-  `docs/tracker/012-property-permissions-and-lifecycle-schema.md`
+  `docs/tracker/shared/012-property-permissions-and-lifecycle-schema.md`
   (decision: `docs/decisions/012-property-lifecycle-and-permissions.md`).
 - Property lifecycle (edit, archive, restore, permanent delete) across the API and Android:
-  `docs/tracker/013-property-lifecycle.md`.
-- Add Customer: `docs/tracker/014-android-add-customer.md`.
+  `docs/tracker/shared/013-property-lifecycle.md`.
+- Add Customer: `docs/tracker/android/014-android-add-customer.md`.
 - Edit Customer and customer type conversion (individual ⇄ company, `BR-087`):
-  `docs/tracker/015-android-edit-customer.md`.
-- Android Manager Home and its operational read: `docs/tracker/016-android-manager-home.md`
+  `docs/tracker/android/015-android-edit-customer.md`.
+- Android Manager Home and its operational read: `docs/tracker/android/016-android-manager-home.md`
   (wire contract: `docs/api/manager-home.md`).
-- Android Manager Job Details and its Job read: `docs/tracker/017-android-job-details.md`
+- Android Manager Job Details and its Job read: `docs/tracker/android/017-android-job-details.md`
   (wire contract: `docs/api/job-details.md`); its management actions:
-  `docs/tracker/018-android-job-actions.md` (wire contract: `docs/api/job-actions.md`).
-- Manager Job Details hierarchy and contextual actions: `docs/tracker/019-android-job-details-hierarchy.md`.
+  `docs/tracker/android/018-android-job-actions.md` (wire contract: `docs/api/job-actions.md`).
+- Manager Job Details hierarchy and contextual actions: `docs/tracker/android/019-android-job-details-hierarchy.md`.
 - The Job's status chip as the status control, and the address row's map glyph:
-  `docs/tracker/020-android-job-details-status-control.md`.
+  `docs/tracker/android/020-android-job-details-status-control.md`.
 - Job Details status polish — the labelled **Job status** control, its compact menu and the Visit date
-  label: `docs/tracker/021-android-job-details-status-polish.md`.
+  label: `docs/tracker/android/021-android-job-details-status-polish.md`.
 - Offline/outbox standard for Android, including the rule a new read or mutation follows (§13):
   `docs/architecture/offline-first-architecture.md`
   (decision: `docs/decisions/014-android-offline-engine.md`).
 - Object storage and the S3 contract (MinIO locally, a third-party S3-compatible provider in
-  production): `docs/tracker/023-object-storage-minio.md`
+  production): `docs/tracker/shared/023-object-storage-minio.md`
   (decision: `docs/decisions/013-object-storage-minio-and-s3.md`).
 - Technician Job photo updates — capture, offline upload through the outbox, and the Activity gallery:
-  `docs/tracker/027-android-job-photo-updates.md` (wire contract: `docs/api/job-photos.md`).
+  `docs/tracker/android/027-android-job-photo-updates.md` (wire contract: `docs/api/job-photos.md`).
 - Photo evidence after 028 — the phased plan for the capability set, a gallery picker, a viewer, offline
   evidence and the lifecycle questions. **Phases 1 (the evidence capability set), 2 (the
   content-type-aware capture pipeline), 3 (the camera and system photo picker behind the update
@@ -456,30 +472,30 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
   the removed record with its actor, instant and reason. The removal is **online-only** (no idempotency key,
   no decided conflict policy), and Android offers it in the viewer only to a session holding the capability,
   behind a confirmation that requires a reason. **Phase 6c (evidence metadata) is next.**
-  `docs/tracker/029-photo-evidence-phases.md`
+  `docs/tracker/shared/029-photo-evidence-phases.md`
   (decisions: `docs/decisions/015-evidence-capabilities.md`,
   `docs/decisions/016-android-image-stack-and-viewer-zoom.md`,
   `docs/decisions/017-viewer-paging-save-and-share.md`).
 - The photo viewer's chrome — the media-viewer surface, its top bar, the phase badge over the photo, the
   Notes section with **More**, the in-flight evidence action and the report drawn inside the viewer:
-  `docs/tracker/031-android-photo-viewer-ui.md`.
+  `docs/tracker/android/031-android-photo-viewer-ui.md`.
 - Job Activity's photo UX — the collapsible **Photos · n** gallery (folded by default, compact preview,
   whole heading a target) and each photo drawn inside its own timeline entry, opening the same viewer:
-  `docs/tracker/032-android-job-activity-photo-ux.md`.
+  `docs/tracker/android/032-android-job-activity-photo-ux.md`.
 - Audio evidence — the model, the container and length vocabulary, the per-kind capabilities, the
   Activity kinds, playback and the offline rules (`docs/decisions/018-audio-evidence.md`), the contract
   (`docs/api/job-audio.md`), and the Android phases still to come:
-  `docs/tracker/035-android-audio-evidence.md`.
+  `docs/tracker/android/035-android-audio-evidence.md`.
 - Development-environment hygiene — the Gradle/Kotlin build daemons Android verification leaves
   behind, and the `make android-stop` / `make tidy` targets that release them:
-  `docs/tracker/030-development-environment-hygiene.md`.
+  `docs/tracker/shared/030-development-environment-hygiene.md`.
 - Verification scope — how much verification an ordinary task runs (the affected application's
   compile/build and the tests that cover the change) versus what it leaves to the end of the feature
   (full lint, full suites, full builds), and why:
-  `docs/tracker/036-verification-scope-tiering.md`.
+  `docs/tracker/shared/036-verification-scope-tiering.md`.
 - The manager's Job status workflow — any permitted destination in one operation and one record, the
   completion invariant, and the confirmation before closing or reopening:
-  `docs/tracker/034-manager-job-status-workflow.md`.
+  `docs/tracker/shared/034-manager-job-status-workflow.md`.
 - The technician's field experience — **`ADR-019` accepted (Phase 1), the field read landed (Phase 2a),
   `GET /home/technician` with the Android technician home landed (Phases 2b and 4), the Visit field
   lifecycle landed (Phase 3) and the Android field action landed (Phase 5)**: `GET /jobs/:id` and
@@ -504,7 +520,7 @@ RAM; `make android-stop` (`make tidy`) releases them — see `docs/development/s
   technician), **`ADR-019` D7 on 2026-09-18**: a Manager may complete a Visit from Job Details without
   being on its crew, recorded as the business rule `BR-093`; and (Phase 5b) the field action is offered
   only to a caller the API will actually accept. Next: Phase 6, the product owner's device QA:
-  `docs/tracker/037-technician-field-experience.md`
+  `docs/tracker/shared/037-technician-field-experience.md`
   (decision: `docs/decisions/019-technician-field-experience.md`; contracts: `docs/api/job-actions.md`
   §7, `docs/api/technician-home.md`).
 - Full ruleset: `docs/versioning.md` — read it before branching or committing.

@@ -7,7 +7,7 @@ Extends `ADR-010` D1–D3, whose back stack and destination graph are unchanged.
 
 References: `BR-001`, `BR-007`, `BR-028`, `BR-041`, `BR-042`, `Project.md` §9, §11, §23 and §31,
 `dev.md` §2, §15 and §18, `qa.md` §6 and §13, `docs/design/android-design-system.md`,
-`docs/tracker/010-customer-detail.md`.
+`docs/tracker/shared/010-customer-detail.md`.
 
 ## Context
 

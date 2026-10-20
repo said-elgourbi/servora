@@ -53,6 +53,9 @@ import kotlin.math.roundToInt
  * `BR-007`, `BR-042`).
  */
 
+/** Identifies one recording attachment in the timeline. */
+fun jobAudioActivityAttachmentTag(audioNoteId: String): String = "job-activity-audio-attachment-$audioNoteId"
+
 /** Identifies the play/pause control of one recording in the timeline. */
 fun jobAudioPlayTag(audioNoteId: String): String = "job-activity-audio-play-$audioNoteId"
 
@@ -203,9 +206,9 @@ internal fun ActivityAudioEvidence(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.secondary,
+            color = MaterialTheme.colorScheme.surfaceContainer,
             shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag(jobAudioActivityAttachmentTag(audioNoteId)),
         ) {
             Column(modifier = Modifier.padding(horizontal = JobAudioAttachmentInset)) {
                 Row(

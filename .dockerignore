@@ -1,0 +1,31 @@
+# API/web image allowlist: shared packages require the repository build context.
+# No secrets, local environment, Android artifacts or host dependencies enter this context.
+**
+!api/
+api/*
+!api/package.json
+!api/package-lock.json
+!api/tsconfig*.json
+!api/nest-cli.json
+!api/src/
+!api/src/**
+!api/drizzle/
+!api/drizzle/**
+!packages/
+packages/*
+!packages/shared-types/
+!packages/shared-types/**
+!packages/shared-config/
+!packages/shared-config/**
+!web/
+web/*
+!web/package.json
+!web/package-lock.json
+!web/angular.json
+!web/tsconfig*.json
+!web/ngsw-config.json
+!web/nginx.conf
+!web/src/
+!web/src/**
+!web/public/
+!web/public/**
