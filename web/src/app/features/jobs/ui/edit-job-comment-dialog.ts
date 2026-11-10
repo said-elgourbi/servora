@@ -37,10 +37,10 @@ export interface EditJobCommentResult { body: string; file: File | null; phase: 
   `,
   styles: [`
     .edit-comment-form { display:grid; gap:8px; min-width:min(440px, 76vw); }
-    textarea, select { width:100%; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:7px; padding:10px; font:inherit; color:inherit; }
+    textarea, select { width:100%; box-sizing:border-box; border:1px solid var(--mat-sys-outline); border-radius:7px; padding:10px; font:inherit; color:inherit; }
     textarea:focus, select:focus { outline:2px solid #3457bd; outline-offset:1px; }
     input[type=file] { max-width:100%; }
-    small { color:#52647f; overflow-wrap:anywhere; }
+    small { color:var(--mat-sys-on-surface-variant); overflow-wrap:anywhere; }
     @media (max-width:600px) { .edit-comment-form { min-width:0; } }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,

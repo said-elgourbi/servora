@@ -4,12 +4,12 @@
 }
 .table-scroll {
   overflow: auto;
-  border: 1px solid var(--mat-sys-outline-variant);
-  border-radius: 10px;
+  border:1px solid var(--mat-sys-outline-variant);
+  border-radius:10px;
   background: var(--mat-sys-surface);
 }
 table {
-  border-collapse: collapse;
+  border-collapse:collapse;
   width: 100%;
   table-layout: fixed;
   font-size: 12px;
@@ -32,7 +32,7 @@ th:nth-child(4) {
   width: 18%;
 }
 td {
-  border-top: 1px solid var(--mat-sys-outline-variant);
+  border-top:1px solid var(--mat-sys-outline-variant);
   padding: 12px;
   vertical-align: top;
   overflow-wrap: anywhere;
@@ -58,7 +58,7 @@ a:hover h2 {
 a:focus-visible {
   outline: 2px solid var(--mat-sys-primary);
   outline-offset: 3px;
-  border-radius: 3px;
+  border-radius:3px;
 }
 h2 {
   font-size: 12px;
@@ -89,18 +89,18 @@ small {
   margin-right: 6px;
 }
 .agenda {
-  border: 1px solid var(--mat-sys-outline-variant);
-  border-radius: 10px;
+  border:1px solid var(--mat-sys-outline-variant);
+  border-radius:10px;
   background: var(--mat-sys-surface);
   overflow: hidden;
 }
 .agenda-row {
   display: block;
   padding: 14px;
-  border-bottom: 1px solid var(--mat-sys-outline-variant);
+  border-bottom:1px solid var(--mat-sys-outline-variant);
 }
 .agenda-row:last-child {
-  border: 0;
+  border:0;
 }
 .agenda-row h2 {
   font-size: 14px;
