@@ -216,6 +216,49 @@ export interface CompleteVisitDto {
   readonly expectedVersion: number | null;
 }
 
+/** The replacement outcome and audit context for a completed Visit (`BR-079`). */
+export interface CorrectVisitOutcomeDto {
+  readonly outcomeCode: VisitOutcomeCode;
+  readonly outcomeSummary: string;
+  readonly reason: string | null;
+  readonly clientOperationId: string | null;
+  readonly capturedAt: Date | null;
+  readonly expectedVersion: number | null;
+}
+
+/** Validates an outcome correction at the API boundary (`BR-078`, `BR-079`). */
+export function parseCorrectVisitOutcomeDto(
+  input: unknown,
+): CorrectVisitOutcomeDto {
+  const source = (input ?? {}) as Record<string, unknown>;
+  const outcomeCode = requireEnum(
+    source.outcomeCode,
+    VISIT_OUTCOME_CODES,
+    'outcomeCode',
+  );
+  const outcomeSummary = optionalText(
+    source.outcomeSummary,
+    'outcomeSummary',
+    MAX_VISIT_OUTCOME_SUMMARY_LENGTH,
+  );
+  if (outcomeSummary === null) {
+    fail(
+      outcomeCode === 'UNABLE_TO_COMPLETE' || outcomeCode === 'UNABLE_TO_ASSESS'
+        ? 'reason'
+        : 'outcomeSummary',
+      'is required',
+    );
+  }
+  return {
+    outcomeCode,
+    outcomeSummary,
+    reason: optionalText(source.reason, 'reason', 2000),
+    clientOperationId: optionalUuid(source.clientOperationId, 'clientOperationId'),
+    capturedAt: toInstant(source.capturedAt, 'capturedAt'),
+    expectedVersion: optionalPositiveInteger(source.expectedVersion, 'expectedVersion'),
+  };
+}
+
 /** The longest outcome summary the API accepts, in characters. */
 export const MAX_VISIT_OUTCOME_SUMMARY_LENGTH = 2000;
 

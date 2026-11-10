@@ -35,6 +35,7 @@ import { JobActivityEntry } from '../ui/job-activity-entry';
 import { ScheduleVisit } from '../ui/schedule-visit';
 import { VisitUpdateDialog } from '../ui/visit-update-dialog';
 import { CompleteVisitDialog } from '../ui/complete-visit-dialog';
+import { CorrectVisitOutcomeDialog } from '../ui/correct-visit-outcome-dialog';
 import { EditJobCommentDialog, type EditJobCommentResult } from '../ui/edit-job-comment-dialog';
 import { DeleteJobCommentDialog } from '../ui/delete-job-comment-dialog';
 import { AudioRecorder } from '../ui/audio-recorder';
@@ -248,6 +249,18 @@ export class JobDetails {
     return !!selected && selected.id === visit.id && selected.completionAllowed &&
       this.auth.hasPermission('VISIT_RECORD_OUTCOME');
   }
+  protected visitOutcomeCorrectionAllowed(visit: OfficeJobDetails['visits'][number]): boolean {
+    const selected = this.job()?.selectedVisit;
+    return !!selected && selected.id === visit.id && selected.outcomeCorrectionAllowed &&
+      this.currentOutcomeEvent(visit) !== null &&
+      this.auth.hasPermission('VISIT_RECORD_OUTCOME');
+  }
+  private currentOutcomeEvent(visit: OfficeJobDetails['visits'][number]): JobActivityEvent | null {
+    const latest = this.activity()
+      .filter((event) => event.visitSequence === visit.sequence && event.kind === 'VISIT_OUTCOME_RECORDED')
+      .sort((left, right) => Date.parse(right.recordedAt) - Date.parse(left.recordedAt))[0];
+    return latest?.outcomeCode === visit.outcomeCode ? latest : null;
+  }
   protected async completeVisit(visit: OfficeJobDetails['visits'][number]): Promise<void> {
     const job = this.job();
     const selected = job?.selectedVisit;
@@ -266,6 +279,30 @@ export class JobDetails {
       maxWidth: '94vw',
     }).afterClosed());
     if (completed) this.refresh();
+  }
+  protected async correctVisitOutcome(visit: OfficeJobDetails['visits'][number]): Promise<void> {
+    const job = this.job();
+    const selected = job?.selectedVisit;
+    if (!job || !selected || selected.id !== visit.id || !this.visitOutcomeCorrectionAllowed(visit) || this.busy()) return;
+    const latest = this.currentOutcomeEvent(visit);
+    if (!latest?.outcomeCode || !latest.outcomeSummary) return;
+    const corrected = await firstValueFrom(this.dialogs.open<CorrectVisitOutcomeDialog, {
+      jobId: string; visitId: string; visitSequence: number; purposeCode: string;
+      outcomeCode: string; outcomeSummary: string; expectedVersion: number;
+    }, boolean>(CorrectVisitOutcomeDialog, {
+      data: {
+        jobId: job.id,
+        visitId: visit.id,
+        visitSequence: visit.sequence,
+        purposeCode: visit.purposeCode,
+        outcomeCode: latest.outcomeCode,
+        outcomeSummary: latest.outcomeSummary,
+        expectedVersion: visit.version,
+      },
+      width: '540px',
+      maxWidth: '94vw',
+    }).afterClosed());
+    if (corrected) this.refresh();
   }
   protected async requestFollowUp(): Promise<void> {
     const job = this.job();

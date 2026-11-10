@@ -88,6 +88,9 @@
                       @if (visit.scheduledStart) { <p class="visit-time">{{ visit.scheduledStart | date: 'mediumDate' : undefined : i18n.language() }} · {{ visit.scheduledStart | preferredTime }}@if (visit.scheduledEnd) { <span> – {{ visit.scheduledEnd | preferredTime }}</span> }</p> }
                       <div class="visit-crew"><strong>{{ i18n.text('crew') }}</strong>@for (member of visit.technicians; track member.membershipId) { <span class="crew-member"><span class="avatar">{{ (member.name || '?').slice(0, 1) }}</span>{{ member.name || i18n.text('unnamedMember') }} @if (member.roleCode === 'LEAD') { <small>· {{ i18n.text('jobVisitLead') }}</small> }</span> } @if (!visit.technicians.length) { <span class="quiet">{{ i18n.text('noCrew') }}</span> }</div>
                     </div><app-work-status [code]="visit.status" />
+                    @if (visitOutcomeCorrectionAllowed(visit)) {
+                      <button mat-stroked-button class="visit-correct-button" [disabled]="busy()" (click)="correctVisitOutcome(visit)"><app-icon name="refresh" />{{ i18n.text('visitCorrectOutcome') }}</button>
+                    }
                     @if (visitCompletionAllowed(visit)) {
                       <button mat-flat-button class="visit-complete-button" [disabled]="busy()" (click)="completeVisit(visit)"><app-icon name="check" />{{ i18n.text('visitCompleteAction') }}</button>
                     }

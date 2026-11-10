@@ -2663,25 +2663,27 @@ Android, Angular, API, Database
 
 **Expected behavior:**
 
-- Technicians may correct their own Visit outcome subject to the future edit policy.
+- The Technician who recorded the Visit's current outcome may correct it while still assigned to that Visit's current crew and before the Job has ever been completed or canceled. There is no additional elapsed-time cutoff.
 - Managers/authorized office users may edit outcomes according to their permissions (BR-006, BR-066).
 - Every outcome change preserves: previous outcome, new outcome, actor, timestamp, and an optional reason.
-- Once the Job is `COMPLETED` (BR-062), Visit outcomes are immutable.
+- Once the Job is `COMPLETED` or `CANCELED`, Visit outcomes are immutable.
+- Reopening a Job does not unfreeze its historical Visit outcomes.
 - Reopening a `COMPLETED` Visit (BR-074) does not rewrite its outcome: the recorded outcome stays in
   append-only outcome history, while the Visit itself holds **no current outcome** until it is completed
   again. The next completion records its own outcome, which is then the Visit's current one (BR-077).
-- A Job that is `COMPLETED` or `CANCELED` refuses field status changes entirely (BR-062, BR-063), so an
-  outcome never becomes mutable by reopening a Visit of a closed Job.
+- A correction updates the outcome-derived Job attention from the current outcome. Job lifecycle effects
+  are applied in the same transaction using the corrected outcome and are recorded in Job history.
+- Existing follow-up requests and visits remain their own workflows; correcting an outcome does not
+  silently approve, reject, cancel or remove them.
 
 **Exceptions:**
 None.
 
 **Notes:**
-The technician self-edit time window/policy is not defined. It is independent of the Job-level immutability rule, which is confirmed. This rule defines the permitted actors and audit requirements, but does not define a correction-request/approval workflow. The API correction operation and client workflows are not yet implemented; until they are, clients must not imply that an outcome can be edited. A technician self-edit window must be decided before technician corrections are implemented.
+The technician self-edit policy is defined by the Job lifecycle rather than an elapsed-time window: the Technician who recorded the current outcome may correct it while still on the Visit's current crew and before the Job has ever been completed or canceled. Reopening the Job does not unfreeze its outcomes. No correction request/approval workflow is defined. The API and client implementation of corrections is tracked by this change.
 
 **Status:**
-**CONFIRMED** — recorded corrections and immutability after Job completion
-**OPEN QUESTION** — the technician self-edit window/policy
+**CONFIRMED** — current-outcome author may correct while on the current Visit crew and before the Job has ever been closed; there is no additional time window.
 
 ---
 

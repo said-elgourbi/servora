@@ -99,7 +99,7 @@ it; the API never returns presentation text (`BR-028`).
 | `VISIT_TECHNICIAN_ASSIGNED`   | Visit | `technicianName?`, `roleCode`                   |
 | `VISIT_TECHNICIAN_REMOVED`    | Visit | `technicianName?`                               |
 | `VISIT_TECHNICIAN_ROLE_CHANGED` | Visit | `technicianName?`, `previousRoleCode`, `roleCode` |
-| `VISIT_OUTCOME_RECORDED`      | Visit | `outcomeCode`, `outcomeSummary?`                |
+| `VISIT_OUTCOME_RECORDED`      | Visit | `outcomeCode`, `outcomeSummary?`, `previousOutcomeCode?`, `previousOutcomeSummary?`, `outcomeCorrectionReason?` |
 | `VISIT_NOTE_ADDED`            | Visit | `body`                                          |
 | `JOB_PHOTO_ADDED`             | Visit | `photoId`, `photoPhase?`, `body?`               |
 | `JOB_PHOTO_REMOVED`           | Visit | `photoId`, `photoRemovalReason?`                |
@@ -116,7 +116,10 @@ it; the API never returns presentation text (`BR-028`).
 `BR-074` for a Visit); the kind names which vocabulary the codes belong to.
 
 `VISIT_OUTCOME_RECORDED` is **history**: every outcome a Visit recorded appears here, in append-only order,
-so a Visit that was completed and reopened and then completed again has more than one such event. The
+so a Visit that was completed and reopened and then completed again has more than one such event. A
+correction event carries the replaced outcome in `previousOutcomeCode` and `previousOutcomeSummary`,
+plus the optional explanation in `outcomeCorrectionReason`; initial outcome events report these fields
+as `null`. The
 Visit's **current** outcome — the one that answers "what did this field attempt result in?" — is not
 derived from this read: it travels on the Visit itself, as `visits[].outcomeCode` on `GET /jobs/:id`
 (`docs/api/job-details.md` §3.2, `BR-079`).
@@ -232,4 +235,3 @@ the same list with what each one blocks.
    and no kind is invented for them (`BR-042`, `ADR-018` A8).
 3. **Pagination** (`BR-080`): the read returns the whole history; whether a long history needs
    paging is a later product decision.
-

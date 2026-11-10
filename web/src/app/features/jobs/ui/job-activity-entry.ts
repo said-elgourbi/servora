@@ -109,7 +109,8 @@ export class JobActivityEntry implements OnDestroy {
   }
   protected action(event: JobActivityEvent): TranslationKey {
     if (event.kind === 'VISIT_NOTE_ADDED') return 'activityAddedNote';
-    if (event.kind === 'VISIT_OUTCOME_RECORDED') return 'activityRecordedResult';
+    if (event.kind === 'VISIT_OUTCOME_RECORDED')
+      return event.previousOutcomeCode ? 'activityCorrectedResult' : 'activityRecordedResult';
     if (event.kind === 'JOB_PHOTO_ADDED') return 'activitySharedPhoto';
     if (event.kind === 'JOB_PHOTO_REMOVED') return 'activityRemovedPhoto';
     if (event.kind === 'JOB_AUDIO_ADDED') return 'activitySharedAudio';

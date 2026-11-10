@@ -103,6 +103,13 @@
         @if (event.outcomeCode) {
           <h4 class="outcome-title">{{ event.outcomeCode | workLabel }}</h4>
         }
+        @if (event.previousOutcomeCode) {
+          <div class="change-facts">
+            <p><strong>{{ i18n.text('visitPreviousOutcome') }}:</strong> {{ event.previousOutcomeCode | workLabel }}</p>
+            @if (event.previousOutcomeSummary) { <p>{{ event.previousOutcomeSummary }}</p> }
+            @if (event.outcomeCorrectionReason) { <p><strong>{{ i18n.text('visitCorrectionReason') }}:</strong> {{ event.outcomeCorrectionReason }}</p> }
+          </div>
+        }
         @if (event.documentId) {
           <div class="document-attachment">
             <span>{{ event.documentDisplayName || i18n.text('jobPdfAttachment') }}</span>

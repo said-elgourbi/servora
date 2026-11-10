@@ -21,6 +21,7 @@ export interface FieldVisitDto {
   fieldActionable: boolean;
   allowedStatusTransitions: string[];
   completionAllowed: boolean;
+  outcomeCorrectionAllowed: boolean;
   addUpdateAllowed: boolean;
   requestFollowUpAllowed: boolean;
 }
@@ -48,6 +49,9 @@ export interface FieldActivityEvent {
   toStatus: string | null;
   outcomeCode: string | null;
   outcomeSummary: string | null;
+  previousOutcomeCode?: string | null;
+  previousOutcomeSummary?: string | null;
+  outcomeCorrectionReason?: string | null;
   body: string | null;
   photoId: string | null;
   photoPhase: string | null;

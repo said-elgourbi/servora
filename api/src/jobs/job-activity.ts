@@ -108,6 +108,11 @@ export interface JobActivityEventDto {
   outcomeCode: string | null;
   /** The outcome's summary (`VISIT_OUTCOME_RECORDED`, `BR-077`). */
   outcomeSummary: string | null;
+  /** Previous outcome values are present when this event is a correction (`BR-079`). */
+  previousOutcomeCode: string | null;
+  previousOutcomeSummary: string | null;
+  /** Optional explanation attached to an outcome correction (`BR-079`). */
+  outcomeCorrectionReason: string | null;
   /** The note's text (`VISIT_NOTE_ADDED`, or a photo's optional note for `JOB_PHOTO_ADDED`). */
   body: string | null;
   /** When a Visit note was edited (`VISIT_NOTE_ADDED`), or `null`. */
@@ -199,6 +204,9 @@ interface RawEvent {
   previousRoleCode: AssignmentRoleCode | null;
   outcomeCode: string | null;
   outcomeSummary: string | null;
+  previousOutcomeCode?: string | null;
+  previousOutcomeSummary?: string | null;
+  outcomeCorrectionReason?: string | null;
   body: string | null;
   noteEditedAt?: Date | null;
   activityEditedAt?: Date | null;
@@ -398,6 +406,9 @@ export async function readJobActivity(
       visitId: visitOutcomeHistory.visitId,
       outcomeCode: visitOutcomeHistory.outcomeCode,
       outcomeSummary: visitOutcomeHistory.outcomeSummary,
+      previousOutcomeCode: visitOutcomeHistory.previousOutcomeCode,
+      previousOutcomeSummary: visitOutcomeHistory.previousOutcomeSummary,
+      outcomeCorrectionReason: visitOutcomeHistory.reason,
       actorMembershipId: visitOutcomeHistory.actorMembershipId,
       recordedAt: visitOutcomeHistory.recordedAt,
     }),
@@ -661,6 +672,9 @@ export async function readJobActivity(
       previousRoleCode: null,
       outcomeCode: row.outcomeCode,
       outcomeSummary: row.outcomeSummary,
+      previousOutcomeCode: row.previousOutcomeCode,
+      previousOutcomeSummary: row.previousOutcomeSummary,
+      outcomeCorrectionReason: row.outcomeCorrectionReason,
       body: null,
     })),
     ...noteRows
@@ -877,6 +891,9 @@ export async function readJobActivity(
     previousRoleCode: event.previousRoleCode,
     outcomeCode: event.outcomeCode,
     outcomeSummary: event.outcomeSummary,
+    previousOutcomeCode: event.previousOutcomeCode ?? null,
+    previousOutcomeSummary: event.previousOutcomeSummary ?? null,
+    outcomeCorrectionReason: event.outcomeCorrectionReason ?? null,
     body: event.body,
     noteEditedAt: (event.activityEditedAt ?? event.noteEditedAt)?.toISOString() ?? null,
     activityEditedAt: event.activityEditedAt?.toISOString() ?? null,

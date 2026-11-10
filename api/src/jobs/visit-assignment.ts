@@ -136,6 +136,8 @@ export interface JobVisit {
    * "what once resulted from it" — a distinction only the authoritative record can make (`BR-001`).
    */
   readonly outcomeCode: VisitOutcomeCode | null;
+  /** Membership that recorded the Visit's current outcome, when one exists (`BR-079`). */
+  readonly outcomeRecordedByMembershipId: string | null;
   readonly purposeCode: VisitPurposeCode;
   /**
    * The Visit's stable, human-readable sequence within the Job — `1` for the Job's first Visit, `2`
@@ -183,6 +185,7 @@ export async function readJobVisits(
       scheduledEnd: visits.scheduledEnd,
       version: visits.version,
       outcomeCode: visits.outcomeCode,
+      outcomeRecordedByMembershipId: visits.outcomeRecordedByMembershipId,
       isAdHocWork: visits.isAdHocWork,
     })
     .from(visits)
@@ -203,6 +206,7 @@ export async function readJobVisits(
     scheduledEnd: row.scheduledEnd,
     version: row.version,
     outcomeCode: row.outcomeCode as VisitOutcomeCode | null,
+    outcomeRecordedByMembershipId: row.outcomeRecordedByMembershipId,
     isAdHocWork: row.isAdHocWork,
   }));
 }

@@ -10,6 +10,7 @@ export function jobReadError(error: unknown): TranslationKey {
 export function jobWriteError(error: unknown): TranslationKey {
   if (!(error instanceof HttpErrorResponse)) return 'jobWriteUncertain';
   const code: unknown = error.error?.code;
+  if (code === 'VISIT_OUTCOME_NOT_CORRECTABLE') return 'visitOutcomeNotCorrectable';
   if (code === 'STORAGE_UNAVAILABLE') return 'jobAttachmentStorageUnavailable';
   if (code === 'JOB_CLOSED_FOR_FIELD_WORK' || code === 'VISIT_SCHEDULING_CONDITION_NOT_MET')
     return 'jobVisitUnavailable';

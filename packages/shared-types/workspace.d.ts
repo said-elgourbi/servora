@@ -98,6 +98,7 @@ export interface WorkspaceJobDetails {
     requestFollowUpAllowed: boolean;
     allowedStatusTransitions: string[];
     completionAllowed: boolean;
+    outcomeCorrectionAllowed: boolean;
     addUpdateAllowed: boolean;
     fieldActionable: boolean;
   } | null;

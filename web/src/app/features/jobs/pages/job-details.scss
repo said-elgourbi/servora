@@ -57,7 +57,7 @@
 .visit-card-header { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:2px 22px 12px 0; }
 .visit-heading-copy { flex:1 1 240px; min-width:0; }.visit-heading-copy h3 { margin:0; font-size:15px; }.visit-time { margin:4px 0 8px; color:#526782; font-size:12px; }
 .visit-crew { display:flex; align-items:center; flex-wrap:wrap; gap:7px; font-size:11px; }.visit-crew > strong { color:#526782; }.crew-member { display:inline-flex; align-items:center; gap:5px; }.crew-member .avatar { width:26px; height:26px; font-size:10px; }.crew-member small { color:#526782; }
-.visit-add-button, .visit-status-button { min-height:34px; font-size:12px; }.visit-add-button app-icon { width:14px; height:14px; margin-right:5px; }.visit-status-button { width:36px; min-width:36px; padding:0; }.visit-status-button app-icon { width:16px; height:16px; }
+.visit-add-button, .visit-correct-button, .visit-status-button { min-height:34px; font-size:12px; }.visit-add-button app-icon, .visit-correct-button app-icon { width:14px; height:14px; margin-right:5px; }.visit-status-button { width:36px; min-width:36px; padding:0; }.visit-status-button app-icon { width:16px; height:16px; }
 .visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
 .visit-updates { display:grid; gap:8px; }.visit-update-card { padding:0 10px; border:1px solid #dce5ef; border-radius:7px; background:#fff; }.visit-update-card .update-card { padding:10px 0; border:0; }
 .visit-outcome-card { border-color:#ffd186; background:#fff5df; }.visit-outcome-card.visit-outcome-resolved { border-color:#9bd5a8; background:#edfff1; }.visit-empty { margin:4px 0; font-size:12px; }
