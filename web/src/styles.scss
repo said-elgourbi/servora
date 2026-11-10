@@ -44,6 +44,15 @@ app-job-details .composer-actions > .primary-button:disabled {
   box-shadow: none !important;
   cursor: not-allowed;
 }
+app-field-report .report-filters { display:grid; grid-template-columns:minmax(220px,1fr) minmax(170px,220px); align-items:end; gap:12px 16px; margin:0 0 16px; }
+app-field-report .report-filters label { display:grid; gap:5px; min-width:0; font-size:12px; }
+app-field-report .report-filters input, app-field-report .report-filters select { min-height:42px; padding:8px 11px; font-size:13px; }
+app-field-report .report-status-filters { display:flex; flex-wrap:wrap; gap:6px; grid-column:1/-1; }
+app-field-report .report-status-filters button, app-field-report .report-clear-filters { padding:6px 10px; background:var(--mat-sys-surface); color:var(--mat-sys-on-surface); border-color:var(--mat-sys-outline-variant); font-size:12px; }
+app-field-report .report-status-filters button.active { border-color:var(--mat-sys-primary); background:var(--mat-sys-primary-container); color:var(--mat-sys-on-primary-container); }
+app-field-report .report-status-filters button span { display:inline-block; min-width:1.5em; margin-left:3px; text-align:center; font-variant-numeric:tabular-nums; }
+app-field-report .report-clear-filters { justify-self:start; color:var(--mat-sys-primary); }
+@media (max-width: 700px) { app-field-report .report-filters { grid-template-columns:1fr; } app-field-report .report-status-filters { grid-column:1; } }
 @media (max-width: 520px) {
   app-office-schedule .navigation .range {
     min-width: 0;

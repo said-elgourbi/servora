@@ -1,5 +1,6 @@
 import {
   ChangeDetectionStrategy,
+  computed,
   Component,
   DestroyRef,
   effect,
@@ -17,7 +18,7 @@ import { AppUpdates } from '../../../core/updates/app-updates';
 import { WorkLabel } from '../../../shared/ui/work-label';
 import { AuthSession } from '../../auth/data-access/auth-session';
 import { FieldSession, fieldPartition } from '../data-access/field-session';
-import { FieldStore, type FieldCommand } from '../data-access/field-store';
+import { FieldStore } from '../data-access/field-store';
 import { FieldQueue } from '../data-access/field-queue';
 
 @Component({
@@ -41,6 +42,29 @@ import { FieldQueue } from '../data-access/field-queue';
             {{ i18n.text('fieldNewReport') }}
           </button>
         </header>
+        <div class="report-filters" role="search" [attr.aria-label]="i18n.text('fieldReportFilters')">
+          <label class="report-search">
+            <span>{{ i18n.text('fieldReportSearch') }}</span>
+            <input type="search" [value]="reportSearch()" (input)="reportSearch.set($any($event.target).value)" [placeholder]="i18n.text('fieldReportSearchHint')" />
+          </label>
+          <label class="report-date-filter">
+            <span>{{ i18n.text('fieldReportDateRange') }}</span>
+            <select [value]="reportDateRange()" (change)="reportDateRange.set($any($event.target).value)">
+              <option value="all">{{ i18n.text('fieldReportAnyTime') }}</option>
+              <option value="30">{{ i18n.text('fieldReportLast30Days') }}</option>
+              <option value="90">{{ i18n.text('fieldReportLast90Days') }}</option>
+              <option value="365">{{ i18n.text('fieldReportLastYear') }}</option>
+            </select>
+          </label>
+          <div class="report-status-filters" role="group" [attr.aria-label]="i18n.text('fieldReportFilterByStatus')">
+            <button type="button" [class.active]="reportStatusFilter() === 'ALL'" (click)="reportStatusFilter.set('ALL')">{{ i18n.text('fieldFilterAll') }} <span>{{ ownReports().length }}</span></button>
+            <button type="button" [class.active]="reportStatusFilter() === 'PENDING'" (click)="reportStatusFilter.set('PENDING')">{{ i18n.text('reviewPending') }} <span>{{ reportStatusCount('PENDING') }}</span></button>
+            <button type="button" [class.active]="reportStatusFilter() === 'LINKED'" (click)="reportStatusFilter.set('LINKED')">{{ i18n.text('reviewLinkedStatus') }} <span>{{ reportStatusCount('LINKED') }}</span></button>
+            <button type="button" [class.active]="reportStatusFilter() === 'CONVERTED'" (click)="reportStatusFilter.set('CONVERTED')">{{ i18n.text('reviewConvertedStatus') }} <span>{{ reportStatusCount('CONVERTED') }}</span></button>
+            <button type="button" [class.active]="reportStatusFilter() === 'REJECTED'" (click)="reportStatusFilter.set('REJECTED')">{{ i18n.text('reviewRejectedStatus') }} <span>{{ reportStatusCount('REJECTED') }}</span></button>
+          </div>
+          @if (hasReportFilters()) { <button type="button" class="report-clear-filters" (click)="clearReportFilters()">{{ i18n.text('fieldClearFilters') }}</button> }
+        </div>
         <div class="report-table-wrap">
           <table>
             <thead>
@@ -53,7 +77,7 @@ import { FieldQueue } from '../data-access/field-queue';
               </tr>
             </thead>
             <tbody>
-              @for (report of ownReports(); track report.id) {
+              @for (report of filteredReports(); track report.id) {
                 <tr>
                   <td [attr.data-label]="i18n.text('fieldReportSummary')">
                     <strong>{{ report.summary }}</strong>
@@ -82,7 +106,7 @@ import { FieldQueue } from '../data-access/field-queue';
                 </tr>
               } @empty {
                 <tr class="report-empty-row">
-                  <td colspan="5">{{ i18n.text('fieldNoMyReports') }}</td>
+                  <td colspan="5">{{ ownReports().length ? i18n.text('fieldNoMatchingReports') : i18n.text('fieldNoMyReports') }}</td>
                 </tr>
               }
             </tbody>
@@ -91,35 +115,6 @@ import { FieldQueue } from '../data-access/field-queue';
         <div class="report-table-actions">
           <button type="button" (click)="refreshReports()">{{ i18n.text('refresh') }}</button>
         </div>
-      </section>
-      <section class="panel report-pending">
-        <header>
-          <h2>{{ i18n.text('fieldPending') }}</h2>
-          <button type="button" (click)="queue.replay()">{{ i18n.text('retry') }}</button>
-        </header>
-        @for (command of commands(); track command.operationId) {
-          <article class="report-pending-row">
-            <p>{{ command.payload['summary'] }}</p>
-            <p>
-              {{
-                i18n.text(
-                  command.state === 'accepted'
-                    ? 'fieldAccepted'
-                    : command.state === 'attention'
-                      ? 'fieldNeedsAttention'
-                      : command.state === 'uploading'
-                        ? 'fieldUploading'
-                        : 'fieldPending'
-                )
-              }}
-            </p>
-            @if (command.error) {
-              <p>{{ i18n.text('fieldRefusalReview') }}</p>
-            }
-          </article>
-        } @empty {
-          <p>{{ i18n.text('fieldNoPending') }}</p>
-        }
       </section>
       <dialog #reportDialog class="report-dialog" aria-labelledby="new-report-title">
         <div class="report-dialog-header">
@@ -185,8 +180,30 @@ export class FieldReport {
   protected readonly busy = signal(false);
   protected readonly ready = signal(false);
   protected readonly saved = signal(false);
-  protected readonly commands = signal<FieldCommand[]>([]);
   protected readonly ownReports = signal<AdHocWorkReport[]>([]);
+  protected readonly reportSearch = signal('');
+  protected readonly reportStatusFilter = signal<'ALL' | 'PENDING' | 'LINKED' | 'CONVERTED' | 'REJECTED'>('ALL');
+  protected readonly reportDateRange = signal<'all' | '30' | '90' | '365'>('all');
+  protected readonly filteredReports = computed(() => {
+    const query = this.reportSearch().trim().toLocaleLowerCase();
+    const status = this.reportStatusFilter();
+    const days = this.reportDateRange() === 'all' ? 0 : Number(this.reportDateRange());
+    const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
+    return this.ownReports()
+      .filter((report) => status === 'ALL' || report.status === status)
+      .filter((report) => !cutoff || new Date(report.createdAt).getTime() >= cutoff)
+      .filter((report) => {
+        if (!query) return true;
+        const searchable = [report.summary, this.reportLocation(report), report.reviewNote,
+          this.resultJobNumber(report)?.toString(), report.outcomeCode,
+          this.i18n.text(this.reportStatusKey(report.status))]
+          .filter(Boolean).join(' ').toLocaleLowerCase();
+        return searchable.includes(query);
+      })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  });
+  protected readonly hasReportFilters = computed(() =>
+    this.reportSearch().trim().length > 0 || this.reportStatusFilter() !== 'ALL' || this.reportDateRange() !== 'all');
   private restoring = false;
   protected readonly outcomes = [
     'RESOLVED',
@@ -228,22 +245,9 @@ export class FieldReport {
       }
     });
     effect(() => {
-      this.store.revision();
       const scope = this.session.context();
-      if (scope)
-        void this.store
-          .records(scope)
-          .then((rows) =>
-            this.commands.set(
-              rows.filter(
-                (row): row is FieldCommand => row.kind === 'command' && row.operation === 'ad-hoc',
-              ),
-            ),
-          )
-          .catch(() => this.error.set('fieldStorageFailure'));
-      else {
+      if (!scope) {
         this.form.reset({}, { emitEvent: false });
-        this.commands.set([]);
       }
     });
     const unload = (event: BeforeUnloadEvent) => {
@@ -278,6 +282,14 @@ export class FieldReport {
   }
   protected reportStatusKey(status: string): 'fieldPending' | 'reviewLinkedStatus' | 'reviewConvertedStatus' | 'reviewRejectedStatus' {
     return status === 'LINKED' ? 'reviewLinkedStatus' : status === 'CONVERTED' ? 'reviewConvertedStatus' : status === 'REJECTED' ? 'reviewRejectedStatus' : 'fieldPending';
+  }
+  protected reportStatusCount(status: string): number {
+    return this.ownReports().filter((report) => report.status === status).length;
+  }
+  protected clearReportFilters(): void {
+    this.reportSearch.set('');
+    this.reportStatusFilter.set('ALL');
+    this.reportDateRange.set('all');
   }
   protected reportLocation(report: AdHocWorkReport): string {
     return [report.customerName ?? report.reportedCustomerName, report.propertyAddress?.addressLine1 ?? report.reportedCustomerAddress, report.propertyAddress?.city].filter(Boolean).join(' · ');
