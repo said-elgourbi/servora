@@ -1,5 +1,13 @@
 # Servora project guidance
 
+## Start every task on a task-matched branch
+
+- At the start of every new user request, read this `AGENTS.md` before inspecting or changing project files. Then check the current Git branch, its upstream, and the working-tree status.
+- Never implement a task on a branch whose name does not clearly describe that task. Create a new branch from the latest `origin/develop` with a concise, task-matched name before editing.
+- If the current branch is unrelated to the new request, first preserve and finish its existing work: commit it, push it, and merge it into `develop`. Then create the task branch from the updated `develop`. Do not mix work from separate tasks in one branch.
+- If the unrelated branch is already clean and merged into `develop`, do not create a duplicate commit or merge; create the new task branch from the current `origin/develop` tip.
+- Keep the new task branch checked out while working. Before delivery, report the branch name and whether it was pushed or merged.
+
 ## Angular web application
 
 - Treat `web/` as the desktop and browser application for office staff and field technicians. Design for non-IT users: use plain labels, obvious actions, readable summaries, and low-friction workflows.
