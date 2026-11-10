@@ -32,6 +32,11 @@ export interface FieldJobDetails extends Omit<
 }
 export interface FieldActivityEvent {
   id: string;
+  authorMembershipId?: string | null;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  activityEditedAt?: string | null;
+  activityRemovedAt?: string | null;
   kind: string;
   recordedAt: string;
   actorName: string | null;
@@ -57,13 +62,27 @@ export interface FieldActivityDto {
 export interface FieldFollowUpDto {
   id: string;
   jobId: string;
+  jobNumber: number;
+  jobTitle: string;
+  customerName: string;
+  address: import("./workspace.js").WorkspaceAddress | null;
   sourceVisitId: string | null;
+  sourceVisitScheduledStart: string | null;
+  sourceVisitStatus: string | null;
+  sourceVisitOutcomeCode: string | null;
+  requestingTechnicianMembershipId: string;
+  proposedStart: string;
+  proposedEnd: string;
+  sameTechnicianPreferred: boolean;
   status: string;
   version: number;
   reason: string;
   reviewNote: string | null;
+  createdVisitId: string | null;
+  createdAt: string;
   messages: {
     id: string;
+    authorMembershipId: string;
     authorKind: string;
     body: string;
     recordedAt: string;

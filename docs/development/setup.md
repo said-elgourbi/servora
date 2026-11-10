@@ -40,8 +40,8 @@ Notes:
 ## 3. Development seed data (`make seed`)
 
 The foundation database starts empty and the API has no user-creation endpoint yet, so a
-fresh environment cannot sign in. `make seed` creates two active accounts, one per default
-foundation role (`BR-003`), inside one organization. It also writes a realistic demo dataset —
+fresh environment cannot sign in. `make seed` creates two active Manager accounts and one active
+Technician QA account inside one organization. It also writes a realistic demo dataset —
 customers, Properties, Jobs and Visits — so local checks have something real to show.
 
 ```bash
@@ -51,9 +51,9 @@ make seed
 | What               | Value                                                                               |
 | ------------------ | ----------------------------------------------------------------------------------- |
 | Organization       | `Servora Development` (`SEED_ORGANIZATION_NAME`)                                    |
-| Manager account    | `manager@servora.test` (`SEED_MANAGER_EMAIL`) — default Manager role                |
+| Manager accounts   | `manager@servora.test` and `manager2@servora.test` — `SEED_MANAGER_*` / `SEED_MANAGER_2_*` |
 | Technician account | `technician@servora.test` (`SEED_TECHNICIAN_EMAIL`) — default Technician role       |
-| Password           | `SEED_MANAGER_PASSWORD` / `SEED_TECHNICIAN_PASSWORD`, or generated and printed once |
+| Password           | Manager 1, Manager 2 and Technician `SEED_*_PASSWORD` values, or generated and printed once |
 
 Written per account: the `users` row (address, Argon2id hash, `ACTIVE`), the `user_profiles`
 row (`Dev Manager` / `Dev Technician`), and the `organization_members` row (`role_id`,
@@ -62,11 +62,11 @@ role-permission assignments.
 
 Demo data — a realistic book of business, not a tagged fixture:
 
-- 14 Customers across Canada: companies and individuals, active and inactive, English and French,
-  each with a billing address, contact persons (`BR-095`), 1–3 service Properties and the active
+- 100 Customers across Canada: companies and individuals, active and inactive, English and French,
+  each with a billing address, company contacts (`BR-095`), service Properties and the active
   Property ↔ Customer relationship rows.
-- 35 Jobs numbered from `1001`, spread across every Job status.
-- 37 Visits across every Visit status, carrying 1–3 technicians with exactly one `LEAD` (`BR-068`),
+- 400 Jobs numbered from `1001`, spread across every Job status.
+- Visits across every Visit status, distributed from the previous week through the next five weeks and assigned to ten technicians, with exactly one `LEAD` (`BR-068`),
   plus the assignment history `BR-069` describes, Visit status history, outcomes, notes and
   cancellation reasons.
 - The dataset is **anchored to the moment the seed runs**: a Visit that has already happened is
@@ -76,8 +76,10 @@ Demo data — a realistic book of business, not a tagged fixture:
   that, breaks the Job/Visit agreement the API enforces, or books one technician on two overlapping
   Visits.
 - `make seed` **replaces** the previous demo rather than appending to it: every Customer, Property,
-  Job and Visit of the seeded organization is removed first, and the organization's Job numbering
-  restarts at `1001`. Anything created by hand through the app in that organization goes with it.
+  Job, Visit and quote workflow/history row of the seeded organization is removed first, and the
+  organization's Job numbering restarts at `1001`. Ad-hoc work reports are preserved, with their
+  Customer and Property links cleared. Other records created by hand through the app may be removed
+  when they belong to the replaced demo data.
 
 Credential policy:
 
@@ -119,18 +121,17 @@ The seed also adds a deterministic **demo dataset** so the management and field 
 real to present. It is one hand-written book of business rather than generated rows, so it reads the way
 a service company's work actually reads:
 
-- **14 Customers** across Canada — companies and individuals, active and inactive, English and French,
-  with contact persons (`BR-095`), a billing address and 1–3 service Properties each;
-- **35 Jobs** numbered from `1001`, spread across **every** Job status so each filter and each list has
+- **100 Customers** across Canada — companies and individuals, active and inactive, English and French,
+  with company contact persons (`BR-095`), a billing address and service Properties;
+- **400 Jobs** numbered from `1001`, spread across **every** Job status so each filter and each list has
   data;
-- **37 Visits** spread across **every** Visit status, carrying a crew of one to three technicians with
+- Visits spread across **every** Visit status and from the previous week through the next five weeks, carrying a crew of one to three technicians with
   exactly one `LEAD` (`BR-068`), the assignment **history** `BR-069` describes — a Lead who was first
   assigned as an ordinary technician and promoted later, and a technician who was removed again — Visit
   status history, recorded outcomes (`BR-077`), notes from the office and the crew (`BR-027`) and a
   structured cancellation reason (`BR-076`);
-- **four further Technician members** (`Sarah Moreau`, `John Tremblay`, `Priya Raman`, `Luc Gagnon`) so a
-  Visit can carry a real crew. They are members only: the two documented credentials above remain the only
-  seeded logins and no password is generated for them.
+- **nine further Technician members** plus the Technician QA account, giving the scheduler a ten-person
+  field roster. The second Manager account is also available for manager workflow checks.
 
 Two properties of the dataset matter when it is edited (`api/src/database/development-seed-scenarios.ts`):
 
@@ -143,9 +144,10 @@ Two properties of the dataset matter when it is edited (`api/src/database/develo
    `COMPLETED` Visit has an outcome and an end in the past, no note is written in the future or by
    somebody off the crew, and no technician is booked on two overlapping Visits (`BR-070`).
 
-Re-running `make seed` **replaces** the demo instead of duplicating it: every Customer, Property, Job and
-Visit of the seeded organization is deleted first (their histories and assignments cascade with them) and
-the organization's Job numbering restarts at `1001`. Evidence objects already uploaded to the local MinIO
+Re-running `make seed` **replaces** the demo instead of duplicating it: every Customer, Property, Job,
+Visit and quote workflow/history row of the seeded organization is deleted first (most histories and
+assignments cascade with their parent rows), and the organization's Job numbering restarts at `1001`.
+Ad-hoc work reports are preserved with their Customer and Property links cleared. Evidence objects already uploaded to the local MinIO
 bucket are not removed — their rows cascade away with the Job, so a re-seed can leave orphaned dev objects
 in the bucket.
 
@@ -170,6 +172,21 @@ credential there.
 
 Implementation: `SignInViewModel.onDevSignIn` prefills the form and reuses the ordinary submit path, and
 `SignInScreen` renders the section only when the account list it is given is non-empty.
+
+### Temporary sign-in buttons (Web builds)
+
+The sign-in page shows Manager and Technician shortcuts in both development and production builds.
+Each prefills the seeded account and submits through the ordinary browser email sign-in flow; it does
+not bypass API authentication. These shortcuts and test credentials are temporary and must be removed
+before the web app is used with real accounts.
+
+| Question | Answer |
+| --- | --- |
+| Development account file | `web/src/app/features/auth/dev-sign-in-accounts.ts` |
+| Build configuration | `web/angular.json` keeps the same account module in development and production |
+| Accounts | The local Manager and Technician seed accounts above |
+| Passwords change | Update the local development account file when the corresponding `SEED_*_PASSWORD` values change; never use real accounts or production credentials |
+| Removal | Delete the account module, remove its import and shortcut section from `web/src/app/features/auth/pages/sign-in/`, and remove the four `devSignIn*` English/French dictionary entries |
 
 ## 4. Android against a local API (physical device or emulator)
 

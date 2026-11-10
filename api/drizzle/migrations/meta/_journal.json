@@ -204,6 +204,41 @@
       "when": 1791561600000,
       "tag": "0028_push_deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793135093587,
+      "tag": "0029_tiresome_inertia",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793135802381,
+      "tag": "0030_overrated_mattie_franklin",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793808214275,
+      "tag": "0031_visit_scoped_job_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793808287410,
+      "tag": "0032_web_audio_and_visit_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793886839586,
+      "tag": "0033_comment_edit_history",
+      "breakpoints": true
     }
   ]
 }

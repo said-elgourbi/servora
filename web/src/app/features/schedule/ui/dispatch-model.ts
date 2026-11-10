@@ -1,4 +1,5 @@
 import type { ScheduleResponse, ScheduleVisit } from '@servora/shared-types';
+import { formatTimeInstant, type TimeFormat } from '../../../core/preferences/time-format';
 export const PIXELS_PER_MINUTE = 1.2;
 const MINUTE = 60000;
 export interface DispatchEntry {
@@ -139,21 +140,16 @@ export function dispatchBoard(
     ),
   };
 }
-export function visitTime(visit: ScheduleVisit, zone: string, language: string): string {
+export function visitTime(visit: ScheduleVisit, zone: string, language: string, timeFormat: TimeFormat = '24H'): string {
   if (!visit.scheduledStart || !visit.scheduledEnd) return '';
   const date = new Intl.DateTimeFormat(language, {
     timeZone: zone,
     month: 'short',
     day: 'numeric',
   });
-  const time = new Intl.DateTimeFormat(language, {
-    timeZone: zone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    timeZoneName: 'shortOffset',
-  });
   const start = new Date(visit.scheduledStart),
     end = new Date(visit.scheduledEnd);
-  return `${date.format(start)} · ${time.format(start)} – ${date.format(start) === date.format(end) ? '' : `${date.format(end)} · `}${time.format(end)}`;
+  const locale = language === 'fr' ? 'fr-CA' : 'en-CA';
+  const format = (instant: Date) => formatTimeInstant(instant, locale, zone, timeFormat, 'shortOffset');
+  return `${date.format(start)} · ${format(start)} – ${date.format(start) === date.format(end) ? '' : `${date.format(end)} · `}${format(end)}`;
 }

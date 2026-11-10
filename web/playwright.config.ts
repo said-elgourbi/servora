@@ -7,7 +7,8 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4300',
+    baseURL: `http://127.0.0.1:${process.env['SERVORA_TEST_PORT'] ?? 4300}`,
+    timezoneId: 'America/Toronto',
     trace: 'retain-on-failure',
     launchOptions: process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE']
       ? { executablePath: process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE'] }
@@ -49,7 +50,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'node e2e/fixtures/static-server.mjs',
-    url: 'http://127.0.0.1:4300',
+    url: `http://127.0.0.1:${process.env['SERVORA_TEST_PORT'] ?? 4300}`,
     reuseExistingServer: false,
   },
 });

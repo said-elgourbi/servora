@@ -92,14 +92,23 @@ export type {
 } from "./customers.js";
 
 export type {
+  EvidencePhase,
   ScheduleVisitRequest,
+  RescheduleVisitRequest,
+  AssignVisitTechniciansRequest,
   AssignableTechnician,
   VisitScheduleConflict,
   CreateJobRequest,
   ChangeJobStatusRequest,
   OfficeJobDetails,
+  JobScheduleSearchOption,
   JobActivityEvent,
   JobActivity,
+  AdHocWorkReport,
+  AdHocWorkReportStatus,
+  AdHocReviewCustomerOption,
+  AdHocReviewPropertyOption,
+  AdHocReviewJobOption,
 } from "./jobs.js";
 
-export type { ScheduleResponse, ScheduleVisit } from './schedule.js';
+export type { ScheduleResponse, ScheduleVisit } from "./schedule.js";

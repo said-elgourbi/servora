@@ -606,6 +606,12 @@ export function toJobDetailsDto(
       : ((details.visits ?? []).find(
           (visit) => visit.visitId === details.selectedVisit?.visitId,
         )?.outcomeCode ?? null);
+  // Scheduling eligibility belongs to the whole Job, not the Visit a particular read happened to
+  // select. Office Job Details commonly has no selected Visit while still carrying open Visits.
+  const latestVisit = (details.visits ?? []).reduce<NonNullable<typeof details.visits>[number] | null>(
+    (latest, visit) => (!latest || visit.sequence > latest.sequence ? visit : latest),
+    null,
+  );
   // Whether the represented Visit admits a follow-up Visit request (`BR-FV-001`, `BR-078`): the
   // attempt is over (`COMPLETED`) and its recorded outcome expects a follow-up. A `RESOLVED` attempt
   // expects none, so the request action is not offered for it. The capability the session holds stays
@@ -617,10 +623,11 @@ export function toJobDetailsDto(
   const canScheduleVisit =
     options.canCreateSchedule === true &&
     (status === 'NEW' || status === 'ACTIVE') &&
-    (canScheduleAfterFinishedVisits(details.visits ?? []) ||
-      details.selectedVisit === null ||
-      (details.selectedVisit.status === 'COMPLETED' &&
-        expectsFollowUpVisit(selectedOutcomeCode)) ||
+    !(details.visits ?? []).some((visit) => visit.status === 'SCHEDULED') &&
+    ((details.visits ?? []).length === 0 ||
+      canScheduleAfterFinishedVisits(details.visits ?? []) ||
+      (latestVisit?.status === 'COMPLETED' &&
+        expectsFollowUpVisit(latestVisit.outcomeCode)) ||
       (details.quoteWorkflow?.state === 'APPROVED' &&
         !hasFutureActionableWorkVisit(
           details.visits ?? [],

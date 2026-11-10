@@ -485,6 +485,30 @@ describe('job activity (e2e)', () => {
     expect(jobStatus.toStatus).toBe('ACTIVE');
   });
 
+  it('allows an office member to add a note to a past Visit and returns the persisted Activity', async () => {
+    const fixture = await activityFixture();
+    const pastStart = new Date(Date.now() - 7_200_000);
+    await database.db
+      .update(visits)
+      .set({ scheduledStart: pastStart, scheduledEnd: new Date(pastStart.getTime() + 3_600_000) })
+      .where(eq(visits.id, fixture.secondVisit.id));
+    const session = await signInFor([JOB_PERMISSIONS.UPDATE]);
+
+    const posted = await request(app.getHttpServer())
+      .post(`/jobs/${fixture.job.id}/visits/${fixture.secondVisit.id}/notes`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ body: 'Add the photo that was missed.', clientOperationId: crypto.randomUUID() })
+      .expect(201);
+
+    expect(posted.body.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'VISIT_NOTE_ADDED',
+        visitSequence: 2,
+        body: 'Add the photo that was missed.',
+      }),
+    ]));
+  });
+
   it('lets a manager correct a visit note and reports the edited marker', async () => {
     const fixture = await activityFixture();
     const session = await signInFor([
@@ -508,6 +532,39 @@ describe('job activity (e2e)', () => {
       noteRemovalReason: null,
     });
     expect(note.noteEditedAt).toEqual(expect.any(String));
+  });
+
+  it('shows edit history only to the note author and a Manager', async () => {
+    const fixture = await activityFixture();
+    const owner = await signInFor([CUSTOMER_PERMISSIONS.VIEW, VISIT_PERMISSIONS.ADD_NOTE]);
+    await database.db.update(visitNotes)
+      .set({ authorMembershipId: owner.membershipId })
+      .where(eq(visitNotes.id, fixture.note.id));
+    await request(app.getHttpServer())
+      .patch(`/jobs/${fixture.job.id}/visits/notes/${fixture.note.id}`)
+      .set('Authorization', `Bearer ${owner.accessToken}`)
+      .send({ body: 'Updated by the author.' })
+      .expect(200);
+
+    const ownerHistory = await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}/activity/VISIT_NOTE_ADDED/${fixture.note.id}/history`)
+      .set('Authorization', `Bearer ${owner.accessToken}`)
+      .expect(200);
+    expect(ownerHistory.body).toEqual([
+      expect.objectContaining({ previousValue: { body: 'Found a damaged capacitor.' } }),
+    ]);
+
+    const otherMember = await signInFor([CUSTOMER_PERMISSIONS.VIEW, VISIT_PERMISSIONS.ADD_NOTE]);
+    await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}/activity/VISIT_NOTE_ADDED/${fixture.note.id}/history`)
+      .set('Authorization', `Bearer ${otherMember.accessToken}`)
+      .expect(403);
+
+    const manager = await signInFor([CUSTOMER_PERMISSIONS.VIEW, JOB_PERMISSIONS.UPDATE]);
+    await request(app.getHttpServer())
+      .get(`/jobs/${fixture.job.id}/activity/VISIT_NOTE_ADDED/${fixture.note.id}/history`)
+      .set('Authorization', `Bearer ${manager.accessToken}`)
+      .expect(200);
   });
 
   it('soft-deletes a visit note from ordinary activity but keeps it in the manager audit read', async () => {

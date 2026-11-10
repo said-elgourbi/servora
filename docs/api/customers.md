@@ -78,6 +78,8 @@ The organization's customers, newest first, each with derived counts:
 - `jobCount`: all jobs belonging to this customer.
 - `openJobCount`: jobs in `NEW` or `ACTIVE`, matching the open-work filter.
 - `overdueVisitCount`: `SCHEDULED` visits whose scheduled end is before the database's current time, matching the overdue filter. Visits already in progress or terminal are excluded.
+- `contactCount`: current (not removed) contact people.
+- `primaryContact`: the primary person's name, email and phone, or `null` when a company has no primary contact. Individual customers continue to use their own customer email and phone.
 
 The two operational counts are additive list fields. They are tenant-scoped, calculated in the list query, and need no per-customer detail requests. Detail responses retain their existing contract.
 Optional `status` and `jobs` filters; see `docs/tracker/android/008-android-customers-filter.md`.
@@ -188,7 +190,8 @@ An unknown value is `400 VALIDATION_FAILED`.
 ### 3.4 `GET /customers/:id/jobs` — the customer's Jobs (`BR-081`)
 
 Newest job number first. Each entry carries the **selected Visit**'s derived date and technicians,
-chosen by the backend so every client shows the same values (`BR-081`).
+chosen by the backend so every client shows the same values (`BR-081`), and any Visits on that Job
+that are still `SCHEDULED` past their scheduled end.
 
 ```json
 [
@@ -210,6 +213,7 @@ chosen by the backend so every client shows the same values (`BR-081`).
       "country": "Canada"
     },
     "scheduledStart": "2026-09-08T13:00:00.000Z",
+    "overdueVisits": [],
     "technicians": [
       { "membershipId": "…", "name": "Mike Lead", "roleCode": "LEAD" },
       { "membershipId": "…", "name": "Sarah Tech", "roleCode": "TECHNICIAN" }
@@ -222,6 +226,9 @@ chosen by the backend so every client shows the same values (`BR-081`).
   invent a parallel vocabulary (`BR-041`).
 - `scheduledStart` is the selected Visit's scheduled start, or `null` when the Job has no eligible
   Visit.
+- `overdueVisits` lists this Job's scheduled Visits whose scheduled end is before the database's
+  current time. This is the same server-clock condition used by `overdueVisitCount` in §3.1; each
+  item includes its scheduled start and end so the client can identify the overdue Visit.
 - `technicians` are the selected Visit's current assignments (`BR-068`), Lead first. An empty array
   means unassigned; the client presents a localized "unassigned" state.
 - `propertyAddress` is the Job's preserved snapshot (`BR-056`), never the Property's current

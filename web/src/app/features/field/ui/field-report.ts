@@ -8,6 +8,10 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
+import { DatePipe } from '@angular/common';
+import { firstValueFrom } from 'rxjs';
+import type { AdHocWorkReport } from '@servora/shared-types';
 import { I18n } from '../../../core/i18n/i18n';
 import { AppUpdates } from '../../../core/updates/app-updates';
 import { WorkLabel } from '../../../shared/ui/work-label';
@@ -19,50 +23,82 @@ import { FieldQueue } from '../data-access/field-queue';
 @Component({
   selector: 'app-field-report',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, ReactiveFormsModule, WorkLabel],
+  imports: [RouterLink, ReactiveFormsModule, WorkLabel, DatePipe],
   styleUrl: './field-workflow.scss',
   template: `
     <a routerLink="/" [queryParams]="{ view: 'field' }">{{ i18n.text('backToDay') }}</a>
-    <h1>{{ i18n.text('fieldAdHoc') }}</h1>
     @if (error()) {
       <p role="alert">{{ i18n.text(error()!) }}</p>
     }
     @if (ready() && session.context() && auth.hasPermission('visits.report_ad_hoc_work')) {
-      <form [formGroup]="form" (ngSubmit)="submit()" class="panel">
-        <label for="report-customer">{{ i18n.text('fieldCustomerName') }}</label
-        ><input id="report-customer" formControlName="reportedCustomerName" />
-        <label for="report-phone">{{ i18n.text('fieldCustomerPhone') }}</label
-        ><input id="report-phone" formControlName="reportedCustomerPhone" type="tel" />
-        <label for="report-address">{{ i18n.text('fieldCustomerAddress') }}</label
-        ><textarea id="report-address" formControlName="reportedCustomerAddress"></textarea>
-        <label for="report-start">{{ i18n.text('fieldStart') }}</label
-        ><input id="report-start" type="datetime-local" formControlName="workStartedAt" />
-        <label for="report-end">{{ i18n.text('fieldEnd') }}</label
-        ><input id="report-end" type="datetime-local" formControlName="workEndedAt" />
-        <label for="report-outcome">{{ i18n.text('fieldOutcome') }}</label
-        ><select id="report-outcome" formControlName="outcomeCode">
-          <option value="">{{ i18n.text('fieldChooseOutcome') }}</option>
-          @for (outcome of outcomes; track outcome) {
-            <option [value]="outcome">{{ outcome | workLabel }}</option>
-          }
-        </select>
-        <label for="report-summary">{{ i18n.text('fieldReportSummary') }}</label
-        ><textarea id="report-summary" formControlName="summary" maxlength="2000"></textarea>
-        <p role="status">{{ i18n.text(saved() ? 'fieldSaved' : 'fieldDraft') }}</p>
-        <p>{{ i18n.text('fieldStorageNotice') }}</p>
-        <div class="actions">
-          <button type="submit" [disabled]="form.invalid || busy()">
-            {{ i18n.text('fieldSubmitReport') }}</button
-          ><button type="button" (click)="discard()" [disabled]="busy()">
-            {{ i18n.text('fieldDiscard') }}
+      <section class="panel report-history" aria-labelledby="my-reports-title">
+        <header>
+          <div>
+            <h1 id="my-reports-title">{{ i18n.text('fieldMyReports') }}</h1>
+            <p>{{ i18n.text('fieldMyReportsHint') }}</p>
+          </div>
+          <button type="button" class="report-new-button" (click)="reportDialog.showModal()">
+            {{ i18n.text('fieldNewReport') }}
           </button>
+        </header>
+        <div class="report-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{{ i18n.text('fieldReportSummary') }}</th>
+                <th scope="col">{{ i18n.text('fieldReportLocation') }}</th>
+                <th scope="col">{{ i18n.text('fieldSubmitted') }}</th>
+                <th scope="col">{{ i18n.text('fieldReportStatus') }}</th>
+                <th scope="col">{{ i18n.text('fieldJob') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (report of ownReports(); track report.id) {
+                <tr>
+                  <td [attr.data-label]="i18n.text('fieldReportSummary')">
+                    <strong>{{ report.summary }}</strong>
+                    <small>{{ formatRange(report) }} · {{ report.outcomeCode | workLabel }}</small>
+                    @if (report.reviewNote) {
+                      <small>{{ i18n.text('fieldOfficeDecision') }}: {{ report.reviewNote }}</small>
+                    }
+                  </td>
+                  <td [attr.data-label]="i18n.text('fieldReportLocation')">
+                    {{ reportLocation(report) || i18n.text('reviewLocationUnknown') }}
+                  </td>
+                  <td [attr.data-label]="i18n.text('fieldSubmitted')">
+                    {{ report.createdAt | date:'mediumDate':undefined:i18n.language() }}
+                  </td>
+                  <td [attr.data-label]="i18n.text('fieldReportStatus')">
+                    <span class="report-status" [class.pending]="report.status === 'PENDING'" [class.linked]="report.status === 'LINKED'" [class.converted]="report.status === 'CONVERTED'" [class.rejected]="report.status === 'REJECTED'">{{ i18n.text(reportStatusKey(report.status)) }}</span>
+                  </td>
+                  <td [attr.data-label]="i18n.text('fieldJob')">
+                    @if (resultJobId(report)) {
+                      <a [routerLink]="['/work/jobs', resultJobId(report)]" [queryParams]="{ view: 'field' }">
+                        {{ i18n.text('fieldOpenJob') }}
+                        @if (resultJobNumber(report)) { <span>#{{ resultJobNumber(report) }}</span> }
+                      </a>
+                    } @else { <span class="report-no-job">—</span> }
+                  </td>
+                </tr>
+              } @empty {
+                <tr class="report-empty-row">
+                  <td colspan="5">{{ i18n.text('fieldNoMyReports') }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
         </div>
-      </form>
-      <section class="panel">
-        <h2>{{ i18n.text('fieldPending') }}</h2>
-        <button type="button" (click)="queue.replay()">{{ i18n.text('retry') }}</button>
+        <div class="report-table-actions">
+          <button type="button" (click)="refreshReports()">{{ i18n.text('refresh') }}</button>
+        </div>
+      </section>
+      <section class="panel report-pending">
+        <header>
+          <h2>{{ i18n.text('fieldPending') }}</h2>
+          <button type="button" (click)="queue.replay()">{{ i18n.text('retry') }}</button>
+        </header>
         @for (command of commands(); track command.operationId) {
-          <article>
+          <article class="report-pending-row">
             <p>{{ command.payload['summary'] }}</p>
             <p>
               {{
@@ -81,8 +117,57 @@ import { FieldQueue } from '../data-access/field-queue';
               <p>{{ i18n.text('fieldRefusalReview') }}</p>
             }
           </article>
+        } @empty {
+          <p>{{ i18n.text('fieldNoPending') }}</p>
         }
       </section>
+      <dialog #reportDialog class="report-dialog" aria-labelledby="new-report-title">
+        <div class="report-dialog-header">
+          <h2 id="new-report-title">{{ i18n.text('fieldAdHoc') }}</h2>
+          <button type="button" class="report-dialog-close" (click)="reportDialog.close()" [attr.aria-label]="i18n.text('fieldCloseDialog')">×</button>
+        </div>
+        <form [formGroup]="form" (ngSubmit)="submit(reportDialog)" class="report-form">
+          <label for="report-summary">{{ i18n.text('fieldReportSummary') }}</label>
+          <textarea id="report-summary" formControlName="summary" maxlength="2000" required></textarea>
+          <label for="report-outcome">{{ i18n.text('fieldOutcome') }}</label>
+          <select id="report-outcome" formControlName="outcomeCode" required>
+            <option value="">{{ i18n.text('fieldChooseOutcome') }}</option>
+            @for (outcome of outcomes; track outcome) {
+              <option [value]="outcome">{{ outcome | workLabel }}</option>
+            }
+          </select>
+          <div class="report-times">
+            <div class="report-time-field">
+              <label for="report-start">{{ i18n.text('fieldStart') }}</label>
+              <input id="report-start" type="datetime-local" formControlName="workStartedAt" required />
+              <button type="button" class="report-time-shortcut" (click)="setTimeNow('workStartedAt')">{{ i18n.text('fieldSetNow') }}</button>
+            </div>
+            <div class="report-time-field">
+              <label for="report-end">{{ i18n.text('fieldEnd') }}</label>
+              <input id="report-end" type="datetime-local" formControlName="workEndedAt" required />
+              <button type="button" class="report-time-shortcut" (click)="setTimeNow('workEndedAt')">{{ i18n.text('fieldSetNow') }}</button>
+            </div>
+          </div>
+          <details class="report-customer-details">
+            <summary>{{ i18n.text('fieldAddCustomerDetails') }}</summary>
+            <label for="report-customer">{{ i18n.text('fieldCustomerName') }}</label>
+            <input id="report-customer" formControlName="reportedCustomerName" />
+            <label for="report-address">{{ i18n.text('fieldCustomerAddress') }}</label>
+            <textarea id="report-address" formControlName="reportedCustomerAddress"></textarea>
+            <label for="report-phone">{{ i18n.text('fieldCustomerPhone') }}</label>
+            <input id="report-phone" formControlName="reportedCustomerPhone" type="tel" />
+          </details>
+          <p role="status" class="report-draft-status">{{ i18n.text(saved() ? 'fieldSaved' : 'fieldDraft') }}</p>
+          <div class="actions">
+            <button type="submit" class="report-submit" [disabled]="form.invalid || busy()">
+              {{ i18n.text('fieldSubmitReport') }}
+            </button>
+            <button type="button" (click)="discard()" [disabled]="busy()">
+              {{ i18n.text('fieldDiscard') }}
+            </button>
+          </div>
+        </form>
+      </dialog>
     }
   `,
 })
@@ -90,6 +175,7 @@ export class FieldReport {
   protected readonly i18n = inject(I18n);
   protected readonly session = inject(FieldSession);
   protected readonly auth = inject(AuthSession);
+  private readonly http = inject(HttpClient);
   private readonly store = inject(FieldStore);
   protected readonly queue = inject(FieldQueue);
   private readonly updates = inject(AppUpdates);
@@ -100,6 +186,7 @@ export class FieldReport {
   protected readonly ready = signal(false);
   protected readonly saved = signal(false);
   protected readonly commands = signal<FieldCommand[]>([]);
+  protected readonly ownReports = signal<AdHocWorkReport[]>([]);
   private restoring = false;
   protected readonly outcomes = [
     'RESOLVED',
@@ -108,17 +195,14 @@ export class FieldReport {
     'UNABLE_TO_COMPLETE',
   ];
   protected readonly form = new FormGroup({
-    reportedCustomerName: new FormControl('', {
-      nonNullable: true,
-      validators: [Validators.required, Validators.maxLength(255)],
-    }),
+    reportedCustomerName: new FormControl('', { nonNullable: true, validators: [Validators.maxLength(255)] }),
     reportedCustomerPhone: new FormControl('', {
       nonNullable: true,
-      validators: [Validators.required, Validators.maxLength(50)],
+      validators: [Validators.maxLength(50)],
     }),
     reportedCustomerAddress: new FormControl('', {
       nonNullable: true,
-      validators: [Validators.required, Validators.maxLength(2000)],
+      validators: [Validators.maxLength(2000)],
     }),
     workStartedAt: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
     workEndedAt: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
@@ -128,6 +212,13 @@ export class FieldReport {
       validators: [Validators.required, Validators.maxLength(2000)],
     }),
   });
+  protected setTimeNow(field: 'workStartedAt' | 'workEndedAt'): void {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 16);
+    this.form.controls[field].setValue(local);
+  }
   constructor() {
     void this.restore();
     const changes = this.form.valueChanges.subscribe(() => {
@@ -170,6 +261,8 @@ export class FieldReport {
     try {
       const scope = this.session.context() ?? (await this.session.verify());
       const rows = await this.store.records(scope);
+      try { this.ownReports.set(await firstValueFrom(this.http.get<AdHocWorkReport[]>('/jobs/ad-hoc-work-reports', this.session.options(scope)))); }
+      catch { this.error.set('fieldRequestFailed'); }
       const draft = rows.find((row) => row.kind === 'report-draft');
       if (draft?.kind === 'report-draft') {
         this.restoring = true;
@@ -182,6 +275,31 @@ export class FieldReport {
     } finally {
       this.ready.set(true);
     }
+  }
+  protected reportStatusKey(status: string): 'fieldPending' | 'reviewLinkedStatus' | 'reviewConvertedStatus' | 'reviewRejectedStatus' {
+    return status === 'LINKED' ? 'reviewLinkedStatus' : status === 'CONVERTED' ? 'reviewConvertedStatus' : status === 'REJECTED' ? 'reviewRejectedStatus' : 'fieldPending';
+  }
+  protected reportLocation(report: AdHocWorkReport): string {
+    return [report.customerName ?? report.reportedCustomerName, report.propertyAddress?.addressLine1 ?? report.reportedCustomerAddress, report.propertyAddress?.city].filter(Boolean).join(' · ');
+  }
+  protected resultJobId(report: AdHocWorkReport): string | null {
+    return report.createdJobId ?? report.knownJobId;
+  }
+  protected resultJobNumber(report: AdHocWorkReport): number | null {
+    return report.createdJobNumber ?? report.knownJobNumber;
+  }
+  protected formatRange(report: AdHocWorkReport): string {
+    const locale = this.i18n.language() === 'fr' ? 'fr-CA' : 'en-CA';
+    const start = new Date(report.workStartedAt);
+    const end = new Date(report.workEndedAt);
+    return `${start.toLocaleDateString(locale, { dateStyle: 'short' })} · ${start.toLocaleTimeString(locale, { timeStyle: 'short' })}–${end.toLocaleTimeString(locale, { timeStyle: 'short' })}`;
+  }
+  protected async refreshReports(): Promise<void> {
+    try {
+      const scope = this.session.context() ?? (await this.session.verify());
+      this.ownReports.set(await firstValueFrom(this.http.get<AdHocWorkReport[]>('/jobs/ad-hoc-work-reports', this.session.options(scope))));
+    }
+    catch { this.error.set('fieldRequestFailed'); }
   }
   private async save(): Promise<void> {
     const scope = this.session.context();
@@ -200,7 +318,7 @@ export class FieldReport {
     ]);
     this.saved.set(JSON.stringify(data) === JSON.stringify(this.form.getRawValue()));
   }
-  protected async submit(): Promise<void> {
+  protected async submit(dialog: HTMLDialogElement): Promise<void> {
     if (this.busy() || this.form.invalid) return;
     this.busy.set(true);
     try {
@@ -214,8 +332,29 @@ export class FieldReport {
         workStartedAt: start.toISOString(),
         workEndedAt: end.toISOString(),
       });
+      const scope = this.session.context();
+      if (scope) {
+        try {
+          await this.store.write(scope, [], [this.store.key(scope, 'report-draft/current')]);
+        } catch {
+          this.error.set('fieldStorageFailure');
+        }
+        try {
+          this.ownReports.set(
+            await firstValueFrom(
+              this.http.get<AdHocWorkReport[]>(
+                '/jobs/ad-hoc-work-reports',
+                this.session.options(scope),
+              ),
+            ),
+          );
+        } catch {
+          // The accepted outbox receipt remains visible above.
+        }
+      }
       this.form.reset({}, { emitEvent: false });
       this.saved.set(false);
+      dialog.close();
     } catch {
       this.error.set('fieldRequestFailed');
     } finally {

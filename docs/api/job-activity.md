@@ -89,6 +89,8 @@ it; the API never returns presentation text (`BR-028`).
 | Kind                          | Level | Carried fields                                  |
 | ----------------------------- | ----- | ----------------------------------------------- |
 | `JOB_STATUS_CHANGED`          | Job   | `fromStatus?`, `toStatus` (Job status codes)    |
+| `JOB_NOTE_ADDED`               | Job   | `body`                                          |
+| `JOB_DOCUMENT_ATTACHED`       | Job   | `documentId`, `documentDisplayName?`, `documentVersion`, `documentByteSize` |
 | `JOB_PROPERTY_CHANGED`        | Job   | —                                               |
 | `JOB_CUSTOMER_CHANGED`        | Job   | —                                               |
 | `VISIT_STATUS_CHANGED`        | Visit | `fromStatus?`, `toStatus` (Visit status codes)  |

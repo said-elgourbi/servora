@@ -15,6 +15,7 @@ export interface WorkspaceTechnician {
 }
 export interface HomeVisitDto {
   visitId: string;
+  visitNumber?: number;
   visitStatus: string;
   purposeCode: string;
   scheduledStart: string;
@@ -36,6 +37,10 @@ export interface HomeAttentionDto {
   jobTitle: string;
   customerName: string;
   visitId: string | null;
+  visitNumber?: number | null;
+  purposeCode?: string | null;
+  visitStatus?: string | null;
+  technicians?: WorkspaceTechnician[];
   scheduledStart: string | null;
   scheduledEnd: string | null;
 }
@@ -47,6 +52,7 @@ export interface HomeDto {
   visits: HomeVisitDto[];
 }
 export interface ManagerHomeResponse extends HomeDto {
+  attention: HomeDto['attention'] & { countsByKind?: Record<string, number> };
   today: {
     total: number;
     completed: number;
@@ -81,11 +87,25 @@ export interface WorkspaceJobDetails {
       isPrimary: boolean;
     }[];
   } | null;
-  selectedVisit: { id: string } | null;
+  selectedVisit: {
+    id: string;
+    status: string;
+    purposeCode: string;
+    scheduledStart: string;
+    scheduledEnd: string;
+    version: number;
+    reschedulable: boolean;
+    requestFollowUpAllowed: boolean;
+    allowedStatusTransitions: string[];
+    completionAllowed: boolean;
+    addUpdateAllowed: boolean;
+    fieldActionable: boolean;
+  } | null;
   visits: {
     id: string;
     sequence: number;
     status: string;
+    version: number;
     purposeCode: string;
     outcomeCode: string | null;
     scheduledStart: string | null;

@@ -16,6 +16,7 @@
   <p role="alert" class="notice">{{ i18n.text('fieldStorageFailure') }}</p>
 }
 @if (job(); as item) {
+  @if (!embedded()) {
   <header>
     <div>
       <p>{{ i18n.text('job') }} #{{ item.jobNumber }} · {{ item.customerName }}</p>
@@ -33,7 +34,7 @@
   @if (fetchedAt(); as time) {
     <p role="status">
       {{ i18n.text(stale() ? 'fieldStale' : 'updatedAt') }}
-      {{ time | date: 'medium' : undefined : i18n.language() }}
+      {{ time | date: 'mediumDate' : undefined : i18n.language() }} · {{ time | preferredTime }}
     </p>
   }
   <p>{{ item.description }}</p>
@@ -73,11 +74,12 @@
       }
     </aside>
   </div>
+  }
   @if (selected(); as visit) {
     @if (session.context() && visit.fieldActionable) {
       <section class="panel">
         <h2>{{ i18n.text('fieldVisitActions') }}</h2>
-        <div class="actions">
+        <div class="actions field-status-actions">
           @for (status of visit.allowedStatusTransitions; track status) {
             @if (auth.hasPermission('VISIT_UPDATE_ASSIGNED_STATUS')) {
               <button
@@ -91,7 +93,7 @@
           }
         </div>
         @if (visit.addUpdateAllowed) {
-          <form [formGroup]="form" (ngSubmit)="submit('note')">
+          <form class="field-update-form" [formGroup]="form" (ngSubmit)="submit('note')">
             <fieldset [disabled]="loading() || busy() || preparing()">
               @if (auth.hasPermission('VISIT_ADD_NOTE')) {
                 <label for="field-note">{{ i18n.text('fieldNote') }}</label
@@ -102,7 +104,7 @@
                   rows="4"
                 ></textarea>
               }
-              <div class="actions">
+              <div class="actions evidence-actions">
                 @if (auth.hasPermission('evidence.photo.add')) {
                   <label class="file"
                     >{{ i18n.text('fieldCamera')
@@ -180,8 +182,9 @@
               }
               <p role="status">{{ i18n.text(saved() ? 'fieldSaved' : 'fieldDraft') }}</p>
               <p class="muted">{{ i18n.text('fieldStorageNotice') }}</p>
-              <div class="actions">
+              <div class="actions field-form-actions">
                 <button
+                  class="primary-action"
                   type="submit"
                   [disabled]="
                     busy() ||
@@ -194,6 +197,7 @@
                 </button>
                 @if (visit.completionAllowed && auth.hasPermission('VISIT_RECORD_OUTCOME')) {
                   <button
+                    class="secondary-action"
                     type="button"
                     (click)="submit('completion')"
                     [disabled]="
@@ -207,7 +211,7 @@
                     {{ i18n.text('fieldComplete') }}
                   </button>
                 }
-                <button type="button" (click)="discardDraft()" [disabled]="busy() || recording()">
+                <button class="secondary-action" type="button" (click)="discardDraft()" [disabled]="busy() || recording()">
                   {{ i18n.text('fieldDiscard') }}
                 </button>
               </div>
@@ -222,19 +226,19 @@
       auth.hasPermission('visits.request_follow_up')
     ) {
       <section class="panel">
-        <h2>{{ i18n.text('fieldFollowUp') }}</h2>
+        <h2>{{ i18n.text('fieldRequestAnotherVisit') }}</h2>
         <p>{{ i18n.text('fieldOnlineOnly') }}</p>
-        <form [formGroup]="follow" (ngSubmit)="requestFollowUp()">
-          <label for="follow-start">{{ i18n.text('fieldStart') }}</label
+        <form class="follow-up-form" [formGroup]="follow" (ngSubmit)="requestFollowUp()">
+          <label for="follow-start">{{ i18n.text('fieldProposedStart') }}</label
           ><input id="follow-start" type="datetime-local" formControlName="start" /><label
             for="follow-end"
-            >{{ i18n.text('fieldEnd') }}</label
+            >{{ i18n.text('fieldProposedEnd') }}</label
           ><input id="follow-end" type="datetime-local" formControlName="end" /><label
             for="follow-reason"
             >{{ i18n.text('fieldReason') }}</label
           ><textarea id="follow-reason" formControlName="reason"></textarea
           ><button type="submit" [disabled]="busy() || follow.invalid">
-            {{ i18n.text('fieldSendRequest') }}
+            {{ i18n.text('fieldSendVisitRequest') }}
           </button>
         </form>
       </section>
@@ -242,7 +246,7 @@
   }
 
   @for (request of requests(); track request.id) {
-    <section class="panel">
+    <section class="panel follow-up-request-card">
       <h2>{{ i18n.text('fieldFollowUp') }}</h2>
       <p>{{ request.status | workLabel }}</p>
       <p>{{ request.reason }}</p>
@@ -250,7 +254,7 @@
       @for (message of request.messages; track message.id) {
         <blockquote>
           {{ message.body
-          }}<small>{{ message.recordedAt | date: 'medium' : undefined : i18n.language() }}</small>
+          }}<small>{{ message.recordedAt | date: 'mediumDate' : undefined : i18n.language() }} · {{ message.recordedAt | preferredTime }}</small>
         </blockquote>
       }
       @if (request.status === 'NEEDS_CLARIFICATION') {
@@ -266,6 +270,7 @@
       }
     </section>
   }
+  @if (!embedded()) {
   <section class="panel">
     <h2>{{ i18n.text('fieldActivity') }}</h2>
     <p>{{ i18n.text('fieldAcceptedMediaOnline') }}</p>
@@ -277,7 +282,7 @@
         }
         <p>
           {{ event.actorName }} ·
-          {{ event.recordedAt | date: 'medium' : undefined : i18n.language() }}
+          {{ event.recordedAt | date: 'mediumDate' : undefined : i18n.language() }} · {{ event.recordedAt | preferredTime }}
           @if (event.visitSequence) {
             · {{ i18n.text('visit') }} {{ event.visitSequence }}
           }
@@ -313,6 +318,7 @@
       <p>{{ i18n.text('fieldNoActivity') }}</p>
     }
   </section>
+  }
 }
 
 @if (session.context()) {

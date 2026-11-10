@@ -114,6 +114,26 @@ form > button {
   font-weight: 650;
   overflow-wrap: anywhere;
 }
+.dev-sign-in {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--mat-sys-outline-variant);
+}
+.dev-sign-in > p {
+  margin: 0 0 0.75rem;
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+.dev-sign-in > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+.dev-sign-in button {
+  flex: 1 1 9rem;
+  min-height: 44px;
+}
 @media (max-width: 800px) {
   .auth-main {
     grid-template-columns: 1fr;
@@ -131,5 +151,9 @@ form > button {
     border: 0;
     padding: 1rem 0;
     background: transparent;
+  }
+  .dev-sign-in > div {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 }

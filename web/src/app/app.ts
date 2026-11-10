@@ -8,9 +8,10 @@ import { Connectivity } from './core/connectivity/connectivity';
 import { AppUpdates } from './core/updates/app-updates';
 import { Preferences } from './shared/ui/preferences/preferences';
 import { NavigationFocus } from './core/accessibility/navigation-focus';
+import { ToastRegion } from './shared/ui/toast-region';
 @Component({
   selector: 'app-root',
-  imports: [PageTitle, RouterOutlet, MatButtonModule, Preferences],
+  imports: [PageTitle, RouterOutlet, MatButtonModule, Preferences, ToastRegion],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

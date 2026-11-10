@@ -9,7 +9,7 @@ import {
 import type { AudioContentType } from '../storage/object-storage.js';
 import { EVIDENCE_PHASES } from './evidence-phase.js';
 import type { EvidencePhase } from './evidence-phase.js';
-import { readMp4AudioDurationSeconds, sniffAudioContentType } from './mp4-audio.js';
+import { readMp4AudioDurationSeconds, readWebmAudioDurationSeconds, sniffAudioContentType } from './mp4-audio.js';
 
 /*
  * The Job audio note upload request (`BR-027`, `BR-091`, `ADR-018`).
@@ -80,13 +80,10 @@ export interface CreateJobAudioNoteDto {
    */
   readonly clientOperationId: string;
   /**
-   * The Visit the recording was made during (`BR-047`, `BR-071`, `BR-091`).
-   *
-   * Required, exactly as it is for a photo: a recording is field evidence, it belongs to the field
-   * attempt it was made on, and the Activity read reports it with that Visit's account (`BR-080`). A
-   * request that names no Visit, or one of another Job or organization, is refused (`BR-042`).
+   * The Visit the recording was made during (`BR-047`, `BR-071`, `BR-091`), when one applies. Office
+   * Job updates may omit it. Field-scoped uploads must name a Visit assigned to the caller.
    */
-  readonly visitId: string;
+  readonly visitId: string | null;
   readonly phase: EvidencePhase;
   readonly note: string | null;
   /** The device instant the recording was made; display and provenance only (`BR-031`). */
@@ -101,9 +98,6 @@ export function parseCreateJobAudioNoteDto(input: unknown): CreateJobAudioNoteDt
     fail('clientOperationId', 'is required');
   }
   const visitId = optionalUuid(source.visitId, 'visitId');
-  if (visitId === null) {
-    fail('visitId', 'is required');
-  }
   const capturedAt = optionalInstant(source.capturedAt, 'capturedAt');
 
   return {
@@ -167,16 +161,18 @@ export function validateJobAudioNoteUpload(
 
   const contentType = sniffAudioContentType(upload.buffer);
   if (contentType === null) {
-    fail('file', 'must be an audio MP4 recording');
+    fail('file', 'must be an audio MP4 or WebM recording');
   }
   const declared = upload.mimetype.trim().toLowerCase();
   if (declared.length > 0 && declared !== contentType) {
     fail('file', `content type must be ${contentType}`);
   }
 
-  const duration = readMp4AudioDurationSeconds(upload.buffer);
+  const duration = contentType === 'audio/webm'
+    ? readWebmAudioDurationSeconds(upload.buffer)
+    : readMp4AudioDurationSeconds(upload.buffer);
   if (duration === null) {
-    fail('file', 'must declare its length');
+    fail('file', 'must be a supported MP4 or WebM audio recording with a declared length');
   }
   if (duration > MAX_JOB_AUDIO_DURATION_SECONDS) {
     fail('file', `must be at most ${MAX_JOB_AUDIO_DURATION_SECONDS} seconds long`);

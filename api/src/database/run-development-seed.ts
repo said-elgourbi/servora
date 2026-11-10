@@ -14,7 +14,7 @@ import {
 } from './development-seed.js';
 import {
   JOB_STATUS_PATHS,
-  SEED_CUSTOMERS,
+  EXPANDED_SEED_CUSTOMERS,
   SEED_TECHNICIAN_MEMBER_TEMPLATES,
   VISIT_STATUS_PATHS,
   addHours,
@@ -30,12 +30,15 @@ import {
   type SeedTechnicianKey,
 } from './development-seed-scenarios.js';
 import {
+  adHocWorkReports,
   customerAddresses,
   customerCompanies,
   customerContacts,
   customerIndividuals,
   customers,
   jobStatusHistory,
+  jobQuoteHistory,
+  jobQuoteWorkflows,
   jobs,
   organizationJobNumberCounters,
   organizationRoles,
@@ -444,6 +447,8 @@ async function main(): Promise<void> {
       manager: membershipIds.MANAGER,
       technician: membershipIds.TECHNICIAN,
     });
+    // Reject an invalid expanded schedule before the replacement deletes the current demo.
+    assertSeedScenariosAreCoherent(EXPANDED_SEED_CUSTOMERS, new Date());
     // The demo is written from a clean slate: every Customer, Property, Job and Visit of this
     // organization is replaced, so `make seed` always produces the same known dataset.
     const removed = await clearDemoData(db, organizationId);
@@ -721,6 +726,14 @@ async function clearDemoData(
   db: SeedDatabase,
   organizationId: string,
 ): Promise<ClearedRows> {
+  // Quote history points at its source Visit with RESTRICT semantics, so it must be
+  // removed before the workflow and Visit rows during a full organization reseed.
+  await db
+    .delete(jobQuoteHistory)
+    .where(eq(jobQuoteHistory.organizationId, organizationId));
+  await db
+    .delete(jobQuoteWorkflows)
+    .where(eq(jobQuoteWorkflows.organizationId, organizationId));
   const removedVisits = await db
     .delete(visits)
     .where(eq(visits.organizationId, organizationId))
@@ -732,6 +745,11 @@ async function clearDemoData(
   await db
     .delete(propertyCustomerRelationships)
     .where(eq(propertyCustomerRelationships.organizationId, organizationId));
+  // Keep ad-hoc field reports as history, but detach them from records being reseeded.
+  await db
+    .update(adHocWorkReports)
+    .set({ customerId: null, propertyId: null })
+    .where(eq(adHocWorkReports.organizationId, organizationId));
   const removedProperties = await db
     .delete(properties)
     .where(eq(properties.organizationId, organizationId))
@@ -764,13 +782,13 @@ async function seedDemoData(
   technicians: SeedTechnicians,
 ): Promise<DemoDataCounts> {
   const now = new Date();
-  assertSeedScenariosAreCoherent(SEED_CUSTOMERS, now);
+  assertSeedScenariosAreCoherent(EXPANDED_SEED_CUSTOMERS, now);
 
   let nextJobNumber = FIRST_DEMO_JOB_NUMBER;
   let propertyCount = 0;
   let visitCount = 0;
 
-  for (const customer of SEED_CUSTOMERS) {
+  for (const customer of EXPANDED_SEED_CUSTOMERS) {
     const customerId = await insertCustomer(db, organizationId, customer, now);
     const seededProperties: SeededProperty[] = [];
 
@@ -818,7 +836,7 @@ async function seedDemoData(
     });
 
   return {
-    customers: SEED_CUSTOMERS.length,
+    customers: EXPANDED_SEED_CUSTOMERS.length,
     properties: propertyCount,
     jobs: lastJobNumber - FIRST_DEMO_JOB_NUMBER + 1,
     visits: visitCount,

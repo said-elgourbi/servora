@@ -169,6 +169,7 @@ export function readMp4AudioDurationSeconds(bytes: Buffer): number | null {
  * refused rather than accepted as an audio note (`ADR-018` A2).
  */
 export function sniffAudioContentType(bytes: Buffer): AudioContentType | null {
+  if (sniffWebmAudio(bytes)) return 'audio/webm';
   const brand = readMajorBrand(bytes);
   if (brand === null || !ACCEPTED_MP4_BRANDS.has(brand)) {
     return null;
@@ -185,6 +186,56 @@ export function sniffAudioContentType(bytes: Buffer): AudioContentType | null {
     return null;
   }
   return 'audio/mp4';
+}
+
+/** Chrome and Firefox record microphone audio in WebM/Opus. Read its declared duration from EBML. */
+export function readWebmAudioDurationSeconds(bytes: Buffer): number | null {
+  if (!sniffWebmAudio(bytes)) return null;
+  const durationId = Buffer.from([0x44, 0x89]);
+  const offset = bytes.indexOf(durationId);
+  if (offset < 0 || offset + 3 > bytes.length) return null;
+  let sizeOffset = offset + 2;
+  const first = bytes[sizeOffset]!;
+  let width = 1;
+  let mask = 0x80;
+  while (width <= 8 && (first & mask) === 0) { width++; mask >>= 1; }
+  if (width > 8 || sizeOffset + width > bytes.length) return null;
+  let length = first & (mask - 1);
+  for (let i = 1; i < width; i++) length = length * 256 + bytes[sizeOffset + i]!;
+  sizeOffset += width;
+  if ((length !== 4 && length !== 8) || sizeOffset + length > bytes.length) return null;
+  const durationUnits = length === 4 ? bytes.readFloatBE(sizeOffset) : bytes.readDoubleBE(sizeOffset);
+  const readSize = (start: number): { width: number; value: number } | null => {
+    const initial = bytes[start];
+    if (initial === undefined || initial === 0) return null;
+    let marker = 0x80;
+    let width = 1;
+    while ((initial & marker) === 0 && width <= 8) { marker >>= 1; width++; }
+    if (width > 8 || start + width > bytes.length) return null;
+    let value = initial & (marker - 1);
+    for (let i = 1; i < width; i++) value = value * 256 + bytes[start + i]!;
+    return { width, value };
+  };
+  const scaleId = Buffer.from([0x2a, 0xd7, 0xb1]);
+  const scaleOffset = bytes.indexOf(scaleId);
+  let scale = 1_000_000;
+  if (scaleOffset >= 0) {
+    const fieldSize = readSize(scaleOffset + 3);
+    if (!fieldSize || fieldSize.value < 1 || fieldSize.value > 4 ||
+      scaleOffset + 3 + fieldSize.width + fieldSize.value > bytes.length) return null;
+    scale = 0;
+    const scaleStart = scaleOffset + 3 + fieldSize.width;
+    for (let i = 0; i < fieldSize.value; i++) scale = scale * 256 + bytes[scaleStart + i]!;
+  }
+  const seconds = durationUnits * scale / 1_000_000_000;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+function sniffWebmAudio(bytes: Buffer): boolean {
+  if (bytes.length < 16 || bytes[0] !== 0x1a || bytes[1] !== 0x45 || bytes[2] !== 0xdf || bytes[3] !== 0xa3) return false;
+  const header = bytes.subarray(0, Math.min(bytes.length, 128)).toString('latin1');
+  return header.includes('webm') && bytes.includes(Buffer.from([0x83, 0x81, 0x02])) &&
+    !bytes.includes(Buffer.from([0x83, 0x81, 0x01]));
 }
 
 /** The one content type this module answers with, so a caller need not repeat the literal. */

@@ -14,7 +14,8 @@
   <article
     class="activity update-card"
     [class.outcome-update]="!!event.outcomeCode"
-    [class.evidence-update]="!!(event.photoId || event.audioNoteId)"
+    [class.resolved-outcome]="event.outcomeCode === 'RESOLVED' || event.outcomeCode === 'NO_WORK_REQUIRED'"
+    [class.evidence-update]="event.kind === 'JOB_PHOTO_ADDED' || event.kind === 'JOB_AUDIO_ADDED'"
   >
     <div class="update-heading">
       <span class="entry-symbol" [class.result-symbol]="!!event.outcomeCode"
@@ -32,11 +33,29 @@
           }
           <time
             [attr.datetime]="event.recordedAt"
-            [title]="event.recordedAt | date: 'medium' : undefined : i18n.language()"
-            >{{ event.recordedAt | date: 'shortTime' : undefined : i18n.language() }}</time
+            [title]="(event.recordedAt | date: 'mediumDate' : undefined : i18n.language()) + ' ' + (event.recordedAt | preferredTime)"
+            >{{ event.recordedAt | preferredTime }}</time
           >
+          @if (editedAt(event); as edited) {
+            <span aria-hidden="true">·</span>
+            @if (event.canEdit) {
+              <button type="button" class="edited-history-link" (click)="showEditHistory(editHistoryDialog)">{{ i18n.text('jobNoteEdited') }}</button>
+            } @else {
+              <span>{{ i18n.text('jobNoteEdited') }}</span>
+            }
+          }
         </p>
       </div>
+      @if (event.canEdit) {
+        <div class="entry-edit-actions" [attr.aria-label]="i18n.text('jobCommentActions')">
+          <button type="button" class="entry-edit-action" [disabled]="busy()" (click)="editRequested.emit()">
+            {{ i18n.text('jobEditComment') }}
+          </button>
+          <button type="button" class="entry-edit-action delete-action" [disabled]="busy()" (click)="deleteRequested.emit()">
+            {{ i18n.text('jobDeleteComment') }}
+          </button>
+        </div>
+      }
       <button
         class="entry-menu"
         mat-icon-button
@@ -46,11 +65,12 @@
         <app-icon name="more" />
       </button>
     </div>
-    <div class="update-body" [class.has-photo]="evidenceAvailable() && event.photoId">
+    <div class="update-body" [class.has-photo]="evidenceAvailable() && event.kind === 'JOB_PHOTO_ADDED' && event.photoId">
       @if (evidenceAvailable() && event.kind === 'JOB_PHOTO_ADDED' && event.photoId) {
         <app-job-photo-preview
           [jobId]="jobId()"
           [photoId]="event.photoId"
+          size="regular"
           (opened)="opened.emit()"
         />
       }
@@ -68,12 +88,37 @@
             }
           </h4>
         }
+        @if (['VISIT_TECHNICIAN_ASSIGNED', 'VISIT_TECHNICIAN_REMOVED', 'VISIT_TECHNICIAN_ROLE_CHANGED'].includes(event.kind)) {
+          <div class="change-facts">
+            @if (event.technicianName) {
+              <p><strong>{{ i18n.text('fieldEventTechnician') }}:</strong> {{ event.technicianName }}</p>
+            }
+            @if (event.roleCode || event.previousRoleCode) {
+              <p><strong>{{ i18n.text('fieldEventRoleLabel') }}:</strong>
+                {{ event.previousRoleCode ? (event.previousRoleCode | workLabel) + ' → ' : '' }}{{ event.roleCode ? (event.roleCode | workLabel) : '—' }}
+              </p>
+            }
+          </div>
+        }
         @if (event.outcomeCode) {
           <h4 class="outcome-title">{{ event.outcomeCode | workLabel }}</h4>
+        }
+        @if (event.documentId) {
+          <div class="document-attachment">
+            <span>{{ event.documentDisplayName || i18n.text('jobPdfAttachment') }}</span>
+            <button mat-stroked-button type="button" (click)="documentOpened.emit()">{{ i18n.text('jobViewPdf') }} / {{ i18n.text('jobDownloadPdf') }}</button>
+          </div>
+        }
+        @if (event.photoRemovalReason || event.audioRemovalReason) {
+          <p class="removal-reason">
+            {{ i18n.text('jobRemovalReason') }}:
+            {{ event.photoRemovalReason || event.audioRemovalReason }}
+          </p>
         }
         <div
           class="comment"
           [id]="'comment-' + event.id"
+          [class.photo-caption]="!!event.photoId"
           [class.clamped]="longNote() && !expanded()"
         >
           @for (text of activityText(event); track $index) {
@@ -91,7 +136,7 @@
             {{ i18n.text(expanded() ? 'activityReadLess' : 'activityReadMore') }}
           </button>
         }
-        @if (['BEFORE', 'DURING', 'AFTER'].includes(event.photoPhase || event.audioPhase || '')) {
+        @if (['BEFORE', 'DURING', 'AFTER', 'BEFORE_WORK', 'DURING_WORK', 'AFTER_WORK'].includes(event.photoPhase || event.audioPhase || '')) {
           <span class="evidence-phase">{{ phaseLabel(event.photoPhase || event.audioPhase) }}</span>
         }
         @if (event.quoteDocumentDisplayName) {
@@ -100,23 +145,10 @@
           </p>
         }
         @if (evidenceAvailable() && event.audioNoteId) {
-          @if (media(); as content) {
-            @if (content.audio && content.id === event.audioNoteId) {
-              <div class="audio-player">
-                <audio
-                  controls
-                  [src]="content.url"
-                  [attr.aria-label]="i18n.text('fieldPlayAudio')"
-                ></audio
-                ><button mat-button (click)="mediaClosed.emit()">
-                  {{ i18n.text('jobCloseMedia') }}
-                </button>
-              </div>
-            } @else {
-              <ng-container [ngTemplateOutlet]="audioButton" />
-            }
-          } @else {
-            <ng-container [ngTemplateOutlet]="audioButton" />
+          @if (audioUrl(); as url) {
+            <div class="audio-player">
+              <audio controls [src]="url" [attr.aria-label]="i18n.text('fieldPlayAudio')"></audio>
+            </div>
           }
         }
       </div>
@@ -131,23 +163,10 @@
     }
     <time
       [attr.datetime]="event.recordedAt"
-      [title]="event.recordedAt | date: 'medium' : undefined : i18n.language()"
-      >{{ event.recordedAt | date: 'shortTime' : undefined : i18n.language() }}</time
+      [title]="(event.recordedAt | date: 'mediumDate' : undefined : i18n.language()) + ' ' + (event.recordedAt | preferredTime)"
+      >{{ event.recordedAt | preferredTime }}</time
     >
   </span>
-</ng-template>
-<ng-template #audioButton>
-  <button
-    mat-stroked-button
-    class="audio-button"
-    [attr.aria-label]="i18n.text('fieldPlayAudio')"
-    (click)="opened.emit()"
-  >
-    {{ i18n.text('fieldPlayAudio') }}
-    @if (event.audioDurationSeconds) {
-      · {{ event.audioDurationSeconds }}s
-    }
-  </button>
 </ng-template>
 <ng-template #eventFacts>
   <div class="event-facts">
@@ -160,12 +179,13 @@
       </p>
     }
     @if (event.technicianName) {
-      <p>{{ event.technicianName }}</p>
+      <p><strong>{{ i18n.text('fieldEventTechnician') }}:</strong> {{ event.technicianName }}</p>
     }
-    @if (event.roleCode) {
+    @if (event.roleCode || event.previousRoleCode) {
       <p>
+        <strong>{{ i18n.text('fieldEventRoleLabel') }}:</strong>
         {{ event.previousRoleCode ? (event.previousRoleCode | workLabel) + ' → ' : ''
-        }}{{ event.roleCode | workLabel }}
+        }}{{ event.roleCode ? (event.roleCode | workLabel) : '—' }}
       </p>
     }
     @if (event.outcomeCode) {
@@ -225,6 +245,33 @@
     </button>
   }
 </mat-menu>
+<ng-template #editHistoryDialog>
+  <h2 mat-dialog-title>{{ i18n.text('jobCommentHistory') }}</h2>
+  <mat-dialog-content>
+    <section class="comment-version current-version">
+      <strong>{{ i18n.text('activityCurrent') }}</strong>
+      @if (historyEvent(); as current) {
+        <time>{{ editedAt(current) | date: 'medium' : undefined : i18n.language() }}</time>
+        @if (current.body) { <p>{{ current.body }}</p> }
+        @if (current.documentDisplayName) { <p>{{ current.documentDisplayName }}</p> }
+        @if (current.photoId) { <p>{{ i18n.text('activityPhoto') }}</p> }
+        @if (current.audioNoteId) { <p>{{ i18n.text('activityAudio') }}</p> }
+      }
+    </section>
+    @for (version of editHistory(); track version.id) {
+      <section class="comment-version">
+        <strong>{{ i18n.text('activityPreviousVersion') }}</strong>
+        <time>{{ version.recordedAt | date: 'medium' : undefined : i18n.language() }}</time>
+        @if (historyBody(version.previousValue); as previousBody) { <p>{{ previousBody }}</p> }
+        @if (version.previousValue['displayName']; as displayName) { <p>{{ displayName }}</p> }
+        @if (historyPhase(version.previousValue); as phase) { <p>{{ phase | workLabel }}</p> }
+      </section>
+    } @empty {
+      <p class="quiet">{{ i18n.text('jobNoCommentHistory') }}</p>
+    }
+  </mat-dialog-content>
+  <mat-dialog-actions align="end"><button mat-button mat-dialog-close>{{ i18n.text('activityClose') }}</button></mat-dialog-actions>
+</ng-template>
 <ng-template #recordDialog>
   <h2 mat-dialog-title>{{ i18n.text('activityEventDetails') }}</h2>
   <mat-dialog-content>

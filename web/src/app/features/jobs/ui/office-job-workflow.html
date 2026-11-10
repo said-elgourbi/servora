@@ -137,12 +137,12 @@
                   <time [attr.datetime]="entry.events[0].recordedAt"
                     >{{
                       entry.events.at(-1)?.recordedAt
-                        | date: 'shortTime' : undefined : i18n.language()
+                        | preferredTime
                     }}
                     @if (entry.events.length > 1) {
                       –
                       {{
-                        entry.events[0].recordedAt | date: 'shortTime' : undefined : i18n.language()
+                        entry.events[0].recordedAt | preferredTime
                       }}
                     }
                   </time>

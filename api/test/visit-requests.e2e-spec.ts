@@ -474,6 +474,32 @@ describe('visit requests and scheduling (e2e)', () => {
     expect(response.body).toMatchObject({ code: 'JOB_CLOSED_FOR_FIELD_WORK' });
   });
 
+  it('allows a new visit when the only open visit is already in the past', async () => {
+    const { job, property } = await newJob('ACTIVE');
+    const creator = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
+    const technician = await newTechnician('Past', 'Visit');
+    const pastStart = new Date(Date.now() - 7_200_000);
+    await newScheduledVisit({
+      jobId: job.id,
+      propertyId: property.id,
+      technicianMembershipId: technician.id,
+      scheduledStart: pastStart,
+      scheduledEnd: new Date(pastStart.getTime() + 3_600_000),
+    });
+
+    await request(app.getHttpServer())
+      .post(`/jobs/${job.id}/visits`)
+      .set('Authorization', `Bearer ${creator.accessToken}`)
+      .send({
+        purposeCode: 'WORK',
+        scheduledStart: new Date(Date.now() + 86_400_000).toISOString(),
+        scheduledEnd: new Date(Date.now() + 90_000_000).toISOString(),
+        technicians: [{ membershipId: technician.id, roleCode: 'LEAD' }],
+        confirmConflicts: false,
+      })
+      .expect(201);
+  });
+
   it('refuses to schedule a Visit on a Job without a Property', async () => {
     const customer = await newCustomer('Property-less Customer');
     jobNumberSequence += 1;
@@ -569,13 +595,15 @@ describe('visit requests and scheduling (e2e)', () => {
 
       const creator = await signInFor([VISIT_PERMISSIONS.CREATE_SCHEDULE]);
       const technician = await newTechnician('Reopened', 'Job');
+      const nextStart = new Date(Date.now() + 86_400_000);
+      const nextEnd = new Date(nextStart.getTime() + 3_600_000);
 
       await request(app.getHttpServer())
         .post(`/jobs/${job.id}/visits`)
         .set('Authorization', `Bearer ${creator.accessToken}`)
         .send({
-          scheduledStart: '2026-10-14T14:00:00.000Z',
-          scheduledEnd: '2026-10-14T15:00:00.000Z',
+          scheduledStart: nextStart.toISOString(),
+          scheduledEnd: nextEnd.toISOString(),
           technicians: [{ membershipId: technician.id, roleCode: 'LEAD' }],
         })
         .expect(201)

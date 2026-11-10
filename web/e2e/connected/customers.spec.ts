@@ -11,7 +11,7 @@ test('office customer and contact lifecycle through the actual API on a phone vi
   await page.getByLabel('Email address').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   await page.locator('.mobile-menu summary').click();
   await page.getByRole('link', { name: 'Customers', exact: true }).click();
   await page.locator('.mobile-menu summary').click();

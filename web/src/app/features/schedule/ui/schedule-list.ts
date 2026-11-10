@@ -7,6 +7,7 @@ import { WorkLabel } from '../../../shared/ui/work-label';
 import { WorkStatus } from '../../../shared/ui/work-status';
 import { addressText } from '../../../shared/ui/work-format';
 import { visitTime } from './dispatch-model';
+import { TimeFormatPreference } from '../../../core/preferences/time-format';
 @Component({
   selector: 'app-schedule-list',
   imports: [RouterLink, WorkLabel, WorkStatus],
@@ -29,10 +30,11 @@ export class ScheduleList {
     'scheduleStatus',
   ];
   protected readonly i18n = inject(I18n);
+  private readonly timePreference = inject(TimeFormatPreference);
   protected readonly rows = computed(() =>
     this.visits().map((visit) => ({
       ...visit,
-      timeLabel: visitTime(visit, this.zone(), this.i18n.language()),
+      timeLabel: visitTime(visit, this.zone(), this.i18n.language(), this.timePreference.format()),
     })),
   );
   protected readonly address = addressText;

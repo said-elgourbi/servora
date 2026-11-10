@@ -21,9 +21,14 @@ const paths = {
   external: 'M14 3h7v7M21 3 10 14M10 3H3v18h18v-7',
   note: 'M4 4h16v12H9l-5 4ZM8 8h8M8 12h5',
   photo: 'M3 6h4l2-3h6l2 3h4v15H3ZM16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
+  document: 'M6 3h8l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM14 3v5h5M8 12h8M8 16h8',
   audio: 'M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0ZM5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8',
   more: 'M12 5h.01M12 12h.01M12 19h.01',
   check: 'm5 12 4 4L19 6',
+  person: 'M20 21a8 8 0 0 0-16 0M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
+  warning: 'M12 3 2.8 20h18.4L12 3ZM12 9v5M12 17h.01',
+  chevron: 'm7 10 5 5 5-5',
+  copy: 'M8 8V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M5 8h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z',
 } as const;
 
 @Component({

@@ -76,6 +76,7 @@ export interface CustomerJobSummary {
   readonly job: Job;
   /** The selected Visit, or `null` when the Job has no eligible Visit (`BR-081`). */
   readonly selectedVisit: { readonly scheduledStart: Date } | null;
+  readonly overdueVisits: { readonly scheduledStart: Date; readonly scheduledEnd: Date }[];
   /** The selected Visit's technicians, Lead first; empty when unassigned (`BR-081`). */
   readonly technicians: CustomerJobTechnician[];
 }
@@ -140,6 +141,8 @@ export interface CustomerJobDto extends CustomerJob {
   propertyAddress: CustomerJobAddressDto | null;
   /** The selected Visit's scheduled start, or `null` when the Job has none (`BR-081`). */
   scheduledStart: string | null;
+  /** Scheduled Visits that are overdue according to the server clock. */
+  overdueVisits: { scheduledStart: string; scheduledEnd: string }[];
   technicians: CustomerJobTechnicianDto[];
 }
 
@@ -190,6 +193,10 @@ export function toCustomerJobDto(summary: CustomerJobSummary): CustomerJobDto {
     propertyId: job.propertyId,
     propertyAddress: readAddressSnapshot(job.propertyAddressSnapshot),
     scheduledStart: summary.selectedVisit?.scheduledStart.toISOString() ?? null,
+    overdueVisits: summary.overdueVisits.map((visit) => ({
+      scheduledStart: visit.scheduledStart.toISOString(),
+      scheduledEnd: visit.scheduledEnd.toISOString(),
+    })),
     technicians: summary.technicians.map((technician) => ({
       membershipId: technician.membershipId,
       name: technician.name,

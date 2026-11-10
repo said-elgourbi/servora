@@ -136,7 +136,16 @@ from technicians.
   assignment/reassignment and permitted visit management with the existing lifecycle constraints.
 - [ ] Deliver the technician's own schedule/history access with assigned scope, reusing Phase 2's
   visit actions. Technician Home continues to provide the daily entry point in earlier phases.
-- [ ] Deliver office follow-up review/clarification and ad-hoc report reconciliation end to end.
+- [x] Give technicians a dedicated, discoverable **My reports** destination for ad-hoc submissions
+  and office decisions, and a **My requests** destination for follow-up request status, clarification
+  conversations and replies. The underlying submit/report form and request actions already exist in
+  the field workflow; these destinations make the full return path visible without requiring the
+  technician to remember which Job Details page contains it.
+- [x] Deliver office follow-up review/clarification and ad-hoc report reconciliation end to end.
+  The office Requests queue must show the request's Job/Customer, proposal, source Visit and full
+  clarification conversation, with approve-and-schedule, clarify and reject actions as authorized.
+  Keep ad-hoc report reconciliation a separate queue: an ad-hoc report is not a Visit until linked or
+  converted by an authorized reviewer.
 - [ ] Deliver assessment quote state, optional PDF upload/open, sent/approved/rejected actions and
   subsequent work scheduling using tracker 061. Preserve online-only quote operations and the
   separation between quote decisions, Job lifecycle, Visit status, purpose and outcome.
@@ -182,6 +191,7 @@ display and tap behavior are recorded separately. Build success alone does not e
 | Browser offline scope, persistence and replay/session policy | Before Phase 2 implementation | ACCEPTED DESIGN — [ADR-027](../../decisions/027-angular-field-offline-workflow.md), 2026-10-19; scoped IndexedDB working set/drafts and foreground replay implemented; service-worker caching remains shell-only |
 | Supported iPhone/iOS/browser versions and field capability acceptance | Establish in Phase 1; validate in Phases 2 and 5 | OPEN QUESTION; verify current platform support from primary sources during implementation |
 | Notification inbox, event coverage and browser transport | Phase 5 design | OPEN QUESTION; assignment events exist, browser delivery/inbox not yet implemented |
+| Technician approval of follow-up Visit requests | Before any web/API approval action is offered to technicians | OPEN PRODUCT DECISION: define the eligible capability and scope, whether it grants both review and scheduling authority, crew/schedule constraints, and audit attribution. Current API approval requires `visits.review_requests` and `visits.create_schedule`; default Technicians do not hold them. Do not infer approval authority from a role name or client UI. |
 
 ## Backlog outside this proposed sequence
 

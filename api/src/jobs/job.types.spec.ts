@@ -175,7 +175,6 @@ describe('job lifecycle vocabulary', () => {
     }
   });
 });
-
 describe('visit lifecycle vocabulary', () => {
   it('permits free movement between working statuses while completion stays explicit', () => {
     expect(VISIT_STATUS_TRANSITIONS).toEqual({

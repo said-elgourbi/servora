@@ -1,0 +1,77 @@
+<section class="home" [class.manager-view]="view() === 'manager'" [class.technician-view]="view() === 'technician'">
+  <div class="page-heading">
+    <div>
+      <h1 [appPageTitle]="i18n.text('homeTitle')">{{ greeting() }}{{ displayName() ? ', ' + displayName() : '' }}</h1>
+      <p>{{ dateLabel() }}</p>
+    </div>
+    @if (canManage() && canWork()) {
+      <div class="view-picker" role="group" [attr.aria-label]="i18n.text('homeView')">
+        <span>{{ i18n.text('homeView') }}</span>
+        <button type="button" [attr.aria-pressed]="view() === 'manager'" [class.selected]="view() === 'manager'" (click)="setView('manager')">{{ i18n.text('managerView') }}</button>
+        <button type="button" [attr.aria-pressed]="view() === 'technician'" [class.selected]="view() === 'technician'" (click)="setView('technician')">{{ i18n.text('technicianView') }}</button>
+      </div>
+    }
+  </div>
+
+  @if (loading() && !manager() && !technician()) {
+    <div class="state-card" role="status">{{ i18n.text('loadingMore') }}</div>
+  } @else if (failed() && !manager() && !technician()) {
+    <div class="state-card error" role="alert"><p>{{ i18n.text('connectionError') }}</p><button type="button" (click)="refresh()">{{ i18n.text('retry') }}</button></div>
+  } @else if (view() === 'manager' && manager(); as data) {
+    @if (failed()) { <p class="refresh-note" role="status">{{ i18n.text('homeRefreshFailed') }}</p> }
+    <section class="attention-section" aria-labelledby="attention-title">
+      <header class="section-heading attention-heading"><div class="attention-heading-main">
+        @if (data.attention.total > 0) {
+          <button class="attention-toggle" type="button" aria-controls="manager-attention-items" [attr.aria-expanded]="attentionExpanded()" (click)="toggleAttention()"><app-icon name="warning" /><span id="attention-title">{{ i18n.text('attention') }}</span><span class="attention-count">({{ data.attention.total }})</span><app-icon class="attention-chevron" name="chevron" /></button>
+        } @else { <h2 id="attention-title"><app-icon name="warning" />{{ i18n.text('attention') }} <span class="attention-count">(0)</span></h2> }
+      </div>
+      @if (data.attention.total > 0) { <a class="attention-view-all" routerLink="/work/attention">{{ viewAllAttentionLabel(data.attention.total) }} <app-icon name="arrow" /></a> }
+      </header>
+      @if (data.attention.total === 0) { <p class="all-clear">{{ i18n.text('homeAllClear') }}</p> }
+      @if (data.attention.total > 0) {
+        <div class="attention-content" id="manager-attention-items" [class.expanded]="attentionExpanded()" [attr.aria-hidden]="!attentionExpanded()" [attr.inert]="attentionExpanded() ? null : ''">
+        <div class="attention-content-inner">
+        <div class="attention-list">
+          @for (item of homeAttentionItems(data); track item.jobId + item.kind + item.visitId) {
+            <article class="attention-row">
+              <span class="kind-icon"><app-icon name="warning" /></span>
+              <div class="attention-job"><strong>{{ item.kind | workLabel }}</strong><a [routerLink]="visitRoute(item.jobId, item.visitId)">#{{ item.jobNumber }} · {{ item.jobTitle }}</a></div>
+              <div class="attention-customer"><strong>{{ item.customerName }}</strong><span>{{ item.visitNumber ? (i18n.text('visitNumber') + ' ' + item.visitNumber) : '' }}{{ item.purposeCode ? ' · ' + (item.purposeCode | workLabel) : '' }}</span><span>{{ item.scheduledStart | date:'mediumDate':'':i18n.language() }} · {{ item.scheduledStart | preferredTime }}</span></div>
+              <div class="attention-crew"><span>{{ item.technicians?.map(t => t.name || i18n.text('unnamedMember')).join(', ') || i18n.text('noCrew') }}</span></div>
+              <a class="row-action" [routerLink]="visitRoute(item.jobId, item.visitId)">{{ i18n.text('openJob') }}</a>
+            </article>
+          }
+        </div>
+        @if (data.attention.total > 3) {
+          <div class="attention-preview-controls">
+            @if (attentionLimit() === 3) { <button type="button" (click)="showMoreAttention()">{{ i18n.text('showMore') }}</button> }
+            @else { <button type="button" (click)="showLessAttention()">{{ i18n.text('showLess') }}</button> }
+          </div>
+        }
+        </div>
+        </div>
+      }
+    </section>
+    <section class="summary-card" aria-labelledby="summary-title"><h2 id="summary-title">{{ i18n.text('todaySummary') }}</h2><div class="summary-items">
+      <div><span class="summary-icon completed"><app-icon name="check" /></span><strong>{{ data.today.completed }}</strong><span>{{ i18n.text('statusCompleted') }}</span></div>
+      <div><span class="summary-icon active"><app-icon name="refresh" /></span><strong>{{ data.today.inProgress }}</strong><span>{{ i18n.text('statusInProgress') }}</span></div>
+      <div><span class="summary-icon upcoming"><app-icon name="calendar" /></span><strong>{{ data.today.upcoming }}</strong><span>{{ i18n.text('statusScheduled') }}</span></div>
+    </div></section>
+    <section class="schedule-card" aria-labelledby="schedule-title"><header class="section-heading"><h2 id="schedule-title">{{ i18n.text('todaysSchedule') }}</h2><a routerLink="/work/schedule">{{ i18n.text('viewFullSchedule') }} <app-icon name="arrow" /></a></header>
+      @if (data.visits.length) {
+        <div class="visit-table-wrap"><table><thead><tr><th>{{ i18n.text('scheduleTime') }}</th><th>{{ i18n.text('scheduleJob') }}</th><th>{{ i18n.text('scheduleCustomer') }} / {{ i18n.text('scheduleLocation') }}</th><th>{{ i18n.text('crew') }}</th><th>{{ i18n.text('scheduleStatus') }}</th></tr></thead><tbody>
+          @for (visit of data.visits; track visit.visitId) { <tr><td class="time-cell" [attr.data-label]="i18n.text('scheduleTime')">{{ visit.scheduledStart | preferredTime:data.day.timeZone }}–{{ visit.scheduledEnd | preferredTime:data.day.timeZone }}</td><td [attr.data-label]="i18n.text('scheduleJob')"><a [routerLink]="visitRoute(visit.jobId, visit.visitId)"><b>#{{ visit.jobNumber }}</b> {{ visit.jobTitle }}</a><small>{{ i18n.text('visitNumber') }} {{ visit.visitNumber }} · {{ visit.purposeCode | workLabel }}</small></td><td [attr.data-label]="i18n.text('scheduleCustomer') + ' / ' + i18n.text('scheduleLocation')"><b>{{ visit.customerName }}</b><small>{{ address(visit.address) }}</small></td><td [attr.data-label]="i18n.text('crew')">{{ visit.technicians.map(t => t.name || i18n.text('unnamedMember')).join(', ') || i18n.text('noCrew') }}</td><td [attr.data-label]="i18n.text('scheduleStatus')"><span class="status-pill" [class.overdue]="visit.overdue">{{ visit.overdue ? (i18n.text('statusScheduled') + ' · ' + i18n.text('overdue')) : (visit.visitStatus | workLabel) }}</span></td></tr> }
+        </tbody></table></div>
+      } @else { <p class="empty-state">{{ i18n.text('homeNoVisits') }}</p> }
+    </section>
+  } @else if (view() === 'technician' && technician(); as data) {
+    @if (failed()) { <p class="refresh-note" role="status">{{ i18n.text('homeRefreshFailed') }}</p> }
+    @if (canReportAdHoc()) { <a class="field-report-entry" routerLink="/work/reports"><span><strong>{{ i18n.text('fieldAdHoc') }}</strong><small>{{ i18n.text('fieldMyReportsHint') }}</small></span><b>{{ i18n.text('fieldOpenReports') }} <app-icon name="arrow" /></b></a> }
+    @if (data.nextVisit; as next) {
+      <article class="next-card"><div class="next-label">{{ i18n.text('upNext') }}</div><div class="next-grid"><div class="next-main"><b class="job-number">#{{ next.jobNumber }}</b><h2>{{ next.jobTitle }}</h2><span class="status-pill" [class.overdue]="next.overdue || next.staleStarted">{{ next.visitStatus | workLabel }}{{ next.overdue ? ' · ' + i18n.text('overdue') : '' }}{{ next.staleStarted ? ' · ' + i18n.text('staleStarted') : '' }}</span><p><app-icon name="calendar" /><strong>{{ next.scheduledStart | date:'EEE, MMM d':data.day.timeZone:i18n.language() }}</strong><span>{{ next.scheduledStart | preferredTime:data.day.timeZone }}–{{ next.scheduledEnd | preferredTime:data.day.timeZone }}</span></p></div><div class="next-customer"><p><app-icon name="person" />{{ next.customerName }}</p><p><app-icon name="pin" />{{ address(next.address) }}</p><h3>{{ i18n.text('crew') }}</h3><div class="crew-list">@for (tech of next.technicians; track tech.membershipId) { <span><span class="avatar">{{ (tech.name || '?').slice(0, 1) }}</span>{{ tech.name || i18n.text('unnamedMember') }}</span> }</div></div><div class="next-open"><b>{{ i18n.text('visitNumber') }} {{ next.visitNumber || 1 }}</b><span>{{ next.purposeCode | workLabel }}</span><a class="primary-action" [routerLink]="visitRoute(next.jobId, next.visitId)">{{ i18n.text('openVisit') }} <app-icon name="arrow" /></a></div></div></article>
+    } @else { <article class="empty-card"><h2>{{ i18n.text('homeNothingNext') }}</h2><p>{{ i18n.text('homeNoAssignedWork') }}</p></article> }
+    @if (data.attention.items.length) { <section class="tech-attention"><h2><app-icon name="warning" />{{ i18n.text('attention') }} ({{ data.attention.total }})</h2>@for (item of data.attention.items; track item.jobId + item.kind) { <article class="tech-attention-row"><div><b>#{{ item.jobNumber }}</b><a [routerLink]="visitRoute(item.jobId, item.visitId)">{{ item.jobTitle }}</a><span>{{ item.kind | workLabel }}</span></div><div><strong>{{ item.scheduledStart | date:'EEE, MMM d':data.day.timeZone:i18n.language() }}</strong><span>{{ item.scheduledStart | preferredTime:data.day.timeZone }}–{{ item.scheduledEnd | preferredTime:data.day.timeZone }}</span></div><span class="status-pill overdue">{{ (item.visitStatus || 'SCHEDULED') | workLabel }} · {{ item.kind | workLabel }}</span></article> }</section> }
+    <section class="tech-day"><h2>{{ i18n.text('otherVisitsToday') }} <span>({{ otherVisits(data).length }})</span></h2><div class="tech-visit-list">@for (visit of otherVisits(data); track visit.visitId) { <a class="tech-visit" [routerLink]="visitRoute(visit.jobId, visit.visitId)"><div class="visit-title"><b>#{{ visit.jobNumber }}</b><strong>{{ visit.jobTitle }}</strong><span class="status-pill" [class.overdue]="visit.overdue || visit.staleStarted">{{ visit.visitStatus | workLabel }}{{ visit.overdue ? ' · ' + i18n.text('overdue') : '' }}{{ visit.staleStarted ? ' · ' + i18n.text('staleStarted') : '' }}</span></div><p><app-icon name="calendar" />{{ visit.scheduledStart | preferredTime:data.day.timeZone }}–{{ visit.scheduledEnd | preferredTime:data.day.timeZone }}</p><p><app-icon name="person" />{{ visit.customerName }}</p><p><app-icon name="pin" />{{ address(visit.address) }}</p><footer><span>{{ i18n.text('crew') }}: {{ visit.technicians.map(t => t.name || i18n.text('unnamedMember')).join(', ') }}</span><span>{{ i18n.text('visitNumber') }} {{ visit.visitNumber || 1 }} · {{ visit.purposeCode | workLabel }}</span></footer></a> } @empty { <p class="empty-state">{{ i18n.text('homeNoOtherVisits') }}</p> }</div></section>
+    <section class="upcoming-card"><header class="section-heading"><h2>{{ i18n.text('upcomingVisits') }}</h2><span>{{ data.upcomingTotal }}</span></header>@for (visit of data.upcoming; track visit.visitId) { <a class="upcoming-row" [routerLink]="visitRoute(visit.jobId, visit.visitId)"><b>#{{ visit.jobNumber }}</b><strong>{{ visit.jobTitle }}</strong><span>{{ visit.scheduledStart | date:'EEE, MMM d':data.day.timeZone:i18n.language() }} · {{ visit.scheduledStart | preferredTime:data.day.timeZone }}</span><app-icon name="arrow" /></a> }<a class="view-upcoming" routerLink="/work/schedule"><app-icon name="calendar" />{{ i18n.text('viewUpcomingCount').replace('{count}', '' + data.upcomingTotal) }} <app-icon name="arrow" /></a></section>
+  }
+</section>

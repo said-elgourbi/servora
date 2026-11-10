@@ -3,9 +3,67 @@ mat-form-field {
 }
 .visit-window {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
   gap: 12px;
 }
+.time-control {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 20px;
+}
+.time-label-row {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.time-label-row label {
+  color: var(--mat-sys-on-surface-variant);
+  font-size: 14px;
+  font-weight: 500;
+}
+.time-label-row mat-button-toggle-group {
+  --mat-button-toggle-height: 28px;
+  --mat-button-toggle-label-text-size: 11px;
+  --mat-button-toggle-label-text-weight: 650;
+  --mat-button-toggle-selected-state-background-color: var(--mat-sys-secondary-container);
+  --mat-button-toggle-selected-state-text-color: var(--mat-sys-on-secondary-container);
+  flex: 0 0 auto;
+}
+.time-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 56px;
+  padding: 0 14px;
+  border: 1px solid var(--mat-sys-outline);
+  border-radius: 4px;
+  background: var(--mat-sys-surface);
+  color: var(--mat-sys-on-surface);
+  font: inherit;
+  font-size: 16px;
+}
+.date-input-shell {
+  position: relative;
+  min-width: 0;
+}
+.date-input { cursor: pointer; padding-right: 52px; }
+.date-input-shell mat-datepicker-toggle {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  color: var(--mat-sys-primary);
+}
+.time-input:focus-visible {
+  border-color: var(--mat-sys-primary);
+  outline: 2px solid var(--mat-sys-primary);
+  outline-offset: 1px;
+}
+.time-input[aria-invalid='true'] { border-color: var(--mat-sys-error); }
+.time-error { margin: -4px 0 0; color: var(--mat-sys-error); font-size: 12px; }
 .conflicts {
   padding: 12px;
   border-radius: 8px;
@@ -16,9 +74,15 @@ mat-dialog-actions {
   flex-wrap: wrap;
   gap: 8px;
 }
+@media (max-width: 900px) {
+  .visit-window { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .date-control { grid-column: 1 / -1; }
+}
 @media (max-width: 600px) {
   .visit-window {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
+  .date-control { grid-column: auto; }
 }
+.locked-window{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 18px;padding:12px 14px;border:1px solid var(--mat-sys-outline-variant);border-radius:8px;background:var(--mat-sys-surface-container-low)}.locked-window strong{font-variant-numeric:tabular-nums}

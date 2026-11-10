@@ -13,9 +13,9 @@ test('password sign-in, reload restoration, and sign-out', async ({ page }) => {
     password: ' preserve spaces ',
     device: { platform: 'WEB' },
   });
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('test-access');
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
@@ -37,7 +37,7 @@ test('SMS request, leading-zero verification code, cooldown and number correctio
   const request = page.waitForRequest('**/auth/web/sms/verify');
   await page.getByRole('button', { name: 'Verify and sign in' }).click();
   expect((await request).postDataJSON().code).toBe('001234');
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
 });
 test('failed sign-in stays generic and rate limits are localized', async ({ page }) => {
   await page.route('**/auth/web/sign-in', (route) =>
@@ -69,7 +69,7 @@ test('sign-out clears a second tab', async ({ page, context }) => {
   await page.getByLabel('Email address').fill('office@example.com');
   await page.getByLabel('Password', { exact: true }).fill('secret');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   const second = await context.newPage();
   await mockAuth(second);
   await second.route('**/auth/web/refresh', (route) =>
@@ -82,7 +82,7 @@ test('sign-out clears a second tab', async ({ page, context }) => {
     }),
   );
   await second.goto('/');
-  await expect(second.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(second.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(second.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
 });

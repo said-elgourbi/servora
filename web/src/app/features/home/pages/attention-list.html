@@ -1,0 +1,39 @@
+<section class="attention-page">
+  <header class="page-heading">
+    <div><h1 [appPageTitle]="i18n.text('attentionListTitle')">{{ i18n.text('attentionListTitle') }}</h1>
+      @if (data(); as result) { <p>{{ result.attention.total }} · {{ i18n.text('attention') }}</p> }
+    </div>
+    <a class="back-home" routerLink="/home"><app-icon name="back" />{{ i18n.text('homeTitle') }}</a>
+  </header>
+  @if (!canManage()) { <p class="state-card error" role="alert">{{ i18n.text('forbiddenDescription') }}</p> }
+  @else if (loading() && !data()) { <p class="state-card" role="status">{{ i18n.text('loadingMore') }}</p> }
+  @else if (failed() && !data()) { <div class="state-card error" role="alert"><p>{{ i18n.text('attentionListLoadError') }}</p><button type="button" (click)="retry()">{{ i18n.text('retry') }}</button></div> }
+  @else if (data(); as result) {
+    @if (failed()) { <p class="refresh-note" role="alert">{{ i18n.text('attentionListLoadError') }} <button type="button" (click)="retry()">{{ i18n.text('retry') }}</button></p> }
+    @if (loading()) { <p class="loading-note" role="status">{{ i18n.text('loadingMore') }}</p> }
+    @if (result.attention.total === 0) { <p class="empty-card">{{ i18n.text('attentionListEmpty') }}</p> }
+    @else {
+      <section class="attention-list-card" aria-labelledby="attention-list-heading">
+        <h2 id="attention-list-heading">{{ i18n.text('attention') }} ({{ result.attention.total }})</h2>
+        <div class="attention-items">
+          @for (item of result.attention.items; track item.jobId + item.kind + item.visitId) {
+            <article class="attention-item">
+              <span class="kind-icon"><app-icon name="warning" /></span>
+              <div class="item-job"><strong>{{ item.kind | workLabel }}</strong><a [routerLink]="jobRoute(item.jobId, item.visitId)">#{{ item.jobNumber }} · {{ item.jobTitle }}</a></div>
+              <div class="item-customer"><strong>{{ item.customerName }}</strong>
+                @if (item.visitNumber || item.purposeCode || item.visitStatus) { <span>{{ item.visitNumber ? (i18n.text('visitNumber') + ' ' + item.visitNumber) : '' }}{{ item.purposeCode ? ' · ' + (item.purposeCode | workLabel) : '' }}{{ item.visitStatus ? ' · ' + (item.visitStatus | workLabel) : '' }}</span> }
+                @if (item.scheduledStart) { <span>{{ item.scheduledStart | date:'mediumDate':result.day.timeZone:i18n.language() }} {{ item.scheduledStart | preferredTime:result.day.timeZone }}{{ item.scheduledEnd ? ' – ' + (item.scheduledEnd | preferredTime:result.day.timeZone) : '' }}</span> }
+              </div>
+              <div class="item-crew">{{ item.technicians?.map(t => t.name || i18n.text('unnamedMember')).join(', ') || i18n.text('noCrew') }}</div>
+              <a class="open-item" [routerLink]="jobRoute(item.jobId, item.visitId)">{{ item.visitId ? i18n.text('openVisit') : i18n.text('openJob') }}</a>
+            </article>
+          }
+        </div>
+        <footer class="pagination">
+          <span>{{ rangeLabel() }}</span>
+          <div><button type="button" (click)="previous()" [disabled]="page() === 0 || loading()">{{ i18n.text('attentionListPrevious') }}</button><span aria-live="polite">{{ page() + 1 }} / {{ pageCount() }}</span><button type="button" (click)="next()" [disabled]="page() + 1 >= pageCount() || loading()">{{ i18n.text('attentionListNext') }}</button></div>
+        </footer>
+      </section>
+    }
+  }
+</section>

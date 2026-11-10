@@ -84,6 +84,15 @@ export class CustomersController {
       ...toCustomerSummaryDto(row.customer, row),
       openJobCount: row.openJobCount,
       overdueVisitCount: row.overdueVisitCount,
+      contactCount: row.contactCount,
+      primaryContact: row.primaryContactFirstName === null
+        ? null
+        : {
+            firstName: row.primaryContactFirstName,
+            lastName: row.primaryContactLastName ?? '',
+            email: row.primaryContactEmail,
+            phone: row.primaryContactPhone,
+          },
     }));
   }
 

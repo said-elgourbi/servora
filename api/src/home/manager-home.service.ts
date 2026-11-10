@@ -61,6 +61,7 @@ export interface ManagerHomeRead {
   readonly viewerDisplayName: string | null;
   readonly attention: readonly ManagerAttentionItem[];
   readonly attentionTotal: number;
+  readonly attentionCountsByKind: Readonly<Record<string, number>>;
   readonly today: ManagerHomeDaySummary;
   readonly visits: readonly ManagerHomeVisit[];
 }
@@ -68,6 +69,7 @@ export interface ManagerHomeRead {
 /** One Visit with the Job and Customer context a schedule row needs. */
 interface VisitContextRow {
   readonly visitId: string;
+  readonly visitNumber: number;
   readonly visitStatus: string;
   readonly purposeCode: string;
   /**
@@ -99,6 +101,7 @@ interface JobConditionRow {
 /** One Visit row used to derive Job-level operational attention. */
 interface JobAttentionVisitRow extends JobConditionRow {
   readonly visitId: string;
+  readonly sequence: number;
   readonly visitStatus: string;
   readonly purposeCode: string;
   readonly outcomeCode: string | null;
@@ -131,6 +134,7 @@ export class ManagerHomeService {
     userId: string,
     day: DayWindow,
     now: Date,
+    attentionOffset = 0,
   ): Promise<ManagerHomeRead> {
     const [
       viewerDisplayName,
@@ -149,6 +153,7 @@ export class ManagerHomeService {
     const technicians = await this.techniciansForVisits(scope, [
       ...dayVisits.map((row) => row.visitId),
       ...attentionVisits.map((row) => row.visitId),
+      ...operationalAttentionRows.map((row) => row.visitId),
     ]);
 
     const visits = dayVisits.flatMap((row) => {
@@ -156,25 +161,31 @@ export class ManagerHomeService {
       return visit === null ? [] : [visit];
     });
 
-    const operationalAttention = toOperationalAttentionItems(
-      operationalAttentionRows,
-    );
+    const operationalAttention = toOperationalAttentionItems(operationalAttentionRows, technicians);
     const operationalAttentionJobIds = new Set(
       operationalAttention.map((item) => item.jobId),
     );
 
     const attention = [
-      ...attentionVisits.map(toVisitAttentionItem),
+      ...attentionVisits.map((row) => toVisitAttentionItem(row, technicians.get(row.visitId) ?? [])),
       ...operationalAttention,
       ...schedulingJobs
         .map((row) => toJobConditionItem('JOB_NEEDS_SCHEDULING', row))
         .filter((item) => !operationalAttentionJobIds.has(item.jobId)),
     ].sort(compareAttentionItems);
 
+    const attentionCountsByKind: Record<string, number> = {};
+    for (const item of attention) {
+      attentionCountsByKind[item.kind] = (attentionCountsByKind[item.kind] ?? 0) + 1;
+    }
     return {
       viewerDisplayName,
-      attention: attention.slice(0, MANAGER_HOME_ATTENTION_LIMIT),
+      attention: attention.slice(
+        attentionOffset,
+        attentionOffset + MANAGER_HOME_ATTENTION_LIMIT,
+      ),
       attentionTotal: attention.length,
+      attentionCountsByKind,
       today: summarize(visits),
       visits: [...visits].sort(compareVisits),
     };
@@ -314,6 +325,7 @@ export class ManagerHomeService {
       .select({
         ...jobConditionSelection,
         visitId: visits.id,
+        sequence: sql<number>`(select count(*) from visits prior where prior.organization_id = ${visits.organizationId} and prior.job_id = ${visits.jobId} and (prior.created_at < ${visits.createdAt} or (prior.created_at = ${visits.createdAt} and prior.id <= ${visits.id})))`,
         visitStatus: visits.status,
         purposeCode: visits.purposeCode,
         outcomeCode: visits.outcomeCode,
@@ -407,6 +419,7 @@ export class ManagerHomeService {
 
 const visitContextSelection = {
   visitId: visits.id,
+  visitNumber: sql<number>`(select count(*) from visits prior where prior.organization_id = ${visits.organizationId} and prior.job_id = ${visits.jobId} and (prior.created_at < ${visits.createdAt} or (prior.created_at = ${visits.createdAt} and prior.id <= ${visits.id})))`,
   visitStatus: visits.status,
   purposeCode: visits.purposeCode,
   scheduledStart: visits.scheduledStart,
@@ -462,6 +475,7 @@ function toVisit(
   const visitStatus = row.visitStatus as VisitStatus;
   return {
     visitId: row.visitId,
+    visitNumber: row.visitNumber,
     visitStatus,
     purposeCode: row.purposeCode as VisitPurposeCode,
     scheduledStart: row.scheduledStart,
@@ -496,7 +510,10 @@ function visitAddress(row: VisitContextRow): AddressSnapshot | null {
 }
 
 /** A derived Visit condition as an attention item. */
-function toVisitAttentionItem(row: VisitContextRow): ManagerAttentionItem {
+function toVisitAttentionItem(
+  row: VisitContextRow,
+  technicians: readonly ManagerHomeTechnician[],
+): ManagerAttentionItem {
   return {
     kind: hasVisitStarted(row.visitStatus as VisitStatus)
       ? 'VISIT_STALE_STARTED'
@@ -508,6 +525,10 @@ function toVisitAttentionItem(row: VisitContextRow): ManagerAttentionItem {
     customerId: row.customerId,
     customerName: row.customerName,
     visitId: row.visitId,
+    visitNumber: row.visitNumber,
+    purposeCode: row.purposeCode as VisitPurposeCode,
+    visitStatus: row.visitStatus as VisitStatus,
+    technicians: [...technicians],
     reasonCode: null,
     scheduledStart: row.scheduledStart,
     scheduledEnd: row.scheduledEnd,
@@ -528,6 +549,10 @@ function toJobConditionItem(
     customerId: row.customerId,
     customerName: row.customerName,
     visitId: null,
+    visitNumber: null,
+    purposeCode: null,
+    visitStatus: null,
+    technicians: [],
     reasonCode: null,
     scheduledStart: null,
     scheduledEnd: null,
@@ -536,6 +561,7 @@ function toJobConditionItem(
 
 function toOperationalAttentionItems(
   rows: readonly JobAttentionVisitRow[],
+  techniciansByVisit: ReadonlyMap<string, ManagerHomeTechnician[]>,
 ): ManagerAttentionItem[] {
   const grouped = new Map<string, JobAttentionVisitRow[]>();
   for (const row of rows) {
@@ -560,12 +586,13 @@ function toOperationalAttentionItems(
             },
       visits: jobRows.map((row, index) => ({
         visitId: row.visitId,
-        sequence: index + 1,
+        sequence: row.sequence,
         status: row.visitStatus as VisitStatus,
         purposeCode: row.purposeCode as VisitPurposeCode,
         outcomeCode: row.outcomeCode as VisitOutcomeCode | null,
       })),
     })) {
+      const relatedVisit = jobRows.find((row) => row.visitId === attention.relevantVisitId);
       items.push({
         kind: attention.code,
         jobId: first.jobId,
@@ -575,6 +602,10 @@ function toOperationalAttentionItems(
         customerId: first.customerId,
         customerName: first.customerName,
         visitId: attention.relevantVisitId,
+        visitNumber: relatedVisit?.sequence ?? null,
+        purposeCode: relatedVisit ? relatedVisit.purposeCode as VisitPurposeCode : null,
+        visitStatus: relatedVisit ? relatedVisit.visitStatus as VisitStatus : null,
+        technicians: relatedVisit ? techniciansByVisit.get(relatedVisit.visitId) ?? [] : [],
         reasonCode: attention.reasonCode,
         scheduledStart: null,
         scheduledEnd: null,

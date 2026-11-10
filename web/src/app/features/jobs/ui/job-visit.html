@@ -21,9 +21,9 @@
             {{ visit.scheduledStart | date: 'mediumDate' : undefined : i18n.language() }}
           </p>
           <span class="secondary-text"
-            >{{ visit.scheduledStart | date: 'shortTime' : undefined : i18n.language() }}
+            >{{ visit.scheduledStart | preferredTime }}
             –
-            {{ visit.scheduledEnd | date: 'shortTime' : undefined : i18n.language() }}
+            {{ visit.scheduledEnd | preferredTime }}
             @if (
               (visit.scheduledStart | date: 'yyyy-MM-dd') !==
               (visit.scheduledEnd | date: 'yyyy-MM-dd')

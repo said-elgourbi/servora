@@ -925,6 +925,8 @@ export const jobPhotos = pgTable(
       .references(() => organizationMembers.id),
     phase: varchar('phase', { length: 20 }).notNull(),
     note: text('note'),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    editedByMembershipId: uuid('edited_by_membership_id').references(() => organizationMembers.id),
     objectKey: varchar('object_key', { length: 512 }).notNull(),
     contentType: varchar('content_type', { length: 100 }).notNull(),
     byteSize: integer('byte_size').notNull(),
@@ -945,6 +947,7 @@ export const jobPhotos = pgTable(
       sql`${table.contentType} in ('image/jpeg', 'image/png', 'image/webp')`,
     ),
     check('job_photos_byte_size_check', sql`${table.byteSize} > 0`),
+    check('job_photos_edit_pair_check', sql`(${table.editedAt} is null) = (${table.editedByMembershipId} is null)`),
     index('job_photos_organization_job_recorded_idx').on(
       table.organizationId,
       table.jobId,
@@ -1046,6 +1049,8 @@ export const jobAudioNotes = pgTable(
       .references(() => organizationMembers.id),
     phase: varchar('phase', { length: 20 }).notNull(),
     note: text('note'),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    editedByMembershipId: uuid('edited_by_membership_id').references(() => organizationMembers.id),
     objectKey: varchar('object_key', { length: 512 }).notNull(),
     contentType: varchar('content_type', { length: 100 }).notNull(),
     byteSize: integer('byte_size').notNull(),
@@ -1064,10 +1069,11 @@ export const jobAudioNotes = pgTable(
     ),
     check(
       'job_audio_notes_content_type_check',
-      sql`${table.contentType} in ('audio/mp4')`,
+      sql`${table.contentType} in ('audio/mp4', 'audio/webm')`,
     ),
     check('job_audio_notes_byte_size_check', sql`${table.byteSize} > 0`),
     check('job_audio_notes_duration_check', sql`${table.durationSeconds} > 0`),
+    check('job_audio_notes_edit_pair_check', sql`(${table.editedAt} is null) = (${table.editedByMembershipId} is null)`),
     index('job_audio_notes_organization_job_recorded_idx').on(
       table.organizationId,
       table.jobId,
@@ -1125,10 +1131,9 @@ export const jobAudioNoteRemovals = pgTable(
 /**
  * One office/commercial document attached to a Job.
  *
- * The first document type is `QUOTE`, used by the Assessment quote workflow. A quote PDF is a
- * Job-level artifact, not Visit evidence: it has no evidence phase, no field-work Visit requirement,
- * and no appearance in the evidence removal tables. The row stores the object key rather than a URL,
- * matching the object-storage boundary used by evidence while keeping documents in their own domain.
+ * Quote PDFs participate in the Assessment quote workflow. General PDFs are append-only Job update
+ * attachments and may be associated with a Visit. Both store object keys rather than
+ * URLs so file reads stay inside the authenticated storage boundary.
  */
 export const jobDocuments = pgTable(
   'job_documents',
@@ -1140,7 +1145,9 @@ export const jobDocuments = pgTable(
     jobId: uuid('job_id')
       .notNull()
       .references(() => jobs.id, { onDelete: 'cascade' }),
+    visitId: uuid('visit_id').references(() => visits.id, { onDelete: 'set null' }),
     documentType: varchar('document_type', { length: 30 }).notNull(),
+    clientOperationId: uuid('client_operation_id'),
     displayName: varchar('display_name', { length: 255 }),
     documentVersion: integer('document_version').notNull().default(1),
     isCurrent: boolean('is_current').notNull().default(true),
@@ -1151,6 +1158,10 @@ export const jobDocuments = pgTable(
       .notNull()
       .references(() => organizationMembers.id),
     supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    editedByMembershipId: uuid('edited_by_membership_id').references(() => organizationMembers.id),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedByMembershipId: uuid('removed_by_membership_id').references(() => organizationMembers.id),
     supersededByJobDocumentId: uuid('superseded_by_job_document_id').references(
       (): AnyPgColumn => jobDocuments.id,
     ),
@@ -1160,7 +1171,7 @@ export const jobDocuments = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
-    check('job_documents_type_check', sql`${table.documentType} in ('QUOTE')`),
+    check('job_documents_type_check', sql`${table.documentType} in ('QUOTE', 'ATTACHMENT')`),
     check(
       'job_documents_content_type_check',
       sql`${table.contentType} in ('application/pdf')`,
@@ -1170,6 +1181,8 @@ export const jobDocuments = pgTable(
       sql`${table.displayName} is null or btrim(${table.displayName}) <> ''`,
     ),
     check('job_documents_version_check', sql`${table.documentVersion} > 0`),
+    check('job_documents_edit_pair_check', sql`(${table.editedAt} is null) = (${table.editedByMembershipId} is null)`),
+    check('job_documents_remove_pair_check', sql`(${table.removedAt} is null) = (${table.removedByMembershipId} is null)`),
     check('job_documents_byte_size_check', sql`${table.byteSize} > 0`),
     check(
       'job_documents_supersession_check',
@@ -1187,13 +1200,16 @@ export const jobDocuments = pgTable(
     ),
     uniqueIndex('job_documents_current_unique')
       .on(table.organizationId, table.jobId, table.documentType)
-      .where(sql`${table.isCurrent} = true`),
+      .where(sql`${table.isCurrent} = true and ${table.documentType} = 'QUOTE'`),
+    uniqueIndex('job_documents_client_operation_unique')
+      .on(table.organizationId, table.clientOperationId)
+      .where(sql`${table.clientOperationId} is not null`),
     uniqueIndex('job_documents_version_unique').on(
       table.organizationId,
       table.jobId,
       table.documentType,
       table.documentVersion,
-    ),
+    ).where(sql`${table.documentType} = 'QUOTE'`),
   ],
 );
 
@@ -2106,6 +2122,51 @@ export const visitNotes = pgTable(
     uniqueIndex('visit_notes_client_operation_unique')
       .on(table.organizationId, table.clientOperationId)
       .where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+/** Append-only office updates attached to a Job rather than a specific field visit. */
+export const jobNotes = pgTable(
+  'job_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id').notNull().references(() => jobs.id, { onDelete: 'cascade' }),
+    authorMembershipId: uuid('author_membership_id').notNull().references(() => organizationMembers.id),
+    body: text('body').notNull(),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    editedByMembershipId: uuid('edited_by_membership_id').references(() => organizationMembers.id),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedByMembershipId: uuid('removed_by_membership_id').references(() => organizationMembers.id),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+    clientOperationId: uuid('client_operation_id'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    check('job_notes_body_check', sql`length(btrim(${table.body})) between 1 and 4000`),
+    check('job_notes_edit_pair_check', sql`(${table.editedAt} is null) = (${table.editedByMembershipId} is null)`),
+    check('job_notes_remove_pair_check', sql`(${table.removedAt} is null) = (${table.removedByMembershipId} is null)`),
+    index('job_notes_organization_job_recorded_idx').on(table.organizationId, table.jobId, table.recordedAt),
+    uniqueIndex('job_notes_client_operation_unique').on(table.organizationId, table.clientOperationId).where(sql`${table.clientOperationId} is not null`),
+  ],
+);
+
+/** Previous versions of user-authored Job updates, including metadata for replaced files. */
+export const jobActivityEdits = pgTable(
+  'job_activity_edits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    jobId: uuid('job_id').notNull().references(() => jobs.id, { onDelete: 'cascade' }),
+    activityKind: varchar('activity_kind', { length: 40 }).notNull(),
+    activityId: uuid('activity_id').notNull(),
+    editorMembershipId: uuid('editor_membership_id').notNull().references(() => organizationMembers.id),
+    previousValue: jsonb('previous_value').$type<Record<string, unknown>>().notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('job_activity_edits_target_recorded_idx').on(table.organizationId, table.jobId, table.activityKind, table.activityId, table.recordedAt),
   ],
 );
 

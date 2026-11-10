@@ -27,6 +27,7 @@ import { I18n } from '../../../core/i18n/i18n';
 import { AppUpdates } from '../../../core/updates/app-updates';
 import { WorkLabel } from '../../../shared/ui/work-label';
 import { WorkStatus } from '../../../shared/ui/work-status';
+import { PreferredTime } from '../../../shared/ui/preferred-time';
 import { JobContact } from '../../jobs/ui/job-contact';
 import { JobVisit } from '../../jobs/ui/job-visit';
 import { AUTHENTICATED_REQUEST } from '../../auth/data-access/auth.interceptor';
@@ -51,6 +52,7 @@ const blankDraft = (): FieldDraft => ({ note: '', outcome: '', summary: '', atta
     ReactiveFormsModule,
     WorkLabel,
     WorkStatus,
+    PreferredTime,
     JobContact,
     JobVisit,
   ],
@@ -61,6 +63,8 @@ const blankDraft = (): FieldDraft => ({ note: '', outcome: '', summary: '', atta
 export class FieldWorkflow {
   readonly jobId = input.required<string>();
   readonly visitId = input<string | null>(null);
+  readonly embedded = input(false);
+  readonly reloadToken = input(0);
   protected readonly directions = directionsUrl;
   protected readonly i18n = inject(I18n);
   protected readonly auth = inject(AuthSession);
@@ -159,6 +163,7 @@ export class FieldWorkflow {
     effect(() => {
       this.jobId();
       this.visitId();
+      this.reloadToken();
       untracked(() => void this.load());
     });
     let listedJob: string | null = null;
@@ -435,6 +440,36 @@ export class FieldWorkflow {
         payload,
         operation === 'status' ? undefined : this.draft(),
       );
+      if (operation === 'status' || operation === 'completion') {
+        // Status actions change which actions the server allows. Refresh immediately after replay
+        // so the page cannot offer a stale transition that the technician can submit twice.
+        const current = await this.data.job(this.jobId(), this.visitId());
+        this.job.set(current.data);
+        this.stale.set(current.stale);
+        this.fetchedAt.set(current.fetchedAt);
+        if (!current.stale) {
+          const scope = this.session.context();
+          if (scope) {
+            const rows = (await this.store.records(scope)).filter(
+              (row): row is FieldCommand => row.kind === 'command' && row.jobId === this.jobId(),
+            );
+            const refused = rows.filter(
+              (row) =>
+                row.visitId === visit.id &&
+                row.operation === operation &&
+                row.state === 'attention' &&
+                !row.ambiguous &&
+                row.error === 'REQUEST_REFUSED' &&
+                !row.reviewed,
+            );
+            if (refused.length)
+              await this.store.write(
+                scope,
+                refused.map((row) => ({ ...row, reviewed: true })),
+              );
+          }
+        }
+      }
       if (operation !== 'status') {
         this.loadingDraft = true;
         this.form.reset();

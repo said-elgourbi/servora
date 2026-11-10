@@ -27,3 +27,18 @@ export function readTimeZoneQuery(query: unknown): string {
   }
   return timeZone;
 }
+
+/** Reads the manager attention-list page offset; the default preserves the original first page. */
+export function readAttentionOffsetQuery(query: unknown): number {
+  const source = (query ?? {}) as Record<string, unknown>;
+  const value = source.attentionOffset;
+  if (value === undefined || value === null || value === '') return 0;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    throw AuthApiError.validationFailed('attentionOffset must be a non-negative integer.');
+  }
+  const offset = Number(value);
+  if (!Number.isSafeInteger(offset) || offset > 1_000_000) {
+    throw AuthApiError.validationFailed('attentionOffset must be a non-negative integer.');
+  }
+  return offset;
+}

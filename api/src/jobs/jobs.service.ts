@@ -12,6 +12,7 @@ import {
   isNull,
   lt,
   ne,
+  not,
   or,
   notInArray,
   sql,
@@ -34,7 +35,11 @@ import {
   adHocWorkReports,
   followUpVisitRequestMessages,
   followUpVisitRequests,
+  jobActivityEdits,
   jobDocuments,
+  jobPhotos,
+  jobAudioNotes,
+  jobNotes,
   jobQuoteHistory,
   jobQuoteWorkflows,
   jobStatusHistory,
@@ -55,6 +60,7 @@ import { isUniqueViolation } from '../database/unique-violation.js';
 import { memberName } from '../members/member-name.js';
 import type { OrganizationScope } from '../tenancy/tenant-scope.js';
 import type { CreateJobDto } from './job-create.dto.js';
+import type { AddJobNoteDto } from './job-note.dto.js';
 import type {
   AdHocWorkReportContext,
   AdHocWorkReportDto,
@@ -85,6 +91,7 @@ import type {
 } from './follow-up-visit-request.dto.js';
 import { toFollowUpVisitRequestDto } from './follow-up-visit-request.dto.js';
 import type { JobDetails } from './job-details.dto.js';
+import { JOB_SCHEDULE_SEARCH_LIMIT } from './job-schedule-search.dto.js';
 import { planAssignmentChanges } from './job-assignment-plan.js';
 import {
   enqueueAssignmentPushEvents,
@@ -540,6 +547,99 @@ export class JobsService {
 
   private get db() {
     return this.database.db;
+  }
+
+  /** Search only Jobs that can start a scheduling attempt: no Visits yet, or a completed latest
+   * Visit with a Work outcome that requires another attempt. */
+  async searchJobsForScheduling(scope: OrganizationScope, query: string) {
+    const term = `%${query}%`;
+    const candidateVisit = alias(visits, 'schedule_search_candidate_visit');
+    const laterVisit = alias(visits, 'schedule_search_later_visit');
+    const noVisits = not(
+      exists(
+        this.db
+          .select({ id: visits.id })
+          .from(visits)
+          .where(and(eq(visits.organizationId, jobs.organizationId), eq(visits.jobId, jobs.id))),
+      ),
+    );
+    const noScheduledVisit = not(
+      exists(
+        this.db
+          .select({ id: visits.id })
+          .from(visits)
+          .where(
+            and(
+              eq(visits.organizationId, jobs.organizationId),
+              eq(visits.jobId, jobs.id),
+              eq(visits.status, 'SCHEDULED'),
+            ),
+          ),
+      ),
+    );
+    const latestCompletedFollowUp = exists(
+      this.db
+        .select({ id: candidateVisit.id })
+        .from(candidateVisit)
+        .where(
+          and(
+            eq(candidateVisit.organizationId, jobs.organizationId),
+            eq(candidateVisit.jobId, jobs.id),
+            eq(candidateVisit.status, 'COMPLETED'),
+            inArray(candidateVisit.outcomeCode, ['NEEDS_FOLLOW_UP', 'NEEDS_PARTS', 'UNABLE_TO_COMPLETE']),
+            not(
+              exists(
+                this.db
+                  .select({ id: laterVisit.id })
+                  .from(laterVisit)
+                  .where(
+                    and(
+                      eq(laterVisit.organizationId, candidateVisit.organizationId),
+                      eq(laterVisit.jobId, candidateVisit.jobId),
+                      sql`(${laterVisit.createdAt} > ${candidateVisit.createdAt} or (${laterVisit.createdAt} = ${candidateVisit.createdAt} and ${laterVisit.id} > ${candidateVisit.id}))`,
+                    ),
+                  ),
+              ),
+            ),
+          ),
+        ),
+    );
+    return this.db
+      .select({
+        id: jobs.id,
+        jobNumber: jobs.jobNumber,
+        title: jobs.title,
+        status: jobs.status,
+        customerName: customers.displayName,
+        propertyName: properties.name,
+      })
+      .from(jobs)
+      .innerJoin(
+        customers,
+        and(
+          eq(customers.id, jobs.customerId),
+          eq(customers.organizationId, scope.organizationId),
+        ),
+      )
+      .leftJoin(
+        properties,
+        and(
+          eq(properties.id, jobs.propertyId),
+          eq(properties.organizationId, scope.organizationId),
+        ),
+      )
+      .where(
+        and(
+          eq(jobs.organizationId, scope.organizationId),
+          inArray(jobs.status, ['NEW', 'ACTIVE']),
+          isNull(customers.deletedAt),
+          noScheduledVisit,
+          or(noVisits, latestCompletedFollowUp),
+          sql`(${jobs.title} ilike ${term} or ${jobs.jobNumber}::text ilike ${term} or ${customers.displayName} ilike ${term})`,
+        ),
+      )
+      .orderBy(desc(jobs.jobNumber))
+      .limit(JOB_SCHEDULE_SEARCH_LIMIT);
   }
 
   /**
@@ -2723,7 +2823,13 @@ export class JobsService {
     purposeCode: VisitPurposeCode,
   ): Promise<void> {
     const jobVisits = await readJobVisits(client, scope, jobId);
-    if (jobVisits.length === 0 || canScheduleAfterFinishedVisits(jobVisits)) {
+    if (jobVisits.some((visit) => visit.status === 'SCHEDULED')) {
+      throw new VisitSchedulingConditionNotMetError('VISIT_SHAPE');
+    }
+    if (
+      jobVisits.length === 0 ||
+      canScheduleAfterFinishedVisits(jobVisits)
+    ) {
       return;
     }
 
@@ -2913,7 +3019,7 @@ export class JobsService {
   ): Promise<JobActivityEventDto[]> {
     await this.requireJobDetails(scope, jobId);
     await this.requireVisitForWriter(scope, jobId, visitId, writer);
-    await this.assertJobOpenForFieldWork(this.db, scope, jobId);
+    if (writer !== null) await this.assertJobOpenForFieldWork(this.db, scope, jobId);
 
     if (input.clientOperationId !== null) {
       const applied = await this.findAppliedNoteOperation(
@@ -2946,25 +3052,168 @@ export class JobsService {
     return readJobActivity(this.db, scope, jobId);
   }
 
+  /** Records an office update directly on the Job without implying a visit or lifecycle change. */
+  async addJobNote(
+    scope: OrganizationScope,
+    jobId: string,
+    actorMembershipId: string,
+    input: AddJobNoteDto,
+  ): Promise<JobActivityEventDto[]> {
+    await this.requireJobDetails(scope, jobId);
+    if (input.clientOperationId !== null) {
+      const [existing] = await this.db.select({ id: jobNotes.id, jobId: jobNotes.jobId })
+        .from(jobNotes)
+        .where(and(eq(jobNotes.organizationId, scope.organizationId), eq(jobNotes.clientOperationId, input.clientOperationId)))
+        .limit(1);
+      if (existing) {
+        if (existing.jobId !== jobId) throw new JobNotFoundError();
+        return readJobActivity(this.db, scope, jobId);
+      }
+    }
+    try {
+      await this.db.insert(jobNotes).values({
+        organizationId: scope.organizationId,
+        jobId,
+        authorMembershipId: actorMembershipId,
+        body: input.body,
+        clientOperationId: input.clientOperationId,
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
+    return readJobActivity(this.db, scope, jobId);
+  }
+
+  async editJobNote(
+    scope: OrganizationScope,
+    jobId: string,
+    noteId: string,
+    actorMembershipId: string,
+    input: EditVisitNoteDto,
+  ): Promise<JobActivityEventDto[]> {
+    await this.requireJobDetails(scope, jobId);
+    const [note] = await this.db.select().from(jobNotes).where(and(
+      eq(jobNotes.organizationId, scope.organizationId),
+      eq(jobNotes.jobId, jobId),
+      eq(jobNotes.id, noteId),
+    )).limit(1);
+    if (!note || note.removedAt !== null) throw new VisitNotFoundError();
+    await this.db.insert(jobActivityEdits).values({
+      organizationId: scope.organizationId,
+      jobId,
+      activityKind: 'JOB_NOTE_ADDED',
+      activityId: noteId,
+      editorMembershipId: actorMembershipId,
+      previousValue: { body: note.body },
+    });
+    await this.db.update(jobNotes).set({
+      body: input.body,
+      editedAt: new Date(),
+      editedByMembershipId: actorMembershipId,
+    }).where(and(
+      eq(jobNotes.organizationId, scope.organizationId),
+      eq(jobNotes.jobId, jobId),
+      eq(jobNotes.id, noteId),
+    ));
+    return readJobActivity(this.db, scope, jobId);
+  }
+
+  async removeJobNote(
+    scope: OrganizationScope,
+    jobId: string,
+    noteId: string,
+    actorMembershipId: string,
+  ): Promise<JobActivityEventDto[]> {
+    await this.requireJobDetails(scope, jobId);
+    const [note] = await this.db.select({ id: jobNotes.id, removedAt: jobNotes.removedAt }).from(jobNotes).where(and(
+      eq(jobNotes.organizationId, scope.organizationId),
+      eq(jobNotes.jobId, jobId),
+      eq(jobNotes.id, noteId),
+    )).limit(1);
+    if (!note || note.removedAt !== null) throw new VisitNotFoundError();
+    await this.db.update(jobNotes).set({ removedAt: new Date(), removedByMembershipId: actorMembershipId })
+      .where(and(eq(jobNotes.organizationId, scope.organizationId), eq(jobNotes.id, noteId)));
+    return readJobActivity(this.db, scope, jobId);
+  }
+
+  async readActivityEditHistory(
+    scope: OrganizationScope,
+    jobId: string,
+    activityKind: string,
+    activityId: string,
+    viewerMembershipId: string,
+    manager: boolean,
+  ) {
+    await this.requireJobDetails(scope, jobId);
+    let authorMembershipId: string | null = null;
+    if (activityKind === 'JOB_NOTE_ADDED') {
+      const [row] = await this.db.select({ author: jobNotes.authorMembershipId }).from(jobNotes).where(and(
+        eq(jobNotes.organizationId, scope.organizationId), eq(jobNotes.jobId, jobId), eq(jobNotes.id, activityId),
+      )).limit(1);
+      authorMembershipId = row?.author ?? null;
+    } else if (activityKind === 'VISIT_NOTE_ADDED') {
+      authorMembershipId = (await this.findVisitNote(scope, jobId, activityId))?.authorMembershipId ?? null;
+    } else if (activityKind === 'JOB_PHOTO_ADDED') {
+      const [row] = await this.db.select({ author: jobPhotos.uploaderMembershipId }).from(jobPhotos).where(and(
+        eq(jobPhotos.organizationId, scope.organizationId), eq(jobPhotos.jobId, jobId), eq(jobPhotos.id, activityId),
+      )).limit(1);
+      authorMembershipId = row?.author ?? null;
+    } else if (activityKind === 'JOB_AUDIO_ADDED') {
+      const [row] = await this.db.select({ author: jobAudioNotes.uploaderMembershipId }).from(jobAudioNotes).where(and(
+        eq(jobAudioNotes.organizationId, scope.organizationId), eq(jobAudioNotes.jobId, jobId), eq(jobAudioNotes.id, activityId),
+      )).limit(1);
+      authorMembershipId = row?.author ?? null;
+    } else if (activityKind === 'JOB_DOCUMENT_ATTACHED') {
+      const [row] = await this.db.select({ author: jobDocuments.uploadedByMembershipId }).from(jobDocuments).where(and(
+        eq(jobDocuments.organizationId, scope.organizationId), eq(jobDocuments.jobId, jobId), eq(jobDocuments.id, activityId),
+      )).limit(1);
+      authorMembershipId = row?.author ?? null;
+    }
+    if (authorMembershipId === null || (!manager && authorMembershipId !== viewerMembershipId)) {
+      throw new VisitNoteForbiddenError();
+    }
+    return this.db.select({
+      id: jobActivityEdits.id,
+      previousValue: jobActivityEdits.previousValue,
+      recordedAt: jobActivityEdits.recordedAt,
+    }).from(jobActivityEdits).where(and(
+      eq(jobActivityEdits.organizationId, scope.organizationId),
+      eq(jobActivityEdits.jobId, jobId),
+      eq(jobActivityEdits.activityKind, activityKind),
+      eq(jobActivityEdits.activityId, activityId),
+    )).orderBy(asc(jobActivityEdits.recordedAt));
+  }
+
   async editVisitNote(
     scope: OrganizationScope,
     jobId: string,
     noteId: string,
     actorMembershipId: string,
     input: EditVisitNoteDto,
-    writer: AssignedVisitWriter | null,
+    canEditAny: boolean,
   ): Promise<JobActivityEventDto[]> {
     await this.requireJobDetails(scope, jobId);
     const note = await this.findVisitNote(scope, jobId, noteId);
     if (note === null) {
       throw new VisitNotFoundError();
     }
-    if (writer !== null && note.authorMembershipId !== writer.membershipId) {
+    if (!canEditAny && note.authorMembershipId !== actorMembershipId) {
       throw new VisitNoteForbiddenError();
     }
     if (note.removedAt !== null) {
       throw new VisitNotFoundError();
     }
+
+    await this.db
+      .insert(jobActivityEdits)
+      .values({
+        organizationId: scope.organizationId,
+        jobId,
+        activityKind: 'VISIT_NOTE_ADDED',
+        activityId: noteId,
+        editorMembershipId: actorMembershipId,
+        previousValue: { body: note.body },
+      });
 
     await this.db
       .update(visitNotes)
@@ -2990,14 +3239,14 @@ export class JobsService {
     noteId: string,
     actorMembershipId: string,
     input: RemoveVisitNoteDto,
-    writer: AssignedVisitWriter | null,
+    canEditAny: boolean,
   ): Promise<JobActivityEventDto[]> {
     await this.requireJobDetails(scope, jobId);
     const note = await this.findVisitNote(scope, jobId, noteId);
     if (note === null) {
       throw new VisitNotFoundError();
     }
-    if (writer !== null && note.authorMembershipId !== writer.membershipId) {
+    if (!canEditAny && note.authorMembershipId !== actorMembershipId) {
       throw new VisitNoteForbiddenError();
     }
     if (note.removedAt !== null) {
@@ -3026,10 +3275,11 @@ export class JobsService {
     scope: OrganizationScope,
     jobId: string,
     noteId: string,
-  ): Promise<{ authorMembershipId: string; removedAt: Date | null } | null> {
+  ): Promise<{ authorMembershipId: string; body: string; removedAt: Date | null } | null> {
     const [row] = await this.db
       .select({
         authorMembershipId: visitNotes.authorMembershipId,
+        body: visitNotes.body,
         removedAt: visitNotes.removedAt,
       })
       .from(visitNotes)

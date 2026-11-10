@@ -85,7 +85,6 @@ export interface JobQuoteDecisionCorrectionVisit {
   readonly sequence: number;
   readonly purposeCode?: VisitPurposeCode;
 }
-
 export function isJobQuoteDecisionState(
   state: JobQuoteWorkflowState,
 ): state is JobQuoteDecisionState {

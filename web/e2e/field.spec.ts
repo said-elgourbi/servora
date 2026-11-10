@@ -156,7 +156,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Email address').fill('field@example.com');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'My work' })).toBeVisible();
 }
 async function openJob(page: Page) {
   await page.goto('/work/jobs/job-one?view=field&visit=visit-one');

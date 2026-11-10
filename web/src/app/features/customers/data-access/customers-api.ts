@@ -1,86 +1,86 @@
 import { HttpClient, HttpContext } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import type {
-  CustomerDetails,
-  CustomerJob,
-  CustomerJobFilter,
-  CustomerProperty,
-  PropertyStatusFilter,
-  CustomerRecord,
-  CustomerStatusFilter,
-  CustomerListSummary,
-  CustomerWriteResult,
-  SaveContactRequest,
-  CustomerContact,
-  SaveCustomerRequest,
-} from '@servora/shared-types';
+import type { CreateCustomerRequest, CustomerContact, CustomerDetails, CustomerJob, CustomerJobFilter, CustomerListSummary, CustomerProperty, CustomerStatusFilter, PropertyDetails, PropertyLifecycleRequest, PropertyStatusFilter, SaveContactRequest, SaveCustomerRequest, SavePropertyRequest } from '@servora/shared-types';
 import { timeout } from 'rxjs';
 import { AUTHENTICATED_REQUEST } from '../../auth/data-access/auth.interceptor';
 
 @Injectable({ providedIn: 'root' })
 export class CustomersApi {
   private readonly http = inject(HttpClient);
-  private options() {
-    return { context: new HttpContext().set(AUTHENTICATED_REQUEST, true) };
+  list(status: CustomerStatusFilter = 'ALL', jobs: CustomerJobFilter = 'ALL') {
+    return this.http.get<CustomerListSummary[]>('/customers', {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+      params: { status, jobs },
+    }).pipe(timeout(15000));
   }
-  private path(id: string) {
-    return `/customers/${encodeURIComponent(id)}`;
-  }
-  list(status: CustomerStatusFilter, jobs: CustomerJobFilter) {
-    return this.http
-      .get<CustomerListSummary[]>('/customers', { ...this.options(), params: { status, jobs } })
-      .pipe(timeout(15000));
-  }
-  detail(id: string) {
-    return this.http.get<CustomerDetails>(this.path(id), this.options()).pipe(timeout(15000));
-  }
-  properties(id: string, status: PropertyStatusFilter = 'ACTIVE') {
-    return this.http
-      .get<CustomerProperty[]>(`${this.path(id)}/properties`, {
-        ...this.options(),
-        params: { status },
-      })
-      .pipe(timeout(15000));
+  customer(id: string) {
+    return this.http.get<CustomerDetails>(`/customers/${encodeURIComponent(id)}`, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
   }
   jobs(id: string) {
-    return this.http
-      .get<CustomerJob[]>(`${this.path(id)}/jobs`, this.options())
-      .pipe(timeout(15000));
+    return this.http.get<CustomerJob[]>(`/customers/${encodeURIComponent(id)}/jobs`, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
   }
-  save(input: SaveCustomerRequest, id?: string) {
-    return (
-      id
-        ? this.http.patch<CustomerWriteResult>(this.path(id), input, this.options())
-        : this.http.post<CustomerWriteResult>('/customers', input, this.options())
-    ).pipe(timeout(20000));
+  properties(id: string, status: PropertyStatusFilter = 'ACTIVE') {
+    return this.http.get<CustomerProperty[]>(`/customers/${encodeURIComponent(id)}/properties`, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true), params: { status },
+    }).pipe(timeout(15000));
   }
-  archive(id: string) {
-    return this.http
-      .post<CustomerRecord>(`${this.path(id)}/archive`, {}, this.options())
-      .pipe(timeout(20000));
+  property(id: string, propertyId: string) {
+    return this.http.get<PropertyDetails>(`/customers/${encodeURIComponent(id)}/properties/${encodeURIComponent(propertyId)}`, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
   }
-  saveContact(
-    id: string,
-    input: SaveContactRequest,
-    contact?: Pick<CustomerContact, 'id' | 'version'>,
-  ) {
-    const path = `${this.path(id)}/contacts`;
-    return (
-      contact
-        ? this.http.patch<CustomerContact>(
-            `${path}/${encodeURIComponent(contact.id)}`,
-            { ...input, expectedVersion: contact.version },
-            this.options(),
-          )
-        : this.http.post<CustomerContact>(path, input, this.options())
-    ).pipe(timeout(20000));
+  create(body: CreateCustomerRequest) {
+    return this.http.post<CustomerDetails>('/customers', body, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
   }
-  removeContact(id: string, contact: Pick<CustomerContact, 'id' | 'version'>) {
-    return this.http
-      .delete<void>(`${this.path(id)}/contacts/${encodeURIComponent(contact.id)}`, {
-        ...this.options(),
-        body: { expectedVersion: contact.version },
-      })
-      .pipe(timeout(20000));
+  update(id: string, body: SaveCustomerRequest) {
+    return this.http.patch<CustomerDetails>(`/customers/${encodeURIComponent(id)}`, body, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
+  }
+  archive(id: string, reason?: string) {
+    return this.http.post(`/customers/${encodeURIComponent(id)}/archive`, { reason: reason || null }, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
+  }
+  addContact(id: string, body: SaveContactRequest) {
+    return this.http.post<CustomerContact>(`/customers/${encodeURIComponent(id)}/contacts`, body, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
+  }
+  updateContact(id: string, contactId: string, body: SaveContactRequest & { expectedVersion: number }) {
+    return this.http.patch<CustomerContact>(`/customers/${encodeURIComponent(id)}/contacts/${encodeURIComponent(contactId)}`, body, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
+  }
+  removeContact(id: string, contactId: string, expectedVersion: number) {
+    return this.http.delete<void>(`/customers/${encodeURIComponent(id)}/contacts/${encodeURIComponent(contactId)}`, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true), body: { expectedVersion },
+    }).pipe(timeout(15000));
+  }
+  createProperty(id: string, body: SavePropertyRequest) {
+    return this.http.post<CustomerProperty>(`/customers/${encodeURIComponent(id)}/properties`, body, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
+  }
+  updateProperty(id: string, propertyId: string, body: SavePropertyRequest) {
+    return this.http.patch<PropertyDetails>(`/customers/${encodeURIComponent(id)}/properties/${encodeURIComponent(propertyId)}`, body, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
+  }
+  archiveProperty(id: string, propertyId: string, body: PropertyLifecycleRequest) {
+    return this.http.post<PropertyDetails>(`/customers/${encodeURIComponent(id)}/properties/${encodeURIComponent(propertyId)}/archive`, body, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
+  }
+  restoreProperty(id: string, propertyId: string, body: PropertyLifecycleRequest) {
+    return this.http.post<PropertyDetails>(`/customers/${encodeURIComponent(id)}/properties/${encodeURIComponent(propertyId)}/restore`, body, {
+      context: new HttpContext().set(AUTHENTICATED_REQUEST, true),
+    }).pipe(timeout(15000));
   }
 }

@@ -5,6 +5,8 @@ html {
   color-scheme: light;
   --app-success-container: #b7f0b1;
   --app-on-success-container: #002204;
+  --app-warning-container: #fef3c7;
+  --app-on-warning-container: #92400e;
   @include mat.theme(
     (
       color: (
@@ -52,6 +54,8 @@ html[data-theme='dark'] {
   color-scheme: dark;
   --app-success-container: #1a4a2a;
   --app-on-success-container: #b7f0b1;
+  --app-warning-container: #5c3c0b;
+  --app-on-warning-container: #fcd34d;
   @include mat.theme(
     (
       color: (

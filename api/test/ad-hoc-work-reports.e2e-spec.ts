@@ -548,28 +548,23 @@ describe('ad-hoc work reports (e2e)', () => {
     });
   });
 
-  it.each([
-    'reportedCustomerName',
-    'reportedCustomerPhone',
-    'reportedCustomerAddress',
-  ])('refuses blank %s without a selected customer', async (field) => {
+  it('accepts a report without customer details', async () => {
     const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
-    await submitReport(
-      reporter.accessToken,
-      validReportBody({ [field]: '   ' }),
-    ).expect(400);
-  });
-
-  it('refuses a report with neither a selected customer nor reported details', async () => {
-    const reporter = await signInFor([VISIT_PERMISSIONS.REPORT_AD_HOC_WORK]);
-    await submitReport(
+    const created = await submitReport(
       reporter.accessToken,
       validReportBody({
         reportedCustomerName: null,
         reportedCustomerPhone: null,
         reportedCustomerAddress: null,
       }),
-    ).expect(400);
+    ).expect(201);
+
+    expect(created.body).toMatchObject({
+      customerId: null,
+      reportedCustomerName: null,
+      reportedCustomerPhone: null,
+      reportedCustomerAddress: null,
+    });
   });
 
   it('refuses a customer id that does not exist in the organization', async () => {

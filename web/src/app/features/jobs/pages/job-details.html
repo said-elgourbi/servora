@@ -1,123 +1,163 @@
-<nav
-  [appPageTitle]="i18n.text('jobDetails')"
-  class="breadcrumb"
-  [attr.aria-label]="i18n.text('navigation')"
->
-  <a routerLink="/" [queryParams]="{ view: query()?.get('view') }"
-    ><app-icon name="back" />{{ i18n.text('backToDay') }}</a
-  >
-  <span class="breadcrumb-divider" aria-hidden="true">/</span>
-  <span>{{ i18n.text('jobDetails') }}</span>
-</nav>
-@if (fieldView()) {
-  <app-field-workflow [jobId]="jobId()" [visitId]="query()?.get('visit') ?? null" />
-} @else {
-  @if (loading()) {
-    <div class="loading-panel" role="status">
-      <app-icon name="refresh" />{{ i18n.text('busy') }}
-    </div>
-  }
-  @if (error(); as message) {
-    <div class="form-error" role="alert">
-      <p>{{ i18n.text(message) }}</p>
-      <button mat-button (click)="refresh()">{{ i18n.text('retry') }}</button>
-    </div>
-  }
+<nav class="breadcrumb" [appPageTitle]="i18n.text('jobDetails')" [attr.aria-label]="i18n.text('navigation')">
+    <a routerLink="/" [queryParams]="{ view: query()?.get('view') }"><app-icon name="back" />{{ i18n.text('backToDay') }}</a>
+  </nav>
+  @if (loading()) { <div class="loading" role="status">{{ i18n.text('busy') }}</div> }
+  @if (error(); as message) { <div class="error" role="alert">{{ i18n.text(message) }} <button mat-stroked-button (click)="refresh()">{{ i18n.text('retry') }}</button></div> }
   @if (job(); as item) {
-    <app-office-job-workflow [job]="item" (changed)="refresh()" (working)="officeBusy.set($event)">
-      <header job-heading class="job-header">
-        <div class="job-heading">
-          <div class="job-reference">
-            <span>{{ i18n.text('job') }} #{{ item.jobNumber }}</span
-            ><app-work-status [code]="item.status" />
+    <div class="details-layout">
+      <main class="main-column">
+        <header class="job-heading">
+          <div class="job-heading-copy">
+            <div class="job-reference"><span>{{ i18n.text('job') }} #{{ item.jobNumber }}</span><app-work-status [code]="item.status" /></div>
+            <h1>{{ item.title }}</h1>
+            @if (auth.hasPermission('customers.view')) {
+              <a class="customer-name" [routerLink]="['/work/customers', item.customerId]"><app-icon name="building" />{{ item.customerName }}</a>
+            } @else {
+              <span class="customer-name"><app-icon name="building" />{{ item.customerName }}</span>
+            }
           </div>
-          <h1>{{ item.title }}</h1>
-          <p class="customer-name">
-            <app-icon name="building" /><a [routerLink]="['/work/customers', item.customerId]">{{
-              item.customerName
-            }}</a>
-          </p>
-          @if (address(item.address); as location) {
-            <p class="job-location"><app-icon name="pin" />{{ location }}</p>
-          }
-        </div>
-      </header>
-      <button
-        job-refresh
-        class="refresh-button"
-        [attr.aria-label]="i18n.text('refresh')"
-        mat-stroked-button
-        [disabled]="officeBusy()"
-        (click)="refresh()"
-      >
-        <app-icon name="refresh" /><span class="refresh-label">{{ i18n.text('refresh') }}</span>
-      </button>
-      <div job-main class="primary-column">
-        @if (item.description) {
-          <details class="panel overview-panel">
-            <summary class="panel-heading">
-              <span class="section-icon"><app-icon name="briefcase" /></span>
-              <h2>{{ i18n.text('overview') }}</h2>
-            </summary>
-            <p class="description">{{ item.description }}</p>
-          </details>
+          <div class="heading-actions">
+            @if (fieldView()) {
+              <button mat-stroked-button [disabled]="loading()" (click)="refresh()">{{ i18n.text('refresh') }}</button>
+            }
+            @if (item.allowedStatusTransitions.length && auth.hasPermission('JOB_UPDATE')) {
+              <button mat-stroked-button [matMenuTriggerFor]="statusMenu" [disabled]="busy()">{{ i18n.text('jobChangeStatus') }}<app-icon name="chevron" /></button>
+              <mat-menu #statusMenu="matMenu">
+                @for (status of item.allowedStatusTransitions; track status) { <button mat-menu-item (click)="changeStatus(status)">{{ status | workLabel }}</button> }
+              </mat-menu>
+            }
+            @if (!fieldView() && canScheduleVisit(item)) { <button class="primary-button" mat-flat-button [disabled]="busy() || !item.propertyId" (click)="scheduleVisit()"><app-icon name="plus" />{{ i18n.text('jobScheduleVisit') }}</button> }
+          </div>
+        </header>
+
+          @if (item.attention.length) {
+          @if (item.attention[0]; as attention) { <div class="attention-banner"><app-icon name="warning" /><div class="attention-copy"><strong>{{ attention.code | workLabel }}</strong><span>{{ attention.reasonCode ? (attention.reasonCode | workLabel) : (attentionSummary(item, attention) || i18n.text('jobSummary')) }}</span></div>
+            @if (fieldView() && fieldReady() && !item.followUpVisitRequest && item.selectedVisit?.requestFollowUpAllowed && auth.hasPermission('visits.request_follow_up')) {
+              <button type="button" class="primary-button" style="flex:0 0 auto;min-height:38px;white-space:nowrap" mat-flat-button (click)="openFollowUpRequest(followUpDialog)">{{ i18n.text('fieldRequestAnotherVisit') }}</button>
+            }
+          </div> }
         }
-        <section class="panel visits-panel">
-          <div class="panel-heading">
-            <span class="section-icon"><app-icon name="calendar" /></span>
-            <h2>{{ i18n.text('visits') }}</h2>
-            <span class="section-count">{{ item.visits.length }}</span>
+        @if (fieldView() && item.followUpVisitRequest; as request) {
+          <section class="card" aria-live="polite" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 16px;flex-wrap:wrap">
+            <div style="display:grid;gap:4px;min-width:0">
+              <strong>{{ i18n.text('visitRequestCreated') }}</strong>
+              <span style="color:#526782;font-size:13px;line-height:1.45">{{ i18n.text(followUpStatusMessage(request.status)) }}</span>
+            </div>
+            <span style="flex:0 0 auto;padding:5px 10px;border-radius:999px;background:#edf3fa;color:#284363;font-size:12px;font-weight:650">{{ request.status | workLabel }}</span>
+          </section>
+        }
+
+              @if ((auth.hasPermission('JOB_UPDATE') || (fieldView() && auth.hasPermission('VISIT_ADD_NOTE') && item.selectedVisit?.addUpdateAllowed)) && fieldReady()) {
+                <section class="composer card" aria-label="Post a job update"><span class="avatar user-avatar">S</span><div class="composer-content" style="container-type:inline-size">
+                  @if (!fieldView()) {
+                  <label class="job-update-destination-label" for="update-destination">{{ i18n.text('jobUpdateDestination') }}</label>
+                  <select class="job-update-destination" id="update-destination" (change)="updateDestinationChanged($any($event.target).value)" [disabled]="busy()">
+                    <option value="" [selected]="selectedUpdateVisit(item) === null">{{ i18n.text('jobUpdateDestinationJob') }}</option>
+                    @for (visit of updateVisits(item); track visit.id) { <option [value]="visit.id" [selected]="selectedUpdateVisit(item) === visit.id">{{ i18n.text('jobUpdateDestinationVisit') }} · {{ visit.sequence }} · {{ visit.purposeCode | workLabel }}</option> }
+                  </select>
+                  } @else if (item.selectedVisit; as selectedVisit) {
+                    <span class="job-update-destination-label">{{ i18n.text('jobUpdateDestinationVisit') }} · {{ selectedVisit.purposeCode | workLabel }}</span>
+                  }
+                  <textarea id="update-composer" rows="2" [value]="draft()" (input)="draft.set($any($event.target).value)" [placeholder]="i18n.text('jobUpdatePlaceholder')" [attr.aria-label]="i18n.text('jobUpdatePlaceholder')" [disabled]="busy()"></textarea>
+                  <div class="evidence-phase-control"><label for="update-evidence-phase">{{ i18n.text('jobUpdateEvidencePhase') }}</label><select id="update-evidence-phase" (change)="evidencePhase.set($any($event.target).value)" [disabled]="busy()">
+                    <option value="BEFORE_WORK" [selected]="evidencePhase() === 'BEFORE_WORK'">{{ i18n.text('jobPhaseBeforeWork') }}</option>
+                    <option value="DURING_WORK" [selected]="evidencePhase() === 'DURING_WORK'">{{ i18n.text('jobPhaseDuringWork') }}</option>
+                    <option value="AFTER_WORK" [selected]="evidencePhase() === 'AFTER_WORK'">{{ i18n.text('jobPhaseAfterWork') }}</option>
+                  </select></div>
+                  <div class="composer-actions"><div class="attachments">
+                    @if (auth.hasPermission('evidence.photo.add')) { <button mat-stroked-button type="button" [disabled]="busy()" (click)="photosInput.click()"><app-icon name="photo" />{{ photoFile()?.name || i18n.text('jobUpdatePhotos') }}</button><input #photosInput class="file-input" type="file" accept="image/jpeg,image/png,image/webp" (change)="setPhoto($event)" [disabled]="busy()" /> }
+                    @if (auth.hasPermission('evidence.audio.add')) { <app-audio-recorder [fileName]="audioFile()?.name ?? null" [disabled]="busy()" (recorded)="setRecordedAudio($event)" (discarded)="clearRecordedAudio()" /> }
+                    @if (!fieldView() || auth.hasPermission('VISIT_ADD_NOTE')) { <button mat-stroked-button type="button" [disabled]="busy()" (click)="documentInput.click()"><app-icon name="document" />{{ documentFile()?.name || 'PDF' }}</button><input #documentInput class="file-input" type="file" accept="application/pdf,.pdf" (change)="setDocument($event)" [disabled]="busy()" /> }
+                  </div><button class="primary-button" mat-flat-button [disabled]="busy() || (!draft().trim() && !photoFile() && !audioFile() && !documentFile())" (click)="postUpdate()">{{ i18n.text(posting() ? 'jobUpdatePosting' : 'jobUpdatePost') }}</button></div>
+                  @if (postError(); as message) { <p class="inline-error" role="alert">{{ i18n.text(message) }}</p> }
+                </div></section>
+              }
+        <section class="timeline card">
+          <div class="timeline-heading"><h2>{{ i18n.text('activityTitle') }}</h2><div class="timeline-tools"><button class="sort-button" (click)="sortNewest.set(!sortNewest())">{{ i18n.text(sortNewest() ? 'newestFirst' : 'oldestFirst') }}<app-icon name="chevron" /></button></div></div>
+          <div class="timeline-tabs" role="tablist" [attr.aria-label]="i18n.text('activityTitle')">
+            <button role="tab" id="tab-visits" [attr.aria-selected]="timelineTab() === 'visits'" aria-controls="panel-visits" (click)="timelineTab.set('visits')">{{ i18n.text('jobVisitsTab') }} <span>{{ item.visits.length }}</span></button>
+            <button role="tab" id="tab-general" [attr.aria-selected]="timelineTab() === 'general'" aria-controls="panel-general" (click)="timelineTab.set('general')">{{ i18n.text('jobGeneralUpdates') }}</button>
           </div>
-          @if (query()?.get('visit') && !hasRequestedVisit(item)) {
-            <p class="empty-state" role="status">{{ i18n.text('visitUnavailable') }}</p>
+          @if (timelineTab() === 'visits') {
+            <div role="tabpanel" id="panel-visits" aria-labelledby="tab-visits" class="visits-timeline timeline-rail">
+              @for (visit of activityVisits(item); track visit.id) {
+                <section class="timeline-visit-card">
+                  <div class="visit-date-badge">@if (visit.scheduledStart) { <span>{{ visit.scheduledStart | date: 'MMM' : undefined : i18n.language() }}</span><strong>{{ visit.scheduledStart | date: 'd' : undefined : i18n.language() }}</strong> } @else { <span>{{ i18n.text('unscheduled') }}</span> }</div>
+                  <div class="visit-card-content">
+                    <header class="visit-card-header"><div class="visit-heading-copy"><h3>{{ i18n.text('visit') }} {{ visit.sequence }} · {{ visit.purposeCode | workLabel }}</h3>
+                      @if (visit.scheduledStart) { <p class="visit-time">{{ visit.scheduledStart | date: 'mediumDate' : undefined : i18n.language() }} · {{ visit.scheduledStart | preferredTime }}@if (visit.scheduledEnd) { <span> – {{ visit.scheduledEnd | preferredTime }}</span> }</p> }
+                      <div class="visit-crew"><strong>{{ i18n.text('crew') }}</strong>@for (member of visit.technicians; track member.membershipId) { <span class="crew-member"><span class="avatar">{{ (member.name || '?').slice(0, 1) }}</span>{{ member.name || i18n.text('unnamedMember') }} @if (member.roleCode === 'LEAD') { <small>· {{ i18n.text('jobVisitLead') }}</small> }</span> } @if (!visit.technicians.length) { <span class="quiet">{{ i18n.text('noCrew') }}</span> }</div>
+                    </div><app-work-status [code]="visit.status" />
+                    @if (visitCompletionAllowed(visit)) {
+                      <button mat-flat-button class="visit-complete-button" [disabled]="busy()" (click)="completeVisit(visit)"><app-icon name="check" />{{ i18n.text('visitCompleteAction') }}</button>
+                    }
+                    @if (visitUpdateAllowed(visit)) {
+                      <button mat-stroked-button class="visit-add-button" [disabled]="busy()" (click)="addVisitUpdate(visit)"><app-icon name="plus" />{{ i18n.text('jobVisitAddUpdate') }}</button>
+                      @if (visitStatusOptions(visit.status).length) { <button mat-stroked-button class="visit-status-button" [attr.aria-label]="i18n.text('jobChangeVisitStatus')" [title]="i18n.text('jobChangeVisitStatus')" [matMenuTriggerFor]="visitStatusMenu" [disabled]="busy()"><span class="visually-hidden">{{ i18n.text('jobChangeVisitStatus') }}</span><app-icon name="more" /></button>
+                        <mat-menu #visitStatusMenu="matMenu">@for (status of visitStatusOptions(visit.status); track status) { <button mat-menu-item (click)="changeVisitStatus(visit.id, status, visit.version)">{{ status | workLabel }}</button> }</mat-menu> }
+                    }
+                    </header>
+                    <div class="visit-updates">
+                      @for (event of visitActivity(visit.sequence); track event.id) { <article class="visit-update-card" [class.visit-outcome-card]="!!event.outcomeCode" [class.visit-outcome-resolved]="event.outcomeCode === 'RESOLVED' || event.outcomeCode === 'NO_WORK_REQUIRED'"><app-job-activity-entry [value]="event" [jobId]="item.id" [busy]="busy()" [evidenceAvailable]="auth.hasPermission('evidence.view')" (opened)="openPhoto(event, photoViewer)" (documentOpened)="openDocument(event, pdfViewer)" (editRequested)="editActivity(event)" (deleteRequested)="deleteActivity(event)" /></article> }
+                      @if (!visitActivity(visit.sequence).length) { <p class="quiet visit-empty">{{ i18n.text('activityNoUpdates') }}</p> }
+                    </div>
+                  </div>
+                </section>
+              } @empty { <section class="no-visits card"><span class="empty-icon"><app-icon name="calendar" /></span><div><h2>{{ i18n.text('jobNoVisitsScheduled') }}</h2><p>{{ i18n.text('jobNoVisitsHint') }}</p></div></section> }
+            </div>
+          } @else {
+            <div role="tabpanel" id="panel-general" aria-labelledby="tab-general" class="general-panel">
+              <section class="timeline-group general-group"><h3>{{ i18n.text('jobGeneralUpdates') }}</h3>
+                @for (event of generalActivity(); track event.id) { <app-job-activity-entry [value]="event" [jobId]="item.id" [busy]="busy()" [evidenceAvailable]="auth.hasPermission('evidence.view')" (opened)="openPhoto(event, photoViewer)" (documentOpened)="openDocument(event, pdfViewer)" (editRequested)="editActivity(event)" (deleteRequested)="deleteActivity(event)" /> }
+                @if (!generalActivity().length) { <p class="quiet">{{ i18n.text('activityNoUpdates') }}</p> }
+              </section>
+            </div>
           }
-          <div class="visit-list">
-            @for (visit of item.visits; track visit.id) {
-              <app-job-visit
-                [id]="'visit-' + visit.id"
-                [value]="visit"
-                [attention]="visitAttention(item, visit.id)"
-                [selected]="visit.id === query()?.get('visit')"
-              />
-            } @empty {
-              <p class="empty-state">{{ i18n.text('noJobVisits') }}</p>
-            }
-          </div>
+          <div class="job-created"><app-icon name="document" /><span>{{ i18n.text('jobCreated') }} · #{{ item.jobNumber }}</span></div>
         </section>
-      </div>
-      <div job-context class="context-column">
-        <section class="panel location-panel">
-          <div class="panel-heading">
-            <span class="section-icon"><app-icon name="pin" /></span>
-            <h2>{{ i18n.text('location') }}</h2>
-          </div>
-          <div class="location-content">
-            @if (item.address?.propertyName; as name) {
-              <h3>{{ name }}</h3>
-            }
-            @if (item.propertyId && auth.hasPermission('properties.view')) {
-              <a
-                [routerLink]="['/work/customers', item.customerId, 'properties', item.propertyId]"
-                >{{ i18n.text('propertyDetails') }}</a
-              >
-            }
-            <p class="secondary-text">{{ address(item.address) || i18n.text('noAddress') }}</p>
-            @if (directions(item.address); as url) {
-              <a
-                class="action-link directions-link"
-                [href]="url"
-                target="_blank"
-                rel="noopener noreferrer"
-                ><app-icon name="pin" />{{ i18n.text('directions') }}<app-icon name="external"
-              /></a>
-            }
-          </div>
+      </main>
+
+      <aside class="context-column">
+        <section class="side-card summary-card"><h2>{{ i18n.text('jobSummary') }}</h2><div class="issue"><span class="summary-icon"><app-icon name="document" /></span><div><strong>{{ i18n.text('reportedIssue') }}</strong><p>{{ item.description || item.title }}</p></div></div></section>
+        <section class="side-card location-card"><h2>{{ i18n.text('location') }}</h2>
+          <div class="map-art" aria-hidden="true"><div class="map-block block-one"></div><div class="map-block block-two"></div><div class="map-block block-three"></div><div class="map-street street-one"></div><div class="map-street street-two"></div><span class="map-pin"><app-icon name="pin" /></span></div>
+          @if (item.address?.propertyName; as propertyName) { <h3>{{ propertyName }}</h3> }
+          @if (item.propertyId && auth.hasPermission('properties.view')) { <a class="property-link" [routerLink]="['/work/customers', item.customerId, 'properties', item.propertyId]">{{ i18n.text('locationDetails') }}</a> }
+          <p>{{ address(item.address) || i18n.text('noAddress') }}</p>
+          @if (directions(item.address); as url) { <a class="outline-action" [href]="url" target="_blank" rel="noopener noreferrer"><app-icon name="pin" />{{ i18n.text('directions') }}</a> }
         </section>
         @if (item.customerContactDetails; as contact) {
-          <app-job-contact [value]="contact" [customer]="item.customerName" />
+          <section class="side-card contact-card"><h2>{{ i18n.text('contact') }}</h2>
+            <div class="company-contact"><span class="contact-icon"><app-icon name="building" /></span><div><strong>{{ item.customerName }}</strong>@if (contact.phone) { <a [href]="'tel:' + contact.phone">{{ contact.phone }}</a> }</div>@if (contact.phone) { <a class="icon-action" [href]="'tel:' + contact.phone" [attr.aria-label]="i18n.text('call')"><app-icon name="phone" /></a> }@if (contact.email) { <a class="icon-action" [href]="'mailto:' + contact.email" [attr.aria-label]="i18n.text('sendEmail')"><app-icon name="mail" /></a> }</div>
+            @for (person of contact.contacts; track $index) { <div class="person-contact"><span class="avatar person-avatar">{{ person.firstName.slice(0, 1) }}{{ person.lastName.slice(0, 1) }}</span><div class="person-copy"><strong>{{ person.firstName }} {{ person.lastName }}</strong><span>{{ person.isPrimary ? i18n.text('primaryContact') : i18n.text('siteContact') }}</span></div>@if (person.phone) { <a class="icon-action" [href]="'tel:' + person.phone" [attr.aria-label]="i18n.text('call')"><app-icon name="phone" /></a> }@if (person.email) { <a class="icon-action" [href]="'mailto:' + person.email" [attr.aria-label]="i18n.text('sendEmail')"><app-icon name="mail" /></a> }</div> }
+            @if (contact.notes) { <p class="contact-note"><strong>{{ i18n.text('jobContactNote') }}</strong>{{ contact.notes }}</p> }
+          </section>
         }
-      </div>
-    </app-office-job-workflow>
-    <p class="connection-note"><span aria-hidden="true"></span>{{ i18n.text('onlineOnly') }}</p>
+      </aside>
+    </div>
   }
-}
+<ng-template #photoViewer let-data>
+  <div style="display:grid;place-items:center;padding:8px;background:var(--mat-sys-surface)"><img [src]="data.url" [alt]="i18n.text('fieldViewPhoto')" style="display:block;max-width:100%;max-height:82vh;object-fit:contain" /></div>
+</ng-template>
+<ng-template #pdfViewer let-data>
+  <div style="display:grid;gap:8px"><div style="display:flex;justify-content:flex-end"><a mat-stroked-button [href]="data.url" [download]="data.name">{{ i18n.text('jobDownloadPdf') }}</a></div><iframe [src]="data.safeUrl" [title]="data.name" style="display:block;width:100%;height:min(76vh,820px);border:1px solid #dce5ef;border-radius:6px"></iframe></div>
+</ng-template>
+<ng-template #followUpDialog>
+  <section class="follow-up-dialog" aria-labelledby="follow-up-title" style="display:grid;gap:10px;padding:24px;box-sizing:border-box;max-width:100%;color:#102648">
+    <h2 id="follow-up-title" style="margin:0;font-size:20px;letter-spacing:-.02em">{{ i18n.text('fieldRequestAnotherVisit') }}</h2>
+    <p class="follow-up-hint" style="margin:0 0 4px;color:#526782;font-size:13px;line-height:1.45">{{ i18n.text('fieldOnlineOnly') }}</p>
+    <form style="display:grid;gap:8px;min-width:0" (submit)="$event.preventDefault(); requestFollowUp()">
+      <label for="follow-start" style="margin-top:3px;color:#284363;font-size:12px;font-weight:650">{{ i18n.text('fieldProposedStart') }}</label>
+      <input id="follow-start" type="datetime-local" style="box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-height:42px;padding:10px 11px;border:1px solid #cbd8e8;border-radius:7px;background:white;color:#102648;font:inherit;font-size:14px" [value]="followUpStart()" (input)="followUpStart.set($any($event.target).value)" required />
+      <label for="follow-end" style="margin-top:3px;color:#284363;font-size:12px;font-weight:650">{{ i18n.text('fieldProposedEnd') }}</label>
+      <input id="follow-end" type="datetime-local" style="box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-height:42px;padding:10px 11px;border:1px solid #cbd8e8;border-radius:7px;background:white;color:#102648;font:inherit;font-size:14px" [value]="followUpEnd()" (input)="followUpEnd.set($any($event.target).value)" required />
+      <label for="follow-reason" style="margin-top:3px;color:#284363;font-size:12px;font-weight:650">{{ i18n.text('fieldReason') }}</label>
+      <textarea id="follow-reason" style="box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-height:94px;padding:10px 11px;border:1px solid #cbd8e8;border-radius:7px;background:white;color:#102648;font:inherit;font-size:14px;resize:vertical" [value]="followUpReason()" (input)="followUpReason.set($any($event.target).value)" required></textarea>
+      @if (postError(); as message) { <p class="inline-error" role="alert">{{ i18n.text(message) }}</p> }
+      <div class="follow-up-actions" style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button type="button" mat-button (click)="closeFollowUpRequest()">{{ i18n.text('cancel') }}</button>
+        <button type="submit" class="primary-button" mat-flat-button [disabled]="busy() || !followUpStart() || !followUpEnd() || !followUpReason().trim()">{{ i18n.text('fieldSendVisitRequest') }}</button>
+      </div>
+    </form>
+  </section>
+</ng-template>

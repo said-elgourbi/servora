@@ -1,0 +1,99 @@
+<div class="review-page">
+  <header class="page-heading">
+    <div>
+      <p class="eyebrow">{{ i18n.text('reviewEyebrow') }}</p>
+      <h1>{{ i18n.text('reviewTitle') }}</h1>
+      <p>{{ i18n.text('reviewDescription') }}</p>
+    </div>
+    <button type="button" class="refresh" (click)="load()" [disabled]="loading() || busy()">{{ i18n.text('refresh') }}</button>
+  </header>
+  @if (error()) { <p class="alert error" role="alert">{{ i18n.text(error()!) }}</p> }
+  @if (notice()) { <p class="alert success" role="status">{{ notice() }}</p> }
+  <div class="review-layout">
+    <section class="queue" aria-labelledby="queue-title">
+      <div class="queue-heading">
+        <div><h2 id="queue-title">{{ i18n.text('reviewQueue') }}</h2><p>{{ i18n.text('reviewQueueHint') }}</p></div>
+        <span class="count">{{ pendingCount() }}</span>
+      </div>
+      <div class="queue-filters">
+        <button type="button" [class.active]="!showResolved()" (click)="showResolved.set(false)">{{ i18n.text('reviewPending') }} <b>{{ pendingCount() }}</b></button>
+        <button type="button" [class.active]="showResolved()" (click)="showResolved.set(true)">{{ i18n.text('reviewAllReports') }}</button>
+      </div>
+      @if (loading()) { <p class="empty">{{ i18n.text('reviewLoading') }}</p> }
+      @else if (visibleReports().length === 0) { <div class="empty"><span class="empty-mark">✓</span><strong>{{ i18n.text(showResolved() ? 'reviewNoReports' : 'reviewQueueClear') }}</strong><p>{{ i18n.text('reviewQueueClearHint') }}</p></div> }
+      @else {
+        <div class="report-list">
+          @for (report of visibleReports(); track report.id) {
+            <button type="button" class="report-row" [class.selected]="selectedId() === report.id" (click)="select(report)" [attr.aria-current]="selectedId() === report.id ? 'true' : null">
+              <span class="row-top"><span class="status" [class]="'status ' + report.status.toLowerCase()">{{ i18n.text(statusKey(report.status)) }}</span><time>{{ report.createdAt | date:'mediumDate' }}</time></span>
+              <strong>{{ report.summary }}</strong>
+              <span class="row-context">{{ locationText(report) }}</span>
+              <span class="row-bottom"><span>{{ report.outcomeCode | workLabel }}</span><span>{{ formatRange(report) }}</span></span>
+            </button>
+          }
+        </div>
+      }
+    </section>
+
+    <section class="detail" aria-live="polite">
+      @if (selected(); as report) {
+        <div class="detail-heading">
+          <div><span class="status" [class]="'status ' + report.status.toLowerCase()">{{ i18n.text(statusKey(report.status)) }}</span><h2>{{ report.summary }}</h2><p>{{ i18n.text('reviewSubmitted') }} {{ report.createdAt | date:'medium' }}</p></div>
+          <span class="report-id">{{ i18n.text('reviewReport') }} · {{ report.id.slice(0, 8) }}</span>
+        </div>
+        <div class="facts-grid">
+          <article class="fact"><span>{{ i18n.text('reviewCustomerProperty') }}</span><strong>{{ locationText(report) }}</strong>
+            @if (report.reportedCustomerPhone) { <a [href]="'tel:' + report.reportedCustomerPhone">{{ report.reportedCustomerPhone }}</a> }
+            @if (!report.customerId) { <small>{{ i18n.text('reviewReportedOnly') }}</small> }
+          </article>
+          <article class="fact"><span>{{ i18n.text('reviewWorkTime') }}</span><strong>{{ formatRange(report) }}</strong></article>
+          <article class="fact"><span>{{ i18n.text('reviewOutcome') }}</span><strong>{{ report.outcomeCode | workLabel }}</strong></article>
+          <article class="fact"><span>{{ i18n.text('reviewRelatedJob') }}</span><strong>{{ report.knownJobNumber ? '#' + report.knownJobNumber + ' · ' + report.knownJobTitle : i18n.text('reviewNoRelatedJob') }}</strong></article>
+        </div>
+        @if (report.notes) { <div class="notes"><h3>{{ i18n.text('reviewTechnicianNote') }}</h3><p>{{ report.notes }}</p></div> }
+        @if (report.status === 'PENDING') {
+          <section class="decision-panel">
+            <div class="decision-title"><div><p class="eyebrow">{{ i18n.text('reviewNextStep') }}</p><h3>{{ i18n.text('reviewReconcileTitle') }}</h3></div><p>{{ i18n.text('reviewReconcileHint') }}</p></div>
+            @if (!report.customerId || !report.propertyId) {
+              <div class="location-step">
+                <h4>{{ i18n.text('reviewConfirmLocation') }}</h4><p>{{ i18n.text('reviewConfirmLocationHint') }}</p>
+                <div class="mode-switch">@if (canChooseExisting) { <button type="button" [class.active]="locationMode() === 'existing'" (click)="locationMode.set('existing')">{{ i18n.text('reviewChooseExisting') }}</button> }@if (canCreateProperty) { <button type="button" [class.active]="locationMode() === 'property'" (click)="locationMode.set('property')">{{ i18n.text('reviewNewLocation') }}</button> }@if (canCreateCustomerAndProperty) { <button type="button" [class.active]="locationMode() === 'new'" (click)="locationMode.set('new')">{{ i18n.text('reviewCreateRecords') }}</button> }</div>
+                @if (locationMode() !== 'new' && auth.hasPermission('customers.view')) {
+                  <label>{{ i18n.text('reviewSearchCustomer') }}<input [value]="customerQuery()" (input)="setCustomerQuery($any($event.target).value)" [placeholder]="i18n.text('reviewSearchCustomerHint')" autocomplete="off"></label>
+                  @if (customers().length) { <label>{{ i18n.text('reviewMatchingCustomer') }}<select [value]="selectedCustomer()" (change)="chooseCustomer($any($event.target).value)"><option value="">{{ i18n.text('reviewSelectCustomer') }}</option>@for (customer of customers(); track customer.id) { <option [value]="customer.id">{{ customer.displayName }}{{ customer.phone ? ' · ' + customer.phone : '' }}</option> }</select></label> }
+                  @if (selectedCustomer() && locationMode() === 'existing') { <label>{{ i18n.text('reviewSelectProperty') }}<select [value]="selectedProperty()" (change)="selectedProperty.set($any($event.target).value)"><option value="">{{ i18n.text('reviewSelectProperty') }}</option>@for (property of properties(); track property.id) { <option [value]="property.id">{{ property.name ? property.name + ' · ' : '' }}{{ property.addressLine1 }}, {{ property.city }}</option> }</select></label> }
+                  @if (selectedCustomer() && locationMode() === 'property') { <div class="new-record-grid"><label>{{ i18n.text('reviewAddressLine') }}<input [value]="propertyLine()" (input)="propertyLine.set($any($event.target).value)"></label><label>{{ i18n.text('reviewCity') }}<input [value]="propertyCity()" (input)="propertyCity.set($any($event.target).value)"></label><label>{{ i18n.text('reviewProvince') }}<select [value]="propertyProvince()" (change)="propertyProvince.set($any($event.target).value)"><option value="AB">AB</option><option value="BC">BC</option><option value="MB">MB</option><option value="NB">NB</option><option value="NL">NL</option><option value="NS">NS</option><option value="NT">NT</option><option value="NU">NU</option><option value="ON">ON</option><option value="PE">PE</option><option value="QC">QC</option><option value="SK">SK</option><option value="YT">YT</option></select></label><label>{{ i18n.text('reviewPostalCode') }}<input [value]="propertyPostal()" (input)="propertyPostal.set($any($event.target).value)"></label></div> }
+                } @else {
+                  <div class="new-record-grid">
+                    <label>{{ i18n.text('reviewCustomerType') }}<select [value]="customerType()" (change)="customerType.set($any($event.target).value)"><option value="COMPANY">{{ i18n.text('customerCompany') }}</option><option value="INDIVIDUAL">{{ i18n.text('customerIndividual') }}</option></select></label>
+                    @if (customerType() === 'COMPANY') { <label>{{ i18n.text('reviewCompanyName') }}<input [value]="customerName()" (input)="customerName.set($any($event.target).value)"></label> } @else { <label>{{ i18n.text('reviewFirstName') }}<input [value]="firstName()" (input)="firstName.set($any($event.target).value)"></label><label>{{ i18n.text('reviewLastName') }}<input [value]="lastName()" (input)="lastName.set($any($event.target).value)"></label> }
+                    <label>{{ i18n.text('reviewPhoneOptional') }}<input type="tel" [value]="customerPhone()" (input)="customerPhone.set($any($event.target).value)"></label>
+                    <label>{{ i18n.text('reviewAddressLine') }}<input [value]="propertyLine()" (input)="propertyLine.set($any($event.target).value)"></label>
+                    <label>{{ i18n.text('reviewCity') }}<input [value]="propertyCity()" (input)="propertyCity.set($any($event.target).value)"></label>
+                    <label>{{ i18n.text('reviewProvince') }}<select [value]="propertyProvince()" (change)="propertyProvince.set($any($event.target).value)"><option value="AB">AB</option><option value="BC">BC</option><option value="MB">MB</option><option value="NB">NB</option><option value="NL">NL</option><option value="NS">NS</option><option value="NT">NT</option><option value="NU">NU</option><option value="ON">ON</option><option value="PE">PE</option><option value="QC">QC</option><option value="SK">SK</option><option value="YT">YT</option></select></label>
+                    <label>{{ i18n.text('reviewPostalCode') }}<input [value]="propertyPostal()" (input)="propertyPostal.set($any($event.target).value)"></label>
+                  </div>
+                }
+                <button type="button" class="secondary" (click)="resolveLocation()" [disabled]="busy()">{{ i18n.text(locationMode() === 'existing' ? 'reviewAttachLocation' : locationMode() === 'property' ? 'reviewCreatePropertyAttach' : 'reviewCreateAndAttach') }}</button>
+              </div>
+            } @else {
+              <div class="canonical"><span>✓</span><div><strong>{{ report.customerName }}</strong><small>{{ report.propertyAddress?.addressLine1 }} · {{ report.propertyAddress?.city }}</small></div><span>{{ i18n.text('reviewLocationConfirmed') }}</span></div>
+            }
+            <div class="actions-card">
+              <label>{{ i18n.text('reviewChooseJob') }}<input [value]="jobQuery()" (input)="setJobQuery($any($event.target).value)" [placeholder]="i18n.text('reviewSearchJobHint')" autocomplete="off"></label>
+              @if (jobs().length) { <label>{{ i18n.text('reviewMatchingJob') }}<select [value]="selectedJob()" (change)="chooseJob($any($event.target).value)"><option value="">{{ i18n.text('reviewSelectJob') }}</option>@for (job of jobs(); track job.id) { <option [value]="job.id">#{{ job.jobNumber }} · {{ job.title }}</option> }</select></label> }
+              <label>{{ i18n.text('reviewNewJobTitle') }}<input [value]="convertTitle()" (input)="convertTitle.set($any($event.target).value)" maxlength="255"></label>
+              <label>{{ i18n.text('reviewDecisionNote') }}<textarea rows="2" [value]="reviewNote()" (input)="reviewNote.set($any($event.target).value)" [placeholder]="i18n.text('reviewDecisionNoteHint')"></textarea></label>
+              @if (report.knownJobId && (report.knownJobNumber || report.knownJobTitle)) { <p class="hint">{{ i18n.text('reviewKnownJobHint') }}</p> }
+              @if (selectedJobStatus() === 'COMPLETED' || selectedJobStatus() === 'CANCELED') { <p class="closed-job-note">{{ i18n.text('reviewClosedJobNotice').replace('{status}', i18n.text(selectedJobStatus() === 'COMPLETED' ? 'statusCompleted' : 'statusCanceled')).replace('{outcome}', i18n.text(statusOutcomeKey(report.outcomeCode))).replace('{state}', i18n.text(resultStateKey(report.outcomeCode, selectedJobStatus()!))) }}</p> }
+              <div class="decision-actions"><button type="button" class="primary" (click)="linkReport()" [disabled]="busy() || !selectedJob() || !report.customerId || !report.propertyId">{{ i18n.text('reviewLinkJob') }}</button><button type="button" class="secondary" (click)="convertReport()" [disabled]="busy() || !report.customerId || !report.propertyId">{{ i18n.text('reviewCreateJob') }}</button><button type="button" class="reject" (click)="rejectReport()" [disabled]="busy()">{{ i18n.text('reviewReject') }}</button></div>
+              <p class="hint">{{ i18n.text('reviewResultHint') }}</p>
+            </div>
+          </section>
+        } @else {
+          <div class="resolved-panel"><strong>{{ i18n.text('reviewDecisionRecorded') }}</strong><p>{{ report.reviewNote || i18n.text('reviewNoDecisionNote') }}</p>@if (report.createdJobNumber) { <p>{{ i18n.text('reviewResultJob') }} #{{ report.createdJobNumber }} · {{ report.createdJobTitle }}</p><a [routerLink]="'/work/jobs/' + report.createdJobId">{{ i18n.text('reviewOpenResult') }}</a> }<small>{{ report.reviewedAt | date:'medium' }}</small></div>
+        }
+      } @else if (!loading()) { <div class="detail-empty"><span class="empty-mark">⌁</span><h2>{{ i18n.text('reviewSelectReport') }}</h2><p>{{ i18n.text('reviewSelectReportHint') }}</p></div> }
+    </section>
+  </div>
+</div>

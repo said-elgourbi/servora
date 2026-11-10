@@ -143,40 +143,33 @@ describe('ad-hoc work report DTOs', () => {
     ).toThrow(DomainValidationError);
   });
 
-  it.each([undefined, null, '', '   '])(
-    'rejects missing customer identity (%s)',
-    (value) => {
-      expect(() =>
-        parseSubmitAdHocWorkReportDto({
-          workStartedAt: '2026-10-01T13:00:00.000Z',
-          workEndedAt: '2026-10-01T15:00:00.000Z',
-          outcomeCode: 'RESOLVED',
-          summary: 'Replaced the leaking valve.',
-          reportedCustomerName: value,
-          reportedCustomerPhone: value,
-          reportedCustomerAddress: value,
-        }),
-      ).toThrow(DomainValidationError);
-    },
-  );
+  it('accepts a report without customer details', () => {
+    const result = parseSubmitAdHocWorkReportDto({
+      workStartedAt: '2026-10-01T13:00:00.000Z',
+      workEndedAt: '2026-10-01T15:00:00.000Z',
+      outcomeCode: 'RESOLVED',
+      summary: 'Replaced the leaking valve.',
+    });
 
-  it.each([
-    'reportedCustomerName',
-    'reportedCustomerPhone',
-    'reportedCustomerAddress',
-  ])('requires %s when no customer is selected', (field) => {
-    expect(() =>
-      parseSubmitAdHocWorkReportDto({
-        workStartedAt: '2026-10-01T13:00:00.000Z',
-        workEndedAt: '2026-10-01T15:00:00.000Z',
-        outcomeCode: 'RESOLVED',
-        summary: 'Replaced the leaking valve.',
-        reportedCustomerName: 'Maple Leaf Bakery',
-        reportedCustomerPhone: '+16135550123',
-        reportedCustomerAddress: '210 Sparks Street, Ottawa',
-        [field]: '   ',
-      }),
-    ).toThrow(`${field} is required`);
+    expect(result.reportedCustomerName).toBeNull();
+    expect(result.reportedCustomerPhone).toBeNull();
+    expect(result.reportedCustomerAddress).toBeNull();
+  });
+
+  it('treats blank customer details as optional', () => {
+    const result = parseSubmitAdHocWorkReportDto({
+      workStartedAt: '2026-10-01T13:00:00.000Z',
+      workEndedAt: '2026-10-01T15:00:00.000Z',
+      outcomeCode: 'RESOLVED',
+      summary: 'Replaced the leaking valve.',
+      reportedCustomerName: '   ',
+      reportedCustomerPhone: '',
+      reportedCustomerAddress: null,
+    });
+
+    expect(result.reportedCustomerName).toBeNull();
+    expect(result.reportedCustomerPhone).toBeNull();
+    expect(result.reportedCustomerAddress).toBeNull();
   });
 
   it('parses a reject review with an optional note and optimistic guards', () => {

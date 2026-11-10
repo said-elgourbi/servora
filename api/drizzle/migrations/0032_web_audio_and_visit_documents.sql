@@ -1,0 +1,2 @@
+ALTER TABLE "job_audio_notes" DROP CONSTRAINT "job_audio_notes_content_type_check";--> statement-breakpoint
+ALTER TABLE "job_audio_notes" ADD CONSTRAINT "job_audio_notes_content_type_check" CHECK ("job_audio_notes"."content_type" in ('audio/mp4', 'audio/webm'));

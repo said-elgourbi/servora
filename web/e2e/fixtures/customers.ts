@@ -144,7 +144,7 @@ export async function signInCustomers(page: Page) {
   await page.getByLabel('Email address').fill('office@example.com');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByRole('heading', { name: 'Your working day' }).waitFor();
+  await page.getByRole('heading', { name: 'Office overview' }).waitFor();
   await page.goto('/work/customers');
   await expectCustomerPage(page);
 }

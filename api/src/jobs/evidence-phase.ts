@@ -1,3 +1,5 @@
+import type { EvidencePhase } from '@servora/shared-types';
+
 /*
  * The field-work phase an update belongs to (`BR-027`, `BR-091`).
  *
@@ -15,4 +17,4 @@
 /** The phases an update may belong to. */
 export const EVIDENCE_PHASES = ['BEFORE_WORK', 'DURING_WORK', 'AFTER_WORK'] as const;
 
-export type EvidencePhase = (typeof EVIDENCE_PHASES)[number];
+export type { EvidencePhase };

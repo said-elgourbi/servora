@@ -9,81 +9,75 @@
         <mat-option value="ASSESSMENT">{{ i18n.text('purposeAssessment') }}</mat-option>
       </mat-select>
     </mat-form-field>
+    @if (lockedStartAt && lockedEndAt) {
+      <div class="locked-window"><span>{{ lockedStartAt | date:'mediumDate' : undefined : i18n.language() }}</span><strong>{{ lockedStartAt | preferredTime }}–{{ lockedEndAt | preferredTime }}</strong></div>
+    } @else {
     <div class="visit-window">
-      <mat-form-field appearance="outline">
-        <mat-label>{{ i18n.text('jobVisitStartDate') }}</mat-label>
-        <input
-          matInput
-          [matDatepicker]="startDatePicker"
-          formControlName="startDate"
-          readonly
-          required
-          (click)="startDatePicker.open()"
-        />
-        <mat-datepicker-toggle
-          matSuffix
-          [for]="startDatePicker"
-          [aria-label]="i18n.text('jobVisitStartDate')"
-        />
+      <div class="time-control date-control">
+        <div class="time-label-row"><label for="visit-date">{{ i18n.text('jobVisitDate') }}</label></div>
+        <div class="date-input-shell">
+          <input id="visit-date" class="time-input date-input" matInput [matDatepicker]="startDatePicker" [min]="today" formControlName="startDate" readonly required (click)="startDatePicker.open()" />
+          <mat-datepicker-toggle [for]="startDatePicker" [attr.aria-label]="i18n.text('jobVisitDate')" />
+        </div>
         <mat-datepicker #startDatePicker />
-        <mat-error>{{ i18n.text('required') }}</mat-error>
-      </mat-form-field>
-      <mat-form-field appearance="outline">
-        <mat-label>{{ i18n.text('jobVisitStartTime') }}</mat-label>
+        @if (form.controls.startDate.touched && form.controls.startDate.invalid) { <p class="time-error" role="alert">{{ i18n.text('required') }}</p> }
+      </div>
+      <div class="time-control">
+        <div class="time-label-row">
+          <label for="visit-start-time">{{ i18n.text('jobVisitStartTime') }}</label>
+          <mat-button-toggle-group
+            [value]="timeFormat()"
+            [attr.aria-label]="i18n.text('jobVisitTimeFormat')"
+            [hideSingleSelectionIndicator]="true"
+            (change)="setTimeFormat($event.value)"
+          >
+            <mat-button-toggle value="24H">{{ i18n.text('jobVisit24HourShort') }}</mat-button-toggle>
+            <mat-button-toggle value="12H">{{ i18n.text('jobVisit12HourShort') }}</mat-button-toggle>
+          </mat-button-toggle-group>
+        </div>
         <input
-          matInput
-          [matTimepicker]="startTimePicker"
-          formControlName="startTime"
-          readonly
-          required
+          id="visit-start-time"
+          class="time-input"
+          type="text"
+          [attr.inputmode]="timeFormat() === '24H' ? 'numeric' : 'text'"
+          [value]="startTimeText()"
+          [placeholder]="timeFormat() === '24H' ? '14:30' : '02:30 PM'"
+          [attr.aria-invalid]="!!timeError('start')"
+          [attr.aria-describedby]="timeError('start') ? 'visit-start-time-error' : null"
+          list="visit-time-suggestions"
+          autocomplete="off"
+          (input)="setStartTime($event)"
+          (blur)="startTimeTouched.set(true)"
         />
-        <mat-timepicker-toggle
-          matSuffix
-          [for]="startTimePicker"
-          [aria-label]="i18n.text('jobVisitStartTime')"
-        />
-        <mat-timepicker #startTimePicker interval="15m" />
-        <mat-error>{{ i18n.text('required') }}</mat-error>
-      </mat-form-field>
-      <mat-form-field appearance="outline">
-        <mat-label>{{ i18n.text('jobVisitEndDate') }}</mat-label>
+        @if (timeError('start'); as message) { <p id="visit-start-time-error" class="time-error" role="alert">{{ i18n.text(message) }}</p> }
+      </div>
+      <div class="time-control">
+        <div class="time-label-row"><label for="visit-end-time">{{ i18n.text('jobVisitEndTime') }}</label></div>
         <input
-          matInput
-          [matDatepicker]="endDatePicker"
-          formControlName="endDate"
-          readonly
-          required
-          (click)="endDatePicker.open()"
+          id="visit-end-time"
+          class="time-input"
+          type="text"
+          [attr.inputmode]="timeFormat() === '24H' ? 'numeric' : 'text'"
+          [value]="endTimeText()"
+          [placeholder]="timeFormat() === '24H' ? '16:30' : '04:30 PM'"
+          [attr.aria-invalid]="!!timeError('end')"
+          [attr.aria-describedby]="timeError('end') ? 'visit-end-time-error' : null"
+          list="visit-time-suggestions"
+          autocomplete="off"
+          (input)="setEndTime($event)"
+          (blur)="endTimeTouched.set(true)"
         />
-        <mat-datepicker-toggle
-          matSuffix
-          [for]="endDatePicker"
-          [aria-label]="i18n.text('jobVisitEndDate')"
-        />
-        <mat-datepicker #endDatePicker />
-        <mat-error>{{ i18n.text('required') }}</mat-error>
-      </mat-form-field>
-      <mat-form-field appearance="outline">
-        <mat-label>{{ i18n.text('jobVisitEndTime') }}</mat-label>
-        <input
-          matInput
-          [matTimepicker]="endTimePicker"
-          formControlName="endTime"
-          readonly
-          required
-        />
-        <mat-timepicker-toggle
-          matSuffix
-          [for]="endTimePicker"
-          [aria-label]="i18n.text('jobVisitEndTime')"
-        />
-        <mat-timepicker #endTimePicker interval="15m" />
-        <mat-error>{{ i18n.text('required') }}</mat-error>
-      </mat-form-field>
+        @if (timeError('end'); as message) { <p id="visit-end-time-error" class="time-error" role="alert">{{ i18n.text(message) }}</p> }
+      </div>
     </div>
+    }
+    <datalist id="visit-time-suggestions">
+      @for (suggestion of timeSuggestions(); track suggestion) { <option [value]="suggestion"></option> }
+    </datalist>
     @if (invalidWindow()) {
       <p role="alert">{{ i18n.text('jobVisitWindowError') }}</p>
     }
+    @if (pastStart()) { <p role="alert">{{ i18n.text('jobVisitPastStartError') }}</p> }
     @if (loading()) {
       <p role="status">{{ i18n.text('busy') }}</p>
     }
@@ -130,8 +124,8 @@
             {{ conflict.technicianName || i18n.text('unnamedMember') }} · {{ i18n.text('job') }} #{{
               conflict.jobNumber
             }}
-            · {{ conflict.scheduledStart | date: 'medium' : undefined : i18n.language() }} –
-            {{ conflict.scheduledEnd | date: 'shortTime' : undefined : i18n.language() }}
+            · {{ conflict.scheduledStart | date: 'mediumDate' : undefined : i18n.language() }} {{ conflict.scheduledStart | preferredTime }} –
+            {{ conflict.scheduledEnd | preferredTime }}
           </p>
         }
         <button type="button" mat-stroked-button [disabled]="busy()" (click)="save(true)">
@@ -157,6 +151,7 @@
         !!readError() ||
         form.invalid ||
         invalidWindow() ||
+        pastStart() ||
         !form.controls.crew.value.includes(form.controls.lead.value) ||
         !!conflicts().length
       "

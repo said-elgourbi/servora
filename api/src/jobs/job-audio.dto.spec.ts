@@ -111,12 +111,8 @@ describe('job audio note requests', () => {
       ).toThrow(DomainValidationError);
     });
 
-    it('requires the Visit the recording belongs to, because evidence is field work', () => {
-      // A recording is made during a Visit (`BR-047`, `BR-080`), so a request that names none — or one
-      // that is not a Visit id at all — is refused rather than stored with no attribution (`BR-042`).
-      expect(() =>
-        parseCreateJobAudioNoteDto({ clientOperationId: OPERATION_ID, phase: 'DURING_WORK' }),
-      ).toThrow(DomainValidationError);
+    it('allows a Job-level audio note while still validating an optional Visit id', () => {
+      expect(parseCreateJobAudioNoteDto({ clientOperationId: OPERATION_ID, phase: 'BEFORE_WORK' }).visitId).toBeNull();
       expect(() =>
         parseCreateJobAudioNoteDto({
           clientOperationId: OPERATION_ID,

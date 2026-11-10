@@ -5,10 +5,11 @@ import { I18n } from '../../../core/i18n/i18n';
 import { Icon } from '../../../shared/ui/icon';
 import { WorkLabel } from '../../../shared/ui/work-label';
 import { WorkStatus } from '../../../shared/ui/work-status';
+import { PreferredTime } from '../../../shared/ui/preferred-time';
 
 @Component({
   selector: 'app-job-visit',
-  imports: [DatePipe, Icon, WorkLabel, WorkStatus],
+  imports: [DatePipe, Icon, WorkLabel, WorkStatus, PreferredTime],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './job-visit.html',
   styleUrl: './job-visit.scss',

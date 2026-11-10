@@ -113,6 +113,7 @@ export function jobPhotoObjectKey(input: {
  */
 export const AUDIO_CONTENT_TYPES = {
   'audio/mp4': 'm4a',
+  'audio/webm': 'webm',
 } as const;
 
 export type AudioContentType = keyof typeof AUDIO_CONTENT_TYPES;

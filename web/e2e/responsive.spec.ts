@@ -65,19 +65,24 @@ test('workspace and job details fit phone, tablet and desktop in light and dark 
   await page.getByLabel('Email address').fill('member@example.com');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
+  const filterColumns = await page.locator('.filter-controls').evaluate((element) =>
+    getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+  );
+  expect(filterColumns).toBe(compact ? (viewport?.width ?? 1280) <= 480 ? 1 : 2 : 4);
   await page.screenshot({ path: testInfo.outputPath('home-light.png'), fullPage: true });
   if (compact) await page.locator('.mobile-menu summary').click();
   await page.getByRole('radio', { name: 'Français', exact: true }).click();
   await page.getByRole('radio', { name: 'Sombre', exact: true }).click();
   if (compact) await page.locator('.mobile-menu summary').click();
-  await expect(page.getByRole('heading', { name: 'Votre journée de travail' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Vue du bureau' })).toBeVisible();
+  await expect(page.locator('.view-switch')).toHaveCount(0);
+  const workTable = page.locator('.table-scroll');
+  await expect(workTable).toBeVisible();
+  expect(await workTable.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('home.png'), fullPage: true });
-  await page
-    .getByRole('link')
-    .filter({ has: page.getByRole('heading', { name: 'Furnace repair' }) })
-    .click();
+  await page.locator('.attention-table tr').filter({ hasText: 'Furnace repair' }).getByRole('link').click();
   await expect(page.getByRole('heading', { name: title })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('job.png'), fullPage: true });
@@ -101,7 +106,7 @@ test('keyboard reaches account controls and skips the shell at every viewport', 
   await page.getByLabel('Email address').fill('member@example.com');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   const skip = page.getByRole('link', { name: 'Skip to content' });
   for (let step = 0; step < 30; step++) {
     await page.keyboard.press('Shift+Tab');
@@ -129,7 +134,7 @@ test('keyboard reaches account controls and skips the shell at every viewport', 
   // Segmented controls support arrow navigation without using a pointer.
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
-  await expect(page.getByRole('heading', { name: 'Votre journée de travail' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Vue du bureau' })).toBeVisible();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('radio', { name: 'Système', exact: true })).toBeFocused();
   await page.keyboard.press('Tab');

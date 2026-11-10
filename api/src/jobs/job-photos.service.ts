@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import { isUniqueViolation } from '../database/unique-violation.js';
-import { customers, jobPhotoRemovals, jobPhotos, jobs, visits } from '../database/schema.js';
+import { customers, jobActivityEdits, jobPhotoRemovals, jobPhotos, jobs, visits } from '../database/schema.js';
 import {
   OBJECT_STORAGE,
   ObjectNotFoundError,
@@ -65,9 +66,11 @@ export class JobPhotosService {
     uploaderMembershipId: string,
     input: CreateJobPhotoDto,
     photo: ValidatedJobPhoto,
+    allowLateUpdate = false,
   ): Promise<JobActivityEventDto[]> {
-    await this.requireOpenJob(scope, jobId);
-    await this.requireVisit(scope, jobId, input.visitId);
+    if (allowLateUpdate) await this.requireJob(scope, jobId);
+    else await this.requireOpenJob(scope, jobId);
+    if (input.visitId !== null) await this.requireVisit(scope, jobId, input.visitId);
 
     const existing = await this.findByOperationId(scope, input.clientOperationId);
     if (existing !== null) {
@@ -168,6 +171,45 @@ export class JobPhotosService {
       throw error;
     }
 
+    return readJobActivity(this.db, scope, jobId);
+  }
+
+  async editJobPhoto(
+    scope: OrganizationScope,
+    jobId: string,
+    photoId: string,
+    actorMembershipId: string,
+    input: Pick<CreateJobPhotoDto, 'note' | 'phase'>,
+    photo: ValidatedJobPhoto | null,
+    canEditAny: boolean,
+  ): Promise<JobActivityEventDto[]> {
+    await this.requireJob(scope, jobId);
+    const [current] = await this.db.select().from(jobPhotos).where(and(
+      eq(jobPhotos.organizationId, scope.organizationId), eq(jobPhotos.jobId, jobId), eq(jobPhotos.id, photoId),
+    )).limit(1);
+    const availability = await this.findPhoto(scope, jobId, photoId);
+    if (!current || !availability || availability.removed) throw new JobPhotoNotFoundError();
+    if (!canEditAny && current.uploaderMembershipId !== actorMembershipId) throw new JobPhotoRemovalForbiddenError();
+
+    const old = current;
+    const recordedAt = new Date();
+    await this.db.insert(jobActivityEdits).values({
+      organizationId: scope.organizationId, jobId, activityKind: 'JOB_PHOTO_ADDED', activityId: photoId,
+      editorMembershipId: actorMembershipId,
+      previousValue: { body: old.note, phase: old.phase, contentType: old.contentType, byteSize: old.byteSize },
+      recordedAt,
+    });
+    const changes: Partial<typeof jobPhotos.$inferInsert> = {
+      note: input.note, phase: input.phase, editedAt: recordedAt, editedByMembershipId: actorMembershipId,
+    };
+    if (photo) {
+      const objectKey = jobPhotoObjectKey({ organizationId: scope.organizationId, jobId, photoId: randomUUID(), contentType: photo.contentType });
+      await this.storage.putObject({ key: objectKey, body: photo.body, contentType: photo.contentType });
+      changes.objectKey = objectKey; changes.contentType = photo.contentType; changes.byteSize = photo.body.byteLength;
+    }
+    await this.db.update(jobPhotos).set(changes).where(and(
+      eq(jobPhotos.organizationId, scope.organizationId), eq(jobPhotos.jobId, jobId), eq(jobPhotos.id, photoId),
+    ));
     return readJobActivity(this.db, scope, jobId);
   }
 
@@ -323,16 +365,6 @@ export class JobPhotosService {
     return row;
   }
 
-  private async requireOpenJob(
-    scope: OrganizationScope,
-    jobId: string,
-  ): Promise<void> {
-    const job = await this.requireJob(scope, jobId);
-    if (job.status === 'COMPLETED' || job.status === 'CANCELED') {
-      throw new JobClosedForFieldWorkError();
-    }
-  }
-
   /**
    * One Visit of the caller's organization **and** of the Job the evidence is recorded on.
    *
@@ -360,6 +392,11 @@ export class JobPhotosService {
     if (row === undefined) {
       throw new VisitNotFoundError();
     }
+  }
+
+  private async requireOpenJob(scope: OrganizationScope, jobId: string): Promise<void> {
+    const job = await this.requireJob(scope, jobId);
+    if (job.status === 'COMPLETED' || job.status === 'CANCELED') throw new JobClosedForFieldWorkError();
   }
 }
 

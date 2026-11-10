@@ -169,7 +169,6 @@ export function parseSubmitAdHocWorkReportDto(
     fail('workEndedAt', 'must be after workStartedAt');
   }
   const customerId = optionalUuid(source.customerId, 'customerId');
-  const customerText = customerId === null ? requireText : optionalText;
   return {
     customerId,
     propertyId: optionalUuid(source.propertyId, 'propertyId'),
@@ -183,17 +182,17 @@ export function parseSubmitAdHocWorkReportDto(
     ),
     summary: requireText(source.summary, 'summary', 2000),
     notes: optionalText(source.notes, 'notes', 4000),
-    reportedCustomerName: customerText(
+    reportedCustomerName: optionalText(
       source.reportedCustomerName,
       'reportedCustomerName',
       255,
     ),
-    reportedCustomerPhone: customerText(
+    reportedCustomerPhone: optionalText(
       source.reportedCustomerPhone,
       'reportedCustomerPhone',
       50,
     ),
-    reportedCustomerAddress: customerText(
+    reportedCustomerAddress: optionalText(
       source.reportedCustomerAddress,
       'reportedCustomerAddress',
       2000,

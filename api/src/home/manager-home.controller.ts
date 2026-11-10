@@ -6,7 +6,7 @@ import { RequirePermissions } from '../auth/permissions.decorator.js';
 import { PermissionsGuard } from '../auth/permissions.guard.js';
 import type { PermissionedRequest } from '../auth/permissions.guard.js';
 import { resolveDayWindow } from './home-day.js';
-import { readTimeZoneQuery } from './home-query.js';
+import { readAttentionOffsetQuery, readTimeZoneQuery } from './home-query.js';
 import { toManagerHomeDto } from './manager-home.dto.js';
 import type { ManagerHomeDto } from './manager-home.dto.js';
 import { ManagerHomeService } from './manager-home.service.js';
@@ -43,6 +43,7 @@ export class ManagerHomeController {
     }
 
     const timeZone = readTimeZoneQuery(query);
+    const attentionOffset = readAttentionOffsetQuery(query);
     const now = new Date();
     const day = resolveDayWindow(timeZone, now);
     const read = await this.managerHome.readManagerHome(
@@ -50,6 +51,7 @@ export class ManagerHomeController {
       auth.userId,
       day,
       now,
+      attentionOffset,
     );
 
     return toManagerHomeDto({
@@ -58,6 +60,7 @@ export class ManagerHomeController {
       viewerDisplayName: read.viewerDisplayName,
       attention: read.attention,
       attentionTotal: read.attentionTotal,
+      attentionCountsByKind: read.attentionCountsByKind,
       today: read.today,
       visits: read.visits,
     });

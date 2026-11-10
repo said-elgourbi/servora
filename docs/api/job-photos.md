@@ -85,7 +85,7 @@ capability only.
 | ------------------- | -------- | --------------------------------------------------------------------- |
 | `file`              | yes      | The photo. JPEG, PNG or WebP, decided from the bytes. Max 15 MiB.      |
 | `clientOperationId` | yes      | UUID. The idempotency key; **also the photo's id** (§3.2).             |
-| `visitId`           | yes      | UUID of the Visit the photo was recorded during (`BR-047`). A Visit that is not on this Job, or in another organization, is refused `404 VISIT_NOT_FOUND`. |
+| `visitId`           | no       | UUID of the Visit the photo was recorded during. Office Job updates may omit it; field-scoped uploads must name an assigned Visit. |
 | `phase`             | yes      | `BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK`.                          |
 | `note`              | no       | At most 2000 characters. Absent or blank means no note.                |
 | `capturedAt`        | no       | ISO-8601 UTC instant the device captured the photo.                    |
@@ -118,10 +118,8 @@ event and there is no separate photo read. The new entry is:
 
 `photoId` is what `GET /jobs/:id/photos/:photoId/content` is asked for, and `body` carries the note.
 `photoRemovalReason` is `null` on every event but `JOB_PHOTO_REMOVED`, which carries no `body`
-(`docs/api/job-activity.md` §3.2). The entry is **Visit-level** (`visitSequence` names the Visit the photo
-was recorded during), which is what makes it read beside that field attempt in Job Activity (`BR-047`,
-`BR-080`, `docs/tracker/shared/056-evidence-belongs-to-a-visit.md`). A photo recorded before the link existed
-carries no Visit, and that is the only case in which the entry is Job-level (`visitSequence: null`).
+(`docs/api/job-activity.md` §3.2). The entry is Visit-level when `visitId` is supplied. Office Job-level
+photos have `visitSequence: null`.
 
 ### 3.2 Idempotency (`BR-031`, offline standard §5)
 

@@ -57,4 +57,4 @@ createServer(async (req, res) => {
     res.writeHead(404);
     res.end();
   }
-}).listen(4300, '127.0.0.1');
+}).listen(Number(process.env['SERVORA_TEST_PORT'] ?? 4300), '127.0.0.1');

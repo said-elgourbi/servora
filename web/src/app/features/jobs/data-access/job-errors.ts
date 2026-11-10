@@ -10,10 +10,12 @@ export function jobReadError(error: unknown): TranslationKey {
 export function jobWriteError(error: unknown): TranslationKey {
   if (!(error instanceof HttpErrorResponse)) return 'jobWriteUncertain';
   const code: unknown = error.error?.code;
+  if (code === 'STORAGE_UNAVAILABLE') return 'jobAttachmentStorageUnavailable';
   if (code === 'JOB_CLOSED_FOR_FIELD_WORK' || code === 'VISIT_SCHEDULING_CONDITION_NOT_MET')
     return 'jobVisitUnavailable';
   if (code === 'TECHNICIANS_NOT_ASSIGNABLE') return 'jobConflict';
   if (code === 'CUSTOMER_INACTIVE') return 'jobCustomerInactive';
+  if (error.status === 413) return 'jobUploadTooLarge';
   if (code === 'JOB_COMPLETION_BLOCKED') return 'jobCompletionBlocked';
   if (code === 'PROPERTY_NOT_AVAILABLE_FOR_NEW_WORK') return 'jobPropertyArchived';
   if (error.status === 409) return 'jobConflict';

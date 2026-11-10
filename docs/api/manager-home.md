@@ -51,6 +51,7 @@ related reads to build it.
 | Parameter  | Required | Meaning                                                                                                                                                                                                                                                  |
 | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `timeZone` | no       | The IANA time-zone identifier the client renders in; the API resolves the local day from it. An omitted value resolves in `UTC`. A fixed offset a device reports (`GMT+05:30`) is accepted and normalised to `+05:30`. An unresolvable identifier is `400 VALIDATION_FAILED`. |
+| `attentionOffset` | no | Zero-based offset into the ordered attention list. Defaults to `0`; must be a non-negative integer no greater than `1,000,000`, otherwise `400 VALIDATION_FAILED`. Each response returns at most 20 items. `attention.total` and `countsByKind` describe the full matching list, regardless of offset. |
 
 ### 3.2 Response
 
@@ -65,6 +66,7 @@ related reads to build it.
   "viewer": { "displayName": "Sarah Tremblay" },
   "attention": {
     "total": 3,
+    "countsByKind": { "VISIT_OVERDUE": 2, "JOB_QUOTE_REQUIRED": 1 },
     "items": [
       {
         "code": "VISIT_OVERDUE",
@@ -76,6 +78,12 @@ related reads to build it.
         "customerId": "…",
         "customerName": "ABC Property Management",
         "visitId": "…",
+        "visitNumber": 1,
+        "purposeCode": "WORK",
+        "visitStatus": "SCHEDULED",
+        "technicians": [
+          { "membershipId": "…", "name": "Mike Johnson", "roleCode": "LEAD" }
+        ],
         "reasonCode": null,
         "scheduledStart": "2026-09-14T11:00:00.000Z",
         "scheduledEnd": "2026-09-14T12:00:00.000Z"
@@ -86,6 +94,7 @@ related reads to build it.
   "visits": [
     {
       "visitId": "…",
+      "visitNumber": 1,
       "visitStatus": "SCHEDULED",
       "purposeCode": "WORK",
       "scheduledStart": "2026-09-14T11:00:00.000Z",
@@ -124,9 +133,14 @@ related reads to build it.
 | `attention.items[].code` / `kind` | Stable attention code, never display text (`BR-028`, `BR-041`). Visit conditions use `VISIT_OVERDUE` and `VISIT_STALE_STARTED`; generic unscheduled work uses `JOB_NEEDS_SCHEDULING`; outcome-derived Job attention uses `FOLLOW_UP_NEEDS_SCHEDULING`, `PARTS_REQUIRED`, `UNABLE_TO_COMPLETE`, `JOB_WORK_RECOMMENDED`, `JOB_QUOTE_REQUIRED` or `JOB_NEEDS_REASSESSMENT`. `kind` is the compatibility alias for `code`. |
 | `attention.items[].reasonCode` | `null` unless the attention condition has an approved structured reason. The current `UNABLE_TO_COMPLETE` write requires a reason as text, but no structured reason catalogue is approved, so the projection does not invent reason subcodes. |
 | `attention.total`    | Every matching condition, including the ones beyond `items` (capped at 20). The section's count comes from here, so a capped list never under-reports the operation.                                                   |
-| `attention.items`    | Ordered: what has gone wrong first, then what awaits the office, then what has to be planned; within a kind by scheduled time, then Job number. `visitId` and the schedule are `null` for a Job-level condition.        |
+| `attention.countsByKind` | Exact total count for each attention code across the full list. Codes with no matching items are omitted. This supports category counts while the client loads pages. |
+| `attention.items`    | Up to 20 items from the requested `attentionOffset`, preserving the stable order: what has gone wrong first, then what awaits the office, then what has to be planned; within a kind by scheduled time, then Job number. `visitId` and the schedule are `null` for a Job-level condition. |
+| `attention.items[].visitNumber` | The Visit's one-based sequence within its Job, derived from Visit creation order; `null` for Job-level attention. |
+| `attention.items[].purposeCode` / `visitStatus` / `technicians` | The relevant Visit's type, status, and current assigned crew. The crew is Lead first; Job-level attention has `null` codes and an empty crew. |
 | `today`              | `completed + inProgress + upcoming = total`, over the Visits of `visits`.                                                                                                                                             |
 | `visits`             | Today's Visits, excluding `CANCELED`. Ordered overdue → active → upcoming → completed, then by scheduled start and Job number.                                                                                       |
+| `visits[].visitNumber` | The Visit's one-based sequence within its Job, derived from creation order (`BR-047`, `BR-071`). |
+| `visits[].purposeCode` | The stable code for the type of visit (`WORK` or `ASSESSMENT`). |
 | `visits[].address`   | The Visit's own preserved location, falling back to the Job's preserved address; `null` when neither exists (`BR-056`, `BR-057`).                                                                                     |
 | `visits[].technicians` | The current assignments, Lead first (`BR-068`); empty when the Visit has none. `name` is `null` when the member has no profile yet.                                                                                  |
 | `visits[].overdue`   | The derived overdue condition, decided by the API from the server clock, so a client presents it without comparing schedules against its own clock (`BR-001`).                                                          |
@@ -151,7 +165,7 @@ The client presents the original scheduled date and time and opens the affected 
 
 | Status | Code                | When                                                     |
 | ------ | ------------------- | -------------------------------------------------------- |
-| `400`  | `VALIDATION_FAILED` | `timeZone` names a zone the server cannot resolve.        |
+| `400`  | `VALIDATION_FAILED` | `timeZone` names a zone the server cannot resolve, or `attentionOffset` is not a supported non-negative integer. |
 | `401`  | `UNAUTHENTICATED`   | No usable session.                                        |
 | `403`  | `FORBIDDEN`         | The caller does not hold `customers.view`.                |
 | `5xx`  | —                   | Server failure; the client reports it and keeps its cache. |

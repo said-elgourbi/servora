@@ -7,7 +7,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Email address').fill('member@example.com');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
 }
 
 // Reach controls through the real tab order; never move focus using DOM APIs.
@@ -166,7 +166,7 @@ test('system appearance follows the browser while an explicit choice survives re
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.getByRole('radio', { name: 'Dark', exact: true }).click();
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.getByRole('radio', { name: 'System', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');

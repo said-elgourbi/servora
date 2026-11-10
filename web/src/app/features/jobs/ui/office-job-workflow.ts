@@ -20,6 +20,7 @@ import type { JobActivity, JobActivityEvent, OfficeJobDetails } from '@servora/s
 import { I18n } from '../../../core/i18n/i18n';
 import type { TranslationKey } from '../../../core/i18n/en';
 import { WorkLabel } from '../../../shared/ui/work-label';
+import { PreferredTime } from '../../../shared/ui/preferred-time';
 import { AuthSession } from '../../auth/data-access/auth-session';
 import { JobsApi } from '../data-access/jobs-api';
 import { jobReadError, jobWriteError } from '../data-access/job-errors';
@@ -35,6 +36,7 @@ import { ScheduleVisit } from './schedule-visit';
     MatButtonModule,
     MatDialogModule,
     WorkLabel,
+    PreferredTime,
     JobActivityEntry,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,

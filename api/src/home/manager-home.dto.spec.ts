@@ -17,6 +17,7 @@ function visit(
 ): ManagerHomeVisit {
   return {
     visitId: 'visit-1',
+    visitNumber: 1,
     purposeCode: 'WORK',
     scheduledStart: new Date('2026-09-14T13:00:00.000Z'),
     scheduledEnd: new Date('2026-09-14T14:00:00.000Z'),
@@ -119,6 +120,10 @@ describe('compareAttentionItems', () => {
       customerId: 'customer-1',
       customerName: 'ABC Property Management',
       visitId: null,
+      visitNumber: null,
+      purposeCode: null,
+      visitStatus: null,
+      technicians: [],
       scheduledStart: null,
       scheduledEnd: null,
       ...overrides,
@@ -204,11 +209,16 @@ describe('toManagerHomeDto', () => {
           customerId: 'customer-1',
           customerName: 'ABC Property Management',
           visitId: 'visit-1',
+      visitNumber: 1,
+      purposeCode: 'WORK',
+      visitStatus: 'SCHEDULED',
+      technicians: [],
           scheduledStart: new Date('2026-09-14T13:00:00.000Z'),
           scheduledEnd: new Date('2026-09-14T14:00:00.000Z'),
         },
       ],
       attentionTotal: 4,
+      attentionCountsByKind: { VISIT_OVERDUE: 4 },
       today: { total: 1, completed: 0, inProgress: 0, upcoming: 1 },
       visits: [
         visit({
@@ -244,6 +254,7 @@ describe('toManagerHomeDto', () => {
     expect(dto.viewer).toEqual({ displayName: 'Sarah Tremblay' });
     // `total` reports every condition, including the ones beyond `items`.
     expect(dto.attention.total).toBe(4);
+    expect(dto.attention.countsByKind).toEqual({ VISIT_OVERDUE: 4 });
     expect(dto.attention.items[0]?.kind).toBe('VISIT_OVERDUE');
     expect(dto.attention.items[0]?.scheduledStart).toBe(
       '2026-09-14T13:00:00.000Z',
@@ -267,6 +278,6 @@ describe('toManagerHomeDto', () => {
     });
 
     expect(dto.viewer.displayName).toBeNull();
-    expect(dto.attention).toEqual({ total: 0, items: [] });
+    expect(dto.attention).toEqual({ total: 0, countsByKind: {}, items: [] });
   });
 });

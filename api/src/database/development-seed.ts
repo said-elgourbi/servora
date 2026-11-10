@@ -24,6 +24,7 @@ export const DEFAULT_SEED_ORGANIZATION_NAME = 'Servora Development';
 // Reserved `.test` addresses (RFC 2606) so a seeded account can never reach a
 // real inbox even if a notification path is added later.
 export const DEFAULT_SEED_MANAGER_EMAIL = 'manager@servora.test';
+export const DEFAULT_SEED_SECOND_MANAGER_EMAIL = 'manager2@servora.test';
 export const DEFAULT_SEED_TECHNICIAN_EMAIL = 'technician@servora.test';
 
 /** 18 random bytes encode to 24 URL-safe characters, comfortably above `MIN_PASSWORD_LENGTH`. */
@@ -68,6 +69,14 @@ const ACCOUNT_TEMPLATES: readonly AccountTemplate[] = [
     passwordVariable: 'SEED_MANAGER_PASSWORD',
     defaultEmail: DEFAULT_SEED_MANAGER_EMAIL,
     firstName: 'Dev',
+    lastName: 'Manager',
+  },
+  {
+    role: 'MANAGER',
+    emailVariable: 'SEED_MANAGER_2_EMAIL',
+    passwordVariable: 'SEED_MANAGER_2_PASSWORD',
+    defaultEmail: DEFAULT_SEED_SECOND_MANAGER_EMAIL,
+    firstName: 'Alex',
     lastName: 'Manager',
   },
   {

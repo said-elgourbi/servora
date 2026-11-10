@@ -2,16 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { SYSTEM_ROLE_CODES } from '../members/organization-member.types.js';
 import {
   DEFAULT_SEED_MANAGER_EMAIL,
+  DEFAULT_SEED_SECOND_MANAGER_EMAIL,
   DEFAULT_SEED_ORGANIZATION_NAME,
   DEFAULT_SEED_TECHNICIAN_EMAIL,
   resolveDevelopmentSeed,
 } from './development-seed.js';
 
 describe('resolveDevelopmentSeed', () => {
-  it('seeds one account per default system role template', () => {
+  it('seeds two managers and one technician account for QA sign-in', () => {
     const seed = resolveDevelopmentSeed({});
 
     expect(seed.accounts.map((account) => account.role)).toEqual([
+      'MANAGER',
       'MANAGER',
       'TECHNICIAN',
     ]);
@@ -28,17 +30,20 @@ describe('resolveDevelopmentSeed', () => {
     expect(seed.organizationName).toBe(DEFAULT_SEED_ORGANIZATION_NAME);
     expect(seed.accounts.map((account) => account.email)).toEqual([
       DEFAULT_SEED_MANAGER_EMAIL,
+      DEFAULT_SEED_SECOND_MANAGER_EMAIL,
       DEFAULT_SEED_TECHNICIAN_EMAIL,
     ]);
   });
 
   it('generates a distinct, usable password per account when none is configured', () => {
     const seed = resolveDevelopmentSeed({});
-    const [manager, technician] = seed.accounts;
+    const [manager, manager2, technician] = seed.accounts;
 
     expect(manager?.generatedPassword).toBe(true);
     expect(technician?.generatedPassword).toBe(true);
+    expect(manager2?.generatedPassword).toBe(true);
     expect(manager?.password).not.toBe(technician?.password);
+    expect(manager?.password).not.toBe(manager2?.password);
     expect((manager?.password ?? '').length).toBeGreaterThanOrEqual(8);
     expect((technician?.password ?? '').length).toBeGreaterThanOrEqual(8);
   });
@@ -46,12 +51,15 @@ describe('resolveDevelopmentSeed', () => {
   it('uses configured passwords and reports them as not generated', () => {
     const seed = resolveDevelopmentSeed({
       SEED_MANAGER_PASSWORD: 'manager-dev-password',
+      SEED_MANAGER_2_PASSWORD: 'manager2-dev-password',
       SEED_TECHNICIAN_PASSWORD: 'technician-dev-password',
     });
-    const [manager, technician] = seed.accounts;
+    const [manager, manager2, technician] = seed.accounts;
 
     expect(manager?.password).toBe('manager-dev-password');
     expect(manager?.generatedPassword).toBe(false);
+    expect(manager2?.password).toBe('manager2-dev-password');
+    expect(manager2?.generatedPassword).toBe(false);
     expect(technician?.password).toBe('technician-dev-password');
     expect(technician?.generatedPassword).toBe(false);
   });
@@ -95,6 +103,7 @@ describe('resolveDevelopmentSeed', () => {
 
     expect(seed.accounts.map((account) => account.passwordVariable)).toEqual([
       'SEED_MANAGER_PASSWORD',
+      'SEED_MANAGER_2_PASSWORD',
       'SEED_TECHNICIAN_PASSWORD',
     ]);
   });

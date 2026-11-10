@@ -5,6 +5,7 @@ import {
   jobAudioNoteRemovals,
   jobAudioNotes,
   jobDocuments,
+  jobNotes,
   jobCustomerHistory,
   jobPhotoRemovals,
   jobPhotos,
@@ -45,6 +46,7 @@ import { readJobVisits } from './visit-assignment.js';
 
 export const JOB_ACTIVITY_KINDS = [
   'JOB_STATUS_CHANGED',
+  'JOB_NOTE_ADDED',
   'JOB_PROPERTY_CHANGED',
   'JOB_CUSTOMER_CHANGED',
   'JOB_PHOTO_ADDED',
@@ -57,6 +59,7 @@ export const JOB_ACTIVITY_KINDS = [
   'JOB_QUOTE_REJECTED',
   'JOB_QUOTE_CORRECTED',
   'JOB_QUOTE_DOCUMENT_UPLOADED',
+  'JOB_DOCUMENT_ATTACHED',
   'VISIT_STATUS_CHANGED',
   'VISIT_SCHEDULED',
   'VISIT_RESCHEDULED',
@@ -83,6 +86,9 @@ export interface JobActivityEventDto {
    * (`BR-020`).
    */
   actorName: string | null;
+  authorMembershipId: string | null;
+  canEdit: boolean;
+  canDelete: boolean;
   /**
    * The Visit's human-readable sequence, `Visit 1`, `Visit 2`, … — `null` for a Job-level event
    * (`docs/domain/job-visit-domain-model.md` §6).
@@ -106,6 +112,8 @@ export interface JobActivityEventDto {
   body: string | null;
   /** When a Visit note was edited (`VISIT_NOTE_ADDED`), or `null`. */
   noteEditedAt: string | null;
+  activityEditedAt: string | null;
+  activityRemovedAt: string | null;
   /** When a Visit note was removed (`VISIT_NOTE_ADDED` in audit reads), or `null`. */
   noteRemovedAt: string | null;
   /** Why a Visit note was removed (`VISIT_NOTE_ADDED` in audit reads), or `null`. */
@@ -165,6 +173,10 @@ export interface JobActivityEventDto {
   quoteDocumentIsCurrent: boolean | null;
   /** The quote document byte size (`JOB_QUOTE_DOCUMENT_UPLOADED`), or `null`. */
   quoteDocumentByteSize: number | null;
+  documentId: string | null;
+  documentDisplayName: string | null;
+  documentVersion: number | null;
+  documentByteSize: number | null;
 }
 
 /** The Job Activity read's response body. */
@@ -189,6 +201,8 @@ interface RawEvent {
   outcomeSummary: string | null;
   body: string | null;
   noteEditedAt?: Date | null;
+  activityEditedAt?: Date | null;
+  activityRemovedAt?: Date | null;
   noteRemovedAt?: Date | null;
   noteRemovalReason?: string | null;
   /**
@@ -222,6 +236,10 @@ interface RawEvent {
   quoteDocumentVersion?: number | null;
   quoteDocumentIsCurrent?: boolean | null;
   quoteDocumentByteSize?: number | null;
+  documentId?: string | null;
+  documentDisplayName?: string | null;
+  documentVersion?: number | null;
+  documentByteSize?: number | null;
 }
 
 /** Wraps the read's events in its response body (`docs/api/job-activity.md`). */
@@ -283,6 +301,7 @@ export async function readJobActivity(
 
   const [
     jobStatusRows,
+    jobNoteRows,
     jobPropertyRows,
     jobCustomerRows,
     visitStatusRows,
@@ -312,6 +331,17 @@ export async function readJobActivity(
           eq(jobStatusHistory.jobId, jobId),
         ),
       ),
+    db
+      .select({
+        id: jobNotes.id,
+        authorMembershipId: jobNotes.authorMembershipId,
+        body: jobNotes.body,
+        editedAt: jobNotes.editedAt,
+        removedAt: jobNotes.removedAt,
+        recordedAt: jobNotes.recordedAt,
+      })
+      .from(jobNotes)
+      .where(and(eq(jobNotes.organizationId, scope.organizationId), eq(jobNotes.jobId, jobId))),
     db
       .select({
         id: jobPropertyHistory.id,
@@ -388,6 +418,7 @@ export async function readJobActivity(
         uploaderMembershipId: jobPhotos.uploaderMembershipId,
         phase: jobPhotos.phase,
         note: jobPhotos.note,
+        editedAt: jobPhotos.editedAt,
         recordedAt: jobPhotos.recordedAt,
       })
       .from(jobPhotos)
@@ -428,6 +459,7 @@ export async function readJobActivity(
         phase: jobAudioNotes.phase,
         note: jobAudioNotes.note,
         durationSeconds: jobAudioNotes.durationSeconds,
+        editedAt: jobAudioNotes.editedAt,
         recordedAt: jobAudioNotes.recordedAt,
       })
       .from(jobAudioNotes)
@@ -478,11 +510,15 @@ export async function readJobActivity(
     db
       .select({
         id: jobDocuments.id,
+        visitId: jobDocuments.visitId,
+        documentType: jobDocuments.documentType,
         displayName: jobDocuments.displayName,
         documentVersion: jobDocuments.documentVersion,
         isCurrent: jobDocuments.isCurrent,
         byteSize: jobDocuments.byteSize,
         uploadedByMembershipId: jobDocuments.uploadedByMembershipId,
+        editedAt: jobDocuments.editedAt,
+        removedAt: jobDocuments.removedAt,
         recordedAt: jobDocuments.recordedAt,
       })
       .from(jobDocuments)
@@ -490,7 +526,6 @@ export async function readJobActivity(
         and(
           eq(jobDocuments.organizationId, scope.organizationId),
           eq(jobDocuments.jobId, jobId),
-          eq(jobDocuments.documentType, 'QUOTE'),
         ),
       ),
   ]);
@@ -515,6 +550,25 @@ export async function readJobActivity(
       outcomeCode: null,
       outcomeSummary: null,
       body: null,
+    })),
+    ...jobNoteRows
+      .filter((row) => options.includeRemovedEvidence === true || row.removedAt === null)
+      .map((row): RawEvent => ({
+      id: row.id,
+      kind: 'JOB_NOTE_ADDED',
+      recordedAt: row.recordedAt as Date,
+      actorMembershipId: row.authorMembershipId,
+      visitId: null,
+      fromStatus: null,
+      toStatus: null,
+      technicianMembershipId: null,
+      roleCode: null,
+      previousRoleCode: null,
+      outcomeCode: null,
+      outcomeSummary: null,
+      body: row.body,
+      activityEditedAt: row.editedAt as Date | null,
+      activityRemovedAt: row.removedAt as Date | null,
     })),
     ...jobPropertyRows.map((row): RawEvent => ({
       id: row.id,
@@ -629,6 +683,7 @@ export async function readJobActivity(
         outcomeSummary: null,
         body: row.body,
         noteEditedAt: row.editedAt as Date | null,
+        activityEditedAt: row.editedAt as Date | null,
         noteRemovedAt: row.removedAt as Date | null,
         noteRemovalReason: row.removalReason,
       })),
@@ -661,6 +716,7 @@ export async function readJobActivity(
         body: row.note,
         photoId: row.id,
         photoPhase: row.phase,
+        activityEditedAt: row.editedAt as Date | null,
       })),
     // The removal is history in its own right (`BR-067`, `BR-089`) and is part of **every** read, so
     // Activity never silently drops the fact that evidence was taken out of use; the reason it was
@@ -713,6 +769,7 @@ export async function readJobActivity(
         audioNoteId: row.id,
         audioPhase: row.phase,
         audioDurationSeconds: row.durationSeconds,
+        activityEditedAt: row.editedAt as Date | null,
       })),
     // The removal is history in its own right (`BR-067`, `BR-089`) and is part of every read, exactly as
     // a photo's removal is, so Activity never silently drops the fact that evidence was taken out of use.
@@ -751,12 +808,14 @@ export async function readJobActivity(
       quoteToState: row.toState,
       quoteNote: row.note,
     })),
-    ...quoteDocumentRows.map((row): RawEvent => ({
+    ...quoteDocumentRows
+      .filter((row) => row.documentType !== 'ATTACHMENT' || options.includeRemovedEvidence === true || row.removedAt === null)
+      .map((row): RawEvent => ({
       id: row.id,
-      kind: 'JOB_QUOTE_DOCUMENT_UPLOADED',
+      kind: row.documentType === 'QUOTE' ? 'JOB_QUOTE_DOCUMENT_UPLOADED' : 'JOB_DOCUMENT_ATTACHED',
       recordedAt: row.recordedAt as Date,
       actorMembershipId: row.uploadedByMembershipId,
-      visitId: null,
+      visitId: row.visitId,
       fromStatus: null,
       toStatus: null,
       technicianMembershipId: null,
@@ -765,11 +824,17 @@ export async function readJobActivity(
       outcomeCode: null,
       outcomeSummary: null,
       body: null,
-      quoteDocumentId: row.id,
-      quoteDocumentDisplayName: row.displayName,
-      quoteDocumentVersion: row.documentVersion,
-      quoteDocumentIsCurrent: row.isCurrent,
-      quoteDocumentByteSize: row.byteSize,
+      quoteDocumentId: row.documentType === 'QUOTE' ? row.id : null,
+      quoteDocumentDisplayName: row.documentType === 'QUOTE' ? row.displayName : null,
+      quoteDocumentVersion: row.documentType === 'QUOTE' ? row.documentVersion : null,
+      quoteDocumentIsCurrent: row.documentType === 'QUOTE' ? row.isCurrent : null,
+      quoteDocumentByteSize: row.documentType === 'QUOTE' ? row.byteSize : null,
+      documentId: row.documentType === 'ATTACHMENT' ? row.id : null,
+      documentDisplayName: row.documentType === 'ATTACHMENT' ? row.displayName : null,
+      documentVersion: row.documentType === 'ATTACHMENT' ? row.documentVersion : null,
+      documentByteSize: row.documentType === 'ATTACHMENT' ? row.byteSize : null,
+      activityEditedAt: row.documentType === 'ATTACHMENT' ? row.editedAt as Date | null : null,
+      activityRemovedAt: row.documentType === 'ATTACHMENT' ? row.removedAt as Date | null : null,
     })),
   ];
 
@@ -794,6 +859,10 @@ export async function readJobActivity(
     kind: event.kind,
     recordedAt: event.recordedAt.toISOString(),
     actorName: nameByMember.get(event.actorMembershipId) ?? null,
+    authorMembershipId: ['JOB_NOTE_ADDED', 'VISIT_NOTE_ADDED', 'JOB_PHOTO_ADDED', 'JOB_AUDIO_ADDED', 'JOB_DOCUMENT_ATTACHED'].includes(event.kind)
+      ? event.actorMembershipId : null,
+    canEdit: false,
+    canDelete: false,
     visitSequence:
       event.visitId === null
         ? null
@@ -809,7 +878,9 @@ export async function readJobActivity(
     outcomeCode: event.outcomeCode,
     outcomeSummary: event.outcomeSummary,
     body: event.body,
-    noteEditedAt: event.noteEditedAt?.toISOString() ?? null,
+    noteEditedAt: (event.activityEditedAt ?? event.noteEditedAt)?.toISOString() ?? null,
+    activityEditedAt: event.activityEditedAt?.toISOString() ?? null,
+    activityRemovedAt: event.activityRemovedAt?.toISOString() ?? null,
     noteRemovedAt: event.noteRemovedAt?.toISOString() ?? null,
     noteRemovalReason: event.noteRemovalReason ?? null,
     photoId: event.photoId ?? null,
@@ -827,6 +898,10 @@ export async function readJobActivity(
     quoteDocumentVersion: event.quoteDocumentVersion ?? null,
     quoteDocumentIsCurrent: event.quoteDocumentIsCurrent ?? null,
     quoteDocumentByteSize: event.quoteDocumentByteSize ?? null,
+    documentId: event.documentId ?? null,
+    documentDisplayName: event.documentDisplayName ?? null,
+    documentVersion: event.documentVersion ?? null,
+    documentByteSize: event.documentByteSize ?? null,
   }));
 }
 

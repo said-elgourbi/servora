@@ -555,9 +555,12 @@ with what each one blocks.
    applied in full, so a reversal needs no extra permission; which further turn should additionally be
    *flagged* as a correction is not confirmed, so `is_correction` stays the one pair `BR-075` named,
    `EN_ROUTE → SCHEDULED`.
-10. **The technician self-edit window for an outcome** (`BR-079`). No outcome-correction route exists, so
-    the window is not implemented and `BR-079`'s confirmed half — immutability once the Job is closed — is
-    the only part in force.
+10. **Outcome corrections** (`BR-079`). The business rule intends to allow technician self-correction
+    under a future policy and manager/authorized office correction under existing permissions. No
+    correction route or client workflow exists yet. The technician self-edit window is undecided, and
+    BR-079 defines no request/approval workflow; neither should be inferred by clients. Every future
+    correction must preserve the previous and new outcome, actor, timestamp and optional reason. The
+    confirmed Job-closure immutability rule is enforced today.
 11. **A paused or on-hold Visit state** (`BR-013`, `BR-074`). `BR-074` has no such state, so none is
     invented: a technician who stops working leaves the Visit `IN_PROGRESS`, and the Visit's own history
     is the record.

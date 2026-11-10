@@ -12,27 +12,30 @@ const permissions = [...jobPermissions, 'visits.create_schedule', 'TECHNICIAN_VI
 const finished = { ...job.visits[0], status: 'COMPLETED', outcomeCode: 'RESOLVED' };
 const reopened = { canScheduleVisit: true, visits: [finished] };
 
-async function pickTime(page: Page, label: string, hour: number) {
-  await page.getByRole('combobox', { name: label, exact: true }).click();
-  await page.getByRole('option', { name: `${hour}:00 a.m.`, exact: true }).click();
-}
-
 async function fillVisit(page: Page) {
-  for (const label of ['Start date', 'End date']) {
-    const input = page.getByRole('textbox', { name: label, exact: true });
-    await expect(input).toHaveAttribute('readonly', /true|^$/);
-    await input.click();
-    await page.getByRole('button', { name: 'Next month' }).click();
-    await page.getByRole('button', { name: /November 5, 2026/ }).click();
-  }
-  await pickTime(page, 'Start time', 9);
-  await pickTime(page, 'End time', 10);
+  const date = page.getByRole('textbox', { name: 'Visit date', exact: true });
+  await expect(date).toHaveAttribute('readonly', /true|^$/);
+  await date.click();
+  await page.getByRole('button', { name: 'Next month' }).click();
+  await page.getByRole('button', { name: /November 5, 2026/ }).click();
+  const twentyFourHour = page.getByRole('radio', { name: '24h', exact: true });
+  if (!(await twentyFourHour.isChecked())) await twentyFourHour.click();
+  const startTime = page.getByRole('combobox', { name: 'Start time', exact: true });
+  await startTime.fill('1210kkk');
+  await expect(startTime).toHaveValue('12:10');
+  await startTime.fill('09:00');
+  await page.getByRole('combobox', { name: 'End time', exact: true }).fill('10:00');
   await page.getByRole('combobox', { name: 'Technicians', exact: true }).click();
   await page.getByRole('option', { name: 'Alex Tremblay', exact: true }).click();
   await page.getByRole('option', { name: 'Jo Tremblay', exact: true }).click();
   await page.keyboard.press('Escape');
   await page.getByRole('combobox', { name: 'Lead technician', exact: true }).click();
   await page.getByRole('option', { name: 'Jo Tremblay', exact: true }).click();
+  if (page.viewportSize()!.width > 600) {
+    const startBox = await page.getByRole('combobox', { name: 'Start time', exact: true }).boundingBox();
+    const endBox = await page.getByRole('combobox', { name: 'End time', exact: true }).boundingBox();
+    expect(startBox && endBox && Math.abs(startBox.y - endBox.y) < 1).toBe(true);
+  }
 }
 
 test('reopens a resolved job and schedules a new visit without changing its history', async ({
@@ -46,7 +49,8 @@ test('reopens a resolved job and schedules a new visit without changing its hist
   });
   await propertySignIn(page, '/work/jobs/job-one?view=office');
   await expect(page.getByRole('button', { name: 'Schedule a visit', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Reopen job', exact: true }).click();
+  await page.getByRole('button', { name: 'Change job status', exact: false }).click();
+  await page.getByRole('menuitem', { name: 'Active', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm', exact: true }).click();
   await page.getByRole('button', { name: 'Schedule a visit', exact: true }).click();
   const submit = page
@@ -55,10 +59,20 @@ test('reopens a resolved job and schedules a new visit without changing its hist
   await expect(submit).toBeDisabled();
   await fillVisit(page);
   await page.screenshot({ path: testInfo.outputPath('schedule-pickers.png') });
-  await pickTime(page, 'End time', 8);
+  await page.getByRole('radio', { name: 'AM/PM', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Start time', exact: true })).toHaveValue('09:00 AM');
+  await expect(page.getByRole('combobox', { name: 'End time', exact: true })).toHaveValue('10:00 AM');
+  expect(await page.locator('#visit-time-suggestions option').count()).toBe(96);
+  await expect(page.locator('#visit-time-suggestions option[value="09:15 AM"]')).toHaveCount(1);
+  expect(await page.evaluate(() => localStorage.getItem('servora.time-format'))).toBe('12H');
+  await page.screenshot({ path: testInfo.outputPath(`schedule-12-hour-${testInfo.project.name}.png`) });
+  await page.getByRole('radio', { name: '24h', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Start time', exact: true })).toHaveValue('09:00');
+  await page.getByRole('combobox', { name: 'End time', exact: true }).fill('08:00');
   await expect(submit).toBeDisabled();
   await expect(page.getByRole('alert')).toContainText('end time must be after');
-  await pickTime(page, 'End time', 10);
+  await page.getByRole('radio', { name: 'AM/PM', exact: true }).click();
+  await page.getByRole('combobox', { name: 'End time', exact: true }).fill('10:00 AM');
   await submit.click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(writes.at(-1)).toEqual({
@@ -75,8 +89,7 @@ test('reopens a resolved job and schedules a new visit without changing its hist
     },
   });
   await expect(page.getByRole('button', { name: 'Schedule a visit', exact: true })).toHaveCount(0);
-  await expect(page.locator('app-job-visit')).toHaveCount(2);
-  await expect(page.locator('app-job-visit').first()).toContainText('Resolved');
+  await expect(page.getByText('Visit 2 · Work', { exact: true })).toBeVisible();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   );
@@ -88,6 +101,23 @@ test('shows scheduling only when the API allows it', async ({ page }) => {
   await propertySignIn(page, '/work/jobs/job-one?view=office');
   await expect(page.getByRole('heading', { name: 'Furnace repair', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Schedule a visit', exact: true })).toHaveCount(0);
+});
+
+test('blocks scheduling while a past-dated visit is still scheduled', async ({ page }, testInfo) => {
+  await mockJobs(page, permissions, {
+    canScheduleVisit: true,
+    visits: [{
+      ...job.visits[0],
+      status: 'SCHEDULED',
+      scheduledStart: '2026-10-18T13:00:00Z',
+      scheduledEnd: '2026-10-18T14:00:00Z',
+    }],
+  });
+  await propertySignIn(page, '/work/jobs/job-one?view=office');
+  await expect(page.getByRole('heading', { name: 'Visit 1 · Work' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Schedule a visit', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath(`job-scheduled-visit-blocks-${testInfo.project.name}.png`), fullPage: true });
 });
 
 test('requires explicit conflict confirmation and refreshes the job on success', async ({
@@ -153,7 +183,7 @@ test('retains the form after a lost response and prevents duplicate submissions'
   await submit.click();
   await expect(page.getByRole('alert')).toContainText('result could not be confirmed');
   await expect(submit).toBeDisabled();
-  await expect(page.getByRole('combobox', { name: 'Start time', exact: true })).toHaveValue(/9:00/);
+  await expect(page.getByRole('combobox', { name: 'Start time', exact: true })).toHaveValue('09:00');
   expect(attempts).toBe(1);
 });
 
@@ -166,7 +196,7 @@ test('opens the scheduling form in French', async ({ page }) => {
   await expect(
     page.getByRole('heading', { name: 'Planifier une visite', exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Date de début', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Date de la visite', exact: true })).toBeVisible();
   await expect(
     page.getByRole('combobox', { name: 'Technicien responsable', exact: true }),
   ).toBeVisible();

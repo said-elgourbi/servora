@@ -705,6 +705,29 @@ describe('job details (e2e)', () => {
     expect(details?.technicians).toEqual([]);
   });
 
+  it('records an append-only Job update without creating a Visit or changing Job status', async () => {
+    const author = await newMembership(organizationId);
+    const customer = await newCustomer(organizationId, 'Job Update Co');
+    const job = await newJob(organizationId, customer.id);
+    const before = await jobsService.findJobDetailsInOrganization({ organizationId }, job.id);
+
+    const events = await jobsService.addJobNote(
+      { organizationId },
+      job.id,
+      author.id,
+      { body: 'Access confirmed for Tuesday.', clientOperationId: null },
+    );
+    const after = await jobsService.findJobDetailsInOrganization({ organizationId }, job.id);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'JOB_NOTE_ADDED',
+      body: 'Access confirmed for Tuesday.',
+      visitSequence: null,
+    }));
+    expect(after?.job.status).toBe(before?.job.status);
+    expect(after?.visits).toHaveLength(0);
+  });
+
   it('contributes no name for an assigned member who has no profile yet', async () => {
     const member = await newMembership(organizationId);
     const profileless = await newMembership(organizationId);

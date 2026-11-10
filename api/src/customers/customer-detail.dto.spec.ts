@@ -94,10 +94,13 @@ function propertyRow(): Property {
 describe('customer detail projections', () => {
   it('maps the selected Visit onto the Job row', () => {
     const scheduledStart = new Date('2026-09-08T13:00:00.000Z');
+    const overdueStart = new Date('2026-08-08T13:00:00.000Z');
+    const overdueEnd = new Date('2026-08-08T14:00:00.000Z');
 
     const dto = toCustomerJobDto({
       job: jobRow(),
       selectedVisit: { scheduledStart },
+      overdueVisits: [{ scheduledStart: overdueStart, scheduledEnd: overdueEnd }],
       technicians: [
         { membershipId: 'm-1', name: 'Mike Lead', roleCode: 'LEAD' },
       ],
@@ -109,12 +112,14 @@ describe('customer detail projections', () => {
     expect(dto.technicians).toEqual([
       { membershipId: 'm-1', name: 'Mike Lead', roleCode: 'LEAD' },
     ]);
+    expect(dto.overdueVisits).toEqual([{ scheduledStart: overdueStart.toISOString(), scheduledEnd: overdueEnd.toISOString() }]);
   });
 
   it('reports no date and no technicians when no Visit was selected', () => {
     const dto = toCustomerJobDto({
       job: jobRow(),
       selectedVisit: null,
+      overdueVisits: [],
       technicians: [],
     });
 
@@ -137,6 +142,7 @@ describe('customer detail projections', () => {
         },
       }),
       selectedVisit: null,
+      overdueVisits: [],
       technicians: [],
     });
 
@@ -156,6 +162,7 @@ describe('customer detail projections', () => {
       toCustomerJobDto({
         job: jobRow({ propertyAddressSnapshot: 'not-an-object' }),
         selectedVisit: null,
+        overdueVisits: [],
         technicians: [],
       }).propertyAddress,
     ).toBeNull();
@@ -165,6 +172,7 @@ describe('customer detail projections', () => {
       toCustomerJobDto({
         job: jobRow({ propertyAddressSnapshot: { city: 42 } }),
         selectedVisit: null,
+        overdueVisits: [],
         technicians: [],
       }).propertyAddress,
     ).toEqual({

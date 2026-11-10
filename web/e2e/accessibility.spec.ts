@@ -46,7 +46,7 @@ test('navigation identifies Home only on Home and moves focus into the new page'
   await page.getByLabel('Email address').fill('member@example.com');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   const home = page
     .getByRole('navigation', { name: 'Main navigation', exact: true })
     .getByRole('link', { name: 'Workspace', exact: true });
@@ -67,10 +67,10 @@ test('navigation identifies Home only on Home and moves focus into the new page'
   await expect(page).toHaveTitle('Job details | Servora');
   await expect(page.getByRole('main')).toBeFocused();
   await page.getByRole('link', { name: 'Back to Home' }).click();
-  await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
   await expect(page.getByRole('main')).toBeFocused();
   await expect(home).toHaveAttribute('aria-current', 'page');
-  await expect(page).toHaveTitle('Your working day | Servora');
+  await expect(page).toHaveTitle('Office overview | Servora');
 });
 
 for (const width of [390, 768, 1440]) {

@@ -187,6 +187,7 @@ Example Nginx routing (replace API upstream for your deployment):
 ```nginx
 root /srv/servora/browser;
 index index.html;
+client_max_body_size 21m; # Supports the API's 20 MiB PDF limit plus multipart framing.
 
 # API namespaces must win over the SPA deep-link fallback. Keep this list in sync with API routes.
 location ~ ^/(auth|jobs|customers|properties|home|schedule|technicians|push)(/|$) {

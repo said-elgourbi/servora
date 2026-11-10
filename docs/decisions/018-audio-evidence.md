@@ -72,22 +72,20 @@ below. This ADR decides only that audio is added beside photos rather than under
 **Changed decision?** No. `D8`'s option (b) was the shape to adopt *if* evidence kinds were unified; the
 per-kind decisions `ADR-015`, `A6` and `A7` already took are what this ADR follows.
 
-### A2 — One container: `audio/mp4`, decided from the bytes
+### A2 — Supported audio containers are `audio/mp4` and `audio/webm`, decided from the bytes
 
-The API accepts **`audio/mp4`** (AAC audio in an MP4/M4A container) and nothing else. The type is
-**sniffed from the bytes** — an `ftyp` box at offset 0 with a brand the API recognises, plus an audio
-track — rather than taken from what a client declared, which is the rule `BR-015` and `ADR-013` D7 set
-for photo evidence and which this kind follows. A declared content type that disagrees with the bytes is
-refused, and a file that is not the accepted container is refused with nothing recorded.
+The API accepts **`audio/mp4`** (AAC audio in an MP4/M4A container) and **`audio/webm`** (audio-only
+WebM, normally Opus) for browser microphone capture. The type is **sniffed from the bytes** rather than
+taken from what a client declared. MP4 requires a recognised `ftyp` brand and audio track; WebM requires
+an EBML WebM header, audio track, and declared duration. A declared content type that disagrees with the
+bytes is refused, and a file outside either validated container is refused with nothing recorded.
 
-**Why one container.** It is the container the platform's own recorder produces on every Android version
-Servora supports (`MediaRecorder` with `MPEG_4` + AAC), so a second accepted type would exist only for
-uploads Servora's own client cannot make. Each additional container would need its own duration parser,
-its own playback risk and its own tests, and `BR-042` does not allow accepting a vocabulary nothing
-produces. A device whose recorder cannot produce `audio/mp4` is a **refusal**, not a silently different
-format: the client refuses the recording rather than storing bytes the API would refuse.
+**Why these two containers.** Android field capture produces MP4 (`MediaRecorder` with `MPEG_4` + AAC).
+Desktop browsers such as Chrome expose microphone recording as WebM/Opus through `MediaRecorder` and
+cannot produce MP4. Supporting WebM lets the office web app save the format its browser can actually
+record. Each accepted type has a server-side byte and duration check; unsupported recordings are refused.
 
-**Consequence.** The object key is `evidence/job-audio-notes/{organizationId}/{jobId}/{audioNoteId}.m4a`,
+**Consequence.** The object key uses the extension derived from the validated type (`.m4a` or `.webm`),
 built by the API from the record — the same provider-agnostic key shape `ADR-013` D6.5 requires and the
 photo key already uses.
 

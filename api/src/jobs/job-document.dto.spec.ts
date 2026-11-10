@@ -25,6 +25,18 @@ describe('job document requests', () => {
       ).toEqual({
         documentType: 'QUOTE',
         displayName: 'Assessment quote.pdf',
+        clientOperationId: null,
+      });
+    });
+
+    it('accepts a general PDF attachment and a stable retry identifier', () => {
+      expect(parseCreateJobDocumentDto({
+        documentType: 'ATTACHMENT',
+        clientOperationId: '6f1a8d1e-4b26-4f8f-9a34-2b7c9e0d5a11',
+      })).toEqual({
+        documentType: 'ATTACHMENT',
+        displayName: null,
+        clientOperationId: '6f1a8d1e-4b26-4f8f-9a34-2b7c9e0d5a11',
       });
     });
 

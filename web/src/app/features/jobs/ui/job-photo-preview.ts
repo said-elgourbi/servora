@@ -16,6 +16,7 @@ import { I18n } from '../../../core/i18n/i18n';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<button
     type="button"
+    [class.regular]="size() === 'regular'"
     (click)="opened.emit()"
     [attr.aria-label]="i18n.text('fieldViewPhoto')"
   >
@@ -41,11 +42,13 @@ import { I18n } from '../../../core/i18n/i18n';
       color: var(--mat-sys-primary);
       cursor: pointer;
     }
+    button.regular { width: 148px; }
     img {
       width: 112px;
       height: 72px;
       object-fit: cover;
     }
+    button.regular img { width: 148px; height: 96px; }
     span {
       padding: 7px;
       font-family: inherit;
@@ -58,6 +61,7 @@ import { I18n } from '../../../core/i18n/i18n';
 export class JobPhotoPreview {
   readonly jobId = input.required<string>();
   readonly photoId = input.required<string>();
+  readonly size = input<'compact' | 'regular'>('compact');
   readonly opened = output<void>();
   protected readonly i18n = inject(I18n);
   private readonly auth = inject(AuthSession);

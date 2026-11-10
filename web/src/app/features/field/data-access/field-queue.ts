@@ -153,7 +153,7 @@ export class FieldQueue {
           ? [this.store.key(scope, 'report-draft/current')]
           : [],
     );
-    void this.replay();
+    await this.replay();
   }
   async replay(): Promise<void> {
     if (this.busy()) {

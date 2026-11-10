@@ -1,10 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
   customers,
   jobAudioNoteRemovals,
   jobAudioNotes,
+  jobActivityEdits,
   jobs,
   visits,
 } from '../database/schema.js';
@@ -68,9 +70,11 @@ export class JobAudioNotesService {
     uploaderMembershipId: string,
     input: CreateJobAudioNoteDto,
     audio: ValidatedJobAudioNote,
+    allowLateUpdate = false,
   ): Promise<JobActivityEventDto[]> {
-    await this.requireOpenJob(scope, jobId);
-    await this.requireVisit(scope, jobId, input.visitId);
+    if (allowLateUpdate) await this.requireJob(scope, jobId);
+    else await this.requireOpenJob(scope, jobId);
+    if (input.visitId !== null) await this.requireVisit(scope, jobId, input.visitId);
 
     const existing = await this.findByOperationId(scope, input.clientOperationId);
     if (existing !== null) {
@@ -172,6 +176,44 @@ export class JobAudioNotesService {
       throw error;
     }
 
+    return readJobActivity(this.db, scope, jobId);
+  }
+
+  async editJobAudioNote(
+    scope: OrganizationScope,
+    jobId: string,
+    audioNoteId: string,
+    actorMembershipId: string,
+    input: Pick<CreateJobAudioNoteDto, 'note' | 'phase'>,
+    audio: ValidatedJobAudioNote | null,
+    canEditAny: boolean,
+  ): Promise<JobActivityEventDto[]> {
+    await this.requireJob(scope, jobId);
+    const [current] = await this.db.select().from(jobAudioNotes).where(and(
+      eq(jobAudioNotes.organizationId, scope.organizationId), eq(jobAudioNotes.jobId, jobId), eq(jobAudioNotes.id, audioNoteId),
+    )).limit(1);
+    const availability = await this.findAudioNote(scope, jobId, audioNoteId);
+    if (!current || !availability || availability.removed) throw new JobAudioNoteNotFoundError();
+    if (!canEditAny && current.uploaderMembershipId !== actorMembershipId) throw new JobAudioNoteRemovalForbiddenError();
+    const recordedAt = new Date();
+    await this.db.insert(jobActivityEdits).values({
+      organizationId: scope.organizationId, jobId, activityKind: 'JOB_AUDIO_ADDED', activityId: audioNoteId,
+      editorMembershipId: actorMembershipId,
+      previousValue: { body: current.note, phase: current.phase, durationSeconds: current.durationSeconds, contentType: current.contentType, byteSize: current.byteSize },
+      recordedAt,
+    });
+    const changes: Partial<typeof jobAudioNotes.$inferInsert> = {
+      note: input.note, phase: input.phase, editedAt: recordedAt, editedByMembershipId: actorMembershipId,
+    };
+    if (audio) {
+      const objectKey = jobAudioNoteObjectKey({ organizationId: scope.organizationId, jobId, audioNoteId: randomUUID(), contentType: audio.contentType });
+      await this.storage.putObject({ key: objectKey, body: audio.body, contentType: audio.contentType });
+      changes.objectKey = objectKey; changes.contentType = audio.contentType;
+      changes.byteSize = audio.body.byteLength; changes.durationSeconds = audio.durationSeconds;
+    }
+    await this.db.update(jobAudioNotes).set(changes).where(and(
+      eq(jobAudioNotes.organizationId, scope.organizationId), eq(jobAudioNotes.jobId, jobId), eq(jobAudioNotes.id, audioNoteId),
+    ));
     return readJobActivity(this.db, scope, jobId);
   }
 
@@ -326,16 +368,6 @@ export class JobAudioNotesService {
     return row;
   }
 
-  private async requireOpenJob(
-    scope: OrganizationScope,
-    jobId: string,
-  ): Promise<void> {
-    const job = await this.requireJob(scope, jobId);
-    if (job.status === 'COMPLETED' || job.status === 'CANCELED') {
-      throw new JobClosedForFieldWorkError();
-    }
-  }
-
   /**
    * One Visit of the caller's organization **and** of the Job the recording is filed under.
    *
@@ -362,6 +394,11 @@ export class JobAudioNotesService {
     if (row === undefined) {
       throw new VisitNotFoundError();
     }
+  }
+
+  private async requireOpenJob(scope: OrganizationScope, jobId: string): Promise<void> {
+    const job = await this.requireJob(scope, jobId);
+    if (job.status === 'COMPLETED' || job.status === 'CANCELED') throw new JobClosedForFieldWorkError();
   }
 }
 

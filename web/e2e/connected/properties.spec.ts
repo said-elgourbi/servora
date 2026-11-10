@@ -12,7 +12,7 @@ for (const width of [390, 1440]) {
     await page.getByLabel('Email address').fill(office);
     await page.getByLabel('Password', { exact: true }).fill(password);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
     if (width < 900) await page.locator('summary').click();
     await page.getByRole('link', { name: 'Customers', exact: true }).click();
     if (width < 900) await page.locator('summary').click();

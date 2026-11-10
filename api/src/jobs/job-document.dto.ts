@@ -2,6 +2,7 @@ import {
   DomainValidationError,
   optionalText,
   requireEnum,
+  optionalUuid,
 } from '../validation/domain-validation.js';
 import type { JobDocumentContentType } from '../storage/object-storage.js';
 import type { JobQuoteWorkflowState } from './job.types.js';
@@ -9,12 +10,12 @@ import type { JobQuoteWorkflowState } from './job.types.js';
 /*
  * The Job document upload request.
  *
- * Job documents are office/commercial artifacts attached directly to a Job. The first supported type
- * is a quote PDF for Assessment Visits that conclude with `QUOTE_REQUIRED`; it is deliberately not
- * modeled as Visit evidence, so this boundary has no evidence phase or Visit id.
+ * Job documents are PDFs attached directly to a Job. Quote PDFs participate in the quote workflow;
+ * general attachments are append-only updates and do not alter quote or Visit state. An optional
+ * Visit association controls where the attachment appears in the activity timeline.
  */
 
-export const JOB_DOCUMENT_TYPES = ['QUOTE'] as const;
+export const JOB_DOCUMENT_TYPES = ['QUOTE', 'ATTACHMENT'] as const;
 
 export type JobDocumentType = (typeof JOB_DOCUMENT_TYPES)[number];
 
@@ -35,6 +36,8 @@ export interface JobDocumentUpload {
 export interface CreateJobDocumentDto {
   readonly documentType: JobDocumentType;
   readonly displayName: string | null;
+  readonly clientOperationId: string | null;
+  readonly visitId: string | null;
 }
 
 /** The metadata the API returns after a Job document write. */
@@ -69,18 +72,21 @@ export function parseCreateJobDocumentDto(
   input: unknown,
 ): CreateJobDocumentDto {
   const source = (input ?? {}) as Record<string, unknown>;
+  const documentType = requireEnum(source.documentType, JOB_DOCUMENT_TYPES, 'documentType');
+  const visitId = optionalUuid(source.visitId, 'visitId');
+  if (documentType === 'QUOTE' && visitId) {
+    throw new DomainValidationError(['visitId is only allowed for ATTACHMENT']);
+  }
 
   return {
-    documentType: requireEnum(
-      source.documentType,
-      JOB_DOCUMENT_TYPES,
-      'documentType',
-    ),
+    documentType,
     displayName: optionalText(
       source.displayName,
       'displayName',
       MAX_JOB_DOCUMENT_DISPLAY_NAME_LENGTH,
     ),
+    clientOperationId: optionalUuid(source.clientOperationId, 'clientOperationId'),
+    visitId,
   };
 }
 

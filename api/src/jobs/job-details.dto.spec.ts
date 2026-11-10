@@ -589,8 +589,8 @@ describe('job details projection', () => {
           status: 'COMPLETED',
           purposeCode: 'WORK',
           outcomeCode,
-          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
-          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          scheduledStart: new Date('2099-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2099-09-08T15:00:00.000Z'),
           version: 3,
           technicians: [],
         },
@@ -862,6 +862,16 @@ describe('job details projection', () => {
     // Without the capability the answer is false.
     expect(toJobDetailsDto(base).canScheduleVisit).toBe(false);
 
+    // A visit remains blocking while it is marked SCHEDULED, even after its window has elapsed.
+    expect(toJobDetailsDto({
+      ...base,
+      visits: [{
+        visitId: 'visit-past', sequence: 1, status: 'SCHEDULED', purposeCode: 'WORK',
+        outcomeCode: null, scheduledStart: new Date('2000-10-20T12:00:00Z'),
+        scheduledEnd: new Date('2000-10-20T13:00:00Z'), version: 1, technicians: [],
+      }],
+    }, { canCreateSchedule: true }).canScheduleVisit).toBe(false);
+
     // A represented Visit that is COMPLETED with a follow-up outcome admits a follow-up.
     const completedFollowUp = toJobDetailsDto(
       {
@@ -881,8 +891,8 @@ describe('job details projection', () => {
             status: 'COMPLETED',
             purposeCode: 'WORK',
             outcomeCode: 'NEEDS_FOLLOW_UP',
-            scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
-            scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+            scheduledStart: new Date('2099-09-08T13:00:00.000Z'),
+            scheduledEnd: new Date('2099-09-08T15:00:00.000Z'),
             version: 1,
             technicians: [],
           },
@@ -942,7 +952,7 @@ describe('job details projection', () => {
                 ...finishedVisit,
                 visitId: 'open',
                 sequence: 2,
-                status: 'SCHEDULED',
+                status: 'IN_PROGRESS',
                 outcomeCode: null,
               },
             ],
@@ -960,8 +970,8 @@ describe('job details projection', () => {
           visitId: 'visit-2',
           status: 'SCHEDULED',
           purposeCode: 'WORK',
-          scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
-          scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+          scheduledStart: new Date('2099-09-08T13:00:00.000Z'),
+          scheduledEnd: new Date('2099-09-08T15:00:00.000Z'),
           version: 1,
         },
         visits: [
@@ -971,8 +981,8 @@ describe('job details projection', () => {
             status: 'SCHEDULED',
             purposeCode: 'WORK',
             outcomeCode: null,
-            scheduledStart: new Date('2026-09-08T13:00:00.000Z'),
-            scheduledEnd: new Date('2026-09-08T15:00:00.000Z'),
+            scheduledStart: new Date('2099-09-08T13:00:00.000Z'),
+            scheduledEnd: new Date('2099-09-08T15:00:00.000Z'),
             version: 1,
             technicians: [],
           },

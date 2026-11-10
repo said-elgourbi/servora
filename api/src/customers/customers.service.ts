@@ -144,6 +144,11 @@ export interface CustomerWithCounts {
   readonly jobCount: number;
   readonly openJobCount: number;
   readonly overdueVisitCount: number;
+  readonly contactCount: number;
+  readonly primaryContactFirstName: string | null;
+  readonly primaryContactLastName: string | null;
+  readonly primaryContactEmail: string | null;
+  readonly primaryContactPhone: string | null;
 }
 
 /**
@@ -325,6 +330,35 @@ export class CustomersService {
             and ${visits.status} = 'SCHEDULED'
             and ${visits.scheduledEnd} < now()
         )`.mapWith(Number),
+        contactCount: sql<number>`(
+          select count(*) from ${customerContacts} contacts
+          where contacts.customer_id = ${customers.id}
+            and contacts.removed_at is null
+        )`.mapWith(Number),
+        primaryContactFirstName: sql<string | null>`(
+          select contact.first_name from ${customerContacts} contact
+          where contact.customer_id = ${customers.id}
+            and contact.is_primary = true and contact.removed_at is null
+          limit 1
+        )`,
+        primaryContactLastName: sql<string | null>`(
+          select contact.last_name from ${customerContacts} contact
+          where contact.customer_id = ${customers.id}
+            and contact.is_primary = true and contact.removed_at is null
+          limit 1
+        )`,
+        primaryContactEmail: sql<string | null>`(
+          select contact.email from ${customerContacts} contact
+          where contact.customer_id = ${customers.id}
+            and contact.is_primary = true and contact.removed_at is null
+          limit 1
+        )`,
+        primaryContactPhone: sql<string | null>`(
+          select contact.phone from ${customerContacts} contact
+          where contact.customer_id = ${customers.id}
+            and contact.is_primary = true and contact.removed_at is null
+          limit 1
+        )`,
         // `distinct` stops the two left joins from multiplying each other's rows.
         propertyCount: sql<number>`count(distinct ${properties.id})`.mapWith(
           Number,
@@ -1208,6 +1242,38 @@ export class CustomersService {
       [...selectedVisits.values()].map((visit) => visit.visitId),
     );
 
+    const overdueRows = await this.db
+      .select({
+        jobId: visits.jobId,
+        scheduledStart: visits.scheduledStart,
+        scheduledEnd: visits.scheduledEnd,
+      })
+      .from(visits)
+      .where(
+        and(
+          eq(visits.organizationId, scope.organizationId),
+          inArray(visits.jobId, rows.map((job) => job.id)),
+          eq(visits.status, 'SCHEDULED'),
+          sql`${visits.scheduledEnd} < now()`,
+        ),
+      )
+      .orderBy(asc(visits.scheduledEnd));
+    const overdueByJob = new Map<
+      string,
+      { scheduledStart: Date; scheduledEnd: Date }[]
+    >();
+    for (const overdue of overdueRows) {
+      if (overdue.scheduledStart === null || overdue.scheduledEnd === null) {
+        continue;
+      }
+      const list = overdueByJob.get(overdue.jobId) ?? [];
+      list.push({
+        scheduledStart: overdue.scheduledStart,
+        scheduledEnd: overdue.scheduledEnd,
+      });
+      overdueByJob.set(overdue.jobId, list);
+    }
+
     return rows.map((job) => {
       const selected = selectedVisits.get(job.id);
       return {
@@ -1216,6 +1282,7 @@ export class CustomersService {
           selected === undefined
             ? null
             : { scheduledStart: selected.scheduledStart },
+        overdueVisits: overdueByJob.get(job.id) ?? [],
         technicians:
           selected === undefined
             ? []

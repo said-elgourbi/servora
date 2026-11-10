@@ -91,12 +91,8 @@ describe('job photo requests', () => {
       ).toThrow(DomainValidationError);
     });
 
-    it('requires the Visit the photo belongs to, because evidence is field work', () => {
-      // A photo is recorded during a Visit (`BR-047`, `BR-080`), so a request that names none — or one
-      // that is not a Visit id at all — is refused rather than stored with no attribution (`BR-042`).
-      expect(() =>
-        parseCreateJobPhotoDto({ clientOperationId: OPERATION_ID, phase: 'DURING_WORK' }),
-      ).toThrow(DomainValidationError);
+    it('allows a Job-level photo while still validating an optional Visit id', () => {
+      expect(parseCreateJobPhotoDto({ clientOperationId: OPERATION_ID, phase: 'BEFORE_WORK' }).visitId).toBeNull();
       expect(() =>
         parseCreateJobPhotoDto({
           clientOperationId: OPERATION_ID,

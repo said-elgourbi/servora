@@ -5,8 +5,9 @@
 }
 aside {
   padding: 30px 18px;
-  border-right: 1px solid var(--mat-sys-outline-variant);
-  background: var(--mat-sys-surface);
+  border-right: 1px solid #0a1a30;
+  background: linear-gradient(180deg, #142b49 0%, #0d2039 100%);
+  color: #f4f7fc;
 }
 .wordmark {
   display: flex;
@@ -14,6 +15,8 @@ aside {
   gap: 10px;
   padding: 0 8px;
   font-size: 24px;
+  color: #f4f7fc;
+  text-decoration: none;
 }
 .wordmark > span:last-child {
   margin-left: -9px;
@@ -43,7 +46,7 @@ nav a {
   padding: 12px 14px;
   border-radius: 8px;
   text-decoration: none;
-  color: var(--mat-sys-on-surface-variant);
+  color: #e3ebf7;
   font-size: 13px;
   font-weight: 650;
 }
@@ -60,6 +63,7 @@ nav a app-icon:last-child {
   min-width: 0;
 }
 header {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -115,6 +119,7 @@ header {
 .mobile-brand {
   display: none;
 }
+.mobile-brand.wordmark { color: #14213d; }
 main {
   padding: 34px 38px 48px;
   max-width: 1440px;
@@ -156,8 +161,18 @@ main {
   .menu-content {
     display: grid;
     gap: 14px;
-    padding-block: 14px;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 20;
+    width: min(320px, calc(100vw - 32px));
+    padding: 14px;
+    border: 1px solid var(--mat-sys-outline-variant);
+    border-radius: 10px;
+    background: var(--mat-sys-surface);
+    box-shadow: 0 10px 28px rgb(20 38 64 / 18%);
   }
+  .mobile-menu { position: relative; flex: 0 0 auto; z-index: 20; }
   .account,
   .header-context {
     display: none;
@@ -199,8 +214,8 @@ main {
 }
 
 nav a.active {
-  background: color-mix(in srgb, var(--mat-sys-primary) 9%, var(--mat-sys-surface));
-  color: var(--mat-sys-primary);
+  background: #1762bd;
+  color: #fff;
 }
 
 main.dispatch-workspace {

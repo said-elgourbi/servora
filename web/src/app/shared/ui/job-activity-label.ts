@@ -3,6 +3,8 @@ import { I18n } from '../../core/i18n/i18n';
 import type { TranslationKey } from '../../core/i18n/en';
 const labels: Record<string, TranslationKey> = {
   JOB_STATUS_CHANGED: 'fieldEventJobStatus',
+  JOB_NOTE_ADDED: 'fieldEventJobNote',
+  JOB_DOCUMENT_ATTACHED: 'fieldEventJobDocument',
   JOB_PROPERTY_CHANGED: 'fieldEventProperty',
   JOB_CUSTOMER_CHANGED: 'fieldEventCustomer',
   JOB_PHOTO_ADDED: 'fieldEventPhoto',

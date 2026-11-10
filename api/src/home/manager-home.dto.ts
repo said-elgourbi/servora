@@ -101,6 +101,7 @@ export interface ManagerHomeTechnician {
 /** One row of today's schedule. */
 export interface ManagerHomeVisit {
   readonly visitId: string;
+  readonly visitNumber: number;
   readonly visitStatus: VisitStatus;
   readonly purposeCode: VisitPurposeCode;
   readonly scheduledStart: Date;
@@ -141,6 +142,10 @@ export interface ManagerAttentionItem {
   readonly customerName: string;
   /** The Visit the condition is about, or `null` for a Job-level condition (`BR-060`). */
   readonly visitId: string | null;
+  readonly visitNumber: number | null;
+  readonly purposeCode: VisitPurposeCode | null;
+  readonly visitStatus: VisitStatus | null;
+  readonly technicians: readonly ManagerHomeTechnician[];
   readonly reasonCode?: string | null;
   /** The condition Visit's scheduled start, or `null` (`BR-072`). */
   readonly scheduledStart: Date | null;
@@ -260,6 +265,7 @@ export type ManagerHomeAddressDto = AddressSnapshot;
 
 export interface ManagerHomeVisitDto {
   visitId: string;
+  visitNumber: number;
   visitStatus: VisitStatus;
   purposeCode: VisitPurposeCode;
   scheduledStart: string;
@@ -285,6 +291,10 @@ export interface ManagerAttentionItemDto {
   customerId: string;
   customerName: string;
   visitId: string | null;
+  visitNumber: number | null;
+  purposeCode: VisitPurposeCode | null;
+  visitStatus: VisitStatus | null;
+  technicians: ManagerHomeTechnicianDto[];
   reasonCode: string | null;
   scheduledStart: string | null;
   scheduledEnd: string | null;
@@ -314,8 +324,10 @@ export interface ManagerHomeDto extends ManagerHomeResponse {
    */
   viewer: { displayName: string | null };
   attention: {
-    /** Every matching condition, including any beyond `items` (`MANAGER_HOME_ATTENTION_LIMIT`). */
+    /** Every matching condition, including any beyond the currently returned page. */
     total: number;
+    /** Exact total count for each condition kind, over the full attention set. */
+    countsByKind: Readonly<Record<string, number>>;
     items: ManagerAttentionItemDto[];
   };
   today: ManagerHomeDaySummary;
@@ -328,6 +340,7 @@ export function toManagerHomeDto(input: {
   readonly viewerDisplayName: string | null;
   readonly attention: readonly ManagerAttentionItem[];
   readonly attentionTotal: number;
+  readonly attentionCountsByKind?: Readonly<Record<string, number>>;
   readonly today: ManagerHomeDaySummary;
   readonly visits: readonly ManagerHomeVisit[];
 }): ManagerHomeDto {
@@ -341,11 +354,22 @@ export function toManagerHomeDto(input: {
     viewer: { displayName: input.viewerDisplayName },
     attention: {
       total: input.attentionTotal,
+      countsByKind:
+        input.attentionCountsByKind ?? countAttentionKinds(input.attention),
       items: input.attention.map(toManagerAttentionItemDto),
     },
     today: input.today,
     visits: input.visits.map(toManagerHomeVisitDto),
   };
+}
+
+function countAttentionKinds(
+  items: readonly ManagerAttentionItem[],
+): Record<string, number> {
+  return items.reduce<Record<string, number>>((counts, item) => {
+    counts[item.kind] = (counts[item.kind] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 function toManagerAttentionItemDto(
@@ -361,6 +385,14 @@ function toManagerAttentionItemDto(
     customerId: item.customerId,
     customerName: item.customerName,
     visitId: item.visitId,
+    visitNumber: item.visitNumber,
+    purposeCode: item.purposeCode,
+    visitStatus: item.visitStatus,
+    technicians: item.technicians.map((technician) => ({
+      membershipId: technician.membershipId,
+      name: technician.name,
+      roleCode: technician.roleCode,
+    })),
     reasonCode: item.reasonCode ?? null,
     scheduledStart: item.scheduledStart?.toISOString() ?? null,
     scheduledEnd: item.scheduledEnd?.toISOString() ?? null,
@@ -370,6 +402,7 @@ function toManagerAttentionItemDto(
 function toManagerHomeVisitDto(visit: ManagerHomeVisit): ManagerHomeVisitDto {
   return {
     visitId: visit.visitId,
+    visitNumber: visit.visitNumber,
     visitStatus: visit.visitStatus,
     purposeCode: visit.purposeCode,
     scheduledStart: visit.scheduledStart.toISOString(),

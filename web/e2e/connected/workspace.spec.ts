@@ -24,7 +24,7 @@ for (const audience of ['office', 'field'] as const) {
     await page.getByLabel('Email address').fill(fixture.email);
     await page.getByLabel('Password', { exact: true }).fill(fixture.password);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
     const home = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname ===
@@ -167,7 +167,7 @@ for (const audience of ['office', 'field'] as const) {
       await expect(page.getByText('Colleague private job', { exact: true })).toHaveCount(0);
     }
     await page.getByRole('link', { name: 'Back to Home' }).click();
-    await expect(page.getByRole('heading', { name: 'Your working day' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Office overview' })).toBeVisible();
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.reload();

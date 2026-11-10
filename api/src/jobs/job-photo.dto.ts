@@ -64,14 +64,10 @@ export interface CreateJobPhotoDto {
    */
   readonly clientOperationId: string;
   /**
-   * The Visit the photo was recorded during (`BR-047`, `BR-071`).
-   *
-   * It is **required**: evidence is field work, and Servora records which field attempt it belongs to
-   * so the Activity read reports the entry with that Visit's account (`BR-080`). A request that names
-   * no Visit — or one of another Job or another organization — is refused rather than stored with no
-   * attribution (`BR-042`).
+   * The Visit the photo was recorded during (`BR-047`, `BR-071`), when one applies. Office Job updates
+   * may omit it. Field-scoped uploads must name a Visit assigned to the caller.
    */
-  readonly visitId: string;
+  readonly visitId: string | null;
   readonly phase: JobPhotoPhase;
   readonly note: string | null;
   /** The device instant the photo was taken; display and provenance only (`BR-031`). */
@@ -89,9 +85,6 @@ export function parseCreateJobPhotoDto(input: unknown): CreateJobPhotoDto {
     fail('clientOperationId', 'is required');
   }
   const visitId = optionalUuid(source.visitId, 'visitId');
-  if (visitId === null) {
-    fail('visitId', 'is required');
-  }
   const capturedAt = optionalInstant(source.capturedAt, 'capturedAt');
 
   return {

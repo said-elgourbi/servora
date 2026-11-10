@@ -31,11 +31,11 @@ What the API stores per audio note:
 | ---------------------- | ------------------------------------------------------------------------------------------ |
 | `id`                   | The audio note's identifier, which is the **client operation id** the device generated.      |
 | `jobId`                | The Job the evidence belongs to.                                                           |
-| `visitId`              | The Visit the recording was made during (`BR-047`, `BR-091`). Required by every write.       |
+| `visitId`              | The Visit the recording was made during. Optional for office Job updates; field-scoped uploads must name an assigned Visit. |
 | `phase`                | `BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK` — the same code a photo carries (`BR-091`).      |
 | `note`                 | The technician's optional note.                                                            |
 | `objectKey`            | The object's key in the store. An **object key, never a URL** (`ADR-013` D6.4).              |
-| `contentType`          | Decided from the bytes, not from what the client declared (`BR-015`). `audio/mp4` (§3.3).    |
+| `contentType`          | Decided from the bytes, not from what the client declared (`BR-015`): `audio/mp4` or `audio/webm`. |
 | `byteSize`             | The stored size in bytes.                                                                  |
 | `durationSeconds`      | The recording's length, **read from its own container** (`ADR-018` A3) — never declared.      |
 | `capturedAt`           | The device instant the recording was made: provenance only, never business time (`BR-031`).  |
@@ -78,9 +78,9 @@ one question about one read rather than one question per kind (`ADR-018` A7).
 
 | Part                | Required | Notes                                                                    |
 | ------------------- | -------- | ------------------------------------------------------------------------ |
-| `file`              | yes      | The recording. `audio/mp4`, decided from the bytes. Max 10 MiB, 1–300 s.  |
+| `file`              | yes      | The recording. Audio-only MP4 or WebM, decided from the bytes. Max 10 MiB, 1–300 s.  |
 | `clientOperationId` | yes      | UUID. The idempotency key; **also the audio note's id** (§3.2).            |
-| `visitId`           | yes      | UUID of the Visit the recording was made during (`BR-047`, `BR-091`). A Visit that is not on this Job, or in another organization, is refused `404 VISIT_NOT_FOUND`. |
+| `visitId`           | no       | UUID of the Visit the recording was made during. Office Job updates may omit it; field-scoped uploads must name an assigned Visit. |
 | `phase`             | yes      | `BEFORE_WORK` / `DURING_WORK` / `AFTER_WORK`.                             |
 | `note`              | no       | At most 2000 characters. Absent or blank means no note.                   |
 | `capturedAt`        | no       | ISO-8601 UTC instant the device made the recording.                       |
@@ -120,10 +120,7 @@ Activity event and there is no separate audio read. The new entry is:
 `audioNoteId` is what `GET /jobs/:id/audio-notes/:audioNoteId/content` is asked for, `body` carries the
 note, and `audioDurationSeconds` is the length the API read from the container. `audioRemovalReason` is
 `null` on every event but `JOB_AUDIO_REMOVED`, which carries no `body` (`docs/api/job-activity.md` §3.2).
-The entry is **Visit-level** — `visitSequence` names the Visit the recording was made during, which is what
-makes it read beside that field attempt in Job Activity (`BR-047`, `BR-080`,
-`docs/tracker/shared/056-evidence-belongs-to-a-visit.md`). A recording made before the link existed carries no
-Visit, and that is the only case in which the entry is Job-level (`visitSequence: null`).
+The entry is Visit-level when `visitId` is supplied. Office Job-level recordings have `visitSequence: null`.
 
 ### 3.2 Idempotency (`BR-031`, offline standard §5)
 
@@ -171,7 +168,7 @@ Tenant scope comes from the authenticated session only: an audio note is always 
 
 ### 4.1 `GET /jobs/:id/audio-notes/:audioNoteId/content`
 
-Streams the stored bytes with the stored content type (`audio/mp4`), for playback.
+Streams the stored bytes with their validated content type (`audio/mp4` or `audio/webm`), for playback.
 
 - Authorization is per request, exactly like every other route: the object's **key is derived from the
   record** and is never supplied by the client (`ADR-013` D6.5).

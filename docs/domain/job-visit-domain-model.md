@@ -1632,10 +1632,13 @@ AND existing.scheduled_end > new.scheduled_start
   Job `ACTIVE` and derive the attention that outcome implies (§8.4).
   An authorized rejection of a follow-up request because no additional Visit is required resolves that
   requirement (`BR-FV-004`, `BR-FV-007`). No client derives or sends this consequence.
-- Corrections (`BR-079`): every outcome change preserves the previous outcome, the new outcome, the
-  actor, the timestamp and an optional reason. Managers/authorized office users may correct outcomes
-  according to their permissions (`BR-006`, `BR-066`). The **technician self-edit window/policy is
-  undefined** (`BR-079`): no time window is invented, modelled or enforced.
+- Corrections (`BR-079`): the intended rule permits technicians to correct their own outcomes under a
+  future self-edit policy, and managers/authorized office users to correct outcomes according to their
+  permissions (`BR-006`, `BR-066`). Every change preserves the previous and new outcome, actor, timestamp
+  and optional reason. The **technician self-edit window/policy is undefined**; the rule does not define a
+  correction request or approval workflow. No correction operation or client workflow is currently
+  implemented, so clients must not offer editing until the API supports it. No time window is invented,
+  modelled or enforced.
 - **Immutability** (`BR-062`, `BR-079`): once the Job is `COMPLETED`, Visit outcomes are immutable.
   This is enforced in the service layer from the Job's status inside the same transaction that would
   change the outcome. Reopening a Job (`BR-063`) does not reopen historical Visits, so it does not

@@ -1,10 +1,5 @@
-import { inject } from '@angular/core';
-import { AuthSession } from './features/auth/data-access/auth-session';
-import { AppUpdates } from './core/updates/app-updates';
-const preserveFieldEditor = () =>
-  !inject(AuthSession).authenticated() || inject(AppUpdates).checkpoint();
 import type { Routes } from '@angular/router';
-import { authenticatedGuard, signedOutGuard } from './features/auth/auth.guards';
+import { authenticatedGuard, permissionGuard, signedOutGuard } from './features/auth/auth.guards';
 export const routes: Routes = [
   {
     path: 'sign-in',
@@ -23,64 +18,76 @@ export const routes: Routes = [
     loadComponent: () => import('./layout/app-shell/app-shell').then((m) => m.AppShell),
     children: [
       {
+        path: 'home',
+        loadComponent: () =>
+          import('./features/home/pages/home').then((m) => m.HomePage),
+      },
+      {
+        path: 'work/attention',
+        loadComponent: () =>
+          import('./features/home/pages/attention-list').then((m) => m.AttentionListPage),
+      },
+      {
+        path: 'work/jobs/:jobId',
+        loadComponent: () =>
+          import('./features/jobs/pages/job-details').then((m) => m.JobDetails),
+      },
+      {
+        path: 'work/customers',
+        pathMatch: 'full',
+        loadComponent: () =>
+          import('./features/customers/pages/customers').then((m) => m.CustomersPage),
+      },
+      {
+        path: 'work/customers/new',
+        loadComponent: () =>
+          import('./features/customers/pages/customer-form').then((m) => m.CustomerFormPage),
+      },
+      {
+        path: 'work/customers/:customerId/edit',
+        loadComponent: () =>
+          import('./features/customers/pages/customer-form').then((m) => m.CustomerFormPage),
+      },
+      {
+        path: 'work/customers/:customerId',
+        loadComponent: () =>
+          import('./features/customers/pages/customer-detail').then((m) => m.CustomerDetailPage),
+      },
+      {
         path: 'work/schedule',
         loadComponent: () =>
           import('./features/schedule/pages/schedule').then((m) => m.OfficeSchedule),
       },
       {
-        path: 'work/customers/:customerId/jobs/new',
-        loadComponent: () => import('./features/jobs/pages/job-form').then((m) => m.JobForm),
-      },
-      {
-        path: 'work/customers/:customerId/properties/new',
+        path: 'work/visit-requests',
+        canActivate: [permissionGuard('visits.review_requests')],
         loadComponent: () =>
-          import('./features/properties/pages/property-form').then((m) => m.PropertyForm),
+          import('./features/schedule/pages/visit-requests').then((m) => m.VisitRequestsReviewPage),
       },
       {
-        path: 'work/customers/:customerId/properties/:propertyId/edit',
+        path: 'work/review',
         loadComponent: () =>
-          import('./features/properties/pages/property-form').then((m) => m.PropertyForm),
+          import('./features/reconciliation/pages/work-review').then((m) => m.WorkReviewPage),
       },
       {
-        path: 'work/customers/:customerId/properties/:propertyId',
+        path: 'work/reports',
         loadComponent: () =>
-          import('./features/properties/pages/property-detail').then((m) => m.PropertyDetailPage),
+          import('./features/field/ui/field-report').then((m) => m.FieldReport),
       },
       {
-        path: 'work/customers/new',
+        path: 'work/requests',
+        canActivate: [permissionGuard('visits.request_follow_up')],
         loadComponent: () =>
-          import('./features/customers/pages/customer-form').then((m) => m.CustomerForm),
-      },
-      {
-        path: 'work/customers/:customerId/edit',
-        loadComponent: () =>
-          import('./features/customers/pages/customer-form').then((m) => m.CustomerForm),
-      },
-      {
-        path: 'work/customers/:customerId',
-        loadComponent: () =>
-          import('./features/customers/pages/customer-detail').then((m) => m.CustomerDetail),
-      },
-      {
-        path: 'work/customers',
-        loadComponent: () =>
-          import('./features/customers/pages/customer-list').then((m) => m.CustomerList),
-      },
-      {
-        path: 'work/report',
-        canDeactivate: [preserveFieldEditor],
-        loadComponent: () => import('./features/field/ui/field-report').then((m) => m.FieldReport),
-      },
-      {
-        path: 'work/jobs/:jobId',
-        canDeactivate: [preserveFieldEditor],
-        loadComponent: () => import('./features/jobs/pages/job-details').then((m) => m.JobDetails),
+          import('./features/field/ui/field-requests').then((m) => m.FieldRequestsPage),
       },
       {
         path: '',
         pathMatch: 'full',
-        loadComponent: () =>
-          import('./features/workspace/pages/workspace').then((m) => m.Workspace),
+        redirectTo: 'home',
+      },
+      {
+        path: '**',
+        redirectTo: 'home',
       },
     ],
   },

@@ -2677,7 +2677,7 @@ Android, Angular, API, Database
 None.
 
 **Notes:**
-The technician self-edit time window/policy is not defined. It is independent of the Job-level immutability rule, which is confirmed.
+The technician self-edit time window/policy is not defined. It is independent of the Job-level immutability rule, which is confirmed. This rule defines the permitted actors and audit requirements, but does not define a correction-request/approval workflow. The API correction operation and client workflows are not yet implemented; until they are, clients must not imply that an outcome can be edited. A technician self-edit window must be decided before technician corrections are implemented.
 
 **Status:**
 **CONFIRMED** — recorded corrections and immutability after Job completion

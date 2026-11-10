@@ -31,6 +31,8 @@ export interface CustomerSummary extends CustomerRecord {
 export interface CustomerListSummary extends CustomerSummary {
   openJobCount: number;
   overdueVisitCount: number;
+  contactCount: number;
+  primaryContact: Pick<CustomerContact, "firstName" | "lastName" | "email" | "phone"> | null;
 }
 export interface CustomerIndividual {
   customerId: string;
@@ -69,6 +71,8 @@ interface CustomerHeaderInput {
   displayName: string;
   email?: string | null;
   phone?: string | null;
+  billingEmail?: string | null;
+  billingPhone?: string | null;
   notes?: string | null;
   preferredContactMethod?: CustomerRecord["preferredContactMethod"];
   language?: CustomerRecord["language"];
@@ -131,6 +135,8 @@ export interface CustomerJob {
   propertyId: string | null;
   propertyAddress: import("./workspace.js").WorkspaceAddress | null;
   scheduledStart: string | null;
+  /** Scheduled visits on this Job whose end time has passed while still awaiting field work. */
+  overdueVisits: { scheduledStart: string; scheduledEnd: string }[];
   technicians: import("./workspace.js").WorkspaceTechnician[];
 }
 

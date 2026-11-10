@@ -45,6 +45,7 @@ const history: CustomerJob[] = [
       country: 'Canada',
     },
     scheduledStart: '2026-10-01T12:00:00Z',
+    overdueVisits: [],
     technicians: [],
   },
   {
@@ -57,6 +58,7 @@ const history: CustomerJob[] = [
     propertyId: 'property-two',
     propertyAddress: null,
     scheduledStart: null,
+    overdueVisits: [],
     technicians: [],
   },
 ];
@@ -142,6 +144,6 @@ export async function propertySignIn(
   await page.getByLabel('Email address').fill('office@example.com');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByRole('heading', { name: 'Your working day' }).waitFor();
+  await page.locator('app-shell .workspace-body').waitFor({ state: 'attached' });
   await page.goto(path);
 }

@@ -5,7 +5,7 @@ import { WorkLabel } from './work-label';
   selector: 'app-work-status',
   imports: [WorkLabel],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<span [attr.data-status]="code()"
+  template: `<span [class.plain]="plain()" [attr.data-status]="code()"
     ><i aria-hidden="true"></i>{{ code() | workLabel }}</span
   >`,
   styles: `
@@ -23,6 +23,11 @@ import { WorkLabel } from './work-label';
       font-weight: 650;
       background: color-mix(in srgb, var(--mat-sys-primary) 9%, var(--mat-sys-surface));
       color: var(--mat-sys-primary);
+    }
+    .plain {
+      padding: 0;
+      background: transparent !important;
+      color: inherit !important;
     }
     i {
       width: 6px;
@@ -42,8 +47,13 @@ import { WorkLabel } from './work-label';
       background: var(--mat-sys-surface-container);
       color: var(--mat-sys-on-surface-variant);
     }
+    [data-status='CANCELED'] {
+      background: var(--mat-sys-error-container);
+      color: var(--mat-sys-error);
+    }
   `,
 })
 export class WorkStatus {
   readonly code = input.required<string>();
+  readonly plain = input(false);
 }

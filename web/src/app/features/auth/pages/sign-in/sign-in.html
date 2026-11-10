@@ -155,6 +155,19 @@
           </p>
         }
       }
+      @if (devSignInAccounts.length) {
+        <section class="dev-sign-in" aria-label="{{ i18n.text('devSignInTitle') }}">
+          <p>{{ i18n.text('devSignInTitle') }}</p>
+          <div>
+            <button mat-stroked-button type="button" [disabled]="busy() || session.loggingOut()" (click)="devSignIn('manager')">
+              {{ i18n.text('devSignInManager') }}
+            </button>
+            <button mat-stroked-button type="button" [disabled]="busy() || session.loggingOut()" (click)="devSignIn('technician')">
+              {{ i18n.text('devSignInTechnician') }}
+            </button>
+          </div>
+        </section>
+      }
     </section>
   </main>
 </div>

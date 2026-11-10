@@ -50,6 +50,11 @@ export const SEED_TECHNICIAN_MEMBER_TEMPLATES = [
     lastName: 'Gagnon',
     email: 'luc.gagnon@servora.test',
   },
+  { key: 'EMMA', firstName: 'Emma', lastName: 'Wilson', email: 'emma.wilson@servora.test' },
+  { key: 'NOAH', firstName: 'Noah', lastName: 'Martin', email: 'noah.martin@servora.test' },
+  { key: 'OLIVIA', firstName: 'Olivia', lastName: 'Brown', email: 'olivia.brown@servora.test' },
+  { key: 'LIAM', firstName: 'Liam', lastName: 'Roy', email: 'liam.roy@servora.test' },
+  { key: 'AMINA', firstName: 'Amina', lastName: 'Hassan', email: 'amina.hassan@servora.test' },
 ] as const;
 
 /** The seeded people work is assigned to. `SEEDED` is the documented technician QA account. */
@@ -260,7 +265,7 @@ export const JOB_STATUS_PATHS: Record<SeedJobStatus, readonly SeedJobStatus[]> =
  * whatever time of day it runs; `assertSeedScenariosAreCoherent` refuses it the moment a future field
  * attempt is presented as finished work or a technician is double-booked.
  */
-export const SEED_CUSTOMERS: readonly SeedCustomerPlan[] = [
+const BASE_SEED_CUSTOMERS: readonly SeedCustomerPlan[] = [
   {
     kind: 'COMPANY',
     displayName: 'Maple Ridge Property Management',
@@ -727,6 +732,111 @@ export const SEED_CUSTOMERS: readonly SeedCustomerPlan[] = [
     ],
   },
 ];
+
+/** Creates realistic repeatable Customers and enough Job work to fill a six-week schedule. */
+function buildExpandedSeedCustomers(): readonly SeedCustomerPlan[] {
+  const existingJobs = BASE_SEED_CUSTOMERS.reduce((sum, customer) => sum + customer.jobs.length, 0);
+  const generatedJobCount = 400 - existingJobs;
+  const cities = [
+    ['Toronto', 'Ontario', 'M5V 2T6'], ['Ottawa', 'Ontario', 'K1P 1J1'],
+    ['Montréal', 'Québec', 'H2Y 1C6'], ['Québec', 'Québec', 'G1R 4S9'],
+    ['Calgary', 'Alberta', 'T2P 1J9'], ['Edmonton', 'Alberta', 'T5J 0N3'],
+    ['Vancouver', 'British Columbia', 'V6B 1A1'], ['Victoria', 'British Columbia', 'V8W 1P6'],
+    ['Winnipeg', 'Manitoba', 'R3B 1J3'], ['Halifax', 'Nova Scotia', 'B3J 1S9'],
+  ] as const;
+  const streetNames = ['King', 'Queen', 'Maple', 'Cedar', 'Bay', 'Victoria', 'Lakeview', 'Park'];
+  const companyNames = ['Northstar', 'Cedarline', 'Summit', 'Evergreen', 'Harbour', 'Pinecrest', 'Bluewater', 'Westfield'];
+  const services = [
+    ['Seasonal HVAC inspection', 'INSPECTION', 'Check the equipment, document its condition and flag any maintenance needed before the next season.'],
+    ['Furnace service call', 'SERVICE_CALL', 'Investigate the reported heating issue, confirm the cause and restore reliable operation.'],
+    ['Replace circulation pump', 'REPAIR', 'Remove the failed circulation pump, install the replacement and verify the system flow.'],
+    ['Building system maintenance', 'MAINTENANCE', 'Complete the scheduled service, record readings and leave the equipment room tidy.'],
+    ['Install replacement water heater', 'INSTALLATION', 'Install the approved replacement unit, test connections and review operation with the site contact.'],
+  ] as const;
+  const jobsByCustomer: SeedJobPlan[][] = Array.from({ length: 95 }, () => []);
+  let scheduledIndex = 0;
+  let completedIndex = 0;
+  for (let jobIndex = 0; jobIndex < generatedJobCount; jobIndex += 1) {
+    const customerIndex = jobIndex % 95;
+    const customerNumber = customerIndex + 6;
+    const statusIndex = jobIndex % 20;
+    const jobStatus: SeedJobPlan['status'] = statusIndex < 5 ? 'NEW' : statusIndex < 9 ? 'CANCELED' : statusIndex < 15 ? 'COMPLETED' : 'ACTIVE';
+    const [title, typeCode, description] = services[jobIndex % services.length]!;
+    const visitIndex = scheduledIndex++;
+    const technicianKeys = SEED_TECHNICIAN_MEMBER_TEMPLATES.slice(4).map((member) => member.key);
+    const dayOffset = -7 + Math.floor(visitIndex / 7);
+    const hour = 8 + (visitIndex % 8);
+    const schedule = dayOffset < 0
+      ? { kind: 'DAYS_AGO' as const, days: -dayOffset, hour, durationHours: 1 }
+      : { kind: 'IN_DAYS' as const, days: dayOffset + 1, hour, durationHours: 1 };
+    const crew = [technicianKeys[visitIndex % technicianKeys.length]!];
+    let visit: SeedVisitPlan;
+    if (jobStatus === 'NEW') {
+      visit = { status: 'DRAFT', schedule: null, crew: [] };
+      scheduledIndex -= 1;
+    } else if (jobStatus === 'CANCELED') {
+      visit = { status: 'CANCELED', schedule, crew, cancellation: { reasonCode: 'CUSTOMER_RESCHEDULED', note: 'The customer asked to move this appointment; the office will confirm a new date.' } };
+    } else if (jobStatus === 'COMPLETED') {
+      const completedSlot = completedIndex++;
+      const completedTechnicians: readonly SeedTechnicianKey[] = [
+        'SEEDED',
+        ...SEED_TECHNICIAN_MEMBER_TEMPLATES.slice(0, 4).map((member) => member.key),
+      ];
+      const completedCrew = [completedTechnicians[completedSlot % completedTechnicians.length]!];
+      const pastSchedule = { kind: 'DAYS_AGO' as const, days: 1 + Math.floor(completedSlot / 20), hour: 18 + (Math.floor(completedSlot / 5) % 4), durationHours: 1 };
+      visit = { status: 'COMPLETED', schedule: pastSchedule, crew: completedCrew, outcome: { code: 'RESOLVED', summary: 'Service completed, equipment tested and the site contact updated.' } };
+    } else {
+      visit = { status: 'SCHEDULED', schedule, crew };
+    }
+    jobsByCustomer[customerIndex]!.push({
+      title: `${title} — ${String(customerNumber).padStart(3, '0')}-${String(jobsByCustomer[customerIndex]!.length + 1).padStart(2, '0')}`,
+      description,
+      typeCode,
+      status: jobStatus,
+      propertyIndex: 0,
+      owner: true,
+      ...(jobStatus === 'CANCELED' ? { cancellationNote: 'The customer requested a new appointment date.' } : {}),
+      visits: [visit],
+    });
+  }
+
+  const additions: SeedCustomerPlan[] = Array.from({ length: 95 }, (_, index) => {
+    const number = index + 6;
+    const [city, province, postalCode] = cities[index % cities.length]!;
+    const street = streetNames[Math.floor(index / cities.length) % streetNames.length]!;
+    const addressLine1 = `${100 + number * 7} ${street} Street`;
+    const isCompany = index % 2 === 0;
+    const stem = isCompany ? `${companyNames[index % companyNames.length]} ${street}` : `${['Avery', 'Jordan', 'Morgan', 'Taylor', 'Casey', 'Riley', 'Jamie', 'Quinn'][index % 8]} ${['Campbell', 'Singh', 'Lavoie', 'Nguyen', 'MacDonald', 'Patel', 'Côté', 'Chen'][index % 8]}`;
+    const slug = `customer${String(number).padStart(3, '0')}`;
+    const jobs = jobsByCustomer[index]!;
+    return {
+      kind: isCompany ? 'COMPANY' : 'INDIVIDUAL',
+      displayName: stem,
+      ...(isCompany ? {
+        legalName: `${stem} ${index % 4 === 0 ? 'Inc.' : 'Ltd.'}`,
+        businessName: stem,
+        contacts: [{ firstName: ['Alex', 'Sam', 'Robin', 'Lee'][index % 4]!, lastName: ['Miller', 'Roy', 'Wilson', 'Ahmed'][index % 4]!, role: 'Site Coordinator', email: `contact${number}@servora.test`, phone: `+1 416 555 ${String(1000 + number).slice(-4)}`, isPrimary: true, isJobContact: true }],
+      } : {
+        firstName: stem.split(' ')[0]!, lastName: stem.split(' ').slice(1).join(' '), contacts: [],
+      }),
+      email: `${slug}@servora.test`,
+      phone: `+1 416 555 ${String(2000 + number).slice(-4)}`,
+      notes: isCompany ? 'Coordinate access with the site contact before arrival; send service summaries by email.' : 'Residential customer; please call before arrival and leave the work area clean.',
+      preferredContactMethod: index % 3 === 0 ? 'EMAIL' : 'PHONE',
+      language: index % 5 === 0 ? 'fr-CA' : 'en-CA',
+      status: index % 11 === 0 ? 'INACTIVE' : 'ACTIVE',
+      customerSinceDaysAgo: 30 + (index * 13) % 700,
+      billingAddress: { addressLine1, city, province, postalCode },
+      properties: [{ name: isCompany ? `${stem} — Main Site` : `${stem} Residence`, addressLine1, city, province, postalCode }],
+      jobs,
+    };
+  });
+  return [...BASE_SEED_CUSTOMERS, ...additions];
+}
+
+export const EXPANDED_SEED_CUSTOMERS = buildExpandedSeedCustomers();
+/** Public dataset name retained for the scenario checks and seed documentation. */
+export const SEED_CUSTOMERS = EXPANDED_SEED_CUSTOMERS;
 
 /** A Visit's resolved window: what `BR-072` stores as the internal scheduled start and end. */
 export interface ResolvedSeedWindow {

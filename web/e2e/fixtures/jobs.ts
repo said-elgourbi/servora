@@ -12,6 +12,11 @@ export const jobPermissions = [
 ];
 export const photoEvent: JobActivityEvent = {
   id: 'event-photo',
+  authorMembershipId: 'member-one',
+  canEdit: true,
+  canDelete: true,
+  activityEditedAt: null,
+  activityRemovedAt: null,
   kind: 'JOB_PHOTO_ADDED',
   recordedAt: '2026-10-19T12:00:00Z',
   actorName: 'Alex Tremblay',
@@ -36,6 +41,13 @@ export const photoEvent: JobActivityEvent = {
   quoteNote: null,
   quoteDocumentDisplayName: null,
   quoteDocumentVersion: null,
+  quoteDocumentId: null,
+  quoteDocumentIsCurrent: null,
+  quoteDocumentByteSize: null,
+  documentId: null,
+  documentDisplayName: null,
+  documentVersion: null,
+  documentByteSize: null,
 };
 export async function mockJobs(
   page: Page,
@@ -78,6 +90,23 @@ export async function mockJobs(
                   photoEvent,
                 ]
               : [],
+        },
+      });
+    }
+    if (path.endsWith('/notes') && request.method() === 'POST') {
+      return route.fulfill({
+        status: 201,
+        json: {
+          jobId: current.id,
+          events: [{
+            ...photoEvent,
+            id: `note-${writes.length}`,
+            kind: path.includes('/visits/') ? 'VISIT_NOTE_ADDED' : 'JOB_NOTE_ADDED',
+            visitSequence: path.includes('/visits/') ? 1 : null,
+            photoId: null,
+            photoPhase: null,
+            body: request.postDataJSON().body,
+          }],
         },
       });
     }
@@ -130,6 +159,17 @@ export async function mockJobs(
         selectedVisit: { id: nextVisit.id },
       };
       return route.fulfill({ status: 201, json: current });
+    }
+    if (path.includes('/visits/') && path.endsWith('/status')) {
+      const visitId = path.split('/').at(-2)!;
+      const body = request.postDataJSON() as { status: string };
+      current = {
+        ...current,
+        visits: current.visits.map((visit) => visit.id === visitId
+          ? { ...visit, status: body.status, version: visit.version + 1 }
+          : visit),
+      };
+      return route.fulfill({ json: current });
     }
     if (path.endsWith('/status')) {
       const body = request.postDataJSON() as { status: string };

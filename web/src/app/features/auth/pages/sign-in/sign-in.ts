@@ -11,6 +11,8 @@ import { Preferences } from '../../../../shared/ui/preferences/preferences';
 import { AuthSession } from '../../data-access/auth-session';
 import { authErrorKey } from '../../data-access/auth-errors';
 import { safeReturnUrl } from '../../auth.guards';
+import { DEV_SIGN_IN_ACCOUNTS } from '../../dev-sign-in-accounts';
+import type { DevSignInRole } from '../../dev-sign-in-types';
 
 @Component({
   selector: 'app-sign-in',
@@ -29,6 +31,7 @@ import { safeReturnUrl } from '../../auth.guards';
 export class SignIn {
   protected readonly i18n = inject(I18n);
   protected readonly session = inject(AuthSession);
+  protected readonly devSignInAccounts = DEV_SIGN_IN_ACCOUNTS;
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   protected readonly method = signal<'email' | 'phone'>('email');
@@ -89,6 +92,13 @@ export class SignIn {
       this.emailForm.controls.password.reset();
       await this.enter();
     });
+  }
+  protected async devSignIn(role: DevSignInRole): Promise<void> {
+    const account = this.devSignInAccounts.find((entry) => entry.role === role);
+    if (!account || this.busy() || this.session.loggingOut()) return;
+    this.choose('email');
+    this.emailForm.setValue({ email: account.email, password: account.password });
+    await this.emailSignIn();
   }
   protected async requestCode(): Promise<void> {
     this.phoneForm.markAllAsTouched();

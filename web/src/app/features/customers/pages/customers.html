@@ -1,0 +1,81 @@
+<section class="customers-page" (click)="closeOutside($event)" (keydown.escape)="closePopover()">
+  <header class="page-heading">
+    <div><p class="eyebrow">{{ i18n.text('customerWorkspace') }}</p><h1>{{ i18n.text('customers') }} <span class="count">{{ visible().length }} {{ i18n.text('customerResults') }}</span></h1></div>
+    @if (auth.hasPermission('customers.create')) { <a class="new-button" routerLink="/work/customers/new">＋ {{ i18n.text('customerNew') }}</a> }
+  </header>
+
+  <div class="customer-workspace">
+  <section class="directory" aria-label="{{ i18n.text('customers') }}">
+    <div class="toolbar">
+      <label class="search"><span aria-hidden="true">⌕</span><input type="search" [placeholder]="i18n.text('customerSearchExtended')" [value]="query()" (input)="setQuery($any($event.target).value)" /></label>
+      <label class="type-filter"><span class="visually-hidden">{{ i18n.text('customerType') }}</span><select [value]="type()" (change)="setType($any($event.target).value)"><option value="ALL">{{ i18n.text('customerAllTypes') }}</option><option value="COMPANY">{{ i18n.text('customerCompany') }}</option><option value="INDIVIDUAL">{{ i18n.text('customerIndividual') }}</option></select></label>
+      @if (query() || type() !== 'ALL' || filter() !== 'ALL') { <button class="clear" type="button" (click)="clear()">{{ i18n.text('clearFilters') }}</button> }
+    </div>
+    <nav class="quick-filters" [attr.aria-label]="i18n.text('customerQuickFilters')">
+      <button type="button" [class.selected]="filter() === 'ALL'" (click)="setFilter('ALL')">{{ i18n.text('customerFilterAll') }}</button>
+      <button type="button" [class.selected]="filter() === 'OVERDUE'" (click)="setFilter('OVERDUE')"><i class="dot overdue-dot"></i>{{ i18n.text('customerFilterOverdue') }}</button>
+      <button type="button" [class.selected]="filter() === 'ACTIVE_JOBS'" (click)="setFilter('ACTIVE_JOBS')">{{ i18n.text('customerFilterActiveJobs') }}</button>
+      <button type="button" [class.selected]="filter() === 'INACTIVE'" (click)="setFilter('INACTIVE')">{{ i18n.text('customerFilterInactive') }}</button>
+    </nav>
+    <div class="table-scroll" [class.scroll-locked]="!!activePopover()">
+      <div class="table-head"><span>{{ i18n.text('customers') }}</span><span>{{ i18n.text('customerContactInfo') }}</span><span>{{ i18n.text('customerJobs') }}</span><span>{{ i18n.text('customerStatus') }}</span><span></span></div>
+      @if (loading()) { <p class="state" role="status">{{ i18n.text('busy') }}</p> }
+      @else if (failed()) { <div class="state"><p>{{ i18n.text('customerLoadFailed') }}</p><button type="button" class="retry" (click)="load()">{{ i18n.text('retry') }}</button></div> }
+      @else if (visible().length === 0) { <p class="state">{{ i18n.text('customerEmpty') }}</p> }
+      @else {
+        @for (row of visible(); track row.id) {
+          <article class="customer-row">
+            <div class="customer-cell"><span class="avatar" [class.individual]="row.type === 'INDIVIDUAL'">{{ initials(row.displayName) }}</span><span class="customer-name"><a [routerLink]="['/work/customers',row.id]"><strong>{{ row.displayName }}</strong></a><small>{{ row.type === 'COMPANY' ? i18n.text('customerCompany') : i18n.text('customerIndividual') }}</small></span></div>
+            <div class="contact-cell">
+              <div class="contact-heading"><strong>{{ contactName(row) }}</strong>@if (row.contactCount > 1) { <button type="button" class="more-chip popover-trigger" aria-haspopup="dialog" aria-controls="customer-quick-popover" [attr.aria-expanded]="activePopover()?.kind === 'contacts' && activePopover()?.id === row.id" [attr.aria-label]="i18n.text('customerShowMoreContacts') + ': ' + contactMoreCount(row)" (click)="$event.stopPropagation(); toggleContacts($event,row)">+{{ contactMoreCount(row) }}</button> }</div>
+              <div class="contact-meta">
+                @if (row.primaryContact?.email || row.email) { <span class="contact-value"><span class="contact-link"><app-icon [name]="'mail'"></app-icon><span class="contact-text">{{ row.primaryContact?.email || row.email }}</span></span><button type="button" class="copy-icon" (click)="copyContactValue(row.primaryContact?.email || row.email!)" [attr.aria-label]="i18n.text(copiedContactValue() === (row.primaryContact?.email || row.email) ? 'customerCopied' : 'customerCopyEmail')">@if (copiedContactValue() === (row.primaryContact?.email || row.email)) { <span class="copy-feedback">{{ i18n.text('customerCopied') }}</span> } @else { <app-icon [name]="'copy'"></app-icon> }</button></span> }
+                @if (row.primaryContact?.phone || row.phone) { <span class="contact-value"><span class="contact-link"><app-icon [name]="'phone'"></app-icon><span class="contact-text">{{ row.primaryContact?.phone || row.phone }}</span></span><button type="button" class="copy-icon" (click)="copyContactValue(row.primaryContact?.phone || row.phone!)" [attr.aria-label]="i18n.text(copiedContactValue() === (row.primaryContact?.phone || row.phone) ? 'customerCopied' : 'customerCopyPhone')">@if (copiedContactValue() === (row.primaryContact?.phone || row.phone)) { <span class="copy-feedback">{{ i18n.text('customerCopied') }}</span> } @else { <app-icon [name]="'copy'"></app-icon> }</button></span> }
+                @if (!(row.primaryContact?.email || row.email || row.primaryContact?.phone || row.phone)) { <span>—</span> }
+              </div>
+            </div>
+            <button type="button" class="jobs-cell popover-trigger" aria-haspopup="dialog" aria-controls="customer-quick-popover" [disabled]="row.jobCount === 0" [attr.aria-expanded]="activePopover()?.kind === 'jobs' && activePopover()?.id === row.id" (click)="$event.stopPropagation(); toggleJobs($event,row)" [attr.aria-label]="i18n.text('customerOpenJobList') + ': ' + row.jobCount">
+              <span class="jobs-primary"><strong>{{ row.openJobCount }} <span>{{ i18n.text('customerActiveJobsShort') }}</span></strong>@if (row.overdueVisitCount > 0) { <span class="badge overdue">{{ row.overdueVisitCount }} {{ i18n.text('customerOverdueShort') }}</span> }</span><small>{{ row.jobCount }} {{ i18n.text('customerTotalJobsShort') }} · {{ i18n.text('customerViewJobs') }}</small>
+            </button>
+            <div><span class="status" [class.active]="row.status === 'ACTIVE'" [class.inactive]="row.status === 'INACTIVE'"><i></i>{{ row.status === 'ACTIVE' ? i18n.text('customerActive') : i18n.text('customerInactive') }}</span></div>
+            <span class="row-more" aria-hidden="true">›</span>
+          </article>
+        }
+      }
+    </div>
+    @if (activePopover(); as popover) {
+      <aside id="customer-quick-popover" class="quick-popover" role="dialog" tabindex="-1" [style.top.px]="popover.top" [style.left.px]="popover.left" [attr.aria-label]="popover.kind === 'contacts' ? i18n.text('customerOtherContacts') : i18n.text('customerJobs')" (click)="$event.stopPropagation()">
+        <header><h2>{{ popover.kind === 'contacts' ? i18n.text('customerOtherContacts') : i18n.text('customerJobs') }}</h2><button type="button" class="popover-close" (click)="closePopover()" [attr.aria-label]="i18n.text('activityClose')">×</button></header>
+        @if (popoverLoading() === popover.id) { <p class="popover-message" role="status">{{ i18n.text('busy') }}</p> }
+        @else if (popoverError() === popover.id) { <div class="popover-message" role="alert"><p>{{ i18n.text('customerPopoverFailed') }}</p><button type="button" (click)="retryPopover()">{{ i18n.text('retry') }}</button></div> }
+        @else if (popover.kind === 'contacts') {
+          @for (contact of extraContacts(popover.id); track contact.id) {
+            <div class="contact-person-row"><span class="contact-avatar">{{ contactInitials(contact.firstName,contact.lastName) }}</span><span class="contact-person-info"><strong>{{ contact.firstName }} {{ contact.lastName }}</strong>@if (contact.role) { <small>{{ contact.role }}</small> }<span class="contact-links">@if (contact.phone) { <span class="contact-value"><span class="contact-link"><app-icon [name]="'phone'"></app-icon><span class="contact-text">{{ contact.phone }}</span></span><button type="button" class="copy-icon" (click)="copyContactValue(contact.phone)" [attr.aria-label]="i18n.text(copiedContactValue() === contact.phone ? 'customerCopied' : 'customerCopyPhone')">@if (copiedContactValue() === contact.phone) { <span class="copy-feedback">{{ i18n.text('customerCopied') }}</span> } @else { <app-icon [name]="'copy'"></app-icon> }</button></span> }@if (contact.email) { <span class="contact-value"><span class="contact-link"><app-icon [name]="'mail'"></app-icon><span class="contact-text">{{ contact.email }}</span></span><button type="button" class="copy-icon" (click)="copyContactValue(contact.email)" [attr.aria-label]="i18n.text(copiedContactValue() === contact.email ? 'customerCopied' : 'customerCopyEmail')">@if (copiedContactValue() === contact.email) { <span class="copy-feedback">{{ i18n.text('customerCopied') }}</span> } @else { <app-icon [name]="'copy'"></app-icon> }</button></span> }</span></span></div>
+          } @empty { <p class="popover-message">{{ i18n.text('customerNoExtraContacts') }}</p> }
+        } @else if (popover.kind === 'jobs') {
+          @for (job of jobCache()[popover.id] ?? []; track job.id) {
+            <a class="popover-item job-item" [routerLink]="['/work/jobs', job.id]" (click)="closePopover()"><span class="job-copy"><strong>#{{ job.jobNumber }} · {{ job.title }}</strong><small>{{ job.scheduledStart ? ((job.scheduledStart | date:'mediumDate' : undefined : i18n.language()) + ' · ' + (job.scheduledStart | preferredTime)) : i18n.text('unscheduled') }}</small>@for (visit of job.overdueVisits; track visit.scheduledStart) { <small class="overdue-visit"><span class="badge overdue">{{ i18n.text('customerOverdueVisitDetail') }}</span> {{ visit.scheduledStart | date:'mediumDate' : undefined : i18n.language() }} {{ visit.scheduledStart | preferredTime }} – {{ visit.scheduledEnd | preferredTime }}</small> }</span><span class="job-state" [class.job-new]="job.status === 'NEW'" [class.job-active]="job.status === 'ACTIVE'" [class.job-completed]="job.status === 'COMPLETED'" [class.job-canceled]="job.status === 'CANCELED'">{{ job.status | workLabel }}</span></a>
+          } @empty { <p class="popover-message">{{ i18n.text('customerPopoverNoJobs') }}</p> }
+        }
+      </aside>
+    }
+    <footer class="table-foot"><span>{{ i18n.text('customerShowing') }} {{ visible().length }} {{ i18n.text('customerResults') }}</span><span>{{ i18n.text('customerSortOverdue') }}</span></footer>
+  </section>
+  <aside class="customer-stats" [attr.aria-label]="i18n.text('customerOverview')">
+    <section class="stats-card overview-card">
+      <header><span class="stats-icon">◉</span><div><h2>{{ i18n.text('customerOverview') }}</h2><p>{{ i18n.text('customerAllCustomers') }}</p></div></header>
+      <div class="stats-total"><strong>{{ stats().total }}</strong><span>{{ i18n.text('customerTotalCustomers') }}</span></div>
+      <div class="stats-list">
+        <div><span><i class="stats-icon small">▦</i>{{ i18n.text('customerCompanies') }}</span><strong>{{ stats().companies }}</strong></div>
+        <div><span><i class="stats-icon small">◎</i>{{ i18n.text('customerIndividuals') }}</span><strong>{{ stats().individuals }}</strong></div>
+        <div><span><i class="stats-icon small">◉</i>{{ i18n.text('customerActiveCustomers') }}</span><strong>{{ stats().active }}</strong></div>
+      </div>
+    </section>
+    <section class="stats-card attention-card">
+      <header><span class="attention-mark">!</span><div><h2>{{ i18n.text('customerNeedsAttention') }}</h2><p>{{ i18n.text('customerAttentionHint') }}</p></div></header>
+      <button type="button" (click)="setFilter('OVERDUE')"><span>{{ i18n.text('customerOverdueCustomers') }}</span><strong>{{ stats().overdue }}</strong><b aria-hidden="true">›</b></button>
+      <button type="button" (click)="setFilter('ACTIVE_JOBS')"><span>{{ i18n.text('customerCustomersWithJobs') }}</span><strong>{{ stats().withJobs }}</strong><b aria-hidden="true">›</b></button>
+    </section>
+  </aside>
+  </div>
+</section>
