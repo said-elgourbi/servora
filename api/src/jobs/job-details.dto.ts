@@ -167,6 +167,8 @@ export interface JobDetailsVisitDto {
   allowedStatusTransitions: VisitStatus[];
   /** Whether this caller may use the explicit Visit completion operation for this Visit. */
   completionAllowed: boolean;
+  /** Whether this caller may correct the current outcome under `BR-079`. */
+  outcomeCorrectionAllowed: boolean;
   /** Whether this caller may add a field update to this Visit. */
   addUpdateAllowed: boolean;
   /**
@@ -483,6 +485,8 @@ export interface JobVisitSummary {
   readonly purposeCode: VisitPurposeCode;
   /** The Visit's **current** outcome, or `null` when it holds none (`BR-077`, `BR-079`). */
   readonly outcomeCode: VisitOutcomeCode | null;
+  /** Current outcome author, kept internal for authorization-aware projections. */
+  readonly outcomeRecordedByMembershipId?: string | null;
   readonly scheduledStart: Date | null;
   readonly scheduledEnd: Date | null;
   readonly version: number;
@@ -494,6 +498,8 @@ export interface JobVisitSummary {
 /** Everything the Job Details projection resolves for one Job. */
 export interface JobDetails {
   readonly job: Job;
+  /** Whether this Job has ever reached a terminal status (`BR-079`), internal projection input. */
+  readonly hadTerminalJobStatus?: boolean;
   readonly customerId: string;
   readonly customerName: string;
   /**
@@ -606,6 +612,12 @@ export function toJobDetailsDto(
       : ((details.visits ?? []).find(
           (visit) => visit.visitId === details.selectedVisit?.visitId,
         )?.outcomeCode ?? null);
+  const selectedOutcomeAuthor =
+    details.selectedVisit === null
+      ? null
+      : ((details.visits ?? []).find(
+          (visit) => visit.visitId === details.selectedVisit?.visitId,
+        )?.outcomeRecordedByMembershipId ?? null);
   // Scheduling eligibility belongs to the whole Job, not the Visit a particular read happened to
   // select. Office Job Details commonly has no selected Visit while still carrying open Visits.
   const latestVisit = (details.visits ?? []).reduce<NonNullable<typeof details.visits>[number] | null>(
@@ -706,6 +718,17 @@ export function toJobDetailsDto(
               status !== 'CANCELED' &&
               details.selectedVisit.status !== 'COMPLETED' &&
               details.selectedVisit.status !== 'CANCELED',
+            outcomeCorrectionAllowed:
+              drivesSelectedVisit &&
+              details.selectedVisit.status === 'COMPLETED' &&
+              selectedOutcomeCode !== null &&
+              options.recordsVisitOutcome === true &&
+              status !== 'COMPLETED' &&
+              status !== 'CANCELED' &&
+              details.hadTerminalJobStatus !== true &&
+              (options.officeVisitWriter === true ||
+                (options.callerMembershipId !== undefined &&
+                  selectedOutcomeAuthor === options.callerMembershipId)),
             addUpdateAllowed:
               drivesSelectedVisit &&
               status !== 'COMPLETED' &&

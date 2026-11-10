@@ -65,6 +65,7 @@ authorization the note route has had all along:
 | -------------------------------------------- | ------------------------------------------------------------------------------------- |
 | `PATCH /jobs/:id/visits/:visitId/status`     | `VISIT_UPDATE_ASSIGNED_STATUS` **or** `JOB_UPDATE`                                    |
 | `POST /jobs/:id/visits/:visitId/completion`  | `VISIT_UPDATE_ASSIGNED_STATUS` **or** `JOB_UPDATE`, **and** `VISIT_RECORD_OUTCOME`     |
+| `PATCH /jobs/:id/visits/:visitId/outcome`    | `VISIT_UPDATE_ASSIGNED_STATUS` **or** `JOB_UPDATE`, **and** `VISIT_RECORD_OUTCOME`     |
 | `POST /jobs/:id/visits/:visitId/notes`       | `VISIT_ADD_NOTE` **or** `JOB_UPDATE`                                                  |
 
 A **completion is its own route** (`§7.6`): the outcome `BR-077` requires is the business operation that
@@ -475,6 +476,39 @@ the Job status the consequence produced. `UNABLE_TO_COMPLETE`'s **structured** r
 `OPEN QUESTION`: the reason is recorded as the free text `BR-077` requires and the API derives no sub-code
 from it (`BR-042`, `§10`).
 
+### 7.7 `PATCH /jobs/:id/visits/:visitId/outcome`
+
+Corrects the outcome of a Visit that is already completed (`BR-079`). This does not reopen the Visit or
+create another field attempt. The response is the refreshed Job projection.
+
+```json
+{
+  "outcomeCode": "NEEDS_FOLLOW_UP",
+  "outcomeSummary": "The replacement part is not available yet.",
+  "reason": "I selected RESOLVED by mistake.",
+  "clientOperationId": "77777777-7777-4777-8777-777777777777",
+  "capturedAt": "2026-11-10T15:30:00.000Z",
+  "expectedVersion": 6
+}
+```
+
+The submitted outcome must be valid for the Visit's stored purpose and the summary is required. `reason`
+is optional and recorded as the correction explanation. Scoped field callers must include the operation
+id, capture time and Visit version; these provide retry safety and stale-write protection.
+
+The route requires `VISIT_RECORD_OUTCOME` in addition to the Visit writer permission. A Technician must
+be on the Visit's current crew and must be the author of its current outcome. An authorized office writer
+may correct it under `JOB_UPDATE`. The Visit must still be `COMPLETED` and hold a current outcome. The
+Job must never have been `COMPLETED` or `CANCELED`; reopening a terminal Job does not unfreeze its outcome.
+The previous and replacement outcome, actor, timestamp and optional reason are appended to outcome
+history, and the Visit's current outcome is updated in the same transaction. The corrected outcome's Job
+consequence is applied transactionally. Existing follow-up requests and Visits remain unchanged.
+
+Refusals include `403 FORBIDDEN` when the Technician did not record the current outcome, `409
+VISIT_OUTCOME_NOT_CORRECTABLE` when the Visit is not eligible, `409 VERSION_CONFLICT` when the Visit
+changed since it was read, `409 JOB_CLOSED_FOR_FIELD_WORK` after terminal Job history, and the purpose
+validation error when the outcome does not match the Visit.
+
 ## 8. Errors
 
 | Status | Code                                 | When                                                                   |
@@ -555,12 +589,14 @@ with what each one blocks.
    applied in full, so a reversal needs no extra permission; which further turn should additionally be
    *flagged* as a correction is not confirmed, so `is_correction` stays the one pair `BR-075` named,
    `EN_ROUTE → SCHEDULED`.
-10. **Outcome corrections** (`BR-079`). The business rule intends to allow technician self-correction
-    under a future policy and manager/authorized office correction under existing permissions. No
-    correction route or client workflow exists yet. The technician self-edit window is undecided, and
-    BR-079 defines no request/approval workflow; neither should be inferred by clients. Every future
-    correction must preserve the previous and new outcome, actor, timestamp and optional reason. The
-    confirmed Job-closure immutability rule is enforced today.
+10. **Outcome corrections** (`BR-079`). The Technician who recorded the current outcome may correct it
+    while still on the Visit's current crew and before the Job has ever been completed or canceled; no
+    elapsed-time cutoff applies, and reopening the Job does not unfreeze the outcome.
+    The API correction route requires `VISIT_RECORD_OUTCOME`, current crew membership, a completed Visit
+    with a current outcome, and a Job with no terminal status in its history. The current outcome author, previous and replacement
+    values, timestamp and optional reason are preserved in append-only history. The correction and any
+    resulting Job status transition are atomic. Existing follow-up requests and Visits are not silently
+    changed. Job closure makes outcomes immutable. No request/approval workflow is defined.
 11. **A paused or on-hold Visit state** (`BR-013`, `BR-074`). `BR-074` has no such state, so none is
     invented: a technician who stops working leaves the Visit `IN_PROGRESS`, and the Visit's own history
     is the record.

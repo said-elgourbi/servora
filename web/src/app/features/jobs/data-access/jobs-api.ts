@@ -104,6 +104,17 @@ export class JobsApi {
       this.options(),
     ).pipe(timeout(20000));
   }
+  correctVisitOutcome(
+    id: string,
+    visitId: string,
+    input: { outcomeCode: string; outcomeSummary: string; reason: string | null; expectedVersion: number },
+  ) {
+    return this.http.patch<OfficeJobDetails>(
+      `${this.path(id)}/visits/${encodeURIComponent(visitId)}/outcome`,
+      { ...input, clientOperationId: crypto.randomUUID(), capturedAt: new Date().toISOString() },
+      this.options(),
+    ).pipe(timeout(20000));
+  }
   technicians() {
     return this.http
       .get<AssignableTechnician[]>('/technicians', this.options())

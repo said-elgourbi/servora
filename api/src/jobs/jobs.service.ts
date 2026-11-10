@@ -105,6 +105,7 @@ import type {
   ChangeJobStatusDto,
   ChangeVisitStatusDto,
   CompleteVisitDto,
+  CorrectVisitOutcomeDto,
   RescheduleVisitDto,
   DecideQuoteDto,
   MarkQuoteSentDto,
@@ -498,6 +499,22 @@ export class VisitOutcomeInvalidForPurposeError extends Error {
   }
 }
 
+/** The Visit has no current outcome to correct or is no longer eligible (`BR-079`). */
+export class VisitOutcomeNotCorrectableError extends Error {
+  constructor() {
+    super('The current visit outcome cannot be corrected.');
+    this.name = 'VisitOutcomeNotCorrectableError';
+  }
+}
+
+/** A field caller may correct only the outcome they recorded (`BR-079`). */
+export class VisitOutcomeCorrectionForbiddenError extends Error {
+  constructor() {
+    super('Only the technician who recorded this outcome may correct it.');
+    this.name = 'VisitOutcomeCorrectionForbiddenError';
+  }
+}
+
 /**
  * A caller who reaches a Job through their own field assignments (`BR-009`; `ADR-019` D2).
  *
@@ -690,6 +707,18 @@ export class JobsService {
       return null;
     }
 
+    const [terminalHistory] = await this.db
+      .select({ id: jobStatusHistory.id })
+      .from(jobStatusHistory)
+      .where(
+        and(
+          eq(jobStatusHistory.organizationId, scope.organizationId),
+          eq(jobStatusHistory.jobId, row.job.id),
+          inArray(jobStatusHistory.toStatus, ['COMPLETED', 'CANCELED']),
+        ),
+      )
+      .limit(1);
+
     // The Job's Visits in their own sequence (`BR-047`, `BR-071`), each with the crew it carries. One
     // read of the crews serves every Visit, so a Job with several Visits does not cost one query each
     // (`BR-068`, `dev.md` §6).
@@ -801,6 +830,7 @@ export class JobsService {
 
     return {
       job: row.job,
+      hadTerminalJobStatus: terminalHistory !== undefined,
       customerId: row.customerId,
       customerName: row.customerName,
       customerContactDetails: {
@@ -2213,6 +2243,169 @@ export class JobsService {
       }
     }
 
+    return this.requireJobDetails(scope, jobId);
+  }
+
+  /** Corrects the Visit's current outcome without rewriting its history (`BR-079`). */
+  async correctVisitOutcome(
+    scope: OrganizationScope,
+    jobId: string,
+    visitId: string,
+    actorMembershipId: string,
+    writer: AssignedVisitWriter | null,
+    input: CorrectVisitOutcomeDto,
+  ): Promise<JobDetails> {
+    await this.requireJobDetails(scope, jobId);
+    await this.requireVisitForWriter(scope, jobId, visitId, writer);
+    if (input.clientOperationId !== null) {
+      const applied = await this.findAppliedOutcomeOperation(
+        scope,
+        input.clientOperationId,
+      );
+      if (applied !== null) {
+        this.assertSameVisit(applied.visitId, visitId);
+        return this.requireJobDetails(scope, jobId);
+      }
+    }
+
+    try {
+      await this.db.transaction(async (tx) => {
+        const [locked] = await tx
+          .select()
+          .from(visits)
+          .where(
+            and(
+              eq(visits.organizationId, scope.organizationId),
+              eq(visits.jobId, jobId),
+              eq(visits.id, visitId),
+            ),
+          )
+          .for('update')
+          .limit(1);
+        if (locked === undefined) throw new VisitNotFoundError();
+
+        if (writer !== null) {
+          const [assignment] = await tx
+            .select({ visitId: visitTechnicians.visitId })
+            .from(visitTechnicians)
+            .where(
+              and(
+                eq(visitTechnicians.organizationId, scope.organizationId),
+                eq(visitTechnicians.visitId, visitId),
+                eq(
+                  visitTechnicians.technicianMembershipId,
+                  writer.membershipId,
+                ),
+              ),
+            )
+            .limit(1);
+          if (assignment === undefined) throw new VisitNotFoundError();
+        }
+
+        if (input.clientOperationId !== null) {
+          const applied = await this.findAppliedOutcomeOperation(
+            scope,
+            input.clientOperationId,
+            tx,
+          );
+          if (applied !== null) {
+            this.assertSameVisit(applied.visitId, visitId);
+            return;
+          }
+        }
+
+        if (
+          input.expectedVersion !== null &&
+          input.expectedVersion !== locked.version
+        ) {
+          throw new VisitVersionConflictError(locked.version);
+        }
+        if (
+          locked.status !== 'COMPLETED' ||
+          locked.outcomeCode === null ||
+          locked.outcomeSummary === null ||
+          locked.outcomeRecordedByMembershipId === null
+        ) {
+          throw new VisitOutcomeNotCorrectableError();
+        }
+        if (
+          !isVisitOutcomeValidForPurpose(
+            locked.purposeCode as VisitPurposeCode,
+            input.outcomeCode,
+          )
+        ) {
+          throw new VisitOutcomeInvalidForPurposeError(
+            locked.purposeCode as VisitPurposeCode,
+            input.outcomeCode,
+          );
+        }
+        if (
+          writer !== null &&
+          locked.outcomeRecordedByMembershipId !== actorMembershipId
+        ) {
+          throw new VisitOutcomeCorrectionForbiddenError();
+        }
+
+        const jobStatus = await this.requireLockedJobStatus(tx, scope, jobId);
+        if (jobStatus === 'COMPLETED' || jobStatus === 'CANCELED') {
+          throw new JobClosedForFieldWorkError();
+        }
+        const [terminalStatus] = await tx
+          .select({ id: jobStatusHistory.id })
+          .from(jobStatusHistory)
+          .where(
+            and(
+              eq(jobStatusHistory.organizationId, scope.organizationId),
+              eq(jobStatusHistory.jobId, jobId),
+              inArray(jobStatusHistory.toStatus, ['COMPLETED', 'CANCELED']),
+            ),
+          )
+          .limit(1);
+        if (terminalStatus !== undefined) {
+          throw new JobClosedForFieldWorkError();
+        }
+        const recordedAt = new Date();
+        await tx
+          .update(visits)
+          .set({
+            outcomeCode: input.outcomeCode,
+            outcomeSummary: input.outcomeSummary,
+            outcomeRecordedAt: recordedAt,
+            outcomeRecordedByMembershipId: actorMembershipId,
+            version: sql`${visits.version} + 1`,
+            updatedAt: recordedAt,
+          })
+          .where(
+            and(
+              eq(visits.organizationId, scope.organizationId),
+              eq(visits.id, visitId),
+            ),
+          );
+        await tx.insert(visitOutcomeHistory).values({
+          organizationId: scope.organizationId,
+          visitId,
+          outcomeCode: input.outcomeCode,
+          outcomeSummary: input.outcomeSummary,
+          previousOutcomeCode: locked.outcomeCode,
+          previousOutcomeSummary: locked.outcomeSummary,
+          reason: input.reason,
+          actorMembershipId,
+          capturedAt: input.capturedAt,
+          clientOperationId: input.clientOperationId,
+        });
+        await this.applyVisitConsequence(
+          tx,
+          scope,
+          jobId,
+          actorMembershipId,
+          jobStatus,
+          'COMPLETED',
+          input.outcomeCode,
+        );
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+    }
     return this.requireJobDetails(scope, jobId);
   }
 
@@ -4090,6 +4283,25 @@ export class JobsService {
         and(
           eq(visitStatusHistory.organizationId, scope.organizationId),
           eq(visitStatusHistory.clientOperationId, clientOperationId),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** The Visit an already-applied outcome operation was recorded against, or `null` (`BR-031`). */
+  private async findAppliedOutcomeOperation(
+    scope: OrganizationScope,
+    clientOperationId: string,
+    client: JobMutationClient = this.db,
+  ): Promise<{ visitId: string } | null> {
+    const [row] = await client
+      .select({ visitId: visitOutcomeHistory.visitId })
+      .from(visitOutcomeHistory)
+      .where(
+        and(
+          eq(visitOutcomeHistory.organizationId, scope.organizationId),
+          eq(visitOutcomeHistory.clientOperationId, clientOperationId),
         ),
       )
       .limit(1);

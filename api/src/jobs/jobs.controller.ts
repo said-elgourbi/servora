@@ -126,6 +126,7 @@ import {
   parseChangeJobStatusDto,
   parseChangeVisitStatusDto,
   parseCompleteVisitDto,
+  parseCorrectVisitOutcomeDto,
   parseRescheduleVisitDto,
   parseDecideQuoteDto,
   parseCorrectQuoteToRequiredDto,
@@ -164,6 +165,8 @@ import {
   VisitNotFoundError,
   VisitOperationReusedError,
   VisitOutcomeInvalidForPurposeError,
+  VisitOutcomeCorrectionForbiddenError,
+  VisitOutcomeNotCorrectableError,
   VisitSchedulingConditionNotMetError,
   VisitStatusTransitionNotAllowedError,
   VisitVersionConflictError,
@@ -1332,6 +1335,46 @@ export class JobsController {
     );
   }
 
+  @Patch(':id/visits/:visitId/outcome')
+  @HttpCode(HttpStatus.OK)
+  @RequireAnyPermission(
+    JOB_PERMISSIONS.UPDATE,
+    VISIT_PERMISSIONS.UPDATE_ASSIGNED_STATUS,
+  )
+  @FieldScoped()
+  async correctVisitOutcome(
+    @Req() request: PermissionedRequest,
+    @Param('id') id: string,
+    @Param('visitId') visitId: string,
+    @Body() body: unknown,
+  ): Promise<JobDetailsDto> {
+    const authorization = authorizationOf(request);
+    if (!authorization.permissions.includes(VISIT_PERMISSIONS.RECORD_OUTCOME)) {
+      throw AuthApiError.forbidden();
+    }
+    const input = parseInput(() => parseCorrectVisitOutcomeDto(body));
+    if (
+      authorization.fieldScoped &&
+      (input.clientOperationId === null ||
+        input.capturedAt === null ||
+        input.expectedVersion === null)
+    ) {
+      throw AuthApiError.validationFailed(
+        'Scoped commands require an operation id, capture time and observed version where applicable.',
+      );
+    }
+    return this.action(authorization, () =>
+      this.jobs.correctVisitOutcome(
+        { organizationId: authorization.organizationId },
+        id,
+        visitId,
+        authorization.membershipId,
+        visitWriterOf(authorization),
+        input,
+      ),
+    );
+  }
+
   /**
    * Adds one text update to a Visit and returns the refreshed Job Activity timeline (`BR-027`).
    *
@@ -2289,6 +2332,19 @@ function mapActionError(error: unknown): unknown {
   }
   if (error instanceof VisitOutcomeInvalidForPurposeError) {
     return visitOutcomeInvalidForPurpose(error);
+  }
+  if (error instanceof VisitOutcomeCorrectionForbiddenError) {
+    return AuthApiError.forbidden();
+  }
+  if (error instanceof VisitOutcomeNotCorrectableError) {
+    return new HttpException(
+      {
+        statusCode: HttpStatus.CONFLICT,
+        code: 'VISIT_OUTCOME_NOT_CORRECTABLE',
+        message: 'This visit outcome can no longer be corrected.',
+      },
+      HttpStatus.CONFLICT,
+    );
   }
   if (error instanceof VisitSchedulingConditionNotMetError) {
     return visitSchedulingConditionNotMet(error);
