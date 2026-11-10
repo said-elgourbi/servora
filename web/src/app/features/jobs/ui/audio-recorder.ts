@@ -30,8 +30,8 @@ const maxDurationMs = 299_000;
     button { min-height: 36px; max-width: 100%; }
     audio { width: min(320px, 100%); height: 40px; }
     app-icon { width: 15px; height: 15px; margin-right: 6px; }
-    .error { flex-basis: 100%; margin: 0; color: #a62828; font-size: 12px; }
-    .recording-indicator { display:inline-flex; align-items:center; gap:8px; color:#b42318; font-size:13px; font-weight:600; }
+    .error { flex-basis: 100%; margin: 0; color: var(--app-danger-text); font-size: 12px; }
+    .recording-indicator { display:inline-flex; align-items:center; gap:8px; color:var(--app-danger-text); font-size:13px; font-weight:600; }
     .pulse { width:11px; height:11px; border-radius:50%; background:#dc2626; animation: pulse 1s ease-in-out infinite; }
     @keyframes pulse { 50% { opacity:.25; box-shadow:0 0 0 5px rgb(220 38 38 / 18%); } }
     @media (prefers-reduced-motion: reduce) { .pulse { animation:none; } }

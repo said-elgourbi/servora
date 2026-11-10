@@ -16,7 +16,7 @@ import { WorkLabel } from './work-label';
       display: inline-flex;
       align-items: center;
       gap: 7px;
-      border-radius: 6px;
+      border-radius:6px;
       padding: 5px 9px;
       font-size: 12px;
       line-height: 1.3;
@@ -32,7 +32,7 @@ import { WorkLabel } from './work-label';
     i {
       width: 6px;
       height: 6px;
-      border-radius: 50%;
+      border-radius:50%;
       background: currentColor;
       flex-shrink: 0;
     }

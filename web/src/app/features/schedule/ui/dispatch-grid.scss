@@ -5,8 +5,8 @@
 .board-scroll {
   overflow: auto;
   max-height: min(72dvh, 820px);
-  border: 1px solid var(--mat-sys-outline-variant);
-  border-radius: 10px;
+  border:1px solid var(--mat-sys-outline-variant);
+  border-radius:10px;
   background: var(--mat-sys-surface);
 }
 .board {
@@ -22,7 +22,7 @@
   top: 0;
   z-index: 4;
   background: var(--mat-sys-surface);
-  border-bottom: 1px solid var(--mat-sys-outline);
+  border-bottom:1px solid var(--mat-sys-outline);
   padding: 12px;
   min-height: 66px;
 }
@@ -38,7 +38,7 @@
   display: flex;
   gap: 9px;
   align-items: center;
-  border-left: 1px solid var(--mat-sys-outline-variant);
+  border-left:1px solid var(--mat-sys-outline-variant);
   font-size: 12px;
 }
 .column-heading small {
@@ -52,7 +52,7 @@
   height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
+  border-radius:50%;
   background: var(--mat-sys-secondary-container);
   color: var(--mat-sys-on-secondary-container);
   flex-shrink: 0;
@@ -73,12 +73,12 @@
 }
 .technician-column {
   position: relative;
-  border-left: 1px solid var(--mat-sys-outline-variant);
+  border-left:1px solid var(--mat-sys-outline-variant);
 }
 .hour-line {
   position: absolute;
   width: 100%;
-  border-top: 1px solid var(--mat-sys-outline-variant);
+  border-top:1px solid var(--mat-sys-outline-variant);
 }
 .appointment {
   position: absolute;
@@ -87,9 +87,9 @@
   flex-direction: column;
   gap: 2px;
   padding: 5px 7px;
-  border: 2px solid var(--mat-sys-surface);
-  border-left: 3px solid var(--mat-sys-primary);
-  border-radius: 6px;
+  border:2px solid var(--mat-sys-surface);
+  border-left:3px solid var(--mat-sys-primary);
+  border-radius:6px;
   background: color-mix(in srgb, var(--mat-sys-primary-container) 55%, var(--mat-sys-surface));
   color: var(--mat-sys-on-surface);
   text-decoration: none;
@@ -104,16 +104,16 @@
   filter: brightness(0.98);
 }
 .assessment {
-  border-left-color: var(--mat-sys-tertiary);
+  border-left-color:var(--mat-sys-tertiary);
   background: var(--mat-sys-tertiary-container);
   color: var(--mat-sys-on-tertiary-container);
 }
 .completed {
-  border-left-color: var(--app-on-success-container);
+  border-left-color:var(--app-on-success-container);
   background: color-mix(in srgb, var(--app-success-container) 50%, var(--mat-sys-surface));
 }
 .overlap {
-  border-inline-end: 3px solid var(--mat-sys-error);
+  border-inline-end:3px solid var(--mat-sys-error);
 }
 h2 {
   margin: 0;

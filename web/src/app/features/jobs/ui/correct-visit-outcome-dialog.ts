@@ -46,12 +46,12 @@ export interface CorrectVisitOutcomeDialogData {
   `,
   styles: [`
     mat-dialog-content { display:grid; gap:9px; min-width:min(460px,76vw); padding-top:8px; }
-    .intro { margin:0 0 4px; color:#526782; line-height:1.45; }
+    .intro { margin:0 0 4px; color:var(--mat-sys-on-surface-variant); line-height:1.45; }
     label { font-size:13px; font-weight:600; }
-    select, textarea { box-sizing:border-box; width:100%; padding:11px 12px; border:1px solid #cbd8e8; border-radius:7px; background:white; color:#15234d; font:inherit; }
+    select, textarea { box-sizing:border-box; width:100%; padding:11px 12px; border:1px solid var(--mat-sys-outline); border-radius:7px; background:var(--mat-sys-surface); color:var(--mat-sys-on-surface); font:inherit; }
     textarea { resize:vertical; }
-    .error { color:#a62828; font-size:13px; }
-    .primary { background:#3825ed; color:white; }
+    .error { color:var(--app-danger-text); font-size:13px; }
+    .primary { background:var(--mat-sys-primary); color:var(--mat-sys-on-primary); }
     app-icon { width:16px; height:16px; margin-right:7px; }
     @media(max-width:600px) { mat-dialog-content { min-width:0; } }
   `],

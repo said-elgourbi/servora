@@ -45,14 +45,14 @@ export interface VisitUpdateDialogData { jobId: string; visitId: string; visitSe
   styles: [`
     mat-dialog-content { display:grid; gap:14px; width:100%; min-width:0; box-sizing:border-box; padding-top:8px; }
     mat-dialog-actions { flex-wrap:wrap; gap:8px; }
-    textarea { box-sizing:border-box; width:100%; min-height:112px; resize:vertical; padding:12px; border:1px solid #d2deeb; border-radius:7px; font:inherit; }
-    textarea:focus { border-color:#1767ef; outline:0; box-shadow:inset 0 0 0 1px #1767ef; }
+    textarea { box-sizing:border-box; width:100%; min-height:112px; resize:vertical; padding:12px; border:1px solid var(--mat-sys-outline); border-radius:7px; font:inherit; }
+    textarea:focus { border-color:var(--mat-sys-primary); outline:0; box-shadow:inset 0 0 0 1px #1767ef; }
     .attachment-actions { display:flex; flex-wrap:wrap; gap:8px; }
     .attachment-actions button { min-height:38px; max-width:190px; overflow:hidden; text-overflow:ellipsis; }
     .attachment-actions app-icon { width:16px; height:16px; margin-right:6px; }
     input[type=file] { display:none; }
-    .error { color:#a62828; font-size:13px; }
-    .primary { background:#0862e9; color:white; }
+    .error { color:var(--app-danger-text); font-size:13px; }
+    .primary { background:var(--mat-sys-primary); color:var(--mat-sys-on-primary); }
     @media(max-width:600px) { mat-dialog-content { min-width:0; } .attachment-actions { display:grid; grid-template-columns:1fr; } }
   `],
 })

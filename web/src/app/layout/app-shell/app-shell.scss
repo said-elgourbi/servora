@@ -5,8 +5,8 @@
 }
 aside {
   padding: 30px 18px;
-  border-right: 1px solid #0a1a30;
-  background: linear-gradient(180deg, #142b49 0%, #0d2039 100%);
+  border-right:1px solid #0a1a30;
+  background: var(--app-nav-bg);
   color: #f4f7fc;
 }
 .wordmark {
@@ -32,7 +32,7 @@ aside {
   font-size: 25px;
   font-style: italic;
   font-weight: 800;
-  border-radius: 9px;
+  border-radius:9px;
   letter-spacing: -0.09em;
   padding-right: 3px;
 }
@@ -44,9 +44,9 @@ nav a {
   align-items: center;
   gap: 11px;
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius:8px;
   text-decoration: none;
-  color: #e3ebf7;
+  color: var(--app-nav-text);
   font-size: 13px;
   font-weight: 650;
 }
@@ -70,7 +70,7 @@ header {
   gap: 18px;
   min-height: 76px;
   padding: 14px 36px;
-  border-bottom: 1px solid var(--mat-sys-outline-variant);
+  border-bottom:1px solid var(--mat-sys-outline-variant);
   background: var(--mat-sys-surface);
 }
 .header-context {
@@ -102,12 +102,12 @@ header {
   font-size: 12px;
   font-weight: 550;
   padding-left: 18px;
-  border-left: 1px solid var(--mat-sys-outline-variant);
+  border-left:1px solid var(--mat-sys-outline-variant);
 }
 .account-avatar {
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius:50%;
   display: inline-flex;
   justify-content: center;
   align-items: center;
@@ -119,7 +119,7 @@ header {
 .mobile-brand {
   display: none;
 }
-.mobile-brand.wordmark { color: #14213d; }
+.mobile-brand.wordmark { color: var(--mat-sys-on-surface); }
 main {
   padding: 34px 38px 48px;
   max-width: 1440px;
@@ -167,8 +167,8 @@ main {
     z-index: 20;
     width: min(320px, calc(100vw - 32px));
     padding: 14px;
-    border: 1px solid var(--mat-sys-outline-variant);
-    border-radius: 10px;
+    border:1px solid var(--mat-sys-outline-variant);
+    border-radius:10px;
     background: var(--mat-sys-surface);
     box-shadow: 0 10px 28px rgb(20 38 64 / 18%);
   }

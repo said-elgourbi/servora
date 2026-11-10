@@ -24,7 +24,7 @@
   gap: 10px 20px;
   padding-top: 14px;
   margin-bottom: 18px;
-  border-top: 1px solid var(--mat-sys-outline-variant);
+  border-top:1px solid var(--mat-sys-outline-variant);
 }
 .status-toolbar .actions {
   justify-content: flex-start;
@@ -55,8 +55,8 @@
 }
 .panel {
   background: var(--mat-sys-surface);
-  border: 1px solid var(--mat-sys-outline-variant);
-  border-radius: 14px;
+  border:1px solid var(--mat-sys-outline-variant);
+  border-radius:14px;
   padding: 16px;
   overflow-wrap: anywhere;
 }
@@ -67,7 +67,7 @@
   gap: 8px 16px;
   padding: 12px 16px;
   margin-bottom: 16px;
-  border-radius: 8px;
+  border-radius:8px;
   background: var(--mat-sys-tertiary-container);
   color: var(--mat-sys-on-tertiary-container);
   font-size: 13px;
@@ -128,10 +128,10 @@ h2 {
 .date-heading::after {
   content: '';
   flex: 1;
-  border-top: 1px solid var(--mat-sys-outline-variant);
+  border-top:1px solid var(--mat-sys-outline-variant);
 }
 .system-group {
-  border-left: 2px solid var(--mat-sys-outline-variant);
+  border-left:2px solid var(--mat-sys-outline-variant);
   margin: 4px 0 8px;
   padding-left: 10px;
 }

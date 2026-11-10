@@ -33,14 +33,14 @@ app-job-details .attention-copy {
 }
 app-job-details .attention-banner span {
   display: block;
-  color: #673e12;
+  color: var(--app-warning-text);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 app-job-details .composer-actions > .primary-button:disabled {
-  background: #e2e8f0 !important;
-  color: #66758a !important;
+  background: var(--mat-sys-surface-container) !important;
+  color: var(--mat-sys-on-surface-variant) !important;
   box-shadow: none !important;
   cursor: not-allowed;
 }
@@ -106,6 +106,31 @@ app-job-details .composer-actions > .primary-button:disabled {
 .skip-link:focus {
   top: 1rem;
 }
+html[data-theme='dark'] app-job-details .timeline-tabs button span {
+  background: var(--app-primary-soft) !important;
+  color: var(--mat-sys-on-primary-container) !important;
+}
+html[data-theme='dark'] app-job-details .timeline-rail::after {
+  background: var(--mat-sys-outline);
+}
+html[data-theme='dark'] app-job-details .timeline-visit-card::after {
+  border-color: var(--mat-sys-surface);
+}
+html[data-theme='dark'] app-job-details .map-art {
+  background-color: var(--mat-sys-surface-container);
+  background-image:
+    linear-gradient(31deg, transparent 45%, var(--mat-sys-surface-container-high) 46%, var(--mat-sys-surface-container-high) 49%, transparent 50%),
+    linear-gradient(145deg, transparent 42%, var(--mat-sys-surface-container-high) 43%, var(--mat-sys-surface-container-high) 46%, transparent 47%),
+    linear-gradient(90deg, var(--app-success-bg) 0 20%, transparent 20% 70%, var(--app-success-bg) 70%);
+}
+html[data-theme='dark'] app-job-details .map-block {
+  background: var(--mat-sys-surface-container-low);
+  border-color: var(--mat-sys-outline-variant);
+}
+html[data-theme='dark'] app-job-details .map-street {
+  background: var(--mat-sys-surface-container-highest);
+  border-color: var(--mat-sys-outline);
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -124,10 +149,10 @@ html {
 button[mat-stroked-button] {
   background: var(--mat-sys-surface);
 }
-.job-update-destination-label { display:block; margin-bottom:5px; color:#526782; font-size:12px; font-weight:650 }
-.job-update-destination { box-sizing:border-box; width:min(100%,360px); min-height:38px; margin-bottom:10px; padding:7px 10px; border:1px solid #d2deeb; border-radius:7px; color:#142b4d; background:#fff; font:inherit; font-size:13px }
-.evidence-phase-control { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px; color:#526782; font-size:12px }
-.evidence-phase-control select { min-height:34px; padding:5px 9px; border:1px solid #d2deeb; border-radius:6px; color:#142b4d; background:#fff }
+.job-update-destination-label { display:block; margin-bottom:5px; color:var(--mat-sys-on-surface-variant); font-size:12px; font-weight:650 }
+.job-update-destination { box-sizing:border-box; width:min(100%,360px); min-height:38px; margin-bottom:10px; padding:7px 10px; border:1px solid var(--mat-sys-outline); border-radius:7px; color:var(--mat-sys-on-surface); background:var(--mat-sys-surface); font:inherit; font-size:13px }
+.evidence-phase-control { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px; color:var(--mat-sys-on-surface-variant); font-size:12px }
+.evidence-phase-control select { min-height:34px; padding:5px 9px; border:1px solid var(--mat-sys-outline); border-radius:6px; color:var(--mat-sys-on-surface); background:var(--mat-sys-surface) }
 @media (max-width:580px) { .attachments app-audio-recorder { min-width:0; width:100% } .attachments app-audio-recorder button { box-sizing:border-box; width:100%; max-width:100%; min-width:0; padding-inline:4px; font-size:11px } }
 
 

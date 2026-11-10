@@ -3,6 +3,69 @@
 // Source: docs/design/android-design-system.md. Overrides retain the shared role pairs.
 html {
   color-scheme: light;
+  --app-page-bg: #f1f3f8;
+  --app-surface: #ffffff;
+  --app-surface-soft: #f7f8fa;
+  --app-surface-muted: #eef0f5;
+  --app-text-strong: #131720;
+  --app-text-muted: #52617a;
+  --app-border: #e4e7ec;
+  --app-input-bg: #ffffff;
+  --app-primary: #2b5ea7;
+  --app-primary-contrast: #ffffff;
+  --app-primary-soft: #e4eefb;
+  --app-link: #245b9f;
+  --app-warning-bg: #fff5df;
+  --app-warning-border: #ffd186;
+  --app-warning-text: #8a4a08;
+  --app-success-bg: #e7f5eb;
+  --app-success-text: #176b35;
+  --app-success-border: #a9d7b4;
+  --app-danger-bg: #ffebeb;
+  --app-danger-text: #a62828;
+  --app-danger-border: #e5b9bc;
+  --app-info-bg: #e8f1ff;
+  --app-info-text: #174ea6;
+  --app-nav-bg: linear-gradient(180deg, #142b49 0%, #0d2039 100%);
+  --app-nav-text: #e3ebf7;
+  --fg: var(--mat-sys-on-surface);
+  --muted: var(--mat-sys-on-surface-variant);
+  --surface: var(--mat-sys-surface);
+  --surface-soft: var(--mat-sys-surface-container-low);
+  --surface-muted: var(--mat-sys-surface-container);
+  --line: var(--mat-sys-outline-variant);
+  --line-strong: var(--mat-sys-outline);
+  --primary: var(--mat-sys-primary);
+  --on-primary: var(--mat-sys-on-primary);
+  --primary-soft: var(--app-primary-soft);
+  --on-primary-soft: var(--mat-sys-on-primary-container);
+  --warning: var(--app-warning-bg);
+  --warning-text: var(--app-warning-text);
+  --warning-line: var(--app-warning-border);
+  --success: var(--app-success-bg);
+  --success-text: var(--app-success-text);
+  --danger: var(--app-danger-bg);
+  --danger-text: var(--app-danger-text);
+  --danger-line: var(--app-danger-border);
+  --sf: var(--surface);
+  --sf2: var(--surface-soft);
+  --sf3: var(--surface-muted);
+  --ln: var(--line-strong);
+  --p: var(--primary);
+  --op: var(--on-primary);
+  --ps: var(--primary-soft);
+  --ops: var(--on-primary-soft);
+  --w: var(--warning);
+  --wt: var(--warning-text);
+  --wl: var(--warning-line);
+  --s: var(--success);
+  --st: var(--success-text);
+  --d: var(--danger);
+  --dt: var(--danger-text);
+  --dl: var(--danger-line);
+  --m: var(--muted);
+  --l: var(--line);
+  --sl: var(--app-success-border);
   --app-success-container: #b7f0b1;
   --app-on-success-container: #002204;
   --app-warning-container: #fef3c7;
@@ -52,6 +115,31 @@ html {
 }
 html[data-theme='dark'] {
   color-scheme: dark;
+  --app-page-bg: #111827;
+  --app-surface: #1b2432;
+  --app-surface-soft: #202b3b;
+  --app-surface-muted: #263447;
+  --app-text-strong: #edf2fa;
+  --app-text-muted: #b2bfd1;
+  --app-border: #3a485c;
+  --app-input-bg: #151e2b;
+  --app-primary: #93baff;
+  --app-primary-contrast: #09203e;
+  --app-primary-soft: #293e5a;
+  --app-link: #a4c7ff;
+  --app-warning-bg: #3b2d18;
+  --app-warning-border: #88652c;
+  --app-warning-text: #ffd28a;
+  --app-success-bg: #183526;
+  --app-success-text: #a8e5b8;
+  --app-success-border: #39734e;
+  --app-danger-bg: #3b2228;
+  --app-danger-text: #ffb4ab;
+  --app-danger-border: #8f5054;
+  --app-info-bg: #243b5b;
+  --app-info-text: #b8d3ff;
+  --app-nav-bg: linear-gradient(180deg, #10243d 0%, #0d1d32 100%);
+  --app-nav-text: #e3ebf7;
   --app-success-container: #1a4a2a;
   --app-on-success-container: #b7f0b1;
   --app-warning-container: #5c3c0b;
@@ -66,30 +154,30 @@ html[data-theme='dark'] {
   );
   @include mat.theme-overrides(
     (
-      primary: #6b9bd9,
-      on-primary: #001b3d,
-      primary-container: #1e3a5f,
-      on-primary-container: #c5d9f5,
-      secondary: #1a1a1a,
+      primary: #93baff,
+      on-primary: #09203e,
+      primary-container: #293e5a,
+      on-primary-container: #d9e7ff,
+      secondary: #263447,
       on-secondary: #b8c4d8,
-      secondary-container: #2a2a2a,
-      on-secondary-container: #d0dae8,
-      tertiary: #8fafc8,
-      on-tertiary: #001525,
-      tertiary-container: #1e3044,
-      on-tertiary-container: #b8cce4,
-      background: #000000,
-      on-background: #e8eaf0,
-      surface: #0a0a0a,
-      on-surface: #e8eaf0,
-      surface-container-lowest: #050505,
-      surface-container-low: #0f0f0f,
-      surface-container: #141414,
-      surface-container-high: #1a1a1a,
-      surface-container-highest: #212121,
-      on-surface-variant: #a8b4cc,
-      outline: #3a3a3a,
-      outline-variant: #2a2a2a,
+      secondary-container: #34445a,
+      on-secondary-container: #d8e2f0,
+      tertiary: #b5c9df,
+      on-tertiary: #132538,
+      tertiary-container: #30445a,
+      on-tertiary-container: #d1e2f4,
+      background: #111827,
+      on-background: #edf2fa,
+      surface: #1b2432,
+      on-surface: #edf2fa,
+      surface-container-lowest: #151e2b,
+      surface-container-low: #202b3b,
+      surface-container: #263447,
+      surface-container-high: #2c3a4f,
+      surface-container-highest: #34445a,
+      on-surface-variant: #b2bfd1,
+      outline: #53637b,
+      outline-variant: #3a485c,
       error: #ff6b6b,
       on-error: #3d0000,
       error-container: #5c1a1a,

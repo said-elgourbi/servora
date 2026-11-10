@@ -31,7 +31,7 @@
   place-items: center;
   width: 96px;
   height: 96px;
-  border-radius: 24px;
+  border-radius:24px;
   background: var(--mat-sys-primary-container);
   color: var(--mat-sys-on-primary-container);
   font-weight: 750;
@@ -48,8 +48,8 @@
   width: 100%;
   max-width: 480px;
   padding: clamp(1.25rem, 3vw, 2.5rem);
-  border: 1px solid var(--mat-sys-outline-variant);
-  border-radius: 20px;
+  border:1px solid var(--mat-sys-outline-variant);
+  border-radius:20px;
   background: var(--mat-sys-surface);
 }
 .eyebrow {
@@ -70,14 +70,14 @@ h1 {
 .methods {
   display: flex;
   padding: 4px;
-  border-radius: 10px;
+  border-radius:10px;
   background: var(--mat-sys-surface-container);
   margin-bottom: 1.75rem;
 }
 .methods button {
   flex: 1;
-  border: 0;
-  border-radius: 8px;
+  border:0;
+  border-radius:8px;
   padding: 0.75rem;
   background: transparent;
   color: var(--mat-sys-on-surface-variant);
@@ -117,7 +117,7 @@ form > button {
 .dev-sign-in {
   margin-top: 1.5rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--mat-sys-outline-variant);
+  border-top:1px solid var(--mat-sys-outline-variant);
 }
 .dev-sign-in > p {
   margin: 0 0 0.75rem;
@@ -148,7 +148,7 @@ form > button {
 }
 @media (max-width: 400px) {
   .auth-card {
-    border: 0;
+    border:0;
     padding: 1rem 0;
     background: transparent;
   }

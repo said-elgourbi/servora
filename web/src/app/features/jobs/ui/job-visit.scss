@@ -22,7 +22,7 @@
   flex-shrink: 0;
   background: var(--mat-sys-primary-container);
   color: var(--mat-sys-on-primary-container);
-  border-radius: 50%;
+  border-radius:50%;
   font-size: 10px;
   font-weight: 650;
 }
@@ -35,12 +35,12 @@ h3 {
 }
 .visit {
   position: relative;
-  border: 1px solid var(--mat-sys-outline-variant);
-  border-radius: 10px;
+  border:1px solid var(--mat-sys-outline-variant);
+  border-radius:10px;
   overflow: hidden;
 }
 .visit.selected {
-  border-color: color-mix(in srgb, var(--mat-sys-primary) 50%, var(--mat-sys-outline-variant));
+  border-color:color-mix(in srgb, var(--mat-sys-primary) 50%, var(--mat-sys-outline-variant));
 }
 .visit-header {
   display: flex;
@@ -61,7 +61,7 @@ h3 {
   font-weight: 500;
   color: var(--mat-sys-on-surface-variant);
   padding-left: 12px;
-  border-left: 1px solid var(--mat-sys-outline-variant);
+  border-left:1px solid var(--mat-sys-outline-variant);
 }
 .visit-facts {
   display: grid;
@@ -107,7 +107,7 @@ h3 {
   font-weight: 600;
   color: var(--mat-sys-primary);
   background: color-mix(in srgb, var(--mat-sys-primary) 5%, var(--mat-sys-surface));
-  border-top: 1px solid color-mix(in srgb, var(--mat-sys-primary) 15%, var(--mat-sys-surface));
+  border-top:1px solid color-mix(in srgb, var(--mat-sys-primary) 15%, var(--mat-sys-surface));
 }
 .selected-label app-icon {
   width: 14px;

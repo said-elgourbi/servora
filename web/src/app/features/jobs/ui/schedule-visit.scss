@@ -39,8 +39,8 @@ mat-form-field {
   width: 100%;
   min-height: 56px;
   padding: 0 14px;
-  border: 1px solid var(--mat-sys-outline);
-  border-radius: 4px;
+  border:1px solid var(--mat-sys-outline);
+  border-radius:4px;
   background: var(--mat-sys-surface);
   color: var(--mat-sys-on-surface);
   font: inherit;
@@ -58,15 +58,15 @@ mat-form-field {
   color: var(--mat-sys-primary);
 }
 .time-input:focus-visible {
-  border-color: var(--mat-sys-primary);
+  border-color:var(--mat-sys-primary);
   outline: 2px solid var(--mat-sys-primary);
   outline-offset: 1px;
 }
-.time-input[aria-invalid='true'] { border-color: var(--mat-sys-error); }
+.time-input[aria-invalid='true'] { border-color:var(--mat-sys-error); }
 .time-error { margin: -4px 0 0; color: var(--mat-sys-error); font-size: 12px; }
 .conflicts {
   padding: 12px;
-  border-radius: 8px;
+  border-radius:8px;
   background: var(--mat-sys-tertiary-container);
   color: var(--mat-sys-on-tertiary-container);
 }
