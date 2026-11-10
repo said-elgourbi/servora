@@ -347,18 +347,13 @@ fieldset {
 .report-no-job { color:var(--mat-sys-on-surface-variant); }
 .report-empty-row td { padding:26px 12px; color:var(--mat-sys-on-surface-variant); text-align:center; }
 .report-table-actions { display:flex; justify-content:flex-end; margin-top:12px; }
-.report-pending > header { align-items:center; }
-.report-pending h2 { margin:0; font-size:17px; }
-.report-pending-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 16px; padding:12px 0; border-top:1px solid var(--mat-sys-outline-variant); }
-.report-pending-row p { margin:0; }
-.report-pending-row p:nth-child(2) { color:var(--mat-sys-on-surface-variant); }
 .report-dialog { width:min(760px,calc(100vw - 32px)); max-width:none; max-height:min(90dvh,880px); overflow:auto; padding:0; border:1px solid var(--mat-sys-outline-variant); border-radius:16px; background:var(--mat-sys-surface); color:var(--mat-sys-on-surface); box-shadow:0 18px 60px rgb(14 33 57 / 28%); }
 .report-dialog::backdrop { background:rgb(12 28 49 / 56%); backdrop-filter:blur(2px); }
 .report-dialog-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 20px 0; }
 .report-dialog-header h2 { margin:0; font-size:21px; }
 .report-dialog-close { flex:0 0 auto; min-width:44px; padding:6px; font-size:24px; line-height:1; }
 .report-form { padding:16px 20px 20px; }
-@media (max-width:700px) {
+@media (max-width:900px) {
   .report-table-wrap { overflow:visible; }
   .report-table-wrap table,.report-table-wrap tbody { display:block; }
   .report-table-wrap thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
@@ -379,5 +374,4 @@ fieldset {
   .report-new-button { width:100%; }
   .report-dialog-header { padding:14px 14px 0; }
   .report-form { padding:14px; }
-  .report-pending-row { grid-template-columns:1fr; }
 }
