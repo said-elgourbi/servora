@@ -416,6 +416,11 @@
     <string name="ad_hoc_report_status_linked">Lié à un travail</string>
     <string name="ad_hoc_report_status_converted">Travail créé</string>
     <string name="ad_hoc_report_status_rejected">Rejeté</string>
+    <string name="ad_hoc_report_office_update_label">Mise à jour du bureau</string>
+    <string name="ad_hoc_report_status_pending_detail">Le bureau n’a pas encore examiné ce rapport.</string>
+    <string name="ad_hoc_report_status_linked_detail">Le bureau a lié ce rapport à un travail existant.</string>
+    <string name="ad_hoc_report_status_converted_detail">Le bureau a créé un nouveau travail à partir de ce rapport.</string>
+    <string name="ad_hoc_report_status_rejected_detail">Le bureau a rejeté ce rapport.</string>
     <string name="ad_hoc_report_location_label">Emplacement</string>
     <string name="ad_hoc_report_known_job_label">Travail lié</string>
     <string name="ad_hoc_report_known_job_value">Travail n° %1$d · %2$s</string>

@@ -60,6 +60,7 @@ import com.servora.android.domain.model.AdHocReportCustomerOption
 import com.servora.android.domain.model.AdHocReportJobOption
 import com.servora.android.domain.model.AdHocReportPropertyOption
 import com.servora.android.domain.model.AdHocWorkReport
+import com.servora.android.domain.model.AdHocWorkReportStatus
 import com.servora.android.domain.model.FollowUpVisitRequest
 import com.servora.android.domain.model.ScheduleVisit
 import com.servora.android.domain.model.VisitOutcome
@@ -160,6 +161,8 @@ const val TechnicianAdHocReportsRetryTag = "technician-ad-hoc-reports-retry"
 const val TechnicianAdHocReportsEmptyTag = "technician-ad-hoc-reports-empty"
 const val TechnicianAdHocReportsUnrefreshedTag = "technician-ad-hoc-reports-unrefreshed"
 fun technicianAdHocReportTag(reportId: String): String = "technician-ad-hoc-report-$reportId"
+fun technicianAdHocReportOpenJobTag(reportId: String): String =
+    "technician-ad-hoc-report-open-job-$reportId"
 
 /*
  * The views' own metrics. The tab row follows the office schedule's lane selector — a 32 dp pill the
@@ -323,6 +326,7 @@ fun TechnicianScheduleScreen(
                     locale = locale,
                     zone = zone,
                     onRetry = onRetry,
+                    onOpenJob = onOpenJob,
                 )
             }
         }
@@ -1166,6 +1170,7 @@ private fun TechnicianAdHocReports(
     locale: Locale,
     zone: ZoneId,
     onRetry: () -> Unit,
+    onOpenJob: (String, String?) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag(TechnicianAdHocReportsSectionTag),
@@ -1194,7 +1199,12 @@ private fun TechnicianAdHocReports(
                     item(key = "empty") { TechnicianAdHocReportsEmpty() }
                 } else {
                     items(items = state.adHocReports, key = { it.id }) { report ->
-                        TechnicianAdHocReportCard(report = report, locale = locale, zone = zone)
+                        TechnicianAdHocReportCard(
+                            report = report,
+                            locale = locale,
+                            zone = zone,
+                            onOpenJob = onOpenJob,
+                        )
                     }
                 }
             }
@@ -1295,11 +1305,19 @@ private fun TechnicianAdHocReportCard(
     report: AdHocWorkReport,
     locale: Locale,
     zone: ZoneId,
+    onOpenJob: (String, String?) -> Unit,
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag(technicianAdHocReportTag(report.id)),
+            .testTag(technicianAdHocReportTag(report.id))
+            .then(
+                report.createdJobId?.let { jobId ->
+                    Modifier.clickable(onClickLabel = stringResource(R.string.ad_hoc_report_open_job)) {
+                        onOpenJob(jobId, null)
+                    }
+                } ?: Modifier,
+            ),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shape = MaterialTheme.shapes.large,
@@ -1317,12 +1335,34 @@ private fun TechnicianAdHocReportCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = stringResource(adHocWorkReportStatusLabel(report.status)),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            AdHocReportOfficeUpdate(report)
+            report.createdJobId?.let { jobId ->
+                Button(
+                    onClick = { onOpenJob(jobId, null) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(technicianAdHocReportOpenJobTag(report.id)),
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.ad_hoc_report_open_job))
+                        val jobLabel = buildString {
+                            report.createdJobNumber?.let { append("#$it") }
+                            report.createdJobTitle?.takeIf { it.isNotBlank() }?.let {
+                                if (isNotEmpty()) append(" · ")
+                                append(it)
+                            }
+                        }
+                        if (jobLabel.isNotBlank()) {
+                            Text(
+                                text = jobLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
             report.propertyAddress?.let { address ->
                 formattedAddressLine(
                     addressLine1 = address.addressLine1,
@@ -1372,6 +1412,48 @@ private fun TechnicianAdHocReportCard(
             }
         }
     }
+}
+
+@Composable
+private fun AdHocReportOfficeUpdate(report: AdHocWorkReport) {
+    val colors = MaterialTheme.colorScheme
+    val (containerColor, contentColor) = when (report.status) {
+        AdHocWorkReportStatus.PENDING -> colors.surfaceVariant to colors.onSurfaceVariant
+        AdHocWorkReportStatus.LINKED,
+        AdHocWorkReportStatus.CONVERTED -> colors.secondaryContainer to colors.onSecondaryContainer
+        AdHocWorkReportStatus.REJECTED -> colors.errorContainer to colors.onErrorContainer
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(TechnicianLineSpacing)) {
+        Text(
+            text = stringResource(R.string.ad_hoc_report_office_update_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+        )
+        Surface(
+            shape = CircleShape,
+            color = containerColor,
+        ) {
+            Text(
+                text = stringResource(adHocWorkReportStatusLabel(report.status)),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor,
+            )
+        }
+        Text(
+            text = stringResource(adHocWorkReportStatusDetail(report.status)),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+    }
+}
+
+private fun adHocWorkReportStatusDetail(status: AdHocWorkReportStatus): Int = when (status) {
+    AdHocWorkReportStatus.PENDING -> R.string.ad_hoc_report_status_pending_detail
+    AdHocWorkReportStatus.LINKED -> R.string.ad_hoc_report_status_linked_detail
+    AdHocWorkReportStatus.CONVERTED -> R.string.ad_hoc_report_status_converted_detail
+    AdHocWorkReportStatus.REJECTED -> R.string.ad_hoc_report_status_rejected_detail
 }
 
 /**

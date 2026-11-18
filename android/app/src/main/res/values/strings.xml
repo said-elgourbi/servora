@@ -1363,6 +1363,11 @@
     <string name="ad_hoc_report_status_linked">Linked to a job</string>
     <string name="ad_hoc_report_status_converted">Created a job</string>
     <string name="ad_hoc_report_status_rejected">Rejected</string>
+    <string name="ad_hoc_report_office_update_label">Office update</string>
+    <string name="ad_hoc_report_status_pending_detail">The office has not reviewed this report yet.</string>
+    <string name="ad_hoc_report_status_linked_detail">The office linked this report to existing work.</string>
+    <string name="ad_hoc_report_status_converted_detail">The office created a new job from this report.</string>
+    <string name="ad_hoc_report_status_rejected_detail">The office rejected this report.</string>
     <string name="ad_hoc_report_location_label">Location</string>
     <string name="ad_hoc_report_known_job_label">Related work</string>
     <string name="ad_hoc_report_known_job_value">Job #%1$d · %2$s</string>
