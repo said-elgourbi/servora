@@ -66,7 +66,7 @@ Demo data — a realistic book of business, not a tagged fixture:
   each with a billing address, company contacts (`BR-095`), service Properties and the active
   Property ↔ Customer relationship rows.
 - 400 Jobs numbered from `1001`, spread across every Job status.
-- Visits across every Visit status, distributed from the previous week through the next five weeks and assigned to ten technicians, with exactly one `LEAD` (`BR-068`),
+- Visits across every Visit status, with completed work in the past and every open appointment from tomorrow through the next six weeks, assigned to ten technicians, with exactly one `LEAD` (`BR-068`),
   plus the assignment history `BR-069` describes, Visit status history, outcomes, notes and
   cancellation reasons.
 - The dataset is **anchored to the moment the seed runs**: a Visit that has already happened is
