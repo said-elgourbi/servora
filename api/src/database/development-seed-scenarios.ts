@@ -764,11 +764,11 @@ function buildExpandedSeedCustomers(): readonly SeedCustomerPlan[] {
     const [title, typeCode, description] = services[jobIndex % services.length]!;
     const visitIndex = scheduledIndex++;
     const technicianKeys = SEED_TECHNICIAN_MEMBER_TEMPLATES.slice(4).map((member) => member.key);
-    const dayOffset = -7 + Math.floor(visitIndex / 7);
+    // Keep every generated appointment that is still open in the future. A seed
+    // that is rerun months later should still give the office a usable schedule.
+    const dayOffset = 1 + Math.floor(visitIndex / 7);
     const hour = 8 + (visitIndex % 8);
-    const schedule = dayOffset < 0
-      ? { kind: 'DAYS_AGO' as const, days: -dayOffset, hour, durationHours: 1 }
-      : { kind: 'IN_DAYS' as const, days: dayOffset + 1, hour, durationHours: 1 };
+    const schedule = { kind: 'IN_DAYS' as const, days: dayOffset, hour, durationHours: 1 };
     const crew = [technicianKeys[visitIndex % technicianKeys.length]!];
     let visit: SeedVisitPlan;
     if (jobStatus === 'NEW') {
