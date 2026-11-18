@@ -314,13 +314,13 @@ class TechnicianScheduleViewModel @Inject constructor(
         readAdHocReportJobs(customer.id)
     }
 
-    fun selectAdHocReportProperty(property: AdHocReportPropertyOption) {
+    fun selectAdHocReportProperty(property: AdHocReportPropertyOption?) {
         _uiState.update {
             it.copy(adHocReportForm = it.adHocReportForm.copy(selectedProperty = property))
         }
     }
 
-    fun selectAdHocReportJob(job: AdHocReportJobOption) {
+    fun selectAdHocReportJob(job: AdHocReportJobOption?) {
         _uiState.update {
             it.copy(adHocReportForm = it.adHocReportForm.copy(selectedJob = job))
         }

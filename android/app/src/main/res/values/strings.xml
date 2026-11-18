@@ -1327,6 +1327,7 @@
     <string name="technician_ad_hoc_report_title">Report ad-hoc work</string>
     <string name="technician_ad_hoc_report_customer">Customer</string>
     <string name="technician_ad_hoc_report_property">Property, if known</string>
+    <string name="technician_ad_hoc_report_clear_selection">Clear</string>
     <string name="technician_ad_hoc_report_known_work">Known work record, if any</string>
     <string name="technician_ad_hoc_report_started">Started at</string>
     <string name="technician_ad_hoc_report_ended">Ended at</string>

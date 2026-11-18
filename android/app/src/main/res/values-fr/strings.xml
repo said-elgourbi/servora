@@ -383,6 +383,7 @@
     <string name="technician_ad_hoc_report_title">Signaler du travail non planifié</string>
     <string name="technician_ad_hoc_report_customer">Client</string>
     <string name="technician_ad_hoc_report_property">Propriété</string>
+    <string name="technician_ad_hoc_report_clear_selection">Effacer</string>
     <string name="technician_ad_hoc_report_outcome">Résultat</string>
     <string name="technician_ad_hoc_report_summary">Ce qui s’est passé</string>
     <string name="technician_ad_hoc_report_notes">Notes</string>
