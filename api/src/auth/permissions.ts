@@ -114,6 +114,7 @@ export type JobPermission =
  */
 export const TECHNICIAN_PERMISSIONS = {
   VIEW: 'TECHNICIAN_VIEW',
+  UPDATE: 'TECHNICIAN_UPDATE',
 } as const satisfies Record<string, KnownPermissionCode>;
 
 export type TechnicianPermission =

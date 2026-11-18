@@ -53,6 +53,15 @@ app-field-report .report-status-filters button.active { border-color:var(--mat-s
 app-field-report .report-status-filters button span { display:inline-block; min-width:1.5em; margin-left:3px; text-align:center; font-variant-numeric:tabular-nums; }
 app-field-report .report-clear-filters { justify-self:start; color:var(--mat-sys-primary); }
 @media (max-width: 700px) { app-field-report .report-filters { grid-template-columns:1fr; } app-field-report .report-status-filters { grid-column:1; } }
+app-visit-requests-review .request-filters { display:grid; grid-template-columns:minmax(240px,1fr) minmax(170px,220px); gap:12px 16px; margin:0 0 18px; padding:16px; border:1px solid var(--mat-sys-outline-variant); border-radius:12px; background:var(--mat-sys-surface); }
+app-visit-requests-review .request-filters label { display:grid; gap:5px; min-width:0; color:var(--mat-sys-on-surface-variant); font-size:12px; font-weight:650; }
+app-visit-requests-review .request-filters input, app-visit-requests-review .request-filters select { box-sizing:border-box; width:100%; min-width:0; min-height:42px; padding:8px 11px; border:1px solid var(--mat-sys-outline); border-radius:8px; background:var(--mat-sys-surface); color:var(--mat-sys-on-surface); font:inherit; }
+app-visit-requests-review .request-status-filters { display:flex; flex-wrap:wrap; gap:6px; grid-column:1/-1; }
+app-visit-requests-review .request-status-filters button, app-visit-requests-review .clear-request-filters { min-height:38px; padding:7px 10px; border:1px solid var(--mat-sys-outline-variant); border-radius:8px; background:var(--mat-sys-surface); color:var(--mat-sys-on-surface); font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
+app-visit-requests-review .request-status-filters button.active { border-color:var(--mat-sys-primary); background:var(--mat-sys-primary-container); color:var(--mat-sys-on-primary-container); }
+app-visit-requests-review .request-status-filters button span { margin-left:3px; opacity:.75; font-variant-numeric:tabular-nums; }
+app-visit-requests-review .clear-request-filters { grid-column:1/-1; justify-self:start; border:0; padding:4px 0; background:transparent; color:var(--mat-sys-primary); }
+@media (max-width: 700px) { app-visit-requests-review .request-filters { grid-template-columns:1fr; padding:12px; } app-visit-requests-review .request-status-filters, app-visit-requests-review .clear-request-filters { grid-column:1; } }
 @media (max-width: 520px) {
   app-office-schedule .navigation .range {
     min-width: 0;

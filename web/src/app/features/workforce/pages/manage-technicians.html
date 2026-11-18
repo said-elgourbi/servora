@@ -1,0 +1,44 @@
+<section class="technician-page">
+  <header class="page-heading">
+    <div><p class="eyebrow">{{ i18n.text('managerView') }}</p><h1>{{ i18n.text('manageTechnicians') }}</h1>
+      <p>{{ i18n.text('manageTechniciansDescription') }}</p></div>
+    <button type="button" class="secondary" (click)="load()" [disabled]="loading()">{{ i18n.text('refresh') }}</button>
+  </header>
+  @if (error()) { <p class="message error" role="alert">{{ error() }}</p> }
+  @if (notice()) { <p class="message success" role="status">{{ notice() }}</p> }
+  @if (loading()) { <p>{{ i18n.text('loading') }}</p> }
+  @else if (!rows().length) { <section class="panel empty">{{ i18n.text('noTechnicians') }}</section> }
+  @else {
+    <div class="manager-layout">
+      <section class="panel technician-list" aria-label="{{ i18n.text('technicians') }}">
+        <label>{{ i18n.text('searchTechnicians') }}<input type="search" [ngModel]="query()" (ngModelChange)="query.set($event)" [placeholder]="i18n.text('searchTechniciansHint')"></label>
+        <ul>@for (row of visible(); track row.membershipId) {
+          <li><button type="button" [class.selected]="selectedId() === row.membershipId" [attr.aria-current]="selectedId() === row.membershipId ? 'true' : null" (click)="select(row)">
+            <strong>{{ row.firstName }} {{ row.lastName }}</strong><span>{{ row.email }}</span><small>{{ row.phone || i18n.text('noPhone') }}</small>
+          </button></li>
+        } @empty { <li class="empty-list">{{ i18n.text('noTechnicianMatches') }}</li> }</ul>
+      </section>
+      @if (selected(); as technician) {
+        <section class="panel editor">
+          <div class="section-heading"><div><h2>{{ technician.firstName }} {{ technician.lastName }}</h2><p>{{ i18n.text('technicianProfileHint') }}</p></div><span class="count">{{ technician.status }}</span></div>
+          <div class="form-grid">
+            <label>{{ i18n.text('firstName') }}<input autocomplete="given-name" [ngModel]="firstName()" (ngModelChange)="firstName.set($event)"></label>
+            <label>{{ i18n.text('lastName') }}<input autocomplete="family-name" [ngModel]="lastName()" (ngModelChange)="lastName.set($event)"></label>
+            <label>{{ i18n.text('email') }}<input type="email" autocomplete="email" [ngModel]="email()" (ngModelChange)="email.set($event)"></label>
+            <label>{{ i18n.text('phone') }}<input type="tel" autocomplete="tel" [ngModel]="phone()" (ngModelChange)="phone.set($event)"></label>
+          </div>
+          <section class="permissions">
+            <div class="section-heading"><div><h3>{{ i18n.text('technicianPermissions') }}</h3><p>{{ i18n.text('technicianPermissionsHint') }}</p></div></div>
+            <label>{{ i18n.text('searchPermissions') }}<input type="search" [ngModel]="permissionQuery()" (ngModelChange)="permissionQuery.set($event)" [placeholder]="i18n.text('searchPermissionsHint')"></label>
+            <div class="permission-list">@for (permission of visiblePermissions(); track permission.code) {
+              <label class="permission-row"><input type="checkbox" [checked]="checked(permission.code)" [disabled]="inherited(permission.code) || !auth.hasPermission('TECHNICIAN_UPDATE')" (change)="toggle(permission.code, $any($event.target).checked)">
+                <span><strong>{{ permissionName(permission) }}</strong><small>{{ permissionDescription(permission) }}@if (inherited(permission.code) ) { · {{ i18n.text('inheritedPermission') }} }</small></span>
+              </label>
+            } @empty { <p class="empty-list">{{ i18n.text('noPermissionMatches') }}</p> }</div>
+          </section>
+          @if (auth.hasPermission('TECHNICIAN_UPDATE')) { <div class="form-actions"><button type="button" class="primary" (click)="save()" [disabled]="saving() || !firstName().trim() || !lastName().trim() || !email().trim()">{{ saving() ? i18n.text('saving') : i18n.text('saveChanges') }}</button></div> }
+        </section>
+      }
+    </div>
+  }
+</section>

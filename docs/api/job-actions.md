@@ -24,6 +24,7 @@ References: `BR-001`, `BR-006`, `BR-007`, `BR-008`, `BR-009`, `BR-010`, `BR-011`
 `docs/tracker/shared/037-technician-field-experience.md`,
 `docs/tracker/shared/051-job-visit-lifecycle-redesign.md` (the lifecycle model this document describes),
 `docs/api/visit-requests.md` (the follow-up Visit request routes),
+`docs/api/technicians.md` (manager technician profiles and permissions),
 `docs/api/job-details.md` (the read this document's actions answer with).
 
 ## 1. Conventions
@@ -50,6 +51,10 @@ projects.
 | `PATCH /jobs/:id/visits/:visitId/schedule`   | `visits.update_schedule`     |
 | `PUT /jobs/:id/visits/:visitId/technicians`  | `visits.assign_technicians`  |
 | `GET /technicians`                           | `TECHNICIAN_VIEW`            |
+
+Manager profile reads and edits use `GET /technicians/management` and `PATCH /technicians/:membershipId`,
+documented in [`technicians.md`](./technicians.md). The assignment route above deliberately remains a
+small name-and-membership read.
 
 Scheduling and rescheduling a Visit and stating its crew are **Visit** concerns, so they are authorized by
 the Visit capabilities the catalogue already names (`VISIT_PERMISSIONS.UPDATE_SCHEDULE`,

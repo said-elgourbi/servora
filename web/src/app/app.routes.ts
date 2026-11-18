@@ -70,6 +70,11 @@ export const routes: Routes = [
           import('./features/reconciliation/pages/work-review').then((m) => m.WorkReviewPage),
       },
       {
+        path: 'work/technicians',
+        canActivate: [permissionGuard('TECHNICIAN_VIEW')],
+        loadComponent: () => import('./features/workforce/pages/manage-technicians').then((m) => m.ManageTechniciansPage),
+      },
+      {
         path: 'work/reports',
         loadComponent: () =>
           import('./features/field/ui/field-report').then((m) => m.FieldReport),

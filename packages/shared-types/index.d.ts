@@ -112,3 +112,4 @@ export type {
 } from "./jobs.js";
 
 export type { ScheduleResponse, ScheduleVisit } from "./schedule.js";
+export type { ManagedTechnician, TechnicianManagement, TechnicianPermission, UpdateTechnicianRequest } from "./technicians.js";
