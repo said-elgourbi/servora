@@ -15,9 +15,14 @@
         <div><h2 id="queue-title">{{ i18n.text('reviewQueue') }}</h2><p>{{ i18n.text('reviewQueueHint') }}</p></div>
         <span class="count">{{ pendingCount() }}</span>
       </div>
-      <div class="queue-filters">
-        <button type="button" [class.active]="!showResolved()" (click)="showResolved.set(false)">{{ i18n.text('reviewPending') }} <b>{{ pendingCount() }}</b></button>
-        <button type="button" [class.active]="showResolved()" (click)="showResolved.set(true)">{{ i18n.text('reviewAllReports') }}</button>
+      <div class="queue-filters" role="group" [attr.aria-label]="i18n.text('reviewQueueFilters')">
+        <button type="button" [class.active]="!showResolved()" [attr.aria-pressed]="!showResolved()" (click)="showPending()">{{ i18n.text('reviewPending') }} <b>{{ pendingCount() }}</b></button>
+        <button type="button" [class.active]="showResolved()" [attr.aria-pressed]="showResolved()" (click)="showAllReports()">{{ i18n.text('reviewAllReports') }} <b>{{ allReportCount() }}</b></button>
+      </div>
+      <div class="report-filters">
+        <label><span>{{ i18n.text('reviewSearchReports') }}</span><input type="search" [value]="reportSearch()" (input)="reportSearch.set($any($event.target).value)" [placeholder]="i18n.text('reviewSearchReportsHint')"></label>
+        <label><span>{{ i18n.text('reviewSubmittedRange') }}</span><select [value]="reportDateRange()" (change)="reportDateRange.set($any($event.target).value)"><option value="all">{{ i18n.text('reviewAnyTime') }}</option><option value="30">{{ i18n.text('reviewLast30Days') }}</option><option value="90">{{ i18n.text('reviewLast90Days') }}</option><option value="365">{{ i18n.text('reviewLastYear') }}</option></select></label>
+        @if (hasReportFilters()) { <button type="button" class="clear-filters" (click)="clearReportFilters()">{{ i18n.text('fieldClearFilters') }}</button> }
       </div>
       @if (loading()) { <p class="empty">{{ i18n.text('reviewLoading') }}</p> }
       @else if (visibleReports().length === 0) { <div class="empty"><span class="empty-mark">✓</span><strong>{{ i18n.text(showResolved() ? 'reviewNoReports' : 'reviewQueueClear') }}</strong><p>{{ i18n.text('reviewQueueClearHint') }}</p></div> }

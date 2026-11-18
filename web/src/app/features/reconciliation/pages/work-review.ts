@@ -26,8 +26,24 @@ export class WorkReviewPage {
   protected readonly selectedId = signal<string | null>(null);
   protected readonly selected = computed(() => this.reports().find((row) => row.id === this.selectedId()) ?? null);
   protected readonly pendingCount = computed(() => this.reports().filter((r) => r.status === 'PENDING').length);
+  protected readonly allReportCount = computed(() => this.reports().length);
   protected readonly showResolved = signal(false);
-  protected readonly visibleReports = computed(() => this.reports().filter((r) => this.showResolved() || r.status === 'PENDING'));
+  protected readonly reportSearch = signal('');
+  protected readonly reportDateRange = signal<'all' | '30' | '90' | '365'>('all');
+  protected readonly hasReportFilters = computed(() => this.reportSearch().trim().length > 0 || this.reportDateRange() !== 'all');
+  protected readonly visibleReports = computed(() => {
+    const query = this.reportSearch().trim().toLocaleLowerCase();
+    const days = this.reportDateRange() === 'all' ? 0 : Number(this.reportDateRange());
+    const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
+    return this.reports()
+      .filter((report) => this.showResolved() || report.status === 'PENDING')
+      .filter((report) => !cutoff || new Date(report.createdAt).getTime() >= cutoff)
+      .filter((report) => !query || [
+        report.summary, this.locationText(report), report.reviewNote, report.knownJobTitle,
+        report.knownJobNumber?.toString(), report.outcomeCode, this.i18n.text(this.statusKey(report.status)),
+      ].filter(Boolean).join(' ').toLocaleLowerCase().includes(query))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  });
   protected readonly busy = signal(false);
   protected readonly loading = signal(true);
   protected readonly error = signal<TranslationKey | null>(null);
@@ -74,6 +90,9 @@ export class WorkReviewPage {
     } catch (e) { this.error.set(this.errorKey(e)); }
     finally { this.loading.set(false); }
   }
+  protected showPending(): void { this.showResolved.set(false); }
+  protected showAllReports(): void { this.showResolved.set(true); }
+  protected clearReportFilters(): void { this.reportSearch.set(''); this.reportDateRange.set('all'); }
   protected select(report: AdHocWorkReport): void { this.selectedId.set(report.id); this.notice.set(null); this.error.set(null); this.syncFormFromReport(); }
   protected setCustomerQuery(value: string): void {
     this.customerQuery.set(value); this.selectedCustomer.set(''); this.properties.set([]); this.selectedProperty.set('');

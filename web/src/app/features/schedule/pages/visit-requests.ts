@@ -21,17 +21,30 @@ interface ApprovalDraft { start: string; end: string; crew: string[]; lead: stri
   template: `
     <section class="review-page">
       <header class="page-header"><div><p class="eyebrow">{{ i18n.text('officeSchedule') }}</p><h1 [appPageTitle]="i18n.text('visitRequestReviewTitle')">{{ i18n.text('visitRequestReviewTitle') }}</h1><p>{{ i18n.text('visitRequestReviewHint') }}</p></div>
-        <div class="header-actions"><label class="resolved-toggle"><input type="checkbox" [checked]="showResolved()" (change)="showResolved.set($any($event.target).checked)"><span>{{ i18n.text('visitRequestShowResolved') }}</span></label><button type="button" (click)="load()" [disabled]="loading() || busyId() !== null">{{ i18n.text('refresh') }}</button></div>
+        <div class="header-actions"><button type="button" (click)="load()" [disabled]="loading() || busyId() !== null">{{ i18n.text('refresh') }}</button></div>
       </header>
+      <div class="request-filters">
+        <label class="request-search"><span>{{ i18n.text('visitRequestSearch') }}</span><input type="search" [value]="requestSearch()" (input)="setRequestSearch($any($event.target).value)" [placeholder]="i18n.text('visitRequestSearchHint')"></label>
+        <label class="request-date-filter"><span>{{ i18n.text('visitRequestDateRange') }}</span><select [value]="requestDateRange()" (change)="setRequestDateRange($any($event.target).value)"><option value="all">{{ i18n.text('reviewAnyTime') }}</option><option value="30">{{ i18n.text('reviewLast30Days') }}</option><option value="90">{{ i18n.text('reviewLast90Days') }}</option><option value="365">{{ i18n.text('reviewLastYear') }}</option></select></label>
+        <div class="request-status-filters" role="group" [attr.aria-label]="i18n.text('visitRequestFilterStatus')">
+          <button type="button" [class.active]="requestStatus() === 'OPEN'" [attr.aria-pressed]="requestStatus() === 'OPEN'" (click)="setRequestStatus('OPEN')">{{ i18n.text('visitRequestFilterOpen') }} <span>{{ requestStatusCount('OPEN') }}</span></button>
+          <button type="button" [class.active]="requestStatus() === 'ALL'" [attr.aria-pressed]="requestStatus() === 'ALL'" (click)="setRequestStatus('ALL')">{{ i18n.text('visitRequestFilterAll') }} <span>{{ rows().length }}</span></button>
+          <button type="button" [class.active]="requestStatus() === 'PENDING'" [attr.aria-pressed]="requestStatus() === 'PENDING'" (click)="setRequestStatus('PENDING')">{{ i18n.text('visitRequestFilterNew') }} <span>{{ requestStatusCount('PENDING') }}</span></button>
+          <button type="button" [class.active]="requestStatus() === 'NEEDS_CLARIFICATION'" [attr.aria-pressed]="requestStatus() === 'NEEDS_CLARIFICATION'" (click)="setRequestStatus('NEEDS_CLARIFICATION')">{{ i18n.text('visitRequestFilterClarification') }} <span>{{ requestStatusCount('NEEDS_CLARIFICATION') }}</span></button>
+          <button type="button" [class.active]="requestStatus() === 'APPROVED'" [attr.aria-pressed]="requestStatus() === 'APPROVED'" (click)="setRequestStatus('APPROVED')">{{ i18n.text('visitRequestFilterApproved') }} <span>{{ requestStatusCount('APPROVED') }}</span></button>
+          <button type="button" [class.active]="requestStatus() === 'REJECTED'" [attr.aria-pressed]="requestStatus() === 'REJECTED'" (click)="setRequestStatus('REJECTED')">{{ i18n.text('visitRequestFilterRejected') }} <span>{{ requestStatusCount('REJECTED') }}</span></button>
+        </div>
+        @if (hasFilters()) { <button type="button" class="clear-request-filters" (click)="clearFilters()">{{ i18n.text('fieldClearFilters') }}</button> }
+      </div>
       @if (error()) { <p class="error" role="alert">{{ i18n.text(error()!) }}</p> }
       @if (notice()) { <p class="notice" role="status">{{ i18n.text(notice()!) }}</p> }
       @if (loading()) { <p class="state" role="status">{{ i18n.text('loadingMore') }}</p> }
-      @else if (!visible().length) { <section class="empty"><h2>{{ i18n.text(showResolved() ? 'visitRequestNoResolved' : 'visitRequestNoPending') }}</h2><p>{{ i18n.text('visitRequestNoPendingHint') }}</p></section> }
+      @else if (!visible().length) { <section class="empty"><h2>{{ i18n.text(rows().length || hasFilters() ? 'visitRequestNoMatches' : 'visitRequestNoPending') }}</h2><p>{{ i18n.text('visitRequestNoPendingHint') }}</p></section> }
       @else {
         <div class="request-layout">
           <nav class="request-list" [attr.aria-label]="i18n.text('visitRequestReviewList')">
             @for (request of visible(); track request.id) {
-              <button type="button" class="request-row" [class.selected]="selectedId() === request.id" (click)="select(request)">
+              <button type="button" class="request-row" [class.selected]="selected()?.id === request.id" (click)="select(request)">
                 <span class="row-top"><strong>#{{ request.jobNumber }} · {{ request.jobTitle }}</strong><span class="status" [class.open]="isOpen(request)">{{ request.status | workLabel }}</span></span>
                 <span>{{ request.customerName }}</span><small>{{ request.proposedStart | date:'mediumDate':undefined:i18n.language() }} · {{ request.proposedStart | preferredTime }}–{{ request.proposedEnd | preferredTime }}</small>
               </button>
@@ -79,9 +92,25 @@ export class VisitRequestsReviewPage {
   protected readonly canApprove = computed(() => this.auth.hasPermission('visits.review_requests') && this.auth.hasPermission('visits.create_schedule'));
   protected readonly rows = signal<FieldFollowUpDto[]>([]);
   protected readonly selectedId = signal<string | null>(null);
-  protected readonly selected = computed(() => this.rows().find((row) => row.id === this.selectedId()) ?? null);
-  protected readonly showResolved = signal(false);
-  protected readonly visible = computed(() => this.rows().filter((row) => this.showResolved() || this.isOpen(row)));
+  protected readonly requestSearch = signal('');
+  protected readonly requestDateRange = signal<'all' | '30' | '90' | '365'>('all');
+  protected readonly requestStatus = signal<'OPEN' | 'ALL' | 'PENDING' | 'NEEDS_CLARIFICATION' | 'APPROVED' | 'REJECTED'>('OPEN');
+  protected readonly visible = computed(() => {
+    const query = this.requestSearch().trim().toLocaleLowerCase();
+    const status = this.requestStatus();
+    const days = this.requestDateRange() === 'all' ? 0 : Number(this.requestDateRange());
+    const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
+    return this.rows()
+      .filter((row) => status === 'ALL' || (status === 'OPEN' ? this.isOpen(row) : row.status === status))
+      .filter((row) => !cutoff || new Date(row.createdAt).getTime() >= cutoff)
+      .filter((row) => !query || [row.jobNumber.toString(), row.jobTitle, row.customerName,
+        row.address?.addressLine1, row.address?.city, row.reason, row.reviewNote,
+        row.status, row.sourceVisitOutcomeCode]
+        .filter(Boolean).join(' ').toLocaleLowerCase().includes(query))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  });
+  protected readonly selected = computed(() => this.visible().find((row) => row.id === this.selectedId()) ?? this.visible()[0] ?? null);
+  protected readonly hasFilters = computed(() => this.requestSearch().trim().length > 0 || this.requestDateRange() !== 'all' || this.requestStatus() !== 'OPEN');
   protected readonly loading = signal(true);
   protected readonly error = signal<TranslationKey | null>(null);
   protected readonly notice = signal<TranslationKey | null>(null);
@@ -103,12 +132,20 @@ export class VisitRequestsReviewPage {
       const rows = await firstValueFrom(this.http.get<FieldFollowUpDto[]>('/jobs/visit-requests', this.requestOptions()).pipe(timeout(15000)));
       this.rows.set(rows);
       const current = this.selectedId();
-      const next = rows.find((row) => row.id === current) ?? rows.find((row) => this.isOpen(row)) ?? rows[0] ?? null;
+      const next = this.visible().find((row) => row.id === current) ?? this.visible()[0] ?? null;
       this.selectedId.set(next?.id ?? null);
     } catch (e) { this.error.set(this.errorKey(e)); }
     finally { this.loading.set(false); }
   }
   protected select(row: FieldFollowUpDto): void { this.selectedId.set(row.id); this.notice.set(null); this.error.set(null); this.approvalError.set(null); this.conflicts.set([]); }
+  protected requestStatusCount(status: 'OPEN' | 'PENDING' | 'NEEDS_CLARIFICATION' | 'APPROVED' | 'REJECTED'): number {
+    return this.rows().filter((row) => status === 'OPEN' ? this.isOpen(row) : row.status === status).length;
+  }
+  protected setRequestStatus(status: 'OPEN' | 'ALL' | 'PENDING' | 'NEEDS_CLARIFICATION' | 'APPROVED' | 'REJECTED'): void { this.requestStatus.set(status); this.selectFirstVisible(); }
+  protected setRequestSearch(value: string): void { this.requestSearch.set(value); this.selectFirstVisible(); }
+  protected setRequestDateRange(value: 'all' | '30' | '90' | '365'): void { this.requestDateRange.set(value); this.selectFirstVisible(); }
+  protected clearFilters(): void { this.requestSearch.set(''); this.requestDateRange.set('all'); this.requestStatus.set('OPEN'); this.selectFirstVisible(); }
+  private selectFirstVisible(): void { const next = this.visible()[0]; this.selectedId.set(next?.id ?? null); }
   protected setNote(id: string, value: string): void { this.notes.update((all) => ({ ...all, [id]: value })); }
   protected async review(row: FieldFollowUpDto, action: 'clarification' | 'rejection'): Promise<void> {
     if (this.busyId()) return;

@@ -32,6 +32,8 @@ import { Preferences } from '../../shared/ui/preferences/preferences';
           ><app-icon name="briefcase" />{{ i18n.text('visitRequestReviewTitle') }}<app-icon name="arrow" /></a> }
         @if (session.hasPermission('visits.review_ad_hoc_work')) { <a routerLink="/work/review" routerLinkActive="active" ariaCurrentWhenActive="page"
           ><app-icon name="briefcase" />{{ i18n.text('reviewTitle') }}<app-icon name="arrow" /></a> }
+        @if (session.hasPermission('TECHNICIAN_VIEW')) { <a routerLink="/work/technicians" routerLinkActive="active" ariaCurrentWhenActive="page"
+          ><app-icon name="people" />{{ i18n.text('manageTechnicians') }}<app-icon name="arrow" /></a> }
         @if (session.hasPermission('visits.report_ad_hoc_work')) { <a routerLink="/work/reports" routerLinkActive="active" ariaCurrentWhenActive="page"
           ><app-icon name="briefcase" />{{ i18n.text('fieldMyReports') }}<app-icon name="arrow" /></a> }
         @if (session.hasPermission('visits.request_follow_up')) { <a routerLink="/work/requests" routerLinkActive="active" ariaCurrentWhenActive="page"
@@ -69,6 +71,7 @@ import { Preferences } from '../../shared/ui/preferences/preferences';
             @if (session.hasPermission('schedule.view_org')) { <a mat-button routerLink="/work/schedule">{{ i18n.text('officeSchedule') }}</a> }
             @if (session.hasPermission('visits.review_requests')) { <a mat-button routerLink="/work/visit-requests">{{ i18n.text('visitRequestReviewTitle') }}</a> }
             @if (session.hasPermission('visits.review_ad_hoc_work')) { <a mat-button routerLink="/work/review">{{ i18n.text('reviewTitle') }}</a> }
+            @if (session.hasPermission('TECHNICIAN_VIEW')) { <a mat-button routerLink="/work/technicians">{{ i18n.text('manageTechnicians') }}</a> }
             @if (session.hasPermission('visits.report_ad_hoc_work')) { <a mat-button routerLink="/work/reports">{{ i18n.text('fieldMyReports') }}</a> }
             @if (session.hasPermission('visits.request_follow_up')) { <a mat-button routerLink="/work/requests">{{ i18n.text('fieldMyRequests') }}</a> }
             @if (session.hasPermission('customers.view')) { <a mat-button routerLink="/work/customers">{{ i18n.text('customers') }}</a> }
@@ -95,6 +98,7 @@ export class AppShell {
   protected headerContext(): import('../../core/i18n/en').TranslationKey {
     const path = this.router.url;
     if (path.includes('/work/review')) return 'reviewTitle';
+    if (path.includes('/work/technicians')) return 'manageTechnicians';
     if (path.includes('/work/visit-requests')) return 'visitRequestReviewTitle';
     if (path.includes('/work/reports')) return 'fieldMyReports';
     if (path.includes('/work/requests')) return 'fieldMyRequests';
