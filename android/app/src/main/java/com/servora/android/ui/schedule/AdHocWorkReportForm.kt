@@ -1,6 +1,8 @@
 package com.servora.android.ui.schedule
 
 import android.text.format.DateFormat
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,9 +17,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -85,8 +89,8 @@ internal fun AdHocWorkReportForm(
     zone: ZoneId,
     onCustomerQueryChange: (String) -> Unit,
     onSelectCustomer: (AdHocReportCustomerOption) -> Unit,
-    onSelectProperty: (AdHocReportPropertyOption) -> Unit,
-    onSelectJob: (AdHocReportJobOption) -> Unit,
+    onSelectProperty: (AdHocReportPropertyOption?) -> Unit,
+    onSelectJob: (AdHocReportJobOption?) -> Unit,
     onWorkStartedAtChange: (java.time.Instant) -> Unit,
     onWorkEndedAtChange: (java.time.Instant) -> Unit,
     onOutcomeChange: (VisitOutcome) -> Unit,
@@ -354,13 +358,13 @@ private fun AdHocPropertyPicker(
     options: List<AdHocReportPropertyOption>,
     isReading: Boolean,
     selected: AdHocReportPropertyOption?,
-    onSelect: (AdHocReportPropertyOption) -> Unit,
+    onSelect: (AdHocReportPropertyOption?) -> Unit,
 ) {
-    Column {
-        Text(
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AdHocChoiceSectionTitle(
             text = stringResource(R.string.technician_ad_hoc_report_property),
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
+            hasSelection = selected != null,
+            onClear = { onSelect(null) },
         )
         when {
             isReading -> CircularProgressIndicator(
@@ -375,24 +379,15 @@ private fun AdHocPropertyPicker(
             )
 
             else -> options.forEach { option ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .toggleable(
-                            value = option == selected,
-                            role = Role.RadioButton,
-                            onValueChange = { onSelect(option) },
-                        )
-                        .heightIn(min = 44.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = option == selected, onClick = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = option.name
-                            ?: stringResource(R.string.technician_ad_hoc_report_property_unnamed),
-                    )
-                }
+                AdHocChoiceRow(
+                    selected = option == selected,
+                    onSelectedChange = { isSelected -> onSelect(if (isSelected) option else null) },
+                    title = option.name
+                        ?: stringResource(R.string.technician_ad_hoc_report_property_unnamed),
+                    subtitle = listOf(option.addressLine1, option.city, option.province)
+                        .filter(String::isNotBlank)
+                        .joinToString(", "),
+                )
             }
         }
     }
@@ -405,13 +400,13 @@ private fun AdHocJobPicker(
     options: List<AdHocReportJobOption>,
     isReading: Boolean,
     selected: AdHocReportJobOption?,
-    onSelect: (AdHocReportJobOption) -> Unit,
+    onSelect: (AdHocReportJobOption?) -> Unit,
 ) {
-    Column {
-        Text(
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AdHocChoiceSectionTitle(
             text = stringResource(R.string.technician_ad_hoc_report_related_work),
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
+            hasSelection = selected != null,
+            onClear = { onSelect(null) },
         )
         when {
             isReading -> CircularProgressIndicator(
@@ -426,21 +421,83 @@ private fun AdHocJobPicker(
             )
 
             else -> options.forEach { option ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .toggleable(
-                            value = option == selected,
-                            role = Role.RadioButton,
-                            onValueChange = { onSelect(option) },
-                        )
-                        .heightIn(min = 44.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = option == selected, onClick = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(text = "#${option.jobNumber} · ${option.title}")
-                }
+                AdHocChoiceRow(
+                    selected = option == selected,
+                    onSelectedChange = { isSelected -> onSelect(if (isSelected) option else null) },
+                    title = option.title,
+                    subtitle = "#${option.jobNumber}",
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdHocChoiceSectionTitle(
+    text: String,
+    hasSelection: Boolean,
+    onClear: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (hasSelection) {
+            TextButton(onClick = onClear) {
+                Text(stringResource(R.string.technician_ad_hoc_report_clear_selection))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdHocChoiceRow(
+    selected: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
+    title: String,
+    subtitle: String,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(if (selected) colors.secondaryContainer else colors.surface)
+            .border(
+                width = if (selected) 1.5.dp else 1.dp,
+                color = if (selected) colors.primary else colors.outlineVariant,
+                shape = shape,
+            )
+            .toggleable(
+                value = selected,
+                role = Role.RadioButton,
+                onValueChange = onSelectedChange,
+            )
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
             }
         }
     }
